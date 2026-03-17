@@ -1,0 +1,621 @@
+<html lang="zh-CN" vid="0"><head vid="1">
+    <meta charset="UTF-8" vid="2">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" vid="3">
+    <title vid="4">Toolbox UI System</title>
+    <script src="https://cdn.tailwindcss.com/3.4.17" vid="5"></script>
+    <script src="https://unpkg.com/@phosphor-icons/web" vid="6"></script>
+    <script vid="7">
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        zinc: {
+                            850: '#202022',
+                            900: '#18181b',
+                            950: '#09090b',
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', '"Helvetica Neue"', 'Arial', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style vid="8">
+        body {
+            background-color: #09090b; 
+            color: #f4f4f5; 
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            margin: 0;
+            padding: 0;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+        }
+        
+        
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #3f3f46; 
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #52525b; 
+        }
+
+        
+        .view-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            transform: scale(0.98);
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .view-container.active {
+            opacity: 1;
+            pointer-events: auto;
+            transform: scale(1);
+        }
+
+        .glass-panel {
+            background: rgba(24, 24, 27, 0.6); 
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+        }
+
+        .search-shadow {
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.05);
+        }
+
+        .card-shadow {
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(255, 255, 255, 0.05);
+        }
+
+        
+        input:focus {
+            outline: none;
+        }
+    </style>
+</head>
+<body class="w-full h-full text-zinc-100 bg-zinc-950 overflow-hidden relative selection:bg-blue-500/30" vid="9">
+
+    
+    <div id="view-launcher" class="view-container active items-center pt-24" vid="10">
+        
+        
+        <div class="w-full max-w-3xl px-8 flex flex-col items-center" vid="11">
+            
+            <div class="w-full flex items-center glass-panel search-shadow rounded-2xl p-3 pl-5 pr-3 transition-all duration-300 hover:bg-zinc-800/60 focus-within:bg-zinc-800/80 focus-within:ring-1 focus-within:ring-zinc-600" vid="12">
+                <i class="ph ph-magnifying-glass text-2xl text-zinc-400 mr-4" vid="13"></i>
+                <input type="text" class="flex-1 bg-transparent text-xl font-medium text-zinc-100 placeholder-zinc-500" placeholder="搜索应用和指令 / 粘贴文件或图片..." vid="14">
+                
+                
+                <button onclick="switchView('profile')" class="ml-4 w-10 h-10 rounded-full bg-zinc-700 flex items-center justify-center overflow-hidden hover:ring-2 hover:ring-zinc-500 transition-all group flex-shrink-0" vid="15">
+                    <i class="ph-fill ph-robot text-2xl text-zinc-300 group-hover:text-white transition-colors" vid="16"></i>
+                </button>
+            </div>
+
+            
+            <div class="w-full mt-12" vid="17">
+                <div class="flex items-center justify-between mb-6 px-2" vid="18">
+                    <h2 class="text-sm font-semibold text-zinc-400 tracking-wider" vid="19">最近使用</h2>
+                    <span class="text-xs text-zinc-500 cursor-pointer hover:text-zinc-300 transition-colors" vid="20">展开 (49)</span>
+                </div>
+
+                
+                <div class="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-9 gap-4" vid="21">
+                    
+                    
+                    <button onclick="switchView('tools')" class="flex flex-col items-center group" vid="22">
+                        <div class="w-16 h-16 rounded-2xl bg-zinc-800 flex items-center justify-center mb-3 group-hover:bg-zinc-700 group-active:scale-95 transition-all duration-200 shadow-sm border border-zinc-700/50" vid="23">
+                            <div class="w-10 h-10 rounded-xl bg-blue-500 flex items-center justify-center shadow-inner" vid="24">
+                                <i class="ph-fill ph-clipboard-text text-xl text-white" vid="25"></i>
+                            </div>
+                        </div>
+                        <span class="text-xs font-medium text-zinc-300 truncate w-full text-center group-hover:text-white transition-colors" vid="26">剪贴板</span>
+                    </button>
+
+                    
+                    <button class="flex flex-col items-center group" vid="27">
+                        <div class="w-16 h-16 rounded-2xl bg-transparent flex items-center justify-center mb-3 group-hover:bg-zinc-800 group-active:scale-95 transition-all duration-200 border border-transparent group-hover:border-zinc-700/50" vid="28">
+                            <div class="w-10 h-10 flex items-center justify-center text-blue-400" vid="29">
+                                <i class="ph-fill ph-cat text-4xl drop-shadow-md" vid="30"></i>
+                            </div>
+                        </div>
+                        <span class="text-xs font-medium text-zinc-400 truncate w-full text-center group-hover:text-zinc-200 transition-colors" vid="31">Clash for Wi...</span>
+                    </button>
+
+                    
+                    <button class="flex flex-col items-center group" vid="32">
+                        <div class="w-16 h-16 rounded-2xl bg-transparent flex items-center justify-center mb-3 group-hover:bg-zinc-800 group-active:scale-95 transition-all duration-200 border border-transparent group-hover:border-zinc-700/50" vid="33">
+                            <div class="w-10 h-10 rounded-full bg-gradient-to-br from-purple-400 to-pink-500 flex items-center justify-center shadow-lg" vid="34">
+                                <i class="ph-fill ph-cube text-xl text-white" vid="35"></i>
+                            </div>
+                        </div>
+                        <span class="text-xs font-medium text-zinc-400 truncate w-full text-center group-hover:text-zinc-200 transition-colors" vid="36">插件应用市场</span>
+                    </button>
+
+                    
+                    <button class="flex flex-col items-center group" vid="37">
+                        <div class="w-16 h-16 rounded-2xl bg-transparent flex items-center justify-center mb-3 group-hover:bg-zinc-800 group-active:scale-95 transition-all duration-200 border border-transparent group-hover:border-zinc-700/50" vid="38">
+                            <div class="w-10 h-10 rounded-xl bg-zinc-700 flex items-center justify-center shadow-md" vid="39">
+                                <i class="ph-bold ph-markdown-logo text-2xl text-white" vid="40"></i>
+                            </div>
+                        </div>
+                        <span class="text-xs font-medium text-zinc-400 truncate w-full text-center group-hover:text-zinc-200 transition-colors" vid="41">Markdown 笔记</span>
+                    </button>
+
+                    
+                    <button class="flex flex-col items-center group" vid="42">
+                        <div class="w-16 h-16 rounded-2xl bg-transparent flex items-center justify-center mb-3 group-hover:bg-zinc-800 group-active:scale-95 transition-all duration-200 border border-transparent group-hover:border-zinc-700/50" vid="43">
+                            <div class="w-10 h-10 rounded-2xl bg-white flex items-center justify-center shadow-md" vid="44">
+                                <i class="ph-fill ph-cloud text-2xl text-blue-500" vid="45"></i>
+                            </div>
+                        </div>
+                        <span class="text-xs font-medium text-zinc-400 truncate w-full text-center group-hover:text-zinc-200 transition-colors" vid="46">夸克网盘</span>
+                    </button>
+
+                    
+                    <button class="flex flex-col items-center group" vid="47">
+                        <div class="w-16 h-16 rounded-2xl bg-transparent flex items-center justify-center mb-3 group-hover:bg-zinc-800 group-active:scale-95 transition-all duration-200 border border-transparent group-hover:border-zinc-700/50" vid="48">
+                            <div class="w-10 h-10 flex items-center justify-center" vid="49">
+                                <i class="ph-fill ph-hexagon text-4xl text-purple-500 drop-shadow-md" vid="50"></i>
+                            </div>
+                        </div>
+                        <span class="text-xs font-medium text-zinc-400 truncate w-full text-center group-hover:text-zinc-200 transition-colors" vid="51">Obsidian</span>
+                    </button>
+
+                    
+                    <button class="flex flex-col items-center group" vid="52">
+                        <div class="w-16 h-16 rounded-2xl bg-transparent flex items-center justify-center mb-3 group-hover:bg-zinc-800 group-active:scale-95 transition-all duration-200 border border-transparent group-hover:border-zinc-700/50" vid="53">
+                            <div class="w-10 h-10 rounded-full bg-white flex items-center justify-center shadow-md" vid="54">
+                                <i class="ph-fill ph-google-chrome-logo text-2xl text-red-500" vid="55"></i>
+                            </div>
+                        </div>
+                        <span class="text-xs font-medium text-zinc-400 truncate w-full text-center group-hover:text-zinc-200 transition-colors" vid="56">Google Chrome</span>
+                    </button>
+
+                    
+                    <button class="flex flex-col items-center group" vid="57">
+                        <div class="w-16 h-16 rounded-2xl bg-transparent flex items-center justify-center mb-3 group-hover:bg-zinc-800 group-active:scale-95 transition-all duration-200 border border-transparent group-hover:border-zinc-700/50" vid="58">
+                            <div class="w-10 h-10 rounded-lg bg-[#012456] flex items-center justify-center shadow-md border border-blue-900" vid="59">
+                                <i class="ph-bold ph-terminal-window text-xl text-white" vid="60"></i>
+                            </div>
+                        </div>
+                        <span class="text-xs font-medium text-zinc-400 truncate w-full text-center group-hover:text-zinc-200 transition-colors" vid="61">PowerShell 7...</span>
+                    </button>
+
+                    
+                    <button class="flex flex-col items-center group" vid="62">
+                        <div class="w-16 h-16 rounded-2xl bg-transparent flex items-center justify-center mb-3 group-hover:bg-zinc-800 group-active:scale-95 transition-all duration-200 border border-transparent group-hover:border-zinc-700/50" vid="63">
+                            <div class="w-10 h-10 rounded-2xl bg-[#ff4d4f] flex items-center justify-center shadow-md" vid="64">
+                                <i class="ph-fill ph-flower-tulip text-xl text-white" vid="65"></i>
+                            </div>
+                        </div>
+                        <span class="text-xs font-medium text-zinc-400 truncate w-full text-center group-hover:text-zinc-200 transition-colors" vid="66">Cherry Studio</span>
+                    </button>
+
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    
+    <div id="view-tools" class="view-container flex-row h-full w-full bg-zinc-950" vid="67">
+        
+        
+        <aside class="w-64 flex flex-col h-full bg-[#1c1c1e] border-r border-zinc-800/60 z-10 flex-shrink-0" vid="68">
+            
+            <div class="p-4 flex items-center gap-2 border-b border-zinc-800/60" vid="69">
+                <button onclick="switchView('launcher')" class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors" vid="70">
+                    <i class="ph ph-house text-lg" vid="71"></i>
+                </button>
+                <div class="flex-1 bg-zinc-900 rounded-lg flex items-center px-3 py-1.5 border border-zinc-800" vid="72">
+                    <i class="ph ph-magnifying-glass text-zinc-500 mr-2 text-sm" vid="73"></i>
+                    <input type="text" class="bg-transparent text-sm w-full text-zinc-200 placeholder-zinc-500" placeholder="搜索应用..." vid="74">
+                </div>
+            </div>
+
+            
+            <div class="flex-1 overflow-y-auto p-2 pb-6 space-y-0.5" vid="75">
+                <div class="px-3 py-2 text-xs font-medium text-zinc-500 mb-1 flex justify-between items-center mt-2" vid="76">
+                    <span vid="77">已安装插件应用 (14)</span>
+                    <button class="hover:text-zinc-300" vid="78"><i class="ph ph-dots-three text-lg" vid="79"></i></button>
+                </div>
+
+                
+                <button class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-zinc-800/80 text-white relative group" vid="80">
+                    <div class="w-8 h-8 rounded-lg bg-red-500 flex items-center justify-center shadow-sm relative" vid="81">
+                        <i class="ph-bold ph-file-pdf text-white" vid="82"></i>
+                        <div class="absolute -top-1 -right-1 bg-indigo-500 text-[9px] font-bold px-1 rounded shadow text-white border border-indigo-400" vid="83">Ai</div>
+                    </div>
+                    <span class="text-sm font-medium" vid="84">PDF 处理</span>
+                </button>
+
+                
+                <button class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-zinc-400 hover:bg-zinc-800/40 hover:text-zinc-200 transition-colors group relative" vid="85">
+                    <div class="w-8 h-8 rounded-lg bg-zinc-700 flex items-center justify-center shadow-sm relative group-hover:bg-zinc-600 transition-colors" vid="86">
+                        <i class="ph-bold ph-markdown-logo text-white" vid="87"></i>
+                        <div class="absolute -top-1 -right-1 bg-indigo-500 text-[9px] font-bold px-1 rounded shadow text-white border border-indigo-400" vid="88">Ai</div>
+                    </div>
+                    <span class="text-sm font-medium" vid="89">Markdown 笔记</span>
+                </button>
+
+                <button class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-zinc-400 hover:bg-zinc-800/40 hover:text-zinc-200 transition-colors group" vid="90">
+                    <div class="w-8 h-8 rounded-lg bg-yellow-600 flex items-center justify-center shadow-sm group-hover:bg-yellow-500 transition-colors" vid="91">
+                        <i class="ph-bold ph-translate text-white" vid="92"></i>
+                    </div>
+                    <span class="text-sm font-medium" vid="93">聚合翻译</span>
+                </button>
+
+                <button class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-zinc-400 hover:bg-zinc-800/40 hover:text-zinc-200 transition-colors group" vid="94">
+                    <div class="w-8 h-8 rounded-lg bg-zinc-200 flex items-center justify-center shadow-sm group-hover:bg-white transition-colors" vid="95">
+                        <i class="ph-bold ph-barcode text-zinc-900" vid="96"></i>
+                    </div>
+                    <span class="text-sm font-medium" vid="97">UUID生成器</span>
+                </button>
+
+                <button class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-zinc-400 hover:bg-zinc-800/40 hover:text-zinc-200 transition-colors group relative" vid="98">
+                    <div class="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center shadow-sm relative group-hover:bg-blue-500 transition-colors" vid="99">
+                        <i class="ph-bold ph-magnifying-glass text-white" vid="100"></i>
+                        <div class="absolute -top-1 -right-1 bg-indigo-500 text-[9px] font-bold px-1 rounded shadow text-white border border-indigo-400" vid="101">Ai</div>
+                    </div>
+                    <span class="text-sm font-medium" vid="102">本地搜索</span>
+                </button>
+
+                <button class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-zinc-400 hover:bg-zinc-800/40 hover:text-zinc-200 transition-colors group" vid="103">
+                    <div class="w-8 h-8 rounded-lg bg-blue-500 flex items-center justify-center shadow-sm group-hover:bg-blue-400 transition-colors" vid="104">
+                        <i class="ph-bold ph-clipboard-text text-white" vid="105"></i>
+                    </div>
+                    <span class="text-sm font-medium" vid="106">剪贴板</span>
+                </button>
+
+                <button class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-zinc-400 hover:bg-zinc-800/40 hover:text-zinc-200 transition-colors group" vid="107">
+                    <div class="w-8 h-8 rounded-lg bg-zinc-800 flex items-center justify-center shadow-sm group-hover:bg-zinc-700 transition-colors border border-zinc-700" vid="108">
+                        <i class="ph-bold ph-brackets-curly text-green-400" vid="109"></i>
+                    </div>
+                    <span class="text-sm font-medium" vid="110">JSON格式化</span>
+                </button>
+
+                <button class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-zinc-400 hover:bg-zinc-800/40 hover:text-zinc-200 transition-colors group" vid="111">
+                    <div class="w-8 h-8 rounded-lg bg-yellow-500 flex items-center justify-center shadow-sm group-hover:bg-yellow-400 transition-colors" vid="112">
+                        <i class="ph-fill ph-linux-logo text-zinc-900" vid="113"></i>
+                    </div>
+                    <span class="text-sm font-medium" vid="114">Linux 命令文档</span>
+                </button>
+
+                <button class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-zinc-400 hover:bg-zinc-800/40 hover:text-zinc-200 transition-colors group" vid="115">
+                    <div class="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center shadow-sm group-hover:bg-indigo-500 transition-colors" vid="116">
+                        <i class="ph-bold ph-keyboard text-white" vid="117"></i>
+                    </div>
+                    <span class="text-sm font-medium truncate w-full text-left" vid="118">英语单词肌肉记忆打...</span>
+                </button>
+                
+                <button class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-zinc-400 hover:bg-zinc-800/40 hover:text-zinc-200 transition-colors group" vid="119">
+                    <div class="w-8 h-8 rounded-lg bg-zinc-800 flex items-center justify-center shadow-sm group-hover:bg-zinc-700 transition-colors border border-zinc-700" vid="120">
+                        <i class="ph-fill ph-git-branch text-orange-500" vid="121"></i>
+                    </div>
+                    <span class="text-sm font-medium" vid="122">git helper</span>
+                </button>
+
+                <button class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-zinc-400 hover:bg-zinc-800/40 hover:text-zinc-200 transition-colors group" vid="123">
+                    <div class="w-8 h-8 rounded-lg bg-indigo-900 flex items-center justify-center shadow-sm group-hover:bg-indigo-800 transition-colors" vid="124">
+                        <i class="ph-bold ph-clock-counter-clockwise text-indigo-300" vid="125"></i>
+                    </div>
+                    <span class="text-sm font-medium" vid="126">时间戳转换</span>
+                </button>
+            </div>
+
+            
+            <div class="p-3 border-t border-zinc-800/60 mt-auto" vid="127">
+                <button onclick="switchView('profile')" class="w-full flex items-center justify-between p-2 rounded-xl hover:bg-zinc-800/50 transition-colors group" vid="128">
+                    <div class="flex items-center gap-3" vid="129">
+                        <div class="w-8 h-8 rounded-full bg-zinc-700 flex items-center justify-center border border-zinc-600" vid="130">
+                            <i class="ph-fill ph-robot text-lg text-zinc-300 group-hover:text-white transition-colors" vid="131"></i>
+                        </div>
+                        <div class="flex flex-col items-start" vid="132">
+                            <span class="text-sm font-medium text-zinc-200" vid="133">个人中心</span>
+                            <span class="text-[10px] text-zinc-500" vid="134">免费版</span>
+                        </div>
+                    </div>
+                    <span class="px-2 py-0.5 rounded-full bg-zinc-800 text-[10px] text-zinc-400 border border-zinc-700" vid="135">升级</span>
+                </button>
+            </div>
+        </aside>
+
+        
+        <main class="flex-1 flex flex-col h-full bg-[#0a0a0c]" vid="136">
+            
+            <header class="h-14 flex items-center justify-between px-6 border-b border-zinc-800/50 bg-[#0a0a0c]/80 backdrop-blur-md sticky top-0 z-10" vid="137">
+                <div class="flex items-center gap-4 text-sm font-medium" vid="138">
+                    <button onclick="switchView('launcher')" class="w-8 h-8 flex items-center justify-center rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800 transition-all" vid="139">
+                        <i class="ph ph-caret-left" vid="140"></i>
+                    </button>
+                    <div class="flex items-center text-zinc-400" vid="141">
+                        <span vid="142">管理中心</span>
+                        <i class="ph ph-caret-right text-xs mx-2 text-zinc-600" vid="143"></i>
+                        <span class="text-zinc-100" vid="144">插件应用市场</span>
+                        <button class="ml-2 w-5 h-5 flex items-center justify-center rounded hover:bg-zinc-800 text-zinc-500 transition-colors" vid="145">
+                            <i class="ph ph-x text-xs" vid="146"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3" vid="147">
+                    <button class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors" vid="148">
+                        <i class="ph ph-gear" vid="149"></i>
+                    </button>
+                    <button class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors" vid="150">
+                        <i class="ph ph-warning" vid="151"></i>
+                    </button>
+                    <button class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors" vid="152">
+                        <i class="ph ph-minus-circle" vid="153"></i>
+                    </button>
+                </div>
+            </header>
+
+            
+            <div class="flex-1 overflow-y-auto p-8 max-w-5xl mx-auto w-full" vid="154">
+                
+                
+                <div class="flex items-start justify-between pb-8 border-b border-zinc-800/60" vid="155">
+                    <div class="flex gap-6" vid="156">
+                        
+                        <div class="w-20 h-20 rounded-2xl bg-red-500 flex items-center justify-center shadow-lg relative flex-shrink-0 card-shadow border border-red-400/20" vid="157">
+                            <i class="ph-bold ph-file-pdf text-4xl text-white" vid="158"></i>
+                            <div class="absolute -top-1.5 -right-1.5 bg-indigo-500 text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm text-white border border-indigo-400" vid="159">Ai</div>
+                        </div>
+                        
+                        
+                        <div class="flex flex-col justify-center" vid="160">
+                            <div class="flex items-baseline gap-3 mb-2" vid="161">
+                                <h1 class="text-2xl font-bold text-zinc-100 tracking-tight" vid="162">PDF 处理</h1>
+                                <span class="text-sm text-zinc-500 font-medium" vid="163">v2.0.4</span>
+                            </div>
+                            <p class="text-sm text-zinc-400 leading-relaxed max-w-xl" vid="164">
+                                PDF 合并、PDF 拆分、PDF 水印、提取图片、PDF 转图片、PDF 转 Word、PDF 转 PPT、PDF 转 Excel
+                            </p>
+                        </div>
+                    </div>
+
+                    
+                    <button class="h-10 px-6 bg-[#2a82e4] hover:bg-[#3b8eed] text-white rounded-lg font-medium shadow-lg shadow-blue-900/20 flex items-center gap-2 transition-all active:scale-95 border border-blue-400/30" vid="165">
+                        <i class="ph-fill ph-caret-up text-xs" vid="166"></i>
+                        打开
+                    </button>
+                </div>
+
+                
+                <div class="flex justify-center mt-8 mb-8" vid="167">
+                    <div class="flex bg-[#18181b] rounded-xl p-1 shadow-inner border border-zinc-800/80" vid="168">
+                        <button class="px-6 py-2 text-sm font-medium rounded-lg bg-[#27272a] text-zinc-100 shadow-sm border border-zinc-700/50 transition-all" vid="169">
+                            功能指令
+                        </button>
+                        <button class="px-6 py-2 text-sm font-medium rounded-lg text-zinc-400 hover:text-zinc-200 transition-all" vid="170">
+                            匹配指令
+                        </button>
+                    </div>
+                </div>
+
+                
+                <div class="space-y-4" vid="171">
+                    <p class="text-[15px] leading-relaxed text-zinc-300 font-medium" vid="172">
+                        PDF 合并、PDF 拆分、PDF 签名、PDF 提取图片、PDF 转图片、PDF 转 Word、PDF 转 PPT、PDF 转 Excel
+                    </p>
+                    <div class="flex" vid="173">
+                        <button class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-colors border border-blue-500/20 text-sm" vid="174">
+                            PDF 处理
+                            <i class="ph ph-caret-down text-xs" vid="175"></i>
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+
+    
+    <div id="view-profile" class="view-container flex-row h-full w-full bg-zinc-950" vid="176">
+        
+        
+        <aside class="w-64 flex flex-col h-full bg-[#1c1c1e] border-r border-zinc-800/60 z-10 flex-shrink-0 pt-4 overflow-y-auto" vid="177">
+            
+            
+            <div class="px-4 mb-2" vid="178">
+                <h3 class="text-xs font-semibold text-zinc-500 tracking-wider mb-2" vid="179">个人中心</h3>
+                <nav class="space-y-0.5" vid="180">
+                    <button class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-zinc-800 text-white font-medium shadow-sm border border-zinc-700/50 transition-colors" vid="181">
+                        <i class="ph-fill ph-user-circle text-lg" vid="182"></i>
+                        <span class="text-sm" vid="183">我的账号</span>
+                    </button>
+                    <button class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200 transition-colors font-medium" vid="184">
+                        <i class="ph-bold ph-list-dashes text-lg" vid="185"></i>
+                        <span class="text-sm" vid="186">我的数据</span>
+                    </button>
+                    <button class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200 transition-colors font-medium" vid="187">
+                        <i class="ph-bold ph-users-three text-lg" vid="188"></i>
+                        <span class="text-sm" vid="189">团队空间</span>
+                    </button>
+                </nav>
+            </div>
+
+            
+            <div class="px-4 mt-6 mb-2" vid="190">
+                <h3 class="text-xs font-semibold text-zinc-500 tracking-wider mb-2" vid="191">偏好设置</h3>
+                <nav class="space-y-0.5" vid="192">
+                    <button class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200 transition-colors font-medium" vid="193">
+                        <i class="ph-bold ph-gear text-lg" vid="194"></i>
+                        <span class="text-sm" vid="195">设置</span>
+                    </button>
+                    <button class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200 transition-colors font-medium" vid="196">
+                        <i class="ph-fill ph-sparkle text-lg" vid="197"></i>
+                        <span class="text-sm" vid="198">AI 模型</span>
+                    </button>
+                    <button class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200 transition-colors font-medium" vid="199">
+                        <i class="ph-bold ph-rocket-launch text-lg" vid="200"></i>
+                        <span class="text-sm" vid="201">本地启动</span>
+                    </button>
+                    <button class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200 transition-colors font-medium" vid="202">
+                        <i class="ph-bold ph-arrow-u-up-right text-lg" vid="203"></i>
+                        <span class="text-sm" vid="204">快捷方式</span>
+                    </button>
+                    <button class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200 transition-colors font-medium" vid="205">
+                        <i class="ph-bold ph-paper-plane-tilt text-lg" vid="206"></i>
+                        <span class="text-sm" vid="207">所有指令</span>
+                    </button>
+                </nav>
+            </div>
+
+            
+            <div class="mt-auto px-4 pb-4 pt-4 border-t border-zinc-800/60" vid="208">
+                <button onclick="switchView('tools')" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200 transition-colors font-medium" vid="209">
+                    <i class="ph-bold ph-cube text-lg" vid="210"></i>
+                    <span class="text-sm" vid="211">插件应用市场</span>
+                </button>
+            </div>
+        </aside>
+
+        
+        <main class="flex-1 flex flex-col h-full bg-[#0a0a0c]" vid="212">
+             
+             <header class="h-14 flex items-center justify-between px-6 border-b border-zinc-800/50 bg-[#0a0a0c]/80 backdrop-blur-md sticky top-0 z-10" vid="213">
+                <div class="flex items-center gap-4 text-sm font-medium" vid="214">
+                    <button onclick="switchView('launcher')" class="w-8 h-8 flex items-center justify-center rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white hover:bg-zinc-800 transition-all" vid="215">
+                        <i class="ph ph-caret-left" vid="216"></i>
+                    </button>
+                    <div class="flex items-center text-zinc-400" vid="217">
+                        <span class="text-zinc-100" vid="218">管理中心</span>
+                        <i class="ph ph-caret-right text-xs mx-2 text-zinc-600" vid="219"></i>
+                        <span vid="220">我的账号</span>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3" vid="221">
+                    <div class="flex gap-1" vid="222">
+                        <div class="w-1 h-1 rounded-full bg-zinc-600" vid="223"></div>
+                        <div class="w-1 h-1 rounded-full bg-zinc-600" vid="224"></div>
+                        <div class="w-1 h-1 rounded-full bg-zinc-600" vid="225"></div>
+                    </div>
+                </div>
+            </header>
+
+            
+            <div class="flex-1 overflow-y-auto p-6 md:p-10" vid="226">
+                <div class="max-w-3xl mx-auto space-y-6" vid="227">
+                    
+                    
+                    <div class="bg-[#18181b] rounded-2xl p-6 md:p-8 card-shadow border border-zinc-800/80 relative overflow-hidden group" vid="228">
+                        
+                        <div class="absolute -right-20 -top-20 w-64 h-64 bg-zinc-800/40 rounded-full blur-3xl group-hover:bg-zinc-700/40 transition-colors duration-700 pointer-events-none" vid="229"></div>
+
+                        <div class="flex items-start justify-between relative z-10" vid="230">
+                            <div class="flex items-center gap-5" vid="231">
+                                <div class="w-16 h-16 rounded-full bg-zinc-800 flex items-center justify-center border-2 border-zinc-700 shadow-inner" vid="232">
+                                    <i class="ph-fill ph-robot text-3xl text-zinc-300" vid="233"></i>
+                                </div>
+                                <div class="flex flex-col" vid="234">
+                                    <h2 class="text-xl font-bold text-zinc-100 mb-1 flex items-center gap-2" vid="235">
+                                        L.H.F
+                                    </h2>
+                                    <div class="flex items-center gap-3 text-sm text-zinc-400 font-medium" vid="236">
+                                        <span vid="237">156****9027</span>
+                                        <div class="w-px h-3 bg-zinc-700" vid="238"></div>
+                                        <span vid="239">uTools 已陪伴你 1514 天</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mt-8 pt-6 border-t border-zinc-800/60 flex items-end justify-between relative z-10" vid="240">
+                            <div class="flex flex-col gap-3" vid="241">
+                                <p class="text-sm text-zinc-400" vid="242">会员享有数据云端备份和多端同步、插件应用无限制安装等权益</p>
+                                <button class="w-fit px-5 py-2 rounded-full bg-zinc-800 hover:bg-zinc-700 text-yellow-500 text-sm font-medium transition-colors border border-zinc-700/50 flex items-center gap-1.5" vid="243">
+                                    升级会员
+                                </button>
+                            </div>
+                            <span class="text-4xl font-black text-zinc-800/50 absolute bottom-4 right-6 select-none pointer-events-none" vid="244">免费版</span>
+                        </div>
+                    </div>
+
+                    
+                    <div class="bg-gradient-to-r from-[#1f1a24] to-[#18181b] rounded-2xl p-5 card-shadow border border-purple-900/30 flex items-center justify-between cursor-pointer hover:border-purple-800/50 transition-colors" vid="245">
+                        <div class="flex items-center gap-4" vid="246">
+                            <div class="w-10 h-10 rounded-full bg-purple-500/10 flex items-center justify-center border border-purple-500/20 shadow-[0_0_15px_rgba(168,85,247,0.2)]" vid="247">
+                                <i class="ph-fill ph-sparkle text-xl text-purple-400" vid="248"></i>
+                            </div>
+                            <span class="text-base font-medium text-zinc-200" vid="249">AI 能量</span>
+                        </div>
+                        <div class="flex items-center gap-1 text-zinc-400 hover:text-zinc-200 transition-colors" vid="250">
+                            <span class="text-sm" vid="251">购买 AI 能量</span>
+                            <i class="ph ph-caret-right text-sm" vid="252"></i>
+                        </div>
+                    </div>
+
+                    
+                    <div class="bg-[#18181b] rounded-2xl border border-zinc-800/80 overflow-hidden shadow-sm" vid="253">
+                        
+                        <button class="w-full flex items-center justify-between p-4 hover:bg-zinc-800/40 transition-colors border-b border-zinc-800/60 group" vid="254">
+                            <span class="text-[15px] font-medium text-zinc-300 group-hover:text-zinc-100 transition-colors" vid="255">代金券</span>
+                            <i class="ph ph-caret-right text-zinc-600 group-hover:text-zinc-400 transition-colors" vid="256"></i>
+                        </button>
+
+                        <button class="w-full flex items-center justify-between p-4 hover:bg-zinc-800/40 transition-colors border-b border-zinc-800/60 group" vid="257">
+                            <span class="text-[15px] font-medium text-zinc-300 group-hover:text-zinc-100 transition-colors" vid="258">AI 能量流水</span>
+                            <i class="ph ph-caret-right text-zinc-600 group-hover:text-zinc-400 transition-colors" vid="259"></i>
+                        </button>
+
+                        <button class="w-full flex items-center justify-between p-4 hover:bg-zinc-800/40 transition-colors border-b border-zinc-800/60 group" vid="260">
+                            <span class="text-[15px] font-medium text-zinc-300 group-hover:text-zinc-100 transition-colors" vid="261">支付记录</span>
+                            <i class="ph ph-caret-right text-zinc-600 group-hover:text-zinc-400 transition-colors" vid="262"></i>
+                        </button>
+
+                        <button class="w-full flex items-center justify-between p-4 hover:bg-zinc-800/40 transition-colors border-b border-zinc-800/60 group" vid="263">
+                            <span class="text-[15px] font-medium text-zinc-300 group-hover:text-zinc-100 transition-colors" vid="264">修改账号</span>
+                            <i class="ph ph-caret-right text-zinc-600 group-hover:text-zinc-400 transition-colors" vid="265"></i>
+                        </button>
+
+                        <button class="w-full flex items-center justify-between p-4 hover:bg-zinc-800/40 transition-colors group" vid="266">
+                            <span class="text-[15px] font-medium text-red-400/80 group-hover:text-red-400 transition-colors" vid="267">退出账号</span>
+                            <i class="ph ph-caret-right text-zinc-600 group-hover:text-zinc-400 transition-colors" vid="268"></i>
+                        </button>
+
+                    </div>
+
+                </div>
+            </div>
+        </main>
+    </div>
+
+    
+    <script vid="269">
+        function switchView(viewId) {
+            
+            const views = document.querySelectorAll('.view-container');
+            views.forEach(view => {
+                view.classList.remove('active');
+            });
+            
+            
+            const targetView = document.getElementById('view-' + viewId);
+            if (targetView) {
+                targetView.classList.add('active');
+            }
+        }
+    </script>
+
+</body></html>
