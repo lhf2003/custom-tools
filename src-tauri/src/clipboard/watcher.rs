@@ -8,6 +8,7 @@ use windows::Win32::System::DataExchange::{
     AddClipboardFormatListener, CloseClipboard, GetClipboardData, OpenClipboard,
     RemoveClipboardFormatListener,
 };
+use windows::Win32::UI::Shell::{DragQueryFileW, HDROP};
 use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -204,6 +205,50 @@ impl ClipboardWatcher {
         }
     }
 
+    /// Read HDROP (file list) data from clipboard
+    unsafe fn read_hdrop_data(hdrop: HDROP) -> anyhow::Result<Vec<String>> {
+        log::info!("Reading HDROP data...");
+
+        // Get the number of files
+        let file_count = DragQueryFileW(hdrop, 0xFFFFFFFF, None);
+        log::info!("HDROP file count: {}", file_count);
+
+        if file_count == 0 {
+            return Err(anyhow::anyhow!("No files in HDROP data"));
+        }
+
+        let mut files = Vec::with_capacity(file_count as usize);
+
+        for i in 0..file_count {
+            // Get the required buffer size for this file path
+            let path_len = DragQueryFileW(hdrop, i, None);
+            if path_len == 0 {
+                log::warn!("Failed to get path length for file {}", i);
+                continue;
+            }
+
+            // Allocate buffer and retrieve the path
+            let mut buffer = vec![0u16; path_len as usize + 1];
+            let chars_copied = DragQueryFileW(hdrop, i, Some(&mut buffer));
+
+            if chars_copied > 0 {
+                // Convert to String (null-terminated, so take only up to chars_copied)
+                let path = String::from_utf16_lossy(&buffer[..chars_copied as usize]);
+                log::debug!("File {}: {}", i, &path);
+                files.push(path);
+            } else {
+                log::warn!("Failed to get path for file {}", i);
+            }
+        }
+
+        if files.is_empty() {
+            return Err(anyhow::anyhow!("No valid files found in HDROP data"));
+        }
+
+        log::info!("HDROP data read successfully: {} files", files.len());
+        Ok(files)
+    }
+
     /// Read DIB (Device Independent Bitmap) data from clipboard and convert to PNG
     unsafe fn read_dib_data(ptr: *mut std::ffi::c_void) -> anyhow::Result<Vec<u8>> {
         use std::slice;
@@ -350,7 +395,19 @@ impl ClipboardWatcher {
 
         if let Ok(handle) = hdrop_handle {
             if !handle.is_invalid() {
-                log::info!("File list in clipboard detected (not yet implemented)");
+                log::info!("CF_HDROP handle acquired, reading file list...");
+                let hdrop = HDROP(handle.0 as isize);
+                match Self::read_hdrop_data(hdrop) {
+                    Ok(files) => {
+                        log::info!("File list read successfully: {} files", files.len());
+                        return Ok(ClipboardContent::FileList(files));
+                    }
+                    Err(e) => {
+                        log::error!("Failed to read HDROP data: {}", e);
+                    }
+                }
+            } else {
+                log::info!("CF_HDROP handle is invalid");
             }
         }
 

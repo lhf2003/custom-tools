@@ -189,7 +189,7 @@ export function ClipboardView() {
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header with Search */}
-        <div className="w-full flex items-center px-4 py-3 border-b border-white/15">
+        <div className="w-full flex items-center px-4 py-3 border-b border-zinc-700/50">
           <Search className="w-5 h-5 text-zinc-400 mr-3 flex-shrink-0" />
           <input
             type="text"
@@ -209,7 +209,7 @@ export function ClipboardView() {
         </div>
 
         {/* Clipboard List */}
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className="flex-1 overflow-y-auto px-4 pb-4 pt-2">
           {isLoading ? (
             <div className="flex flex-col items-center justify-center h-full text-zinc-500">
               <Loader2 size={32} className="animate-spin mb-3" />
@@ -228,10 +228,10 @@ export function ClipboardView() {
           ) : items.length === 0 ? (
             <EmptyState activeTab={activeTab} />
           ) : (
-            <div className="space-y-6">
+            <div className="space-y-4">
               {Object.entries(groupedItems).map(([date, dateItems]) => (
                 <div key={date}>
-                  <h3 className="text-zinc-500 text-xs font-medium mb-2 px-1 sticky top-0 py-1" style={{ backgroundColor: '#333333' }}>
+                  <h3 className="text-zinc-500 text-[11px] font-medium mb-1.5 px-1 -mt-2 pt-2 pb-0.5 sticky -top-2 tracking-wide z-10" style={{ backgroundColor: '#333333' }}>
                     {date}
                   </h3>
                   <div className="space-y-2">
@@ -459,15 +459,6 @@ function ClipboardItem({
       onDoubleClick={handleDoubleClick}
     >
       <div className="flex items-start gap-3">
-        {/* Type Icon - Only show for file type */}
-        {item.content_type === 'file' && (
-          <div
-            className={`w-9 h-9 rounded-lg bg-gradient-to-br ${config.color} flex items-center justify-center shrink-0`}
-          >
-            <TypeIcon size={16} className="text-white" />
-          </div>
-        )}
-
         {/* Content */}
         <div className="flex-1 min-w-0">
           <div className="flex items-start gap-2">
