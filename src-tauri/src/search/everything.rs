@@ -23,10 +23,13 @@ pub fn is_available() -> bool {
 
 /// Find es.exe in common locations
 fn find_es_exe() -> Option<PathBuf> {
-    // Common installation paths
+    // Common installation paths - only check fixed paths for performance
     let possible_paths = [
         r"C:\Program Files\Everything\es.exe",
         r"C:\Program Files (x86)\Everything\es.exe",
+        r"D:\Everything\es.exe",
+        r"E:\Everything\es.exe",
+        r"F:\Everything\es.exe",
     ];
 
     for path in &possible_paths {
@@ -37,19 +40,7 @@ fn find_es_exe() -> Option<PathBuf> {
         }
     }
 
-    // Try to find in PATH
-    if let Ok(output) = Command::new("where").arg("es.exe").output() {
-        if output.status.success() {
-            let path_str = String::from_utf8_lossy(&output.stdout);
-            let path = PathBuf::from(path_str.trim());
-            if path.exists() {
-                log::info!("Found es.exe in PATH: {}", path.display());
-                return Some(path);
-            }
-        }
-    }
-
-    log::debug!("es.exe not found, Everything integration disabled");
+    log::warn!("es.exe not found in common locations: {:?}", possible_paths);
     None
 }
 

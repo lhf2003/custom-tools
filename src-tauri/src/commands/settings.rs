@@ -1,6 +1,7 @@
 use crate::settings::{AppSettings, SettingsManager, ShortcutConfig, ShortcutManager};
 use std::sync::Mutex;
 use tauri::{Manager, State};
+use tauri_plugin_autostart::ManagerExt;
 
 pub struct SettingsState(pub Mutex<SettingsManager>);
 pub struct ShortcutManagerState(pub Mutex<ShortcutManager>);
@@ -82,6 +83,69 @@ pub fn toggle_hide_on_blur(state: State<'_, SettingsState>) -> Result<bool, Stri
         .map_err(|e| e.to_string())?;
 
     Ok(new_value)
+}
+
+/// Toggle startup launch (auto start on system boot)
+#[tauri::command]
+pub fn toggle_startup_launch(
+    app_handle: tauri::AppHandle,
+    state: State<'_, SettingsState>,
+) -> Result<bool, String> {
+    let manager = state.0.lock().map_err(|e| e.to_string())?;
+    let current = manager.get_settings().startup_launch;
+    let new_value = !current;
+
+    // Update setting in database
+    manager
+        .set_setting("startup_launch", &new_value.to_string())
+        .map_err(|e| e.to_string())?;
+
+    // Apply to system autostart
+    let autostart_manager = app_handle.autolaunch();
+    if new_value {
+        autostart_manager
+            .enable()
+            .map_err(|e| format!("Failed to enable autostart: {}", e))?;
+        log::info!("Autostart enabled");
+    } else {
+        autostart_manager
+            .disable()
+            .map_err(|e| format!("Failed to disable autostart: {}", e))?;
+        log::info!("Autostart disabled");
+    }
+
+    Ok(new_value)
+}
+
+/// Set startup launch directly
+#[tauri::command]
+pub fn set_startup_launch(
+    app_handle: tauri::AppHandle,
+    state: State<'_, SettingsState>,
+    enabled: bool,
+) -> Result<(), String> {
+    let manager = state.0.lock().map_err(|e| e.to_string())?;
+
+    // Update setting in database
+    manager
+        .set_setting("startup_launch", &enabled.to_string())
+        .map_err(|e| e.to_string())?;
+
+    // Apply to system autostart
+    let autostart_manager = app_handle.autolaunch();
+    if enabled {
+        autostart_manager
+            .enable()
+            .map_err(|e| format!("Failed to enable autostart: {}", e))?;
+        log::info!("Autostart enabled");
+    } else {
+        autostart_manager
+            .disable()
+            .map_err(|e| format!("Failed to disable autostart: {}", e))?;
+        log::info!("Autostart disabled");
+    }
+
+    Ok(())
 }
 
 // ==================== Shortcut Commands ====================

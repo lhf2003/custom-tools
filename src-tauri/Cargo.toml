@@ -26,6 +26,7 @@ tauri-plugin-clipboard-manager = "2.0.0"
 tauri-plugin-fs = "2.0.0"
 tauri-plugin-notification = "2.0.0"
 tauri-plugin-shell = "2.0.0"
+tauri-plugin-autostart = "2"
 rusqlite = { version = "0.30", features = ["bundled"] }
 anyhow = "1.0"
 dirs = "5.0"

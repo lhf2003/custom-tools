@@ -18,20 +18,20 @@ export function useSearch() {
   const [apps, setApps] = useState<AppItem[]>([]);
   const [files, setFiles] = useState<FileResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [hasEverything, setHasEverything] = useState(false);
+  const [hasEverything, setHasEverything] = useState<boolean | null>(null);
 
-  // Check if Everything is available
-  useEffect(() => {
-    const checkEverything = async () => {
-      try {
-        const available = await invoke<boolean>('is_everything_available');
-        setHasEverything(available);
-      } catch (err) {
-        setHasEverything(false);
-      }
-    };
-    checkEverything();
-  }, []);
+  // Check if Everything is available (lazy check - only when needed)
+  const checkEverythingAvailable = useCallback(async () => {
+    if (hasEverything !== null) return hasEverything;
+    try {
+      const available = await invoke<boolean>('is_everything_available');
+      setHasEverything(available);
+      return available;
+    } catch (err) {
+      setHasEverything(false);
+      return false;
+    }
+  }, [hasEverything]);
 
   const searchApps = useCallback(async (query: string) => {
     try {
@@ -41,9 +41,14 @@ export function useSearch() {
         setApps(results);
 
         // Also search files via Everything if available and query is not empty
-        if (hasEverything && query.length > 0) {
-          const fileResults = await invoke<FileResult[]>('search_everything', { query, limit: 10 });
-          setFiles(fileResults);
+        if (query.length > 0) {
+          const everythingAvailable = await checkEverythingAvailable();
+          if (everythingAvailable) {
+            const fileResults = await invoke<FileResult[]>('search_everything', { query, limit: 10 });
+            setFiles(fileResults);
+          } else {
+            setFiles([]);
+          }
         } else {
           setFiles([]);
         }
@@ -56,7 +61,7 @@ export function useSearch() {
       setApps([]);
       setFiles([]);
     }
-  }, [hasEverything]);
+  }, [checkEverythingAvailable]);
 
   const refreshApps = useCallback(async () => {
     setIsLoading(true);

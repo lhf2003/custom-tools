@@ -1,4 +1,5 @@
 use tauri::Manager;
+use tauri_plugin_autostart::ManagerExt;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -21,6 +22,10 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .setup(|app| {
             // Setup system tray
             setup_system_tray(app.handle())?;
@@ -52,6 +57,19 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 if let Err(e) = window.set_always_on_top(settings.always_on_top) {
                     log::warn!("Failed to set always_on_top: {}", e);
+                }
+            }
+
+            // Apply startup_launch setting
+            let autostart_manager = app.autolaunch();
+            let is_enabled = autostart_manager.is_enabled().unwrap_or(false);
+            if settings.startup_launch && !is_enabled {
+                if let Err(e) = autostart_manager.enable() {
+                    log::warn!("Failed to enable autostart: {}", e);
+                }
+            } else if !settings.startup_launch && is_enabled {
+                if let Err(e) = autostart_manager.disable() {
+                    log::warn!("Failed to disable autostart: {}", e);
                 }
             }
 
@@ -115,10 +133,14 @@ pub fn run() {
             let search_index_arc = Arc::new(Mutex::new(search_index));
             app.manage(commands::search::SearchState(search_index_arc.clone()));
 
-            // Start file watcher for incremental updates
-            if let Err(e) = search::watcher::init_watcher(search_index_arc.clone(), db_state.clone()) {
-                log::warn!("Failed to start file watcher: {}", e);
-            }
+            // Start file watcher in background thread to avoid blocking startup
+            let search_index_for_watcher = search_index_arc.clone();
+            let db_state_for_watcher = db_state.clone();
+            std::thread::spawn(move || {
+                if let Err(e) = search::watcher::init_watcher(search_index_for_watcher, db_state_for_watcher) {
+                    log::warn!("Failed to start file watcher: {}", e);
+                }
+            });
 
             // Background refresh in case cache is stale
             let search_index_for_refresh = search_index_arc.clone();
@@ -185,6 +207,8 @@ pub fn run() {
             commands::settings::toggle_always_on_top,
             commands::settings::set_always_on_top,
             commands::settings::toggle_hide_on_blur,
+            commands::settings::toggle_startup_launch,
+            commands::settings::set_startup_launch,
             commands::settings::get_shortcuts,
             commands::settings::update_shortcut,
             commands::settings::reset_shortcut,

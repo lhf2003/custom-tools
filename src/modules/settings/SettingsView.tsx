@@ -463,11 +463,11 @@ function GeneralSettings() {
     startup_launch,
     toggleAlwaysOnTop,
     toggleHideOnBlur,
-    setSetting,
+    setStartupLaunch,
   } = useSettingsStore();
 
   const handleStartupChange = (enabled: boolean) => {
-    setSetting('startup_launch', enabled.toString());
+    setStartupLaunch(enabled);
   };
 
   return (

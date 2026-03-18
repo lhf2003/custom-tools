@@ -29,6 +29,8 @@ interface SettingsState extends AppSettings {
   toggleAlwaysOnTop: () => Promise<boolean>;
   setHideOnBlur: (enabled: boolean) => Promise<void>;
   toggleHideOnBlur: () => Promise<boolean>;
+  setStartupLaunch: (enabled: boolean) => Promise<void>;
+  toggleStartupLaunch: () => Promise<boolean>;
   setSetting: (key: string, value: string) => Promise<void>;
 
   // Shortcut Actions
@@ -100,6 +102,26 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     } catch (err) {
       console.error('Failed to toggle hide_on_blur:', err);
       return get().hide_on_blur;
+    }
+  },
+
+  setStartupLaunch: async (enabled: boolean) => {
+    try {
+      await invoke('set_startup_launch', { enabled });
+      set({ startup_launch: enabled });
+    } catch (err) {
+      console.error('Failed to set startup_launch:', err);
+    }
+  },
+
+  toggleStartupLaunch: async () => {
+    try {
+      const newValue = await invoke<boolean>('toggle_startup_launch');
+      set({ startup_launch: newValue });
+      return newValue;
+    } catch (err) {
+      console.error('Failed to toggle startup_launch:', err);
+      return get().startup_launch;
     }
   },
 
