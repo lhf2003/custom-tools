@@ -1,11 +1,15 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use nucleo::pattern::{CaseMatching, Normalization, Pattern};
 
 pub mod icon;
+pub mod watcher;
 
+use crate::db::app_cache::{self, AppCacheEntry};
 use crate::db::app_usage::{AppUsage, calculate_frequency_score};
+use crate::db::DatabaseState;
 
 /// Parse a Windows shortcut (.lnk) file and return the target path
 #[cfg(windows)]
@@ -83,9 +87,20 @@ pub struct AppItem {
     pub icon: Option<String>,
 }
 
+impl From<AppCacheEntry> for AppItem {
+    fn from(entry: AppCacheEntry) -> Self {
+        Self {
+            name: entry.name,
+            path: entry.path,
+            icon: None,
+        }
+    }
+}
+
 pub struct SearchIndex {
     apps: Vec<AppItem>,
     indexed: bool,
+    db_state: Option<Arc<DatabaseState>>,
 }
 
 impl SearchIndex {
@@ -93,13 +108,45 @@ impl SearchIndex {
         Self {
             apps: Vec::new(),
             indexed: false,
+            db_state: None,
         }
     }
 
-    pub fn index_apps(&mut self) -> anyhow::Result<()> {
+    pub fn with_db(db_state: Arc<DatabaseState>) -> Self {
+        Self {
+            apps: Vec::new(),
+            indexed: false,
+            db_state: Some(db_state),
+        }
+    }
+
+    /// Fast load from cache, then refresh in background
+    pub fn load_from_cache(&mut self) -> anyhow::Result<()> {
         if self.indexed {
             return Ok(());
         }
+
+        // Try to load from database cache
+        if let Some(ref db_state) = self.db_state {
+            let conn = rusqlite::Connection::open(&db_state.0)?;
+
+            if app_cache::has_cache(&conn)? {
+                let entries = app_cache::load_all(&conn)?;
+                self.apps = entries.into_iter().map(AppItem::from).collect();
+                self.indexed = true;
+
+                log::info!("Loaded {} applications from cache", self.apps.len());
+                return Ok(());
+            }
+        }
+
+        // Fall back to full indexing if no cache
+        self.index_apps()
+    }
+
+    /// Background refresh - scans directories and updates cache
+    pub fn refresh_in_background(&mut self) -> anyhow::Result<()> {
+        let start = std::time::Instant::now();
 
         let mut apps = Vec::new();
         let mut seen = HashSet::new();
@@ -130,10 +177,102 @@ impl SearchIndex {
         // Sort by name alphabetically
         apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
 
+        // Update cache
+        if let Some(ref db_state) = self.db_state {
+            if let Ok(mut conn) = rusqlite::Connection::open(&db_state.0) {
+                let cache_entries: Vec<AppCacheEntry> = apps.iter().map(|app| {
+                    let target_path = parse_shortcut_target(Path::new(&app.path))
+                        .unwrap_or_else(|| app.path.clone());
+                    let last_modified = app_cache::get_file_modified(Path::new(&app.path));
+
+                    AppCacheEntry {
+                        name: app.name.clone(),
+                        path: app.path.clone(),
+                        target_path,
+                        last_modified,
+                        is_valid: true,
+                    }
+                }).collect();
+
+                if let Err(e) = app_cache::save_batch(&mut conn, &cache_entries) {
+                    log::warn!("Failed to save cache: {}", e);
+                } else {
+                    log::info!("Saved {} entries to cache", cache_entries.len());
+                }
+            }
+        }
+
         self.apps = apps;
         self.indexed = true;
 
-        log::info!("Indexed {} applications", self.apps.len());
+        log::info!("Refreshed {} applications in {:?}", self.apps.len(), start.elapsed());
+
+        Ok(())
+    }
+
+    /// Full index from scratch (blocking)
+    pub fn index_apps(&mut self) -> anyhow::Result<()> {
+        if self.indexed {
+            return Ok(());
+        }
+
+        self.refresh_in_background()
+    }
+
+    /// Incremental update for a single file
+    pub fn add_or_update_app(&mut self, path: &Path) -> anyhow::Result<()> {
+        if let Some((app, target_path)) = self.parse_shortcut(path) {
+            // Check for duplicates
+            let key = format!("{}|{}", app.name.to_lowercase(), target_path.to_lowercase());
+
+            // Update in-memory list
+            if let Some(existing) = self.apps.iter_mut().find(|a| {
+                let existing_target = parse_shortcut_target(Path::new(&a.path))
+                    .unwrap_or_else(|| a.path.clone());
+                format!("{}|{}", a.name.to_lowercase(), existing_target.to_lowercase()) == key
+            }) {
+                *existing = app.clone();
+            } else {
+                self.apps.push(app.clone());
+                self.apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+            }
+
+            // Update database cache
+            if let Some(ref db_state) = self.db_state {
+                if let Ok(mut conn) = rusqlite::Connection::open(&db_state.0) {
+                    let entry = AppCacheEntry {
+                        name: app.name,
+                        path: app.path,
+                        target_path,
+                        last_modified: app_cache::get_file_modified(path),
+                        is_valid: true,
+                    };
+
+                    if let Err(e) = app_cache::save(&conn, &entry) {
+                        log::warn!("Failed to update cache for {}: {}", path.display(), e);
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Remove app from index
+    pub fn remove_app(&mut self, path: &Path) -> anyhow::Result<()> {
+        let path_str = path.to_string_lossy().to_string();
+
+        // Remove from in-memory list
+        self.apps.retain(|a| a.path != path_str);
+
+        // Mark as invalid in cache
+        if let Some(ref db_state) = self.db_state {
+            if let Ok(conn) = rusqlite::Connection::open(&db_state.0) {
+                if let Err(e) = app_cache::mark_invalid(&conn, &path_str) {
+                    log::warn!("Failed to mark {} as invalid in cache: {}", path.display(), e);
+                }
+            }
+        }
 
         Ok(())
     }
@@ -305,7 +444,21 @@ impl SearchIndex {
     pub fn refresh(&mut self) -> anyhow::Result<()> {
         self.indexed = false;
         self.apps.clear();
-        self.index_apps()
+
+        // Clear cache and rebuild
+        if let Some(ref db_state) = self.db_state {
+            if let Ok(conn) = rusqlite::Connection::open(&db_state.0) {
+                if let Err(e) = app_cache::clear_all(&conn) {
+                    log::warn!("Failed to clear cache: {}", e);
+                }
+            }
+        }
+
+        self.refresh_in_background()
+    }
+
+    pub fn is_indexed(&self) -> bool {
+        self.indexed
     }
 }
 

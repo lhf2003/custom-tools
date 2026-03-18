@@ -1,5 +1,6 @@
 use tauri::Manager;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 // Tray icon resource ID (must match the one in build.rs if defined there)
 const TRAY_ICON_ID: u32 = 1;
@@ -95,12 +96,40 @@ pub fn run() {
             let password_manager = password::PasswordManager::new();
             app.manage(password::PasswordManagerState(Arc::new(password_manager)));
 
-            // Initialize search index
-            let mut search_index = search::SearchIndex::new();
-            if let Err(e) = search_index.index_apps() {
-                log::warn!("Failed to index apps: {}", e);
+            // Initialize search index with database for caching
+            let db_path = app.path().app_data_dir().unwrap().join("custom-tools.db");
+            let db_state = Arc::new(db::DatabaseState(db_path));
+
+            // Create search index with db connection
+            let mut search_index = search::SearchIndex::with_db(db_state.clone());
+
+            // Fast load from cache first
+            if let Err(e) = search_index.load_from_cache() {
+                log::warn!("Failed to load from cache: {}", e);
+                // Fall back to full index
+                if let Err(e) = search_index.index_apps() {
+                    log::warn!("Failed to index apps: {}", e);
+                }
             }
-            app.manage(commands::search::SearchState(Mutex::new(search_index)));
+
+            let search_index_arc = Arc::new(Mutex::new(search_index));
+            app.manage(commands::search::SearchState(search_index_arc.clone()));
+
+            // Start file watcher for incremental updates
+            if let Err(e) = search::watcher::init_watcher(search_index_arc.clone(), db_state.clone()) {
+                log::warn!("Failed to start file watcher: {}", e);
+            }
+
+            // Background refresh in case cache is stale
+            let search_index_for_refresh = search_index_arc.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_secs(2)); // Wait 2 seconds after startup
+                if let Ok(mut idx) = search_index_for_refresh.lock() {
+                    if let Err(e) = idx.refresh_in_background() {
+                        log::warn!("Background refresh failed: {}", e);
+                    }
+                }
+            });
 
             Ok(())
         })

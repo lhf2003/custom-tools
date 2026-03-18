@@ -3,6 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use tauri::Manager;
 
+pub mod app_cache;
 pub mod app_usage;
 
 pub struct Database {
@@ -127,6 +128,9 @@ impl Database {
             "CREATE INDEX IF NOT EXISTS idx_app_usage_launch_count ON app_usage(launch_count DESC)",
             [],
         )?;
+
+        // App cache table (for fast startup)
+        app_cache::init_table(&self.conn)?;
 
         // Settings table
         self.conn.execute(

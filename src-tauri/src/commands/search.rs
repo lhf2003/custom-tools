@@ -2,9 +2,9 @@ use crate::db::app_usage;
 use crate::db::DatabaseState;
 use crate::search::{icon, AppItem, SearchIndex};
 use rusqlite::Connection;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
-pub struct SearchState(pub Mutex<SearchIndex>);
+pub struct SearchState(pub Arc<Mutex<SearchIndex>>);
 
 fn get_db_conn(db_state: &tauri::State<'_, DatabaseState>) -> Result<Connection, String> {
     Connection::open(&db_state.0).map_err(|e| e.to_string())
