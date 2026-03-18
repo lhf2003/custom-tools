@@ -11,8 +11,7 @@ const safeInvoke = async (cmd: string, args?: Record<string, unknown>) => {
   // In browser, just log
   console.log(`[Browser Mode] Would invoke: ${cmd}`, args);
   return Promise.resolve();
-  }
-  ;
+};
 
 const settingTabs = [
   { id: 'general', name: '通用', icon: Settings },
@@ -21,6 +20,52 @@ const settingTabs = [
 ];
 
 const FIXED_HEIGHT = 500; // 设置页面固定高度
+
+// ==================== Shared Components ====================
+
+interface SettingCardProps {
+  title: string;
+  description?: string;
+  children: React.ReactNode;
+}
+
+function SettingCard({ title, description, children }: SettingCardProps) {
+  return (
+    <div className="rounded-xl p-4 border border-white/10 bg-white/[0.02] hover:border-white/15 transition-colors">
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <p className="text-white/90 text-sm font-medium">{title}</p>
+          {description && (
+            <p className="text-white/40 text-xs mt-0.5">{description}</p>
+          )}
+        </div>
+        <div className="flex-shrink-0">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+interface ToggleProps {
+  enabled?: boolean;
+  onToggle?: (enabled: boolean) => void;
+}
+
+function Toggle({ enabled = false, onToggle }: ToggleProps) {
+  return (
+    <button
+      onClick={() => onToggle?.(!enabled)}
+      className={`relative w-12 h-7 rounded-full transition-colors duration-200 cursor-pointer ${
+        enabled ? 'bg-blue-500' : 'bg-zinc-600 hover:bg-zinc-500'
+      }`}
+    >
+      <span
+        className={`absolute top-1 w-5 h-5 rounded-full bg-white transition-transform duration-200 ${
+          enabled ? 'translate-x-6' : 'translate-x-1'
+        }`}
+      />
+    </button>
+  );
+}
 
 export function SettingsView() {
   const [activeTab, setActiveTab] = useState('shortcuts');
@@ -39,25 +84,37 @@ export function SettingsView() {
   }, []);
 
   return (
-    <div className="w-full h-full flex bg-gradient-to-br from-slate-900/90 via-slate-800/85 to-slate-900/90 backdrop-blur-3xl">
+    <div
+      className="w-full h-full flex"
+      style={{ backgroundColor: '#333' }}
+    >
       {/* Settings Sidebar */}
-      <aside className="w-48 border-r border-white/20 p-4 bg-black/20">
-        <h3 className="text-white/60 text-sm font-medium mb-4">偏好设置</h3>
+      <aside className="w-52 border-r border-white/10 p-4 flex flex-col">
+        <h3 className="text-white/50 text-xs font-semibold uppercase tracking-wider mb-4 px-3">
+          偏好设置
+        </h3>
         <div className="space-y-1">
           {settingTabs.map((tab) => {
             const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
             return (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-colors ${
-                  activeTab === tab.id
-                    ? 'bg-white/10 text-white'
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-200 cursor-pointer ${
+                  isActive
+                    ? 'bg-white/15 text-white shadow-sm'
                     : 'text-white/60 hover:bg-white/5 hover:text-white'
                 }`}
               >
-                <Icon size={16} />
-                <span>{tab.name}</span>
+                <Icon
+                  size={18}
+                  className={`transition-colors ${isActive ? 'text-blue-400' : 'text-white/40'}`}
+                />
+                <span className="font-medium">{tab.name}</span>
+                {isActive && (
+                  <div className="ml-auto w-1.5 h-1.5 rounded-full bg-blue-400" />
+                )}
               </button>
             );
           })}
@@ -66,9 +123,11 @@ export function SettingsView() {
 
       {/* Settings Content */}
       <div className="flex-1 p-6 overflow-y-auto">
-        {activeTab === 'shortcuts' && <ShortcutsSettings />}
-        {activeTab === 'general' && <GeneralSettings />}
-        {activeTab === 'appearance' && <AppearanceSettings />}
+        <div className="max-w-2xl">
+          {activeTab === 'shortcuts' && <ShortcutsSettings />}
+          {activeTab === 'general' && <GeneralSettings />}
+          {activeTab === 'appearance' && <AppearanceSettings />}
+        </div>
       </div>
     </div>
   );
@@ -109,15 +168,18 @@ function ShortcutsSettings() {
   return (
     <>
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-white text-lg font-medium flex items-center gap-2">
-          <span className="w-8 h-8 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center">
-            <Keyboard size={16} />
-          </span>
-          全局快捷键
-        </h2>
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500/30 to-blue-600/20 flex items-center justify-center">
+            <Keyboard size={20} className="text-blue-400" />
+          </div>
+          <div>
+            <h2 className="text-white text-lg font-semibold">全局快捷键</h2>
+            <p className="text-white/40 text-xs">自定义您的快捷操作</p>
+          </div>
+        </div>
         <button
           onClick={handleResetAll}
-          className="px-3 py-1.5 rounded-lg bg-white/10 text-white/70 text-sm hover:bg-white/15 transition-colors flex items-center gap-2"
+          className="px-4 py-2 rounded-lg bg-white/5 text-white/60 text-sm hover:bg-white/10 hover:text-white transition-all duration-200 flex items-center gap-2 cursor-pointer border border-white/10"
         >
           <RotateCcw size={14} />
           恢复默认
@@ -125,9 +187,12 @@ function ShortcutsSettings() {
       </div>
 
       {shortcutsLoading ? (
-        <div className="text-white/50 text-center py-8">加载中...</div>
+        <div className="text-white/40 text-center py-12">
+          <div className="inline-block w-6 h-6 border-2 border-white/20 border-t-blue-400 rounded-full animate-spin mb-3" />
+          <p className="text-sm">加载中...</p>
+        </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {shortcuts.map((shortcut) => (
             <ShortcutItem
               key={shortcut.id}
@@ -148,10 +213,9 @@ function ShortcutsSettings() {
         </div>
       )}
 
-      <div className="mt-6 p-4 rounded-xl bg-white/5 border border-white/10">
-        <p className="text-white/50 text-xs leading-relaxed">
-          提示：点击快捷键区域即可编辑。支持 Ctrl、Shift、Alt、Meta 组合键。
-          <br />
+      <div className="mt-6 p-4 rounded-xl bg-blue-500/5 border border-blue-500/20">
+        <p className="text-blue-200/60 text-xs leading-relaxed">
+          💡 提示：点击快捷键区域即可编辑。支持 Ctrl、Shift、Alt、Meta 组合键。
           修改后系统快捷键会立即生效。
         </p>
       </div>
@@ -214,11 +278,11 @@ function ShortcutItem({
 
   if (isEditing) {
     return (
-      <div className="glass-panel rounded-xl p-4 border border-blue-500/30 shadow-md">
+      <div className="rounded-xl p-4 border border-blue-500/40 bg-blue-500/5">
         <div className="flex items-center gap-4">
-          <div className="flex-1">
-            <p className="text-white/80 text-sm">{config.name}</p>
-            <p className="text-white/40 text-xs mt-1">{config.description}</p>
+          <div className="flex-1 min-w-0">
+            <p className="text-white/90 text-sm font-medium">{config.name}</p>
+            <p className="text-white/40 text-xs mt-0.5">{config.description}</p>
           </div>
           <KeyRecorder
             value={tempKeys}
@@ -228,7 +292,7 @@ function ShortcutItem({
           />
         </div>
         {conflict && (
-          <div className="mt-3 flex items-center gap-2 text-amber-400 text-xs">
+          <div className="mt-3 flex items-center gap-2 text-amber-400 text-xs bg-amber-500/10 px-3 py-2 rounded-lg">
             <AlertCircle size={14} />
             与 "{conflict.name}" 冲突
           </div>
@@ -239,24 +303,24 @@ function ShortcutItem({
 
   return (
     <div
-      className="glass-panel rounded-xl p-4 flex items-center gap-4 border border-white/20 shadow-md hover:border-white/30 transition-colors cursor-pointer"
+      className="group rounded-xl p-4 flex items-center gap-4 border border-white/10 bg-white/[0.02] hover:bg-white/[0.05] hover:border-white/20 transition-all duration-200 cursor-pointer"
       onClick={onEdit}
     >
-      <div className="flex-1">
-        <p className="text-white/80 text-sm">{config.name}</p>
-        <p className="text-white/40 text-xs mt-1">{config.description}</p>
+      <div className="flex-1 min-w-0">
+        <p className="text-white/80 text-sm font-medium group-hover:text-white transition-colors">{config.name}</p>
+        <p className="text-white/40 text-xs mt-0.5">{config.description}</p>
       </div>
-      <div className="flex items-center gap-3">
-        <kbd className="px-3 py-1.5 rounded-lg bg-white/10 text-white/80 text-sm font-mono min-w-[120px] text-center">
+      <div className="flex items-center gap-2">
+        <kbd className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white/70 text-sm font-mono min-w-[100px] text-center group-hover:bg-white/10 group-hover:text-white transition-all">
           {effectiveKeys}
         </kbd>
         {isCustom && (
           <button
             onClick={handleReset}
-            className="p-2 rounded-lg text-white/40 hover:text-amber-400 transition-colors"
+            className="p-2 rounded-lg text-white/30 hover:text-amber-400 hover:bg-amber-400/10 transition-all cursor-pointer"
             title="恢复默认"
           >
-            <RotateCcw size={16} />
+            <RotateCcw size={14} />
           </button>
         )}
       </div>
@@ -369,20 +433,20 @@ function KeyRecorder({ value, onChange, onSave, onCancel }: KeyRecorderProps) {
         tabIndex={0}
         onKeyDown={handleKeyDown}
         onKeyUp={handleKeyUp}
-        className="px-3 py-1.5 rounded-lg bg-blue-500/20 border border-blue-500/30 text-blue-400 text-sm font-mono min-w-[150px] text-center outline-none focus:ring-2 focus:ring-blue-500/50 select-none"
+        className="px-4 py-2 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-400 text-sm font-mono min-w-[140px] text-center outline-none focus:ring-2 focus:ring-blue-500/50 focus:bg-blue-500/20 select-none cursor-pointer"
       >
         {currentCombo || '按快捷键...'}
       </div>
       <button
         onClick={handleSave}
         disabled={!currentCombo}
-        className="px-3 py-1.5 rounded-lg bg-blue-500 text-white text-sm hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        className="px-4 py-2 rounded-lg bg-blue-500 text-white text-sm font-medium hover:bg-blue-600 transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
       >
         保存
       </button>
       <button
         onClick={onCancel}
-        className="px-3 py-1.5 rounded-lg bg-white/10 text-white/70 text-sm hover:bg-white/15 transition-colors"
+        className="px-4 py-2 rounded-lg bg-white/5 text-white/60 text-sm hover:bg-white/10 hover:text-white transition-all duration-200 cursor-pointer border border-white/10"
       >
         取消
       </button>
@@ -408,58 +472,58 @@ function GeneralSettings() {
 
   return (
     <>
-      <h2 className="text-white text-lg font-medium mb-6 flex items-center gap-2">
-        <span className="w-8 h-8 rounded-lg bg-green-500/20 text-green-400 flex items-center justify-center">
-          <Settings size={16} />
-        </span>
-        通用设置
-      </h2>
-
-      <div className="space-y-4">
-        <div className="glass-panel rounded-xl p-4 border border-white/20 shadow-md">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-white/90 text-sm">窗口置顶</p>
-              <p className="text-white/50 text-xs mt-1">窗口始终显示在最前端</p>
-            </div>
-            <Toggle enabled={always_on_top} onToggle={toggleAlwaysOnTop} />
-          </div>
+      <div className="flex items-center gap-3 mb-6">
+        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-green-500/30 to-green-600/20 flex items-center justify-center">
+          <Settings size={20} className="text-green-400" />
         </div>
-
-        <div className="glass-panel rounded-xl p-4 border border-white/20 shadow-md">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-white/90 text-sm">失去焦点时隐藏</p>
-              <p className="text-white/50 text-xs mt-1">点击窗口外部自动隐藏</p>
-            </div>
-            <Toggle enabled={hide_on_blur} onToggle={toggleHideOnBlur} />
-          </div>
+        <div>
+          <h2 className="text-white text-lg font-semibold">通用设置</h2>
+          <p className="text-white/40 text-xs">基础功能配置</p>
         </div>
+      </div>
 
-        <div className="glass-panel rounded-xl p-4 border border-white/20 shadow-md">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-white/90 text-sm">开机启动</p>
-              <p className="text-white/50 text-xs mt-1">系统启动时自动运行</p>
-            </div>
-            <Toggle enabled={startup_launch} onToggle={handleStartupChange} />
-          </div>
-        </div>
+      <div className="space-y-3">
+        <SettingCard
+          title="窗口置顶"
+          description="窗口始终显示在最前端"
+        >
+          <Toggle enabled={always_on_top} onToggle={toggleAlwaysOnTop} />
+        </SettingCard>
 
-        <div className="glass-panel rounded-xl p-4 border border-white/20 shadow-md">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-white/90 text-sm">剪贴板历史保存天数</p>
-              <p className="text-white/50 text-xs mt-1">超过此天数的历史将被自动清理</p>
-            </div>
-            <select className="bg-white/15 text-white text-sm rounded-lg px-3 py-2 outline-none cursor-pointer border border-white/20">
-              <option>7天</option>
-              <option>30天</option>
-              <option>90天</option>
-              <option>永久</option>
-            </select>
-          </div>
-        </div>
+        <SettingCard
+          title="失去焦点时隐藏"
+          description="点击窗口外部自动隐藏"
+        >
+          <Toggle enabled={hide_on_blur} onToggle={toggleHideOnBlur} />
+        </SettingCard>
+
+        <SettingCard
+          title="开机启动"
+          description="系统启动时自动运行"
+        >
+          <Toggle enabled={startup_launch} onToggle={handleStartupChange} />
+        </SettingCard>
+
+        <SettingCard
+          title="剪贴板历史保存天数"
+          description="超过此天数的历史将被自动清理"
+        >
+          <select
+            className="bg-zinc-700 text-white text-sm rounded-lg px-3 py-2 outline-none cursor-pointer border border-zinc-600 hover:border-zinc-500 transition-colors appearance-none min-w-[100px]"
+            style={{
+              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='white'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
+              backgroundRepeat: 'no-repeat',
+              backgroundPosition: 'right 8px center',
+              backgroundSize: '16px',
+              paddingRight: '32px'
+            }}
+          >
+            <option value="7" className="bg-zinc-700 text-white">7天</option>
+            <option value="30" className="bg-zinc-700 text-white">30天</option>
+            <option value="90" className="bg-zinc-700 text-white">90天</option>
+            <option value="0" className="bg-zinc-700 text-white">永久</option>
+          </select>
+        </SettingCard>
       </div>
     </>
   );
@@ -468,86 +532,67 @@ function GeneralSettings() {
 // ==================== Appearance Settings ====================
 
 function AppearanceSettings() {
+  const [activeTheme, setActiveTheme] = useState('深色');
+
   return (
     <>
-      <h2 className="text-white text-lg font-medium mb-6 flex items-center gap-2">
-        <span className="w-8 h-8 rounded-lg bg-purple-500/20 text-purple-400 flex items-center justify-center">
-          <Palette size={16} />
-        </span>
-        外观设置
-      </h2>
+      <div className="flex items-center gap-3 mb-6">
+        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500/30 to-purple-600/20 flex items-center justify-center">
+          <Palette size={20} className="text-purple-400" />
+        </div>
+        <div>
+          <h2 className="text-white text-lg font-semibold">外观设置</h2>
+          <p className="text-white/40 text-xs">个性化您的界面</p>
+        </div>
+      </div>
 
-      <div className="space-y-4">
-        <div className="glass-panel rounded-xl p-4 border border-white/20 shadow-md">
-          <p className="text-white/90 text-sm mb-3">主题</p>
+      <div className="space-y-3">
+        <SettingCard title="主题" description="选择您喜欢的界面风格">
           <div className="flex gap-2">
             {['浅色', '深色', '跟随系统'].map((theme) => (
               <button
                 key={theme}
-                className="px-4 py-2 rounded-lg bg-white/15 text-white/90 text-sm hover:bg-white/25 transition-colors border border-white/10"
+                onClick={() => setActiveTheme(theme)}
+                className={`px-4 py-2 rounded-lg text-sm transition-all duration-200 cursor-pointer ${
+                  activeTheme === theme
+                    ? 'bg-blue-500/20 text-blue-400 border border-blue-500/40'
+                    : 'bg-white/5 text-white/70 border border-white/10 hover:bg-white/10 hover:text-white'
+                }`}
               >
                 {theme}
               </button>
             ))}
           </div>
-        </div>
+        </SettingCard>
 
-        <div className="glass-panel rounded-xl p-4 border border-white/20 shadow-md">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-white/90 text-sm">窗口透明度</p>
-              <p className="text-white/50 text-xs mt-1">调整窗口背景透明程度</p>
-            </div>
+        <SettingCard title="窗口透明度" description="调整窗口背景透明程度">
+          <div className="flex items-center gap-3">
+            <span className="text-white/40 text-xs">0%</span>
             <input
               type="range"
               min="0"
               max="100"
               defaultValue="90"
-              className="w-32 accent-blue-500"
+              className="w-32 accent-blue-500 cursor-pointer"
             />
+            <span className="text-white/40 text-xs">100%</span>
           </div>
-        </div>
+        </SettingCard>
 
-        <div className="glass-panel rounded-xl p-4 border border-white/20 shadow-md">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-white/90 text-sm">窗口圆角</p>
-              <p className="text-white/50 text-xs mt-1">调整窗口边框圆角大小</p>
-            </div>
+        <SettingCard title="窗口圆角" description="调整窗口边框圆角大小">
+          <div className="flex items-center gap-3">
+            <span className="text-white/40 text-xs">0px</span>
             <input
               type="range"
               min="0"
               max="24"
               defaultValue="16"
-              className="w-32 accent-blue-500"
+              className="w-32 accent-blue-500 cursor-pointer"
             />
+            <span className="text-white/40 text-xs">24px</span>
           </div>
-        </div>
+        </SettingCard>
       </div>
     </>
-  );
-}
-
-// ==================== Shared Components ====================
-
-interface ToggleProps {
-  enabled?: boolean;
-  onToggle?: (enabled: boolean) => void;
-}
-
-function Toggle({ enabled = false, onToggle }: ToggleProps) {
-  return (
-    <button
-      onClick={() => onToggle?.(!enabled)}
-      className={`w-11 h-6 rounded-full relative transition-colors cursor-pointer ${
-        enabled ? 'bg-blue-500' : 'bg-white/20'
-      }`}
-    >
-      <span
-        className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-transform ${
-          enabled ? 'right-1' : 'left-1'
-        }`}
-      />
-    </button>
   );
 }
