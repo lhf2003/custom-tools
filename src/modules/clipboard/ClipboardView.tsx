@@ -15,6 +15,7 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import { convertFileSrc } from '@tauri-apps/api/core';
 
 interface ClipboardItemData {
   id: number;
@@ -87,7 +88,26 @@ export function ClipboardView() {
         query.search = searchQuery.trim();
       }
 
-      const result = await invoke<ClipboardItemData[]>('get_clipboard_history', { query });
+      let result = await invoke<ClipboardItemData[]>('get_clipboard_history', { query });
+
+      // For image tab, also include image files (type='file' but path is image)
+      if (activeTab === 'image') {
+        // We need to fetch file type items and filter for images
+        const fileQuery: ClipboardQuery = {
+          limit: 100,
+          content_type: 'file',
+        };
+        if (searchQuery.trim()) {
+          fileQuery.search = searchQuery.trim();
+        }
+        const fileResult = await invoke<ClipboardItemData[]>('get_clipboard_history', { query: fileQuery });
+        const imageFiles = fileResult.filter(item => isImageFile(item.content));
+        // Merge and sort by created_at
+        result = [...result, ...imageFiles].sort((a, b) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+      }
+
       setItems(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : '获取剪贴板历史失败');
@@ -134,6 +154,14 @@ export function ClipboardView() {
         setPreviewImage(base64);
       } catch (err) {
         console.error('Failed to load image:', err);
+      }
+    } else if (item.content_type === 'file' && isImageFile(item.content)) {
+      // For image files, load via backend to get base64 for preview
+      try {
+        const base64 = await invoke<string>('read_image_file_as_base64', { path: item.content });
+        setPreviewImage(base64);
+      } catch (err) {
+        console.error('Failed to load image preview:', err);
       }
     }
   };
@@ -300,8 +328,25 @@ interface ClipboardItemProps {
   onSelect: () => void;
 }
 
+// Check if a file path is an image
+function isImageFile(path: string): boolean {
+  const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico', '.svg'];
+  const lowerPath = path.toLowerCase();
+  return imageExtensions.some(ext => lowerPath.endsWith(ext));
+}
+
 // Get type config
-function getTypeConfig(type: string) {
+function getTypeConfig(type: string, content?: string) {
+  // If it's a file type but the content is an image path, treat it as image
+  if (type === 'file' && content && isImageFile(content)) {
+    return {
+      icon: Image,
+      color: 'from-purple-500/30 to-pink-500/30',
+      bgColor: 'bg-purple-500/10',
+      label: '图片',
+    };
+  }
+
   switch (type) {
     case 'text':
       return {
@@ -348,14 +393,25 @@ function ClipboardItem({
   const [isExpanded, setIsExpanded] = useState(false);
   const [thumbnail, setThumbnail] = useState<string | null>(null);
 
-  // Load image thumbnail for image type
+  // Load image thumbnail for image type or image files
   useEffect(() => {
     if (item.content_type === 'image') {
       invoke<string>('get_clipboard_image_base64', { id: item.id })
         .then(setThumbnail)
         .catch((err) => console.error('Failed to load thumbnail:', err));
+    } else if (item.content_type === 'file' && isImageFile(item.content)) {
+      // For image files, load via backend to get base64
+      const loadImageFromFile = async () => {
+        try {
+          const base64 = await invoke<string>('read_image_file_as_base64', { path: item.content });
+          setThumbnail(base64);
+        } catch (err) {
+          console.error('Failed to load image from file:', err);
+        }
+      };
+      loadImageFromFile();
     }
-  }, [item.id, item.content_type]);
+  }, [item.id, item.content_type, item.content]);
 
   // Constants for expansion
   const MAX_PREVIEW_CHARS = 150;
@@ -406,8 +462,12 @@ function ClipboardItem({
     }
   };
 
-  const config = getTypeConfig(item.content_type);
+  const config = getTypeConfig(item.content_type, item.content);
   const TypeIcon = config.icon;
+
+  // Check if this is an image (either image type or image file)
+  const isImage = item.content_type === 'image' ||
+    (item.content_type === 'file' && isImageFile(item.content));
 
   // Handle click: single click for selection and preview/copy
   const handleClick = () => {
@@ -421,7 +481,7 @@ function ClipboardItem({
     }
 
     const timer = setTimeout(() => {
-      if (item.content_type === 'image') {
+      if (isImage) {
         onPreview();
       } else {
         onCopy();
@@ -462,7 +522,7 @@ function ClipboardItem({
         {/* Content */}
         <div className="flex-1 min-w-0">
           <div className="flex items-start gap-2">
-            {item.content_type === 'image' ? (
+            {isImage ? (
               <div className="flex items-center gap-3">
                 {thumbnail ? (
                   <img
