@@ -28,13 +28,26 @@ pub fn search_apps(
     // Get all usage stats
     let usages = app_usage::get_all_usage(&conn).map_err(|e| e.to_string())?;
 
-    if query.is_empty() {
+    let results = if query.is_empty() {
         // Return apps sorted by recency/frequency
-        Ok(index.get_recently_used(&usages))
+        index.get_recently_used(&usages)
     } else {
         // Search with frequency-based ranking
-        Ok(index.search_with_frequency(&query, &usages))
+        index.search_with_frequency(&query, &usages)
+    };
+
+    // Record search for each result (only for non-empty queries)
+    // This helps build usage patterns for better ranking
+    if !query.is_empty() {
+        // Record first 5 results as relevant to this search
+        for app in results.iter().take(5) {
+            if let Err(e) = app_usage::record_search(&conn, &app.path, &app.name) {
+                log::warn!("Failed to record search for {}: {}", app.name, e);
+            }
+        }
     }
+
+    Ok(results)
 }
 
 #[tauri::command]
