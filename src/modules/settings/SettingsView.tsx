@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Command, Settings, Palette, Keyboard, RotateCcw, AlertCircle } from 'lucide-react';
+import { Command, Settings, Palette, Keyboard, RotateCcw, AlertCircle, BookOpen, Command as CommandIcon, FileText, Lock, HardDrive, Search } from 'lucide-react';
 import { useSettingsStore, type ShortcutConfig } from '@/stores/settingsStore';
 
 // Safe invoke that only works in Tauri environment
@@ -17,6 +17,7 @@ const settingTabs = [
   { id: 'general', name: '通用', icon: Settings },
   { id: 'shortcuts', name: '快捷键', icon: Command },
   { id: 'appearance', name: '外观', icon: Palette },
+  { id: 'manual', name: '操作手册', icon: BookOpen },
 ];
 
 const FIXED_HEIGHT = 500; // 设置页面固定高度
@@ -89,7 +90,7 @@ export function SettingsView() {
       style={{ backgroundColor: '#333' }}
     >
       {/* Settings Sidebar */}
-      <aside className="w-52 border-r border-white/10 p-4 flex flex-col">
+      <aside className="w-40 border-r border-white/10 p-3 flex flex-col flex-shrink-0">
         <h3 className="text-white/50 text-xs font-semibold uppercase tracking-wider mb-4 px-3">
           偏好设置
         </h3>
@@ -123,10 +124,11 @@ export function SettingsView() {
 
       {/* Settings Content */}
       <div className="flex-1 p-6 overflow-y-auto">
-        <div className="max-w-2xl">
+        <div className="max-w-3xl">
           {activeTab === 'shortcuts' && <ShortcutsSettings />}
           {activeTab === 'general' && <GeneralSettings />}
           {activeTab === 'appearance' && <AppearanceSettings />}
+          {activeTab === 'manual' && <ManualSettings />}
         </div>
       </div>
     </div>
@@ -592,6 +594,187 @@ function AppearanceSettings() {
             <span className="text-white/40 text-xs">24px</span>
           </div>
         </SettingCard>
+      </div>
+    </>
+  );
+}
+
+// ==================== Manual Settings ====================
+
+function ManualSettings() {
+  const builtInTools = [
+    {
+      id: 'clipboard',
+      name: '剪贴板',
+      icon: CommandIcon,
+      color: 'bg-blue-500',
+      description: '记录并管理您的剪贴板历史，支持文本、图片、文件等多种格式。可收藏常用内容，快速粘贴历史记录。',
+    },
+    {
+      id: 'markdown',
+      name: 'Markdown笔记',
+      icon: FileText,
+      color: 'bg-zinc-700',
+      description: '轻量级Markdown编辑器，支持实时预览。适合快速记录想法、待办事项或撰写文档。',
+    },
+    {
+      id: 'password',
+      name: '密码管理',
+      icon: Lock,
+      color: 'bg-amber-500',
+      description: '安全存储账号密码，使用AES-GCM加密保护。支持分类管理、快速复制，一键填充网站登录信息。',
+    },
+    {
+      id: 'everything',
+      name: '文件搜索',
+      icon: HardDrive,
+      color: 'bg-cyan-600',
+      description: '集成Everything搜索引擎，毫秒级查找本地文件。支持模糊匹配、快速打开文件所在位置。',
+    },
+  ];
+
+  return (
+    <>
+      <div className="flex items-center gap-3 mb-6">
+        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-orange-500/30 to-orange-600/20 flex items-center justify-center">
+          <BookOpen size={20} className="text-orange-400" />
+        </div>
+        <div>
+          <h2 className="text-white text-lg font-semibold">操作手册</h2>
+          <p className="text-white/40 text-xs">快速上手本系统的使用方法</p>
+        </div>
+      </div>
+
+      {/* 内置工具介绍 */}
+      <div className="mb-8">
+        <h3 className="text-white/80 text-sm font-medium mb-4 flex items-center gap-2">
+          <span className="w-1 h-4 bg-blue-500 rounded-full" />
+          内置工具
+        </h3>
+        <div className="space-y-3">
+          {builtInTools.map((tool) => {
+            const Icon = tool.icon;
+            return (
+              <div
+                key={tool.id}
+                className="rounded-xl p-4 border border-white/10 bg-white/[0.02] hover:border-white/15 hover:bg-white/[0.04] transition-all"
+              >
+                <div className="flex items-start gap-3">
+                  <div className={`w-10 h-10 rounded-lg ${tool.color} flex items-center justify-center flex-shrink-0`}>
+                    <Icon className="w-5 h-5 text-white" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h4 className="text-white/90 text-sm font-medium">{tool.name}</h4>
+                    <p className="text-white/50 text-xs mt-1 leading-relaxed">{tool.description}</p>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 搜索框使用方法 */}
+      <div className="mb-8">
+        <h3 className="text-white/80 text-sm font-medium mb-4 flex items-center gap-2">
+          <span className="w-1 h-4 bg-green-500 rounded-full" />
+          搜索框使用
+        </h3>
+        <div className="rounded-xl p-4 border border-white/10 bg-white/[0.02]">
+          <div className="space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0">
+                <Search className="w-4 h-4 text-white/60" />
+              </div>
+              <div>
+                <h4 className="text-white/80 text-sm font-medium">应用搜索</h4>
+                <p className="text-white/50 text-xs mt-1 leading-relaxed">
+                  在搜索框中输入应用名称，系统会实时显示匹配的程序。支持模糊搜索，无需输入完整名称。
+                </p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0">
+                <CommandIcon className="w-4 h-4 text-white/60" />
+              </div>
+              <div>
+                <h4 className="text-white/80 text-sm font-medium">快速启动内置工具</h4>
+                <p className="text-white/50 text-xs mt-1 leading-relaxed">
+                  输入"剪贴板"、"笔记"、"密码"等关键词可直接启动对应工具。
+                </p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0">
+                <span className="text-white/60 text-xs font-mono">Ctrl+V</span>
+              </div>
+              <div>
+                <h4 className="text-white/80 text-sm font-medium">粘贴文件/图片</h4>
+                <p className="text-white/50 text-xs mt-1 leading-relaxed">
+                  在搜索框中粘贴文件或图片，系统会自动处理：文件可直接打开，图片会保存到剪贴板历史。
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 快捷键使用 */}
+      <div className="mb-6">
+        <h3 className="text-white/80 text-sm font-medium mb-4 flex items-center gap-2">
+          <span className="w-1 h-4 bg-purple-500 rounded-full" />
+          快捷键绑定
+        </h3>
+        <div className="rounded-xl p-4 border border-white/10 bg-white/[0.02]">
+          <div className="space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0">
+                <kbd className="px-2 py-1 rounded bg-white/10 border border-white/10 text-white/70 text-xs font-mono">
+                  Ctrl+Shift+Space
+                </kbd>
+              </div>
+              <div>
+                <h4 className="text-white/80 text-sm font-medium">显示/隐藏窗口</h4>
+                <p className="text-white/50 text-xs mt-1 leading-relaxed">
+                  全局快捷键，在任何界面按下即可快速呼出或隐藏本工具。
+                </p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0">
+                <kbd className="px-2 py-1 rounded bg-white/10 border border-white/10 text-white/70 text-xs font-mono">
+                  Esc
+                </kbd>
+              </div>
+              <div>
+                <h4 className="text-white/80 text-sm font-medium">返回/关闭</h4>
+                <p className="text-white/50 text-xs mt-1 leading-relaxed">
+                  在各功能页面按 Esc 键可返回主界面或关闭当前窗口。
+                </p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3">
+              <div className="flex-shrink-0">
+                <kbd className="px-2 py-1 rounded bg-white/10 border border-white/10 text-white/70 text-xs font-mono">
+                  ↑ ↓
+                </kbd>
+              </div>
+              <div>
+                <h4 className="text-white/80 text-sm font-medium">上下选择</h4>
+                <p className="text-white/50 text-xs mt-1 leading-relaxed">
+                  在搜索结果或列表中使用方向键快速切换选中项，按 Enter 确认。
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 提示信息 */}
+      <div className="p-4 rounded-xl bg-blue-500/5 border border-blue-500/20">
+        <p className="text-blue-200/60 text-xs leading-relaxed">
+          💡 提示：您可以在"快捷键"设置页自定义全局快捷键，在"通用"设置中调整窗口行为（如置顶、失焦隐藏等）。
+        </p>
       </div>
     </>
   );
