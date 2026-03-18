@@ -1,7 +1,7 @@
 import { Search, Command, FileText, Lock, Settings, User, RefreshCw } from 'lucide-react';
 import { useEffect, useState, useCallback } from 'react';
 import { useAppStore } from '@/stores/appStore';
-import { useSearch, FileResult } from '@/hooks/useSearch';
+import { useSearch, type FileResult } from '@/hooks/useSearch';
 
 // Safe invoke that only works in Tauri environment
 const safeInvoke = async (cmd: string, args?: Record<string, unknown>) => {

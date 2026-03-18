@@ -86,8 +86,8 @@ export function PasswordView() {
   // Listen for menu actions from navigation bar
   useEffect(() => {
     const handleNewEntry = () => setShowCreateModal(true);
-    const handleLock = async () => {
-      await handleLockVault();
+    const handleLockFromMenu = async () => {
+      await handleLock();
     };
 
     window.addEventListener('password:new-entry', handleNewEntry);
