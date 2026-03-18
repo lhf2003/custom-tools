@@ -16,22 +16,7 @@ export interface FileResult {
 
 export function useSearch() {
   const [apps, setApps] = useState<AppItem[]>([]);
-  const [files, setFiles] = useState<FileResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [hasEverything, setHasEverything] = useState<boolean | null>(null);
-
-  // Check if Everything is available (lazy check - only when needed)
-  const checkEverythingAvailable = useCallback(async () => {
-    if (hasEverything !== null) return hasEverything;
-    try {
-      const available = await invoke<boolean>('is_everything_available');
-      setHasEverything(available);
-      return available;
-    } catch (err) {
-      setHasEverything(false);
-      return false;
-    }
-  }, [hasEverything]);
 
   const searchApps = useCallback(async (query: string) => {
     try {
@@ -39,29 +24,14 @@ export function useSearch() {
       if (typeof window !== 'undefined' && (window as unknown as { __TAURI__?: unknown }).__TAURI__) {
         const results = await invoke<AppItem[]>('search_apps', { query });
         setApps(results);
-
-        // Also search files via Everything if available and query is not empty
-        if (query.length > 0) {
-          const everythingAvailable = await checkEverythingAvailable();
-          if (everythingAvailable) {
-            const fileResults = await invoke<FileResult[]>('search_everything', { query, limit: 10 });
-            setFiles(fileResults);
-          } else {
-            setFiles([]);
-          }
-        } else {
-          setFiles([]);
-        }
       } else {
         setApps([]);
-        setFiles([]);
       }
     } catch (err) {
       console.error('Failed to search apps:', err);
       setApps([]);
-      setFiles([]);
     }
-  }, [checkEverythingAvailable]);
+  }, []);
 
   const refreshApps = useCallback(async () => {
     setIsLoading(true);
@@ -105,9 +75,7 @@ export function useSearch() {
 
   return {
     apps,
-    files,
     isLoading,
-    hasEverything,
     searchApps,
     refreshApps,
     launchApp,

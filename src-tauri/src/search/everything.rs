@@ -51,16 +51,37 @@ pub fn search_files(query: &str, limit: usize) -> Vec<FileResult> {
         None => return Vec::new(),
     };
 
-    if query.is_empty() {
-        return Vec::new();
+    // Build search query
+    // If query is empty, search for all files (use * wildcard)
+    let search_query = if query.trim().is_empty() {
+        "*"
+    } else {
+        query.trim()
+    };
+
+    log::info!("Everything search query: '{}'", search_query);
+
+    // Build command: es.exe -n 20 query terms... !ext:lnk !ext:exe
+    // -n: limit results
+    // Multiple arguments are AND-ed together by Everything
+    // Exclude .lnk and .exe files to avoid conflict with app search
+    //
+    // IMPORTANT: Do NOT use -s with space-separated query.
+    // "app ext:xls;xlsx" becomes literal match "app ext:xls;xlsx" (not AND logic)
+    // Instead, pass each part as separate arg: es.exe app "ext:xls;xlsx;csv"
+    let mut cmd = Command::new(es_path);
+    cmd.arg("-n").arg(&limit.to_string());
+
+    // Split query by spaces and add as separate arguments
+    // This ensures "app ext:xls;xlsx;csv" becomes two args: "app" and "ext:xls;xlsx;csv"
+    for part in search_query.split_whitespace() {
+        cmd.arg(part);
     }
 
-    // Build command: es.exe -n 20 -s search_term
-    // -n: limit results
-    // -s: sort by relevance
-    let output = match Command::new(es_path)
-        .args(&["-n", &limit.to_string(), "-s", query])
-        .output()
+    // Always exclude .lnk and .exe
+    cmd.arg("!ext:lnk").arg("!ext:exe");
+
+    let output = match cmd.output()
     {
         Ok(output) => output,
         Err(e) => {
@@ -76,7 +97,9 @@ pub fn search_files(query: &str, limit: usize) -> Vec<FileResult> {
 
     // Parse output (one path per line)
     let stdout = String::from_utf8_lossy(&output.stdout);
-    parse_results(&stdout)
+    let results = parse_results(&stdout);
+    log::info!("Everything found {} results", results.len());
+    results
 }
 
 /// Parse es.exe output into FileResult structs

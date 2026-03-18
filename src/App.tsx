@@ -21,6 +21,7 @@ import { ClipboardView } from '@/modules/clipboard/ClipboardView';
 import { MarkdownView } from '@/modules/markdown/MarkdownView';
 import { PasswordView } from '@/modules/password/PasswordView';
 import { SettingsView } from '@/modules/settings/SettingsView';
+import { EverythingView } from '@/modules/everything/EverythingView';
 import { TopNavigationBar } from '@/components/TopNavigationBar';
 import type { ViewMode, MenuItem } from '@/types';
 
@@ -215,6 +216,24 @@ function App() {
           },
         ],
       },
+      everything: {
+        title: '文件搜索',
+        menuItems: [
+          {
+            id: 'always-on-top',
+            label: always_on_top ? '取消置顶' : '窗口置顶',
+            icon: Pin,
+            onClick: () => toggleAlwaysOnTop(),
+          },
+          {
+            id: 'settings',
+            label: '设置',
+            icon: Settings,
+            separator: true,
+            onClick: () => setActiveView('settings'),
+          },
+        ],
+      },
     };
     return configs;
   }, [always_on_top, toggleAlwaysOnTop, setActiveView]);
@@ -282,6 +301,8 @@ function App() {
         return <PasswordView />;
       case 'settings':
         return <SettingsView />;
+      case 'everything':
+        return <EverythingView />;
       default:
         return <LauncherView />;
     }

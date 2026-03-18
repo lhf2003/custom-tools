@@ -1,7 +1,7 @@
-import { Search, Command, FileText, Lock, Settings, User, RefreshCw } from 'lucide-react';
+import { Search, Command, FileText, Lock, Settings, User, RefreshCw, HardDrive } from 'lucide-react';
 import { useEffect, useState, useCallback } from 'react';
 import { useAppStore } from '@/stores/appStore';
-import { useSearch, type FileResult } from '@/hooks/useSearch';
+import { useSearch } from '@/hooks/useSearch';
 
 // Safe invoke that only works in Tauri environment
 const safeInvoke = async (cmd: string, args?: Record<string, unknown>) => {
@@ -71,6 +71,7 @@ const builtInTools = [
   { id: 'clipboard', name: '剪贴板', icon: Command, color: 'bg-blue-500' },
   { id: 'markdown', name: 'Markdown笔记', icon: FileText, color: 'bg-zinc-700' },
   { id: 'password', name: '密码管理', icon: Lock, color: 'bg-amber-500' },
+  { id: 'everything', name: '文件搜索', icon: HardDrive, color: 'bg-cyan-600' },
   { id: 'settings', name: '设置', icon: Settings, color: 'bg-zinc-600' },
 ];
 
@@ -86,12 +87,18 @@ const ITEMS_PER_ROW = 9;
 
 export function LauncherView() {
   const { searchQuery, setSearchQuery, setActiveView } = useAppStore();
-  const { apps, files, isLoading, hasEverything, searchApps, launchApp, getRecentApps } = useSearch();
+  const { apps, isLoading, searchApps, launchApp, getRecentApps } = useSearch();
   const [recentItems, setRecentItems] = useState<AppItemData[]>([]);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [selectedIndex, setSelectedIndex] = useState(0);
 
   // Compute displayed items before using in effects
   const displayedItems = isExpanded ? recentItems : recentItems.slice(0, ITEMS_PER_ROW);
+
+  // Reset selection when items change
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [searchQuery, displayedItems.length]);
 
   // Debounce search
   useEffect(() => {
@@ -243,22 +250,76 @@ export function LauncherView() {
   };
 
   const handleItemClick = async (item: AppItemData) => {
-    // Hide window first
-    try {
-      await safeInvoke('hide_window');
-    } catch (err) {
-      console.error('Failed to hide window:', err);
-    }
-
     if (item.isBuiltIn && item.toolId) {
+      // For built-in tools, just switch view without hiding window
       setActiveView(item.toolId as any);
     } else {
+      // For external apps, hide window first then launch
+      try {
+        await safeInvoke('hide_window');
+      } catch (err) {
+        console.error('Failed to hide window:', err);
+      }
       launchApp(item.path, item.name);
     }
   };
 
+  // Handle keyboard navigation
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    const items = searchQuery ? getAllResults() : displayedItems;
+    const maxIndex = items.length - 1;
+
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        setSelectedIndex(prev => Math.min(prev + ITEMS_PER_ROW, maxIndex));
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        setSelectedIndex(prev => Math.max(prev - ITEMS_PER_ROW, 0));
+        break;
+      case 'ArrowRight':
+        e.preventDefault();
+        setSelectedIndex(prev => Math.min(prev + 1, maxIndex));
+        break;
+      case 'ArrowLeft':
+        e.preventDefault();
+        setSelectedIndex(prev => Math.max(prev - 1, 0));
+        break;
+      case 'Enter':
+        e.preventDefault();
+        if (items[selectedIndex]) {
+          handleItemClick(items[selectedIndex]);
+        }
+        break;
+    }
+  }, [searchQuery, displayedItems, selectedIndex]);
+
+  // Get all results for keyboard navigation during search
+  const getAllResults = () => {
+    if (!searchQuery) return displayedItems;
+    const filteredTools = builtInTools.filter(tool =>
+      tool.name.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+    const toolItems: AppItemData[] = filteredTools.map(tool => ({
+      name: tool.name,
+      path: `builtin://${tool.id}`,
+      isBuiltIn: true,
+      toolId: tool.id,
+    }));
+    return [...toolItems, ...apps];
+  };
+
+  // Get all results for keyboard navigation during search
+  const allResults = searchQuery ? getAllResults() : displayedItems;
+
   return (
-    <div className="w-full h-full flex flex-col rounded-2xl overflow-hidden" style={{ backgroundColor: '#333333' }}>
+    <div
+      className="w-full h-full flex flex-col rounded-2xl overflow-hidden outline-none"
+      style={{ backgroundColor: '#333333' }}
+      onKeyDown={handleKeyDown}
+      tabIndex={0}
+    >
       {/* Search Bar */}
       <div className="w-full flex items-center px-4 py-3">
         <Search className="w-5 h-5 text-zinc-400 mr-3 flex-shrink-0" />
@@ -287,12 +348,13 @@ export function LauncherView() {
           <SearchResults
             query={searchQuery}
             apps={apps}
-            files={files}
-            hasEverything={hasEverything}
             isLoading={isLoading}
             onLaunch={launchApp}
             isExpanded={isExpanded}
             onToggleExpand={() => setIsExpanded(!isExpanded)}
+            selectedIndex={selectedIndex}
+            onSelect={setSelectedIndex}
+            onItemClick={handleItemClick}
           />
         ) : (
           <section className="h-full flex flex-col">
@@ -309,10 +371,11 @@ export function LauncherView() {
 
             {/* App Grid */}
             <div className="grid grid-cols-9 gap-2 overflow-y-auto overflow-x-hidden">
-              {displayedItems.map((item) => (
+              {displayedItems.map((item, index) => (
                 <ItemCard
                   key={item.path}
                   item={item}
+                  isSelected={index === selectedIndex}
                   onClick={() => handleItemClick(item)}
                 />
               ))}
@@ -327,9 +390,11 @@ export function LauncherView() {
 // Item Card Component - handles both built-in tools and external apps
 function ItemCard({
   item,
+  isSelected,
   onClick,
 }: {
   item: AppItemData;
+  isSelected: boolean;
   onClick: () => void;
 }) {
   const [iconData, setIconData] = useState<string | null>(null);
@@ -356,6 +421,9 @@ function ItemCard({
     loadIcon();
   }, [item.path, item.isBuiltIn, item.name]);
 
+  // Selection styles (removed ring border, kept scale effect)
+  const selectedClass = isSelected ? 'scale-105' : '';
+
   // For built-in tools, use Lucide icon
   if (item.isBuiltIn) {
     const tool = builtInTools.find(t => t.id === item.toolId);
@@ -364,12 +432,12 @@ function ItemCard({
       return (
         <button
           onClick={onClick}
-          className="flex flex-col items-center group py-2"
+          className={`flex flex-col items-center group py-2 rounded-lg transition-all ${isSelected ? 'bg-white/10' : ''}`}
         >
-          <div className={`w-8 h-8 rounded-lg ${tool.color} flex items-center justify-center mb-1.5 group-hover:scale-105 transition-transform`}>
+          <div className={`w-8 h-8 rounded-lg ${tool.color} flex items-center justify-center mb-1.5 group-hover:scale-105 transition-transform ${selectedClass}`}>
             <Icon className="w-4 h-4 text-white" />
           </div>
-          <span className="text-xs text-zinc-300 w-full text-center group-hover:text-white transition-colors leading-tight">
+          <span className={`text-xs w-full text-center group-hover:text-white transition-colors leading-tight ${isSelected ? 'text-blue-400 font-medium' : 'text-zinc-300'}`}>
             {item.name}
           </span>
         </button>
@@ -382,9 +450,9 @@ function ItemCard({
     return (
       <button
         onClick={onClick}
-        className="flex flex-col items-center group py-2"
+        className={`flex flex-col items-center group py-2 rounded-lg transition-all ${isSelected ? 'bg-white/10' : ''}`}
       >
-        <div className="w-8 h-8 rounded-lg overflow-hidden mb-1.5 group-hover:scale-105 transition-transform">
+        <div className={`w-8 h-8 rounded-lg overflow-hidden mb-1.5 group-hover:scale-105 transition-transform ${selectedClass}`}>
           <img
             src={iconData}
             alt={item.name}
@@ -392,7 +460,7 @@ function ItemCard({
             draggable={false}
           />
         </div>
-        <span className="text-xs text-zinc-400 w-full text-center group-hover:text-zinc-200 transition-colors leading-tight">
+        <span className={`text-xs w-full text-center group-hover:text-zinc-200 transition-colors leading-tight ${isSelected ? 'text-white font-medium' : 'text-zinc-400'}`}>
           {item.name}
         </span>
       </button>
@@ -428,12 +496,12 @@ function ItemCard({
   return (
     <button
       onClick={onClick}
-      className="flex flex-col items-center group py-2"
+      className={`flex flex-col items-center group py-2 rounded-lg transition-all ${isSelected ? 'bg-white/10' : ''}`}
     >
-      <div className={`w-8 h-8 rounded-lg ${color} flex items-center justify-center mb-1.5 group-hover:scale-105 transition-transform`}>
+      <div className={`w-8 h-8 rounded-lg ${color} flex items-center justify-center mb-1.5 group-hover:scale-105 transition-transform ${selectedClass}`}>
         <span className="text-white text-xs font-bold">{initial}</span>
       </div>
-      <span className="text-xs text-zinc-400 w-full text-center group-hover:text-zinc-200 transition-colors leading-tight">
+      <span className={`text-xs w-full text-center group-hover:text-zinc-200 transition-colors leading-tight ${isSelected ? 'text-white font-medium' : 'text-zinc-400'}`}>
         {item.name}
       </span>
     </button>
@@ -444,22 +512,40 @@ function ItemCard({
 function SearchResults({
   query,
   apps,
-  files,
-  hasEverything,
   isLoading,
   onLaunch,
   isExpanded,
   onToggleExpand,
+  selectedIndex,
+  onSelect,
+  onItemClick,
 }: {
   query: string;
   apps: { name: string; path: string }[];
-  files: FileResult[];
-  hasEverything: boolean;
   isLoading: boolean;
   onLaunch: (path: string, name: string) => void;
   isExpanded: boolean;
   onToggleExpand: () => void;
+  selectedIndex: number;
+  onSelect: (index: number) => void;
+  onItemClick: (item: AppItemData) => void;
 }) {
+  // Filter built-in tools based on query
+  const filteredTools = builtInTools.filter(tool =>
+    tool.name.toLowerCase().includes(query.toLowerCase())
+  );
+
+  // Convert built-in tools to AppItemData format
+  const toolItems: AppItemData[] = filteredTools.map(tool => ({
+    name: tool.name,
+    path: `builtin://${tool.id}`,
+    isBuiltIn: true,
+    toolId: tool.id,
+  }));
+
+  // Merge built-in tools with apps (tools first)
+  const allResults = [...toolItems, ...apps];
+
   if (isLoading) {
     return (
       <div className="flex flex-col items-center justify-center py-12 text-zinc-400">
@@ -469,7 +555,7 @@ function SearchResults({
     );
   }
 
-  if (apps.length === 0) {
+  if (allResults.length === 0) {
     return (
       <div className="text-zinc-400 text-center py-12">
         <p>搜索 &quot;{query}&quot;</p>
@@ -478,80 +564,34 @@ function SearchResults({
     );
   }
 
-  const displayCount = isExpanded ? apps.length : 18;
-  const showExpandButton = apps.length > 18;
+  const displayCount = isExpanded ? allResults.length : 18;
+  const showExpandButton = allResults.length > 18;
 
   return (
     <section className="h-full flex flex-col">
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-sm font-semibold text-zinc-400">
-          搜索结果 ({apps.length})
+          搜索结果 ({allResults.length})
         </h2>
         {showExpandButton && (
           <button
             onClick={onToggleExpand}
             className="text-xs text-zinc-500 cursor-pointer hover:text-zinc-300 transition-colors"
           >
-            {isExpanded ? '收缩' : `展开 (${apps.length})`}
+            {isExpanded ? '收缩' : `展开 (${allResults.length})`}
           </button>
         )}
       </div>
-      <div className="grid grid-cols-9 gap-2 overflow-y-auto overflow-x-hidden mb-4">
-        {apps.slice(0, displayCount).map((app) => (
+      <div className="grid grid-cols-9 gap-2 overflow-y-auto overflow-x-hidden">
+        {allResults.slice(0, displayCount).map((item, index) => (
           <ItemCard
-            key={app.path}
-            item={{ name: app.name, path: app.path }}
-            onClick={async () => {
-              try {
-                await safeInvoke('hide_window');
-              } catch (err) {
-                console.error('Failed to hide window:', err);
-              }
-              onLaunch(app.path, app.name);
-            }}
+            key={item.path}
+            item={item}
+            isSelected={index === selectedIndex}
+            onClick={() => onItemClick(item)}
           />
         ))}
       </div>
-
-      {/* File Results from Everything */}
-      {files.length > 0 && (
-        <div className="mt-2">
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="text-xs font-semibold text-zinc-500">
-              文件 ({files.length})
-            </h2>
-            {hasEverything && (
-              <span className="text-[10px] text-zinc-600">via Everything</span>
-            )}
-          </div>
-          <div className="space-y-1 max-h-32 overflow-y-auto">
-            {files.map((file) => (
-              <button
-                key={file.path}
-                onClick={async () => {
-                  try {
-                    await safeInvoke('hide_window');
-                    await safeInvoke('open_file', { path: file.path });
-                  } catch (err) {
-                    console.error('Failed to open file:', err);
-                  }
-                }}
-                className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-zinc-700/50 transition-colors text-left group"
-              >
-                <FileText className="w-4 h-4 text-zinc-500 flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-zinc-300 truncate group-hover:text-white">
-                    {file.name}
-                  </p>
-                  <p className="text-[10px] text-zinc-600 truncate">
-                    {file.path}
-                  </p>
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
     </section>
   );
 }
