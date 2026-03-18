@@ -1,7 +1,7 @@
 import { Search, Command, FileText, Lock, Settings, User, RefreshCw } from 'lucide-react';
 import { useEffect, useState, useCallback } from 'react';
 import { useAppStore } from '@/stores/appStore';
-import { useSearch } from '@/hooks/useSearch';
+import { useSearch, FileResult } from '@/hooks/useSearch';
 
 // Safe invoke that only works in Tauri environment
 const safeInvoke = async (cmd: string, args?: Record<string, unknown>) => {
@@ -86,7 +86,7 @@ const ITEMS_PER_ROW = 9;
 
 export function LauncherView() {
   const { searchQuery, setSearchQuery, setActiveView } = useAppStore();
-  const { apps, isLoading, searchApps, launchApp, getRecentApps } = useSearch();
+  const { apps, files, isLoading, hasEverything, searchApps, launchApp, getRecentApps } = useSearch();
   const [recentItems, setRecentItems] = useState<AppItemData[]>([]);
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -287,6 +287,8 @@ export function LauncherView() {
           <SearchResults
             query={searchQuery}
             apps={apps}
+            files={files}
+            hasEverything={hasEverything}
             isLoading={isLoading}
             onLaunch={launchApp}
             isExpanded={isExpanded}
@@ -442,6 +444,8 @@ function ItemCard({
 function SearchResults({
   query,
   apps,
+  files,
+  hasEverything,
   isLoading,
   onLaunch,
   isExpanded,
@@ -449,6 +453,8 @@ function SearchResults({
 }: {
   query: string;
   apps: { name: string; path: string }[];
+  files: FileResult[];
+  hasEverything: boolean;
   isLoading: boolean;
   onLaunch: (path: string, name: string) => void;
   isExpanded: boolean;
@@ -490,7 +496,7 @@ function SearchResults({
           </button>
         )}
       </div>
-      <div className="grid grid-cols-9 gap-2 overflow-y-auto overflow-x-hidden">
+      <div className="grid grid-cols-9 gap-2 overflow-y-auto overflow-x-hidden mb-4">
         {apps.slice(0, displayCount).map((app) => (
           <ItemCard
             key={app.path}
@@ -506,6 +512,46 @@ function SearchResults({
           />
         ))}
       </div>
+
+      {/* File Results from Everything */}
+      {files.length > 0 && (
+        <div className="mt-2">
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-xs font-semibold text-zinc-500">
+              文件 ({files.length})
+            </h2>
+            {hasEverything && (
+              <span className="text-[10px] text-zinc-600">via Everything</span>
+            )}
+          </div>
+          <div className="space-y-1 max-h-32 overflow-y-auto">
+            {files.map((file) => (
+              <button
+                key={file.path}
+                onClick={async () => {
+                  try {
+                    await safeInvoke('hide_window');
+                    await safeInvoke('open_file', { path: file.path });
+                  } catch (err) {
+                    console.error('Failed to open file:', err);
+                  }
+                }}
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded hover:bg-zinc-700/50 transition-colors text-left group"
+              >
+                <FileText className="w-4 h-4 text-zinc-500 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-zinc-300 truncate group-hover:text-white">
+                    {file.name}
+                  </p>
+                  <p className="text-[10px] text-zinc-600 truncate">
+                    {file.path}
+                  </p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </section>
   );
 }
