@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use nucleo::pattern::{CaseMatching, Normalization, Pattern};
 
+pub mod everything;
 pub mod icon;
 pub mod watcher;
 

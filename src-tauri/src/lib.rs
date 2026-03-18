@@ -175,6 +175,11 @@ pub fn run() {
             commands::search::launch_app,
             commands::search::extract_app_icon,
             commands::search::get_recent_apps,
+            // Everything integration
+            commands::search::is_everything_available,
+            commands::search::search_everything,
+            commands::search::get_everything_version,
+            commands::search::open_file,
             commands::settings::get_settings,
             commands::settings::set_setting,
             commands::settings::toggle_always_on_top,

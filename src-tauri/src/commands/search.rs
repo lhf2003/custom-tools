@@ -1,6 +1,6 @@
 use crate::db::app_usage;
 use crate::db::DatabaseState;
-use crate::search::{icon, AppItem, SearchIndex};
+use crate::search::{everything, icon, AppItem, SearchIndex};
 use rusqlite::Connection;
 use std::sync::{Arc, Mutex};
 
@@ -113,4 +113,42 @@ pub fn get_recent_apps(
 #[tauri::command]
 pub async fn extract_app_icon(path: String) -> Result<Option<String>, String> {
     icon::extract_icon(&path).map_err(|e| e.to_string())
+}
+
+// Everything integration commands
+
+#[tauri::command]
+pub fn is_everything_available() -> bool {
+    everything::is_available()
+}
+
+#[tauri::command]
+pub fn search_everything(query: String, limit: usize) -> Vec<everything::FileResult> {
+    everything::search_files(&query, limit)
+}
+
+#[tauri::command]
+pub fn get_everything_version() -> Option<String> {
+    everything::get_version()
+}
+
+#[tauri::command]
+pub fn open_file(path: String) -> Result<(), String> {
+    // Open file with default application
+    if let Err(e) = open::that(&path) {
+        log::warn!("Failed to open file with open crate: {}, trying fallback", e);
+        // Fallback to Windows start command
+        #[cfg(windows)]
+        {
+            std::process::Command::new("cmd")
+                .args(["/c", "start", "", &path])
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        }
+        #[cfg(not(windows))]
+        {
+            return Err("Opening files is only supported on Windows".to_string());
+        }
+    }
+    Ok(())
 }
