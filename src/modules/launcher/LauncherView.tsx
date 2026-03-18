@@ -1,5 +1,5 @@
 import { Search, Command, FileText, Lock, Settings, User, RefreshCw } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useAppStore } from '@/stores/appStore';
 import { useSearch } from '@/hooks/useSearch';
 
@@ -48,6 +48,19 @@ const safeInvoke = async (cmd: string, args?: Record<string, unknown>) => {
   if (cmd === 'resize_window') {
     // In browser mode, just log - no actual window to resize
     return Promise.resolve();
+  }
+  if (cmd === 'hide_window') {
+    // In browser mode, just log - no actual window to hide
+    return Promise.resolve();
+  }
+  if (cmd === 'handle_pasted_file') {
+    console.log('[Browser Mode] Would handle pasted file:', args);
+    return Promise.resolve();
+  }
+  if (cmd === 'read_clipboard_image') {
+    // In browser mode, return none - browser API can't read screenshot DIB data
+    console.log('[Browser Mode] Would read clipboard image from backend');
+    return Promise.resolve({ success: false, result_type: 'none', path: null, message: 'Browser mode - use backend API' });
   }
 
   return Promise.resolve();
@@ -107,6 +120,71 @@ export function LauncherView() {
     loadRecentItems();
   }, []);
 
+  // Handle paste event for files and images
+  const handlePaste = useCallback(async (e: React.ClipboardEvent) => {
+    e.preventDefault();
+
+    try {
+      // First, try to read clipboard through backend (handles screenshots and DIB format)
+      const result = await safeInvoke('read_clipboard_image') as {
+        success: boolean;
+        result_type: 'file' | 'image' | 'text' | 'none';
+        path?: string;
+        message?: string;
+      };
+
+      if (result.success) {
+        switch (result.result_type) {
+          case 'file':
+            if (result.path) {
+              await safeInvoke('handle_pasted_file', { path: result.path });
+            }
+            break;
+          case 'image':
+            console.log('Image saved to clipboard history:', result.path);
+            break;
+          case 'text':
+            // Text is already handled by clipboard watcher
+            console.log('Text pasted');
+            break;
+          case 'none':
+            // Backend couldn't read clipboard, try browser API as fallback
+            await handleBrowserPaste(e);
+            break;
+        }
+      } else {
+        // Backend failed, try browser API
+        await handleBrowserPaste(e);
+      }
+    } catch (err) {
+      console.error('Failed to handle paste:', err);
+      await handleBrowserPaste(e);
+    }
+  }, []);
+
+  // Browser fallback for file paste (when files are dropped or pasted from file manager)
+  const handleBrowserPaste = async (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+
+      // Only handle file system files (those with a path)
+      if (item.kind === 'file') {
+        const file = item.getAsFile();
+        if (file && 'path' in file) {
+          const filePath = (file as File & { path: string }).path;
+          try {
+            await safeInvoke('handle_pasted_file', { path: filePath });
+          } catch (err) {
+            console.error('Failed to handle pasted file:', err);
+          }
+        }
+      }
+    }
+  };
+
   const loadRecentItems = async () => {
     try {
       // Get recently used apps from database
@@ -164,7 +242,14 @@ export function LauncherView() {
     }
   };
 
-  const handleItemClick = (item: AppItemData) => {
+  const handleItemClick = async (item: AppItemData) => {
+    // Hide window first
+    try {
+      await safeInvoke('hide_window');
+    } catch (err) {
+      console.error('Failed to hide window:', err);
+    }
+
     if (item.isBuiltIn && item.toolId) {
       setActiveView(item.toolId as any);
     } else {
@@ -181,6 +266,7 @@ export function LauncherView() {
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
+          onPaste={handlePaste}
           placeholder="搜索应用和指令 / 粘贴文件或图片..."
           className="flex-1 bg-transparent text-lg text-zinc-200 placeholder-zinc-500 outline-none"
           autoFocus
@@ -409,7 +495,14 @@ function SearchResults({
           <ItemCard
             key={app.path}
             item={{ name: app.name, path: app.path }}
-            onClick={() => onLaunch(app.path, app.name)}
+            onClick={async () => {
+              try {
+                await safeInvoke('hide_window');
+              } catch (err) {
+                console.error('Failed to hide window:', err);
+              }
+              onLaunch(app.path, app.name);
+            }}
           />
         ))}
       </div>
