@@ -110,7 +110,7 @@ impl PasswordManager {
         new_password: &str,
     ) -> anyhow::Result<()> {
         // Verify old password works
-        let old_crypto = CryptoManager::new(old_password)?;
+        let _old_crypto = CryptoManager::new(old_password)?;
 
         // Create new crypto with new password
         let new_crypto = CryptoManager::new(new_password)?;

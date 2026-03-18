@@ -148,7 +148,7 @@ pub fn get_password_entries(
         .query_map(
             &param_refs[..],
             |row| {
-                let encrypted_password: String = row.get(3)?;
+                let _encrypted_password: String = row.get(3)?;
                 // Return masked password
                 let masked_password = "•".repeat(8);
 
