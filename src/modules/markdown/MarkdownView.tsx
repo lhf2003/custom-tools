@@ -1,25 +1,11 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import {
-  FileText,
-  Plus,
-  Folder,
-  Bold,
-  Italic,
-  List,
-  ListOrdered,
-  Link,
-  Image,
-  Code,
-  Quote,
-  Minus,
-  Palette,
-  Loader2,
-} from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { FileText, Plus, Folder, Loader2 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import MDEditor from '@uiw/react-md-editor';
 import type { NoteItemData, NoteContentData, CreateNoteRequest, DragItem } from './types';
-import { HIGHLIGHT_COLORS, MARKDOWN_WINDOW_HEIGHT } from './constants';
+import { MARKDOWN_WINDOW_HEIGHT } from './constants';
 import { useNotes } from './hooks/useNotes';
-import { ToolbarButton, Modal, EmptyState, NoteTree, ErrorBoundary } from './components';
+import { Modal, EmptyState, NoteTree, ErrorBoundary } from './components';
 
 export function MarkdownView() {
   // Listen for menu actions from navigation bar
@@ -42,8 +28,6 @@ export function MarkdownView() {
 
     const resizeWindow = async () => {
       try {
-        // Store original height (this would need to be fetched from settings or stored earlier)
-        // For now, we assume a default height
         originalHeight = 400; // Default launcher height
         await invoke('resize_window', { height: MARKDOWN_WINDOW_HEIGHT });
       } catch (err) {
@@ -66,7 +50,6 @@ export function MarkdownView() {
     selectedNote,
     setSelectedNote,
     noteContent,
-    setNoteContent,
     editorContent,
     setEditorContent,
     isLoading,
@@ -94,8 +77,6 @@ export function MarkdownView() {
   const [showRenameModal, setShowRenameModal] = useState(false);
   const [renameItem, setRenameItem] = useState<NoteItemData | null>(null);
   const [renameValue, setRenameValue] = useState('');
-
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const handleCreate = async () => {
     if (!createPath.trim()) return;
@@ -297,57 +278,6 @@ export function MarkdownView() {
     setShowRenameModal(true);
   };
 
-  // Markdown toolbar actions
-  const insertText = (before: string, after: string = '') => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const selectedText = editorContent.substring(start, end);
-    const newText = before + selectedText + after;
-
-    const newContent = editorContent.substring(0, start) + newText + editorContent.substring(end);
-    setEditorContent(newContent);
-
-    setTimeout(() => {
-      textarea.focus();
-      const newCursorPos = start + before.length + selectedText.length;
-      textarea.setSelectionRange(newCursorPos, newCursorPos);
-    }, 0);
-  };
-
-  const insertBold = () => insertText('**', '**');
-  const insertItalic = () => insertText('*', '*');
-  const insertList = () => insertText('- ');
-  const insertOrderedList = () => insertText('1. ');
-  const insertLink = () => insertText('[', '](url)');
-  const insertImage = () => insertText('![', '](image-url)');
-  const insertCode = () => insertText('```\n', '\n```');
-  const insertInlineCode = () => insertText('`', '`');
-  const insertQuote = () => insertText('> ');
-  const insertDivider = () => insertText('\n---\n');
-
-  const insertHighlight = (bgColor: string, textColor: string) => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const selectedText = editorContent.substring(start, end);
-
-    const highlightTag = `<span style="background-color: ${bgColor}; color: ${textColor}; padding: 2px 4px; border-radius: 3px;">${selectedText || '高亮文本'}</span>`;
-
-    const newContent = editorContent.substring(0, start) + highlightTag + editorContent.substring(end);
-    setEditorContent(newContent);
-
-    setTimeout(() => {
-      textarea.focus();
-      const newCursorPos = start + highlightTag.length;
-      textarea.setSelectionRange(newCursorPos, newCursorPos);
-    }, 0);
-  };
-
   return (
     <div className="w-full h-full flex" style={{ backgroundColor: '#333333' }}>
       {/* File Tree Sidebar */}
@@ -462,81 +392,19 @@ export function MarkdownView() {
               </div>
             </div>
 
-            {/* Markdown Toolbar */}
-            <div className="px-4 py-2 border-b border-zinc-600/30 flex items-center gap-1 flex-wrap">
-              <ToolbarButton onClick={insertBold} title="粗体">
-                <Bold size={16} />
-              </ToolbarButton>
-              <ToolbarButton onClick={insertItalic} title="斜体">
-                <Italic size={16} />
-              </ToolbarButton>
-              <div className="w-px h-5 bg-zinc-600/50 mx-1" />
-              <ToolbarButton onClick={insertList} title="无序列表">
-                <List size={16} />
-              </ToolbarButton>
-              <ToolbarButton onClick={insertOrderedList} title="有序列表">
-                <ListOrdered size={16} />
-              </ToolbarButton>
-              <div className="w-px h-5 bg-zinc-600/50 mx-1" />
-              <ToolbarButton onClick={insertLink} title="链接">
-                <Link size={16} />
-              </ToolbarButton>
-              <ToolbarButton onClick={insertImage} title="图片">
-                <Image size={16} />
-              </ToolbarButton>
-              <div className="w-px h-5 bg-zinc-600/50 mx-1" />
-              <ToolbarButton onClick={insertInlineCode} title="行内代码">
-                <Code size={14} />
-              </ToolbarButton>
-              <ToolbarButton onClick={insertCode} title="代码块">
-                <Code size={16} />
-              </ToolbarButton>
-              <ToolbarButton onClick={insertQuote} title="引用">
-                <Quote size={16} />
-              </ToolbarButton>
-              <ToolbarButton onClick={insertDivider} title="分割线">
-                <Minus size={16} />
-              </ToolbarButton>
-              <div className="w-px h-5 bg-zinc-600/50 mx-1" />
-              {/* Highlight Colors */}
-              <div className="flex items-center gap-0.5">
-                {HIGHLIGHT_COLORS.slice(0, 4).map((c) => (
-                  <button
-                    key={c.color}
-                    onClick={() => insertHighlight(c.color, c.text)}
-                    title={`高亮 - ${c.name}`}
-                    className="w-5 h-5 rounded-sm border border-zinc-600/50 hover:scale-110 transition-transform cursor-pointer"
-                    style={{ backgroundColor: c.color }}
-                  />
-                ))}
-                <div className="relative group">
-                  <button className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700/50 transition-colors cursor-pointer">
-                    <Palette size={14} />
-                  </button>
-                  <div className="absolute top-full left-0 mt-1 p-2 bg-zinc-800 rounded-lg border border-zinc-700/50 shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 flex gap-1">
-                    {HIGHLIGHT_COLORS.map((c) => (
-                      <button
-                        key={c.color}
-                        onClick={() => insertHighlight(c.color, c.text)}
-                        title={c.name}
-                        className="w-6 h-6 rounded border border-zinc-600/50 hover:scale-110 transition-transform cursor-pointer"
-                        style={{ backgroundColor: c.color }}
-                      />
-                    ))}
-                  </div>
-                </div>
-              </div>
+            {/* WYSIWYG Markdown Editor */}
+            <div className="flex-1 overflow-hidden" data-color-mode="dark">
+              <MDEditor
+                value={editorContent}
+                onChange={(value) => setEditorContent(value || '')}
+                height="100%"
+                preview="edit"
+                hideToolbar={false}
+                textareaProps={{
+                  placeholder: '开始写作...',
+                }}
+              />
             </div>
-
-            {/* Editor */}
-            <textarea
-              ref={textareaRef}
-              value={editorContent}
-              onChange={(e) => setEditorContent(e.target.value)}
-              placeholder="开始写作..."
-              className="flex-1 bg-transparent text-zinc-300 placeholder:text-zinc-600 outline-none resize-none p-6 font-mono text-sm leading-relaxed"
-              spellCheck={false}
-            />
           </>
         ) : (
           <EmptyState />

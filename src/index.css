@@ -2,6 +2,10 @@
 @tailwind components;
 @tailwind utilities;
 
+/* MDEditor Styles */
+@import '@uiw/react-md-editor/markdown-editor.css';
+@import '@uiw/react-markdown-preview/markdown.css';
+
 /* Custom Zinc Theme Utilities */
 @layer utilities {
   /* Glass panel - used for search bar and cards */
@@ -135,4 +139,131 @@ body {
 /* Input focus reset */
 input:focus {
   outline: none;
+}
+
+/* MDEditor Dark Theme Override */
+[data-color-mode="dark"] .w-md-editor {
+  background-color: #2a2a2a !important;
+  color: #d4d4d8 !important;
+}
+
+[data-color-mode="dark"] .w-md-editor-text-pre,
+[data-color-mode="dark"] .w-md-editor-text-input {
+  background-color: #2a2a2a !important;
+  color: #d4d4d8 !important;
+  font-size: 14px !important;
+  line-height: 1.6 !important;
+}
+
+[data-color-mode="dark"] .w-md-editor-text-pre code,
+[data-color-mode="dark"] .w-md-editor-text-input {
+  background-color: transparent !important;
+}
+
+[data-color-mode="dark"] .w-md-editor-toolbar {
+  background-color: #333333 !important;
+  border-bottom: 1px solid rgba(82, 82, 91, 0.3) !important;
+}
+
+[data-color-mode="dark"] .w-md-editor-toolbar button {
+  color: #a1a1aa !important;
+}
+
+[data-color-mode="dark"] .w-md-editor-toolbar button:hover {
+  color: #f4f4f5 !important;
+  background-color: rgba(82, 82, 91, 0.5) !important;
+}
+
+[data-color-mode="dark"] .w-md-editor-toolbar button[data-active="true"] {
+  color: #60a5fa !important;
+  background-color: rgba(59, 130, 246, 0.2) !important;
+}
+
+[data-color-mode="dark"] .w-md-editor-toolbar-divider {
+  background-color: rgba(82, 82, 91, 0.5) !important;
+}
+
+[data-color-mode="dark"] .w-md-editor-preview {
+  background-color: #2a2a2a !important;
+  border-left: 1px solid rgba(82, 82, 91, 0.3) !important;
+}
+
+[data-color-mode="dark"] .wmde-markdown {
+  background-color: #2a2a2a !important;
+  color: #d4d4d8 !important;
+}
+
+[data-color-mode="dark"] .wmde-markdown h1,
+[data-color-mode="dark"] .wmde-markdown h2,
+[data-color-mode="dark"] .wmde-markdown h3,
+[data-color-mode="dark"] .wmde-markdown h4,
+[data-color-mode="dark"] .wmde-markdown h5,
+[data-color-mode="dark"] .wmde-markdown h6 {
+  color: #f4f4f5 !important;
+  border-bottom-color: rgba(82, 82, 91, 0.5) !important;
+}
+
+[data-color-mode="dark"] .wmde-markdown code {
+  background-color: rgba(82, 82, 91, 0.4) !important;
+  color: #f4f4f5 !important;
+}
+
+[data-color-mode="dark"] .wmde-markdown pre {
+  background-color: #1a1a1a !important;
+}
+
+[data-color-mode="dark"] .wmde-markdown blockquote {
+  border-left-color: #3b82f6 !important;
+  color: #a1a1aa !important;
+}
+
+[data-color-mode="dark"] .wmde-markdown a {
+  color: #60a5fa !important;
+}
+
+[data-color-mode="dark"] .wmde-markdown hr {
+  background-color: rgba(82, 82, 91, 0.5) !important;
+}
+
+[data-color-mode="dark"] .wmde-markdown table th,
+[data-color-mode="dark"] .wmde-markdown table td {
+  border-color: rgba(82, 82, 91, 0.5) !important;
+}
+
+[data-color-mode="dark"] .wmde-markdown table tr:nth-child(2n) {
+  background-color: rgba(82, 82, 91, 0.2) !important;
+}
+
+[data-color-mode="dark"] .wmde-markdown ul > li::marker,
+[data-color-mode="dark"] .wmde-markdown ol > li::marker {
+  color: #a1a1aa !important;
+}
+
+/* MDEditor scrollbar */
+.w-md-editor-text-pre::-webkit-scrollbar,
+.w-md-editor-preview::-webkit-scrollbar {
+  width: 6px !important;
+  height: 6px !important;
+}
+
+.w-md-editor-text-pre::-webkit-scrollbar-track,
+.w-md-editor-preview::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
+.w-md-editor-text-pre::-webkit-scrollbar-thumb,
+.w-md-editor-preview::-webkit-scrollbar-thumb {
+  background: #3f3f46 !important;
+  border-radius: 10px !important;
+}
+
+.w-md-editor-text-pre::-webkit-scrollbar-thumb:hover,
+.w-md-editor-preview::-webkit-scrollbar-thumb:hover {
+  background: #52525b !important;
+}
+
+/* Hide default scrollbars in editor container */
+.w-md-editor {
+  scrollbar-width: thin;
+  scrollbar-color: #3f3f46 transparent;
 }
