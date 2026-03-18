@@ -7,6 +7,75 @@ pub mod icon;
 
 use crate::db::app_usage::{AppUsage, calculate_frequency_score};
 
+/// Parse a Windows shortcut (.lnk) file and return the target path
+#[cfg(windows)]
+fn parse_shortcut_target(path: &Path) -> Option<String> {
+    use windows::Win32::System::Com::{
+        CoInitializeEx, COINIT_APARTMENTTHREADED, CLSCTX_INPROC_SERVER,
+        CoCreateInstance, IPersistFile, STGM_READ,
+    };
+    use windows::Win32::UI::Shell::{IShellLinkW, ShellLink, SLGP_RAWPATH};
+    use windows_core::ComInterface;
+
+    // Initialize COM (ignore result since it may already be initialized)
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+    }
+
+    unsafe {
+        // Create ShellLink instance
+        let shell_link: IShellLinkW = match CoCreateInstance(
+            &ShellLink,
+            None,
+            CLSCTX_INPROC_SERVER,
+        ) {
+            Ok(link) => link,
+            Err(_) => return None,
+        };
+
+        // Get IPersistFile interface and load the shortcut
+        let persist_file: IPersistFile = match shell_link.cast() {
+            Ok(pf) => pf,
+            Err(_) => return None,
+        };
+
+        // Convert path to wide string (must be null-terminated)
+        let path_str = path.to_string_lossy();
+        let wide_path: Vec<u16> = path_str.encode_utf16().chain(std::iter::once(0)).collect();
+
+        // Load the shortcut file with read-only access
+        if persist_file.Load(windows::core::PCWSTR(wide_path.as_ptr()), STGM_READ).is_err() {
+            return None;
+        }
+
+        // Get the target path
+        let mut target_path = [0u16; 260];
+        let mut find_data: windows::Win32::Storage::FileSystem::WIN32_FIND_DATAW = std::mem::zeroed();
+        if shell_link.GetPath(
+            &mut target_path,
+            &mut find_data,
+            SLGP_RAWPATH.0 as u32,
+        ).is_err() {
+            return None;
+        }
+
+        // Convert wide string to String
+        let len = target_path.iter().position(|&c| c == 0).unwrap_or(target_path.len());
+        let target = String::from_utf16_lossy(&target_path[..len]);
+
+        if target.is_empty() {
+            return None;
+        }
+
+        Some(target)
+    }
+}
+
+#[cfg(not(windows))]
+fn parse_shortcut_target(_path: &Path) -> Option<String> {
+    None
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct AppItem {
     pub name: String,
@@ -85,8 +154,9 @@ impl SearchIndex {
                 self.scan_directory(&path, apps, seen)?;
             } else if let Some(ext) = path.extension() {
                 if ext.eq_ignore_ascii_case("lnk") {
-                    if let Some(app) = self.parse_shortcut(&path) {
-                        let key = format!("{}|{}", app.name.to_lowercase(), app.path.to_lowercase());
+                    if let Some((app, target_path)) = self.parse_shortcut(&path) {
+                        // Use target path for deduplication
+                        let key = format!("{}|{}", app.name.to_lowercase(), target_path.to_lowercase());
                         if seen.insert(key) {
                             apps.push(app);
                         }
@@ -98,7 +168,7 @@ impl SearchIndex {
         Ok(())
     }
 
-    fn parse_shortcut(&self, path: &Path) -> Option<AppItem> {
+    fn parse_shortcut(&self, path: &Path) -> Option<(AppItem, String)> {
         let file_stem = path.file_stem()?;
         let name = file_stem.to_string_lossy().to_string();
 
@@ -113,11 +183,16 @@ impl SearchIndex {
             return None;
         }
 
-        Some(AppItem {
+        // Get the target path for deduplication
+        let target_path = parse_shortcut_target(path).unwrap_or_else(|| path.to_string_lossy().to_string());
+
+        let app = AppItem {
             name,
             path: path.to_string_lossy().to_string(),
             icon: None,
-        })
+        };
+
+        Some((app, target_path))
     }
 
     pub fn search(&self, query: &str) -> Vec<AppItem> {

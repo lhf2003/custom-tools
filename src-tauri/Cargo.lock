@@ -902,6 +902,7 @@ dependencies = [
  "tauri-plugin-shell",
  "tokio",
  "windows 0.52.0",
+ "windows-core 0.52.0",
  "xxhash-rust",
 ]
 
