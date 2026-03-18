@@ -1,8 +1,8 @@
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
-use std::time::Instant;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::{Arc, Mutex, mpsc};
+use std::time::{Duration, Instant};
+use std::thread;
 
 use crate::db::DatabaseState;
 use crate::search::SearchIndex;
@@ -23,54 +23,44 @@ pub enum WatcherEvent {
 
 /// File system watcher for Start Menu and Desktop directories
 pub struct AppWatcher {
+    #[allow(dead_code)]
     watcher: RecommendedWatcher,
-    event_sender: Sender<WatcherEvent>,
-    last_event: Arc<Mutex<Option<Instant>>>,
+    event_sender: mpsc::Sender<WatcherEvent>,
 }
 
 impl AppWatcher {
     /// Start watching application directories
     pub fn start(
         index: Arc<Mutex<SearchIndex>>,
-        db_state: Arc<DatabaseState>,
+        _db_state: Arc<DatabaseState>,
     ) -> anyhow::Result<Self> {
-        let (tx, rx) = channel::<WatcherEvent>(100);
+        let (tx, rx) = mpsc::channel::<WatcherEvent>();
         let event_sender = tx.clone();
-        let last_event = Arc::new(Mutex::new(None));
-
-        // Clone for closure
-        let last_event_clone = last_event.clone();
-        let index_clone = index.clone();
 
         // Create watcher with debounced handler
         let watcher = notify::recommended_watcher(move |res: Result<Event, notify::Error>| {
             match res {
                 Ok(event) => {
-                    // Update last event time
-                    if let Ok(mut last) = last_event_clone.lock() {
-                        *last = Some(Instant::now());
-                    }
-
                     // Process event based on kind
                     match event.kind {
                         notify::EventKind::Create(_) => {
                             for path in &event.paths {
                                 if is_lnk_file(path) {
-                                    let _ = event_sender.try_send(WatcherEvent::Add(path.clone()));
+                                    let _ = event_sender.send(WatcherEvent::Add(path.clone()));
                                 }
                             }
                         }
                         notify::EventKind::Modify(_) => {
                             for path in &event.paths {
                                 if is_lnk_file(path) {
-                                    let _ = event_sender.try_send(WatcherEvent::Add(path.clone()));
+                                    let _ = event_sender.send(WatcherEvent::Add(path.clone()));
                                 }
                             }
                         }
                         notify::EventKind::Remove(_) => {
                             for path in &event.paths {
                                 if is_lnk_file(path) {
-                                    let _ = event_sender.try_send(WatcherEvent::Remove(path.clone()));
+                                    let _ = event_sender.send(WatcherEvent::Remove(path.clone()));
                                 }
                             }
                         }
@@ -78,7 +68,7 @@ impl AppWatcher {
                     }
 
                     // Send batch update signal
-                    let _ = event_sender.try_send(WatcherEvent::BatchUpdate);
+                    let _ = event_sender.send(WatcherEvent::BatchUpdate);
                 }
                 Err(e) => {
                     log::warn!("File watcher error: {}", e);
@@ -89,14 +79,15 @@ impl AppWatcher {
         let mut app_watcher = Self {
             watcher,
             event_sender: tx,
-            last_event,
         };
 
         // Watch directories
         app_watcher.watch_directories()?;
 
-        // Start background processor
-        tokio::spawn(process_events(index, db_state, rx));
+        // Start background processor in a separate thread
+        thread::spawn(move || {
+            process_events(index, rx);
+        });
 
         Ok(app_watcher)
     }
@@ -133,22 +124,21 @@ impl AppWatcher {
 
     /// Force a full refresh
     pub fn refresh(&self) -> anyhow::Result<()> {
-        let _ = self.event_sender.try_send(WatcherEvent::BatchUpdate);
+        let _ = self.event_sender.send(WatcherEvent::BatchUpdate);
         Ok(())
     }
 }
 
 /// Background task to process watcher events with debouncing
-async fn process_events(
+fn process_events(
     index: Arc<Mutex<SearchIndex>>,
-    _db_state: Arc<DatabaseState>,
-    mut receiver: Receiver<WatcherEvent>,
+    receiver: mpsc::Receiver<WatcherEvent>,
 ) {
     let mut pending_adds = Vec::new();
     let mut pending_removes = Vec::new();
     let mut last_update = Instant::now();
 
-    while let Some(event) = receiver.recv().await {
+    while let Ok(event) = receiver.recv() {
         match event {
             WatcherEvent::Add(path) => {
                 pending_adds.push(path);
@@ -186,6 +176,9 @@ async fn process_events(
                 }
             }
         }
+
+        // Small sleep to prevent busy-waiting
+        thread::sleep(Duration::from_millis(10));
     }
 }
 
