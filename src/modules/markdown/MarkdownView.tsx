@@ -2,10 +2,10 @@ import { useState, useEffect } from 'react';
 import { FileText, Plus, Folder, Loader2 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import MDEditor from '@uiw/react-md-editor';
-import type { NoteItemData, NoteContentData, CreateNoteRequest, DragItem } from './types';
+import type { NoteItemData, NoteContentData, CreateNoteRequest } from './types';
 import { MARKDOWN_WINDOW_HEIGHT } from './constants';
 import { useNotes } from './hooks/useNotes';
-import { Modal, EmptyState, NoteTree, ErrorBoundary } from './components';
+import { Modal, EmptyState, SortableNoteTree, ErrorBoundary } from './components';
 
 export function MarkdownView() {
   // Listen for menu actions from navigation bar
@@ -60,13 +60,7 @@ export function MarkdownView() {
     setExpandedFolders,
     loadNoteTree,
     toggleFolder,
-    getItemsAtPath,
   } = useNotes();
-
-  // Drag and drop state
-  const [dragItem, setDragItem] = useState<DragItem | null>(null);
-  const [dragOverItem, setDragOverItem] = useState<string | null>(null);
-  const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
 
   // Modal states
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -141,128 +135,24 @@ export function MarkdownView() {
     }
   };
 
-  // Drag and drop handlers
-  const handleDragStart = (e: React.DragEvent, item: NoteItemData, parentPath: string) => {
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('application/json', JSON.stringify({ path: item.path, parentPath }));
-    setDragItem({ item, parentPath });
+  const handleMove = async (sourcePath: string, targetFolder: string) => {
+    await invoke('move_note', {
+      request: {
+        source_path: sourcePath,
+        target_folder: targetFolder,
+      },
+    });
+    loadNoteTree();
   };
 
-  const handleDragEnd = () => {
-    setDragItem(null);
-    setDragOverItem(null);
-    setDragOverFolder(null);
-  };
-
-  const handleDragEnter = (e: React.DragEvent, itemPath: string, isFolder: boolean) => {
-    e.preventDefault();
-    if (dragItem?.item.path === itemPath) return;
-
-    if (isFolder) {
-      setDragOverFolder(itemPath);
-      setDragOverItem(null);
-    } else {
-      setDragOverItem(itemPath);
-    }
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-  };
-
-  const handleDragLeave = () => {
-    setDragOverItem(null);
-    setDragOverFolder(null);
-  };
-
-  const handleDrop = async (e: React.DragEvent, targetItem: NoteItemData, parentPath: string) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    const dragData = e.dataTransfer.getData('application/json');
-    if (!dragData) return;
-
-    const { path: sourcePath, parentPath: sourceParent } = JSON.parse(dragData);
-    const draggedItem = dragItem || { item: { path: sourcePath, name: '', is_folder: false } as NoteItemData, parentPath: sourceParent };
-
-    if (sourcePath === targetItem.path) {
-      setDragOverItem(null);
-      setDragOverFolder(null);
-      return;
-    }
-
-    try {
-      if (targetItem.is_folder) {
-        await invoke('move_note', {
-          request: {
-            source_path: sourcePath,
-            target_folder: targetItem.path,
-          },
-        });
-        setExpandedFolders((prev) => new Set(prev).add(targetItem.path));
-      } else {
-        await reorderItems(draggedItem, targetItem, parentPath);
-      }
-      loadNoteTree();
-    } catch (err) {
-      console.error('Failed to move/reorder:', err);
-      setError(err instanceof Error ? err.message : '移动失败');
-    }
-
-    setDragItem(null);
-    setDragOverItem(null);
-    setDragOverFolder(null);
-  };
-
-  const handleDropToRoot = async (e: React.DragEvent) => {
-    e.preventDefault();
-
-    const dragData = e.dataTransfer.getData('application/json');
-    if (!dragData) return;
-
-    const { path: sourcePath, parentPath: sourceParent } = JSON.parse(dragData);
-
-    if (sourceParent === '') {
-      setDragOverFolder(null);
-      return;
-    }
-
-    try {
-      await invoke('move_note', {
-        request: {
-          source_path: sourcePath,
-          target_folder: '',
-        },
-      });
-      loadNoteTree();
-    } catch (err) {
-      console.error('Failed to move to root:', err);
-      setError(err instanceof Error ? err.message : '移动到根目录失败');
-    }
-
-    setDragItem(null);
-    setDragOverFolder(null);
-  };
-
-  const reorderItems = async (dragItem: DragItem, targetItem: NoteItemData, parentPath: string) => {
-    const parentItems = getItemsAtPath(parentPath);
-
-    const dragIndex = parentItems.findIndex((i) => i.path === dragItem.item.path);
-    const targetIndex = parentItems.findIndex((i) => i.path === targetItem.path);
-
-    if (dragIndex === -1 || targetIndex === -1) return;
-
-    const newOrder = [...parentItems];
-    const [removed] = newOrder.splice(dragIndex, 1);
-    newOrder.splice(targetIndex, 0, removed);
-
+  const handleReorder = async (parentPath: string, itemNames: string[]) => {
     await invoke('reorder_notes', {
       request: {
         parent_path: parentPath,
-        item_names: newOrder.map((i) => i.name),
+        item_names: itemNames,
       },
     });
+    loadNoteTree();
   };
 
   const openCreateModal = (type: 'file' | 'folder', parent: string = '') => {
@@ -302,18 +192,7 @@ export function MarkdownView() {
           </div>
         </div>
 
-        <div
-          className="flex-1 overflow-y-auto p-2"
-          onDragOver={(e) => {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = 'move';
-            if (dragItem && dragItem.parentPath !== '') {
-              setDragOverFolder('root');
-            }
-          }}
-          onDragLeave={() => setDragOverFolder(null)}
-          onDrop={handleDropToRoot}
-        >
+        <div className="flex-1 overflow-y-auto p-2">
           {isLoading ? (
             <div className="flex items-center justify-center h-full text-zinc-500">
               <Loader2 size={20} className="animate-spin mr-2" />
@@ -339,7 +218,7 @@ export function MarkdownView() {
             </div>
           ) : (
             <ErrorBoundary>
-              <NoteTree
+              <SortableNoteTree
                 items={notes}
                 selectedId={selectedNote}
                 expandedFolders={expandedFolders}
@@ -348,23 +227,10 @@ export function MarkdownView() {
                 onCreate={(parent) => openCreateModal('file', parent)}
                 onRename={openRenameModal}
                 onDelete={handleDelete}
-                dragItem={dragItem}
-                dragOverItem={dragOverItem}
-                dragOverFolder={dragOverFolder}
-                onDragStart={handleDragStart}
-                onDragEnd={handleDragEnd}
-                onDragEnter={handleDragEnter}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                parentPath=""
+                onMove={handleMove}
+                onReorder={handleReorder}
               />
             </ErrorBoundary>
-          )}
-          {dragOverFolder === 'root' && (
-            <div className="mt-2 p-2 bg-blue-500/20 border border-blue-500/50 rounded-lg text-center text-blue-400 text-xs">
-              释放以移动到根目录
-            </div>
           )}
         </div>
       </aside>

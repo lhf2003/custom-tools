@@ -68,6 +68,18 @@ export function useSearch() {
     }
   }, []);
 
+  // Record app usage for built-in tools (they don't go through launch_app)
+  const recordAppUsage = useCallback(async (path: string, name: string) => {
+    try {
+      // Check if we're in Tauri environment
+      if (typeof window !== 'undefined' && (window as unknown as { __TAURI__?: unknown }).__TAURI__) {
+        await invoke('record_app_usage', { path, name });
+      }
+    } catch (err) {
+      console.error('Failed to record app usage:', err);
+    }
+  }, []);
+
   useEffect(() => {
     // Initial load
     searchApps('');
@@ -80,5 +92,6 @@ export function useSearch() {
     refreshApps,
     launchApp,
     getRecentApps,
+    recordAppUsage,
   };
 }

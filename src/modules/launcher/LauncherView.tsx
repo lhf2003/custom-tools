@@ -87,7 +87,7 @@ const ITEMS_PER_ROW = 9;
 
 export function LauncherView() {
   const { searchQuery, setSearchQuery, setActiveView } = useAppStore();
-  const { apps, isLoading, searchApps, launchApp, getRecentApps } = useSearch();
+  const { apps, isLoading, searchApps, launchApp, getRecentApps, recordAppUsage } = useSearch();
   const [recentItems, setRecentItems] = useState<AppItemData[]>([]);
   const [isExpanded, setIsExpanded] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -250,9 +250,19 @@ export function LauncherView() {
   };
 
   const handleItemClick = async (item: AppItemData) => {
+    // Optimistic update: immediately move clicked item to first position
+    setRecentItems(prev => {
+      const filtered = prev.filter(i => i.path !== item.path);
+      return [item, ...filtered];
+    });
+
     if (item.isBuiltIn && item.toolId) {
-      // For built-in tools, just switch view without hiding window
+      // For built-in tools, switch view and record usage
       setActiveView(item.toolId as any);
+      // Record usage in background (built-in tools don't go through launch_app)
+      recordAppUsage(item.path, item.name).catch(err => {
+        console.error('Failed to record built-in tool usage:', err);
+      });
     } else {
       // For external apps, hide window first then launch
       try {
@@ -260,7 +270,7 @@ export function LauncherView() {
       } catch (err) {
         console.error('Failed to hide window:', err);
       }
-      launchApp(item.path, item.name);
+      await launchApp(item.path, item.name);
     }
   };
 
