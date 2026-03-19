@@ -51,7 +51,7 @@ export function ActionMenu({ items }: ActionMenuProps) {
   });
 
   return (
-    <div className="relative">
+    <div className="relative z-50">
       <button
         ref={buttonRef}
         onClick={() => setIsOpen(!isOpen)}
@@ -68,7 +68,7 @@ export function ActionMenu({ items }: ActionMenuProps) {
       {isOpen && (
         <div
           ref={menuRef}
-          className="absolute right-0 top-full mt-2 min-w-[200px] bg-zinc-800/80 border border-white/10 rounded-xl shadow-2xl z-50 py-1.5 animate-in fade-in slide-in-from-top-1 duration-150"
+          className="absolute right-0 top-full mt-2 min-w-[200px] bg-zinc-800/80 border border-white/10 rounded-xl shadow-2xl z-10 py-1.5 animate-in fade-in slide-in-from-top-1 duration-150"
           style={{ WebkitBackdropFilter: 'blur(20px)', backdropFilter: 'blur(20px)' }}>
           {groupedItems.map((item, index) => {
             if (item === 'separator') {

@@ -29,6 +29,15 @@ function App() {
   const { activeView, setActiveView, toggleWindow } = useAppStore();
   const { always_on_top, toggleAlwaysOnTop, loadSettings } = useSettingsStore();
 
+  // Stable callback for toggle always on top
+  const handleToggleAlwaysOnTop = useCallback(async () => {
+    try {
+      await toggleAlwaysOnTop();
+    } catch (err) {
+      console.error('Failed to toggle always on top:', err);
+    }
+  }, [toggleAlwaysOnTop]);
+
   // View configurations for navigation bar
   const viewConfigs = useMemo(() => {
     const configs: Record<
@@ -75,7 +84,7 @@ function App() {
             id: 'always-on-top',
             label: always_on_top ? '取消置顶' : '窗口置顶',
             icon: Pin,
-            onClick: () => toggleAlwaysOnTop(),
+            onClick: handleToggleAlwaysOnTop,
           },
           {
             id: 'settings',
@@ -172,7 +181,7 @@ function App() {
             id: 'always-on-top',
             label: always_on_top ? '取消置顶' : '窗口置顶',
             icon: Pin,
-            onClick: () => toggleAlwaysOnTop(),
+            onClick: handleToggleAlwaysOnTop,
           },
           {
             id: 'settings',
@@ -223,7 +232,7 @@ function App() {
             id: 'always-on-top',
             label: always_on_top ? '取消置顶' : '窗口置顶',
             icon: Pin,
-            onClick: () => toggleAlwaysOnTop(),
+            onClick: handleToggleAlwaysOnTop,
           },
           {
             id: 'settings',
@@ -236,7 +245,7 @@ function App() {
       },
     };
     return configs;
-  }, [always_on_top, toggleAlwaysOnTop, setActiveView]);
+  }, [always_on_top, handleToggleAlwaysOnTop, setActiveView]);
 
   // Load settings on mount
   useEffect(() => {
@@ -319,14 +328,16 @@ function App() {
       ) : (
         // Other views - with navigation bar
         <>
-          <TopNavigationBar
-            title={currentConfig?.title || ''}
-            menuItems={currentConfig?.menuItems || []}
-            alwaysOnTop={always_on_top}
-            onToggleAlwaysOnTop={toggleAlwaysOnTop}
-            onBack={handleBack}
-          />
-          <main className="flex-1 overflow-hidden">{renderView()}</main>
+          <div className="relative z-50">
+            <TopNavigationBar
+              title={currentConfig?.title || ''}
+              menuItems={currentConfig?.menuItems || []}
+              alwaysOnTop={always_on_top}
+              onToggleAlwaysOnTop={toggleAlwaysOnTop}
+              onBack={handleBack}
+            />
+          </div>
+          <main className="flex-1 overflow-hidden isolate">{renderView()}</main>
         </>
       )}
     </div>

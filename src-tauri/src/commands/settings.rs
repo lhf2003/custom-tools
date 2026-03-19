@@ -34,6 +34,8 @@ pub fn toggle_always_on_top(
     let current = manager.is_always_on_top();
     let new_value = !current;
 
+    log::info!("Toggling always_on_top: current={}, new={}", current, new_value);
+
     // Update setting
     manager
         .set_setting("always_on_top", &new_value.to_string())
@@ -41,9 +43,17 @@ pub fn toggle_always_on_top(
 
     // Apply to window
     if let Some(window) = app_handle.get_webview_window("main") {
-        window
-            .set_always_on_top(new_value)
-            .map_err(|e| e.to_string())?;
+        log::info!("Applying always_on_top={} to window", new_value);
+        match window.set_always_on_top(new_value) {
+            Ok(_) => log::info!("Successfully set always_on_top to {}", new_value),
+            Err(e) => {
+                log::error!("Failed to set always_on_top: {}", e);
+                return Err(e.to_string());
+            }
+        }
+    } else {
+        log::error!("Main window not found");
+        return Err("Main window not found".to_string());
     }
 
     Ok(new_value)
