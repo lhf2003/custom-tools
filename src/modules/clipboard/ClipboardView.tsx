@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { convertFileSrc } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 
 interface ClipboardItemData {
   id: number;
@@ -119,6 +120,26 @@ export function ClipboardView() {
 
   useEffect(() => {
     fetchClipboardHistory();
+  }, [fetchClipboardHistory]);
+
+  // Listen for clipboard updates from backend
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+
+    const setupListener = async () => {
+      unlisten = await listen('clipboard-updated', () => {
+        console.log('Clipboard updated event received, refreshing...');
+        fetchClipboardHistory();
+      });
+    };
+
+    setupListener();
+
+    return () => {
+      if (unlisten) {
+        unlisten();
+      }
+    };
   }, [fetchClipboardHistory]);
 
   const handleToggleFavorite = async (id: number) => {

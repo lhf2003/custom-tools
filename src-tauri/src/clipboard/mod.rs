@@ -1,12 +1,13 @@
 use std::sync::{Arc, Mutex};
 use std::thread;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc::channel;
 
 mod watcher;
 
 pub use watcher::ClipboardWatcher;
 
+use crate::commands::settings::SettingsState;
 use crate::db::DatabaseState;
 
 /// Clipboard content types
@@ -53,6 +54,19 @@ impl ClipboardManager {
             while let Some(event) = rx.recv().await {
                 if let Err(e) = Self::handle_clipboard_event(&app_handle_clone, event).await {
                     log::error!("Failed to handle clipboard event: {}", e);
+                }
+            }
+        });
+
+        // Cleanup old items on startup
+        let app_handle_clone = app_handle.clone();
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+            if let Some(db_state) = app_handle_clone.try_state::<DatabaseState>() {
+                if let Ok(conn) = rusqlite::Connection::open(&db_state.0) {
+                    if let Err(e) = Self::cleanup_old_items(&app_handle_clone, &conn) {
+                        log::warn!("Failed to cleanup old clipboard items on startup: {}", e);
+                    }
                 }
             }
         });
@@ -156,16 +170,13 @@ impl ClipboardManager {
             }
         }
 
-        // Clean up old items (keep only last 100)
-        let _ = conn.execute(
-            "DELETE FROM clipboard_history
-             WHERE id NOT IN (
-                 SELECT id FROM clipboard_history
-                 ORDER BY created_at DESC
-                 LIMIT 100
-             )",
-            [],
-        );
+        // Clean up old items based on settings
+        if let Err(e) = Self::cleanup_old_items(app_handle, &conn) {
+            log::warn!("Failed to cleanup old clipboard items: {}", e);
+        }
+
+        // Notify frontend that clipboard has been updated
+        app_handle.emit("clipboard-updated", ())?;
 
         Ok(())
     }
@@ -175,6 +186,68 @@ impl ClipboardManager {
         let mut hasher = Sha256::new();
         hasher.update(data);
         format!("{:x}", hasher.finalize())
+    }
+
+    /// Cleanup old clipboard items based on settings
+    fn cleanup_old_items(app_handle: &AppHandle, conn: &rusqlite::Connection) -> anyhow::Result<()> {
+        // Get settings
+        let keep_days: i32 = if let Some(settings_state) = app_handle.try_state::<SettingsState>() {
+            if let Ok(settings) = settings_state.0.lock() {
+                settings.get_settings().clipboard_keep_days
+            } else {
+                30 // Default: 30 days
+            }
+        } else {
+            30 // Default: 30 days
+        };
+
+        // If keep_days is 0, keep all items (no cleanup by days)
+        // But still keep max 500 items to prevent unlimited growth
+        if keep_days == 0 {
+            let deleted = conn.execute(
+                "DELETE FROM clipboard_history
+                 WHERE id NOT IN (
+                     SELECT id FROM clipboard_history
+                     ORDER BY created_at DESC
+                     LIMIT 500
+                 )",
+                [],
+            )?;
+            if deleted > 0 {
+                log::info!("Cleaned up {} old clipboard items (max 500 limit)", deleted);
+            }
+            return Ok(());
+        }
+
+        // Delete items older than keep_days
+        let deleted = conn.execute(
+            "DELETE FROM clipboard_history
+             WHERE created_at < datetime('now', ?1 || ' days')
+             AND is_favorite = 0",
+            [format!("-{}", keep_days)],
+        )?;
+
+        if deleted > 0 {
+            log::info!("Cleaned up {} clipboard items older than {} days", deleted, keep_days);
+        }
+
+        // Also apply max 500 limit as safety
+        let deleted_max = conn.execute(
+            "DELETE FROM clipboard_history
+             WHERE id NOT IN (
+                 SELECT id FROM clipboard_history
+                 ORDER BY created_at DESC
+                 LIMIT 500
+             )
+             AND is_favorite = 0",
+            [],
+        )?;
+
+        if deleted_max > 0 {
+            log::info!("Cleaned up {} clipboard items (max 500 limit)", deleted_max);
+        }
+
+        Ok(())
     }
 
     pub fn stop(&self) -> anyhow::Result<()> {
