@@ -71,6 +71,17 @@ pub fn launch_app(
 }
 
 #[tauri::command]
+pub fn record_app_usage(
+    path: String,
+    name: String,
+    db_state: tauri::State<'_, DatabaseState>,
+) -> Result<(), String> {
+    // Record usage in database (for built-in tools that don't go through launch_app)
+    let conn = get_db_conn(&db_state)?;
+    app_usage::record_launch(&conn, &path, &name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 pub fn get_recent_apps(
     limit: usize,
     db_state: tauri::State<'_, DatabaseState>,

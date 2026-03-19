@@ -195,6 +195,7 @@ pub fn run() {
             commands::search::search_apps,
             commands::search::refresh_apps,
             commands::search::launch_app,
+            commands::search::record_app_usage,
             commands::search::extract_app_icon,
             commands::search::get_recent_apps,
             // Everything integration

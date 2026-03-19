@@ -62,6 +62,10 @@ const safeInvoke = async (cmd: string, args?: Record<string, unknown>) => {
     console.log('[Browser Mode] Would read clipboard image from backend');
     return Promise.resolve({ success: false, result_type: 'none', path: null, message: 'Browser mode - use backend API' });
   }
+  if (cmd === 'record_app_usage') {
+    console.log('[Browser Mode] Would record app usage:', args);
+    return Promise.resolve();
+  }
 
   return Promise.resolve();
 };

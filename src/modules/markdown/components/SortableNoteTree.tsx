@@ -7,11 +7,11 @@ import {
   useSensor,
   useSensors,
   DragOverlay,
-  DragStartEvent,
-  DragOverEvent,
-  DragEndEvent,
   defaultDropAnimationSideEffects,
-  DropAnimation,
+  type DragStartEvent,
+  type DragOverEvent,
+  type DragEndEvent,
+  type DropAnimation,
 } from '@dnd-kit/core';
 import {
   SortableContext,
