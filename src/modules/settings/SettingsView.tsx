@@ -464,10 +464,12 @@ function GeneralSettings() {
     hide_on_blur,
     startup_launch,
     clipboard_keep_days,
+    auto_update,
     toggleAlwaysOnTop,
     toggleHideOnBlur,
     setStartupLaunch,
     setClipboardKeepDays,
+    setAutoUpdate,
   } = useSettingsStore();
 
   const handleStartupChange = (enabled: boolean) => {
@@ -529,6 +531,13 @@ function GeneralSettings() {
             <option value={90} className="bg-zinc-700 text-white">90天</option>
             <option value={0} className="bg-zinc-700 text-white">永久</option>
           </select>
+        </SettingCard>
+
+        <SettingCard
+          title="自动更新"
+          description="启动时自动检查并下载最新版本"
+        >
+          <Toggle enabled={auto_update} onToggle={setAutoUpdate} />
         </SettingCard>
       </div>
     </>

@@ -1,6 +1,6 @@
 use tauri::Manager;
 use tauri_plugin_autostart::ManagerExt;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
 use std::time::Duration;
 
 // Tray icon resource ID (must match the one in build.rs if defined there)
@@ -26,9 +26,16 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             // Setup system tray
             setup_system_tray(app.handle())?;
+
+            // Initialize updater plugin (desktop only)
+            #[cfg(desktop)]
+            {
+                app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
+            }
 
             // Initialize logging in debug mode
             if cfg!(debug_assertions) {
@@ -215,7 +222,11 @@ pub fn run() {
             commands::settings::reset_shortcut,
             commands::settings::reset_all_shortcuts,
             commands::settings::check_shortcut_conflict,
+            commands::settings::toggle_auto_update,
             commands::system::open_external_url,
+            // Updater commands
+            commands::updater::check_for_update,
+            commands::updater::download_and_install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -224,11 +235,20 @@ pub fn run() {
 fn setup_window_handlers(app_handle: &tauri::AppHandle) {
     let window = app_handle.get_webview_window("main").unwrap();
 
+    // Flag to prevent hide-on-blur immediately after showing window
+    let ignore_blur = Arc::new(AtomicBool::new(false));
+    let ignore_blur_clone = ignore_blur.clone();
+
     // Hide window when it loses focus (if hide_on_blur is enabled)
     let app_handle_clone = app_handle.clone();
     window.on_window_event(move |event| {
         if let tauri::WindowEvent::Focused(focused) = event {
             if !focused {
+                // Skip if we're ignoring blur events (recently shown)
+                if ignore_blur_clone.load(Ordering::Relaxed) {
+                    return;
+                }
+
                 // Check settings and hide if configured
                 if let Some(settings_state) = app_handle_clone.try_state::<commands::settings::SettingsState>() {
                     if let Ok(manager) = settings_state.0.lock() {
@@ -242,6 +262,25 @@ fn setup_window_handlers(app_handle: &tauri::AppHandle) {
             }
         }
     });
+
+    // Store the ignore_blur flag in app state so toggle_main_window can access it
+    app_handle.manage(WindowFocusState { ignore_blur });
+}
+
+// State to track window focus behavior
+pub struct WindowFocusState {
+    ignore_blur: Arc<AtomicBool>,
+}
+
+impl WindowFocusState {
+    pub fn set_ignore_blur_for(&self, duration: Duration) {
+        self.ignore_blur.store(true, Ordering::Relaxed);
+        let flag = self.ignore_blur.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(duration);
+            flag.store(false, Ordering::Relaxed);
+        });
+    }
 }
 
 fn toggle_main_window(app_handle: &tauri::AppHandle) {
@@ -251,6 +290,12 @@ fn toggle_main_window(app_handle: &tauri::AppHandle) {
                 let _ = window.hide();
             }
             Ok(false) => {
+                // Set flag to ignore blur events for a short time after showing
+                // This prevents the window from immediately hiding due to focus race conditions
+                if let Some(focus_state) = app_handle.try_state::<WindowFocusState>() {
+                    focus_state.set_ignore_blur_for(Duration::from_millis(300));
+                }
+
                 // Position window at top of screen (centered horizontally)
                 const TOP_PADDING: i32 = 100;
                 let _ = window.center();

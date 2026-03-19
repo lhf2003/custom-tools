@@ -8,6 +8,7 @@ export interface AppSettings {
   theme: string;
   window_opacity: number;
   clipboard_keep_days: number;
+  auto_update: boolean;
 }
 
 export interface ShortcutConfig {
@@ -34,6 +35,8 @@ interface SettingsState extends AppSettings {
   toggleStartupLaunch: () => Promise<boolean>;
   setSetting: (key: string, value: string) => Promise<void>;
   setClipboardKeepDays: (days: number) => Promise<void>;
+  setAutoUpdate: (enabled: boolean) => Promise<void>;
+  toggleAutoUpdate: () => Promise<boolean>;
 
   // Shortcut Actions
   loadShortcuts: () => Promise<void>;
@@ -50,6 +53,7 @@ const defaultSettings: AppSettings = {
   theme: 'system',
   window_opacity: 0.95,
   clipboard_keep_days: 30,
+  auto_update: true,
 };
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
@@ -146,6 +150,26 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       set({ clipboard_keep_days: days });
     } catch (err) {
       console.error('Failed to set clipboard_keep_days:', err);
+    }
+  },
+
+  setAutoUpdate: async (enabled: boolean) => {
+    try {
+      await invoke('set_setting', { key: 'auto_update', value: enabled.toString() });
+      set({ auto_update: enabled });
+    } catch (err) {
+      console.error('Failed to set auto_update:', err);
+    }
+  },
+
+  toggleAutoUpdate: async () => {
+    try {
+      const newValue = await invoke<boolean>('toggle_auto_update');
+      set({ auto_update: newValue });
+      return newValue;
+    } catch (err) {
+      console.error('Failed to toggle auto_update:', err);
+      return get().auto_update;
     }
   },
 

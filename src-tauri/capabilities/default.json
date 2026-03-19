@@ -17,6 +17,12 @@
     "core:window:allow-is-visible",
     "core:tray:default",
     "fs:default",
-    "fs:allow-read"
+    "fs:allow-read",
+    "updater:default",
+    "updater:allow-check",
+    "updater:allow-download",
+    "updater:allow-download-and-install",
+    "process:default",
+    "process:allow-restart"
   ]
 }

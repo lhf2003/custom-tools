@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Search, FileText, Folder, HardDrive, ExternalLink, AlertCircle, Settings, ChevronDown } from 'lucide-react';
+import { Search, FileText, Folder, HardDrive, ExternalLink, AlertCircle, Settings, ChevronDown, Download } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 
 interface FileResult {
@@ -250,13 +250,33 @@ export function EverythingView() {
     );
   }
 
+  // Handle download Everything
+  const handleDownloadEverything = async () => {
+    try {
+      await safeInvoke('open_external_url', { url: 'https://www.voidtools.com' });
+    } catch (err) {
+      console.error('Failed to open download page:', err);
+    }
+  };
+
   if (hasEverything === false) {
     return (
       <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center">
         <HardDrive className="w-16 h-16 text-zinc-600 mb-4" />
         <h2 className="text-lg font-semibold text-zinc-300 mb-2">Everything 未安装</h2>
-        <p className="text-sm text-zinc-500 max-w-md">
-          此功能需要安装 Everything 文件搜索工具。请访问 voidtools.com 下载安装。
+        <p className="text-sm text-zinc-500 max-w-md mb-6">
+          此功能需要安装 Everything 文件搜索工具。Everything 是一款免费的 Windows 文件搜索工具，可以毫秒级查找本地文件。
+        </p>
+        <button
+          onClick={handleDownloadEverything}
+          className="flex items-center gap-2 px-6 py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors"
+        >
+          <Download className="w-5 h-5" />
+          <span>前往官网下载</span>
+          <ExternalLink className="w-4 h-4 ml-1" />
+        </button>
+        <p className="text-xs text-zinc-600 mt-4">
+          安装完成后请重启本应用
         </p>
       </div>
     );

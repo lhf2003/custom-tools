@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'windows-latest'
+            args: ''
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build Tauri app
+        id: tauri
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: ${{ github.ref_name }}
+          releaseBody: 'See the assets to download and install this version.'
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+
+      - name: Generate latest.json
+        shell: pwsh
+        run: |
+          $msiFile = Get-ChildItem -Path "src-tauri/target/release/bundle/msi/*.msi" | Select-Object -First 1
+          $sigFile = "$($msiFile.FullName).sig"
+          $signature = Get-Content $sigFile -Raw
+          $version = "${{ github.ref_name }}"
+          $pubDate = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
+          $filename = $msiFile.Name
+
+          $json = @{
+            version = $version
+            notes = "Release $version"
+            pub_date = $pubDate
+            platforms = @{
+              "windows-x86_64" = @{
+                signature = $signature.Trim()
+                url = "https://github.com/${{ github.repository }}/releases/download/$version/$filename"
+              }
+            }
+          } | ConvertTo-Json -Depth 10
+
+          $json | Out-File -FilePath "latest.json" -Encoding utf8
+          Write-Host "Generated latest.json:"
+          Get-Content "latest.json"
+
+      - name: Upload latest.json to Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ github.ref_name }} latest.json --clobber
+          Write-Host "Uploaded latest.json to release ${{ github.ref_name }}"

@@ -13,6 +13,7 @@ pub struct AppSettings {
     pub theme: String,
     pub window_opacity: f32,
     pub clipboard_keep_days: i32,
+    pub auto_update: bool,
 }
 
 impl Default for AppSettings {
@@ -24,6 +25,7 @@ impl Default for AppSettings {
             theme: "system".to_string(),
             window_opacity: 0.95,
             clipboard_keep_days: 30,  // 默认保存30天
+            auto_update: true,  // 默认开启自动更新
         }
     }
 }
@@ -104,6 +106,11 @@ impl SettingsManager {
                             settings.clipboard_keep_days = v.max(0);
                         }
                     }
+                    "auto_update" => {
+                        if let Ok(v) = value.parse::<bool>() {
+                            settings.auto_update = v;
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -155,6 +162,11 @@ impl SettingsManager {
                 "clipboard_keep_days" => {
                     if let Ok(v) = value.parse::<i32>() {
                         cache.clipboard_keep_days = v.max(0);
+                    }
+                }
+                "auto_update" => {
+                    if let Ok(v) = value.parse::<bool>() {
+                        cache.auto_update = v;
                     }
                 }
                 _ => {}

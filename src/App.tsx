@@ -23,6 +23,7 @@ import { PasswordView } from '@/modules/password/PasswordView';
 import { SettingsView } from '@/modules/settings/SettingsView';
 import { EverythingView } from '@/modules/everything/EverythingView';
 import { TopNavigationBar } from '@/components/TopNavigationBar';
+import { UpdateNotification } from '@/components/UpdateNotification';
 import type { ViewMode, MenuItem } from '@/types';
 
 function App() {
@@ -321,7 +322,7 @@ function App() {
   const currentConfig = isHome ? null : viewConfigs[activeView as Exclude<ViewMode, 'launcher'>];
 
   return (
-    <div className="w-full h-full bg-transparent overflow-hidden flex flex-col relative selection:bg-blue-500/30 rounded-2xl">
+    <div className="w-full h-full bg-transparent flex flex-col relative selection:bg-blue-500/30 rounded-2xl overflow-hidden">
       {isHome ? (
         // Launcher view - no navigation bar
         <main className="flex-1 overflow-hidden">{renderView()}</main>
@@ -340,6 +341,9 @@ function App() {
           <main className="flex-1 overflow-hidden isolate">{renderView()}</main>
         </>
       )}
+
+      {/* Update Notification */}
+      <UpdateNotification />
     </div>
   );
 }

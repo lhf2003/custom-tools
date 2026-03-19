@@ -232,3 +232,19 @@ pub fn check_shortcut_conflict(
     let manager = state.0.lock().map_err(|e| e.to_string())?;
     Ok(manager.check_conflict(&keys, exclude_id.as_deref()).cloned())
 }
+
+/// Toggle auto update setting
+#[tauri::command]
+pub fn toggle_auto_update(state: State<'_, SettingsState>) -> Result<bool, String> {
+    let manager = state.0.lock().map_err(|e| e.to_string())?;
+    let current = manager.get_settings().auto_update;
+    let new_value = !current;
+
+    manager
+        .set_setting("auto_update", &new_value.to_string())
+        .map_err(|e| e.to_string())?;
+
+    log::info!("Auto update toggled: {} -> {}", current, new_value);
+
+    Ok(new_value)
+}
