@@ -769,8 +769,15 @@ pub fn paste_to_clipboard_item(
     };
 
     // Get the previous focused window
+    log::info!("Attempting to get previous focused window...");
     let prev_hwnd = app_handle.try_state::<crate::PreviousFocusedWindow>()
-        .and_then(|state| state.get());
+        .and_then(|state| {
+            let hwnd = state.get();
+            log::info!("PreviousFocusedWindow state found, get() returned: {:?}", hwnd);
+            hwnd
+        });
+
+    log::info!("Final prev_hwnd: {:?}", prev_hwnd);
 
     // Hide the window first
     if let Some(window) = app_handle.get_webview_window("main") {
@@ -780,6 +787,7 @@ pub fn paste_to_clipboard_item(
     // If auto-paste is enabled and we have a valid previous window, try to paste
     if auto_paste_enabled {
         if let Some(hwnd) = prev_hwnd {
+            log::info!("Auto-paste enabled, attempting to paste to window: {}", hwnd);
             #[cfg(windows)]
             {
                 // Small delay to ensure window is hidden and target is ready

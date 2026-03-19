@@ -323,15 +323,23 @@ fn toggle_main_window(app_handle: &tauri::AppHandle) {
                 // Capture the previous focused window before showing our window
                 // This is needed for auto-paste functionality
                 #[cfg(windows)]
-                if let Some(prev_window_state) = app_handle.try_state::<PreviousFocusedWindow>() {
-                    unsafe {
-                        use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
-                        let hwnd = GetForegroundWindow();
-                        // Store the HWND value (0 is invalid/null)
-                        if hwnd.0 != 0 {
-                            prev_window_state.store(hwnd.0);
-                            log::info!("Captured previous window HWND: {}", hwnd.0);
+                {
+                    log::info!("Attempting to capture previous focused window...");
+                    if let Some(prev_window_state) = app_handle.try_state::<PreviousFocusedWindow>() {
+                        unsafe {
+                            use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+                            let hwnd = GetForegroundWindow();
+                            log::info!("GetForegroundWindow returned: {}", hwnd.0);
+                            // Store the HWND value (0 is invalid/null)
+                            if hwnd.0 != 0 {
+                                prev_window_state.store(hwnd.0);
+                                log::info!("Captured previous window HWND: {}", hwnd.0);
+                            } else {
+                                log::warn!("GetForegroundWindow returned null, cannot capture");
+                            }
                         }
+                    } else {
+                        log::warn!("PreviousFocusedWindow state not found, cannot capture HWND");
                     }
                 }
 

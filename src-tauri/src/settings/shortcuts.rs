@@ -469,6 +469,8 @@ fn parse_key_code(key: &str) -> Result<Code, String> {
 /// 处理快捷键动作
 fn handle_shortcut_action(app_handle: &AppHandle, action_id: &str) {
     use tauri::Emitter;
+    use crate::PreviousFocusedWindow;
+    use std::time::Duration;
 
     match action_id {
         "toggle_window" => {
@@ -477,6 +479,27 @@ fn handle_shortcut_action(app_handle: &AppHandle, action_id: &str) {
                 match window.is_visible() {
                     Ok(true) => { let _ = window.hide(); }
                     Ok(false) => {
+                        // Capture the previous focused window before showing our window
+                        #[cfg(windows)]
+                        {
+                            log::info!("[Shortcut] Attempting to capture previous focused window...");
+                            if let Some(prev_window_state) = app_handle.try_state::<PreviousFocusedWindow>() {
+                                unsafe {
+                                    use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+                                    let hwnd = GetForegroundWindow();
+                                    log::info!("[Shortcut] GetForegroundWindow returned: {}", hwnd.0);
+                                    if hwnd.0 != 0 {
+                                        prev_window_state.store(hwnd.0);
+                                        log::info!("[Shortcut] Captured previous window HWND: {}", hwnd.0);
+                                    } else {
+                                        log::warn!("[Shortcut] GetForegroundWindow returned null");
+                                    }
+                                }
+                            } else {
+                                log::warn!("[Shortcut] PreviousFocusedWindow state not found");
+                            }
+                        }
+
                         const TOP_PADDING: i32 = 100;
                         let _ = window.center();
                         if let Ok(pos) = window.outer_position() {
@@ -494,33 +517,33 @@ fn handle_shortcut_action(app_handle: &AppHandle, action_id: &str) {
                 }
             }
         }
-        "open_clipboard" => {
+        "open_clipboard" | "open_notes" | "open_passwords" | "open_settings" => {
+            // Capture previous window before showing
+            #[cfg(windows)]
+            {
+                if let Some(prev_window_state) = app_handle.try_state::<PreviousFocusedWindow>() {
+                    unsafe {
+                        use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+                        let hwnd = GetForegroundWindow();
+                        if hwnd.0 != 0 {
+                            prev_window_state.store(hwnd.0);
+                            log::info!("[Shortcut] Captured HWND for {}: {}", action_id, hwnd.0);
+                        }
+                    }
+                }
+            }
             if let Some(window) = app_handle.get_webview_window("main") {
                 let _ = window.show();
                 let _ = window.set_focus();
             }
-            let _ = app_handle.emit("shortcut:open_module", "clipboard");
-        }
-        "open_notes" => {
-            if let Some(window) = app_handle.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
-            let _ = app_handle.emit("shortcut:open_module", "notes");
-        }
-        "open_passwords" => {
-            if let Some(window) = app_handle.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
-            let _ = app_handle.emit("shortcut:open_module", "passwords");
-        }
-        "open_settings" => {
-            if let Some(window) = app_handle.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
-            let _ = app_handle.emit("shortcut:open_module", "settings");
+            let module = match action_id {
+                "open_clipboard" => "clipboard",
+                "open_notes" => "notes",
+                "open_passwords" => "passwords",
+                "open_settings" => "settings",
+                _ => "",
+            };
+            let _ = app_handle.emit("shortcut:open_module", module);
         }
         _ => {
             log::warn!("Unknown shortcut action: {}", action_id);
