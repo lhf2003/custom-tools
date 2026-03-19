@@ -513,18 +513,23 @@ function ClipboardItem({
     setClickTimer(timer);
   };
 
-  // Handle double click: always copy and hide window
+  // Handle double click: copy to clipboard and auto-paste to previous window
   const handleDoubleClick = async () => {
     if (clickTimer) {
       clearTimeout(clickTimer);
       setClickTimer(null);
     }
-    onCopy();
-    // Hide window after copy for better UX
     try {
-      await invoke('hide_window');
+      // Use paste_to_clipboard_item which handles:
+      // 1. Copy to clipboard
+      // 2. Hide window
+      // 3. Restore focus to previous window
+      // 4. Simulate Ctrl+V (if auto-paste is enabled)
+      await invoke('paste_to_clipboard_item', { id: item.id });
     } catch (err) {
-      console.error('Failed to hide window:', err);
+      console.error('Failed to paste clipboard item:', err);
+      // Fallback to just copying if paste fails
+      onCopy();
     }
   };
 

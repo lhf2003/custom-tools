@@ -465,11 +465,13 @@ function GeneralSettings() {
     startup_launch,
     clipboard_keep_days,
     auto_update,
+    clipboard_auto_paste,
     toggleAlwaysOnTop,
     toggleHideOnBlur,
     setStartupLaunch,
     setClipboardKeepDays,
     setAutoUpdate,
+    toggleClipboardAutoPaste,
   } = useSettingsStore();
 
   const handleStartupChange = (enabled: boolean) => {
@@ -508,6 +510,13 @@ function GeneralSettings() {
           description="系统启动时自动运行"
         >
           <Toggle enabled={startup_launch} onToggle={handleStartupChange} />
+        </SettingCard>
+
+        <SettingCard
+          title="剪贴板自动粘贴"
+          description="双击剪贴板历史项后自动粘贴到光标所在位置"
+        >
+          <Toggle enabled={clipboard_auto_paste} onToggle={toggleClipboardAutoPaste} />
         </SettingCard>
 
         <SettingCard

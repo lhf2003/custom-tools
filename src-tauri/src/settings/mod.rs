@@ -14,6 +14,7 @@ pub struct AppSettings {
     pub window_opacity: f32,
     pub clipboard_keep_days: i32,
     pub auto_update: bool,
+    pub clipboard_auto_paste: bool,
 }
 
 impl Default for AppSettings {
@@ -26,6 +27,7 @@ impl Default for AppSettings {
             window_opacity: 0.95,
             clipboard_keep_days: 30,  // 默认保存30天
             auto_update: true,  // 默认开启自动更新
+            clipboard_auto_paste: true,  // 默认开启自动粘贴
         }
     }
 }
@@ -111,6 +113,11 @@ impl SettingsManager {
                             settings.auto_update = v;
                         }
                     }
+                    "clipboard_auto_paste" => {
+                        if let Ok(v) = value.parse::<bool>() {
+                            settings.clipboard_auto_paste = v;
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -167,6 +174,11 @@ impl SettingsManager {
                 "auto_update" => {
                     if let Ok(v) = value.parse::<bool>() {
                         cache.auto_update = v;
+                    }
+                }
+                "clipboard_auto_paste" => {
+                    if let Ok(v) = value.parse::<bool>() {
+                        cache.clipboard_auto_paste = v;
                     }
                 }
                 _ => {}

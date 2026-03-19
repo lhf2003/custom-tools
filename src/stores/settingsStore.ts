@@ -9,6 +9,7 @@ export interface AppSettings {
   window_opacity: number;
   clipboard_keep_days: number;
   auto_update: boolean;
+  clipboard_auto_paste: boolean;
 }
 
 export interface ShortcutConfig {
@@ -37,6 +38,8 @@ interface SettingsState extends AppSettings {
   setClipboardKeepDays: (days: number) => Promise<void>;
   setAutoUpdate: (enabled: boolean) => Promise<void>;
   toggleAutoUpdate: () => Promise<boolean>;
+  setClipboardAutoPaste: (enabled: boolean) => Promise<void>;
+  toggleClipboardAutoPaste: () => Promise<boolean>;
 
   // Shortcut Actions
   loadShortcuts: () => Promise<void>;
@@ -54,6 +57,7 @@ const defaultSettings: AppSettings = {
   window_opacity: 0.95,
   clipboard_keep_days: 30,
   auto_update: true,
+  clipboard_auto_paste: true,
 };
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
@@ -170,6 +174,28 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     } catch (err) {
       console.error('Failed to toggle auto_update:', err);
       return get().auto_update;
+    }
+  },
+
+  setClipboardAutoPaste: async (enabled: boolean) => {
+    try {
+      await invoke('set_setting', { key: 'clipboard_auto_paste', value: enabled.toString() });
+      set({ clipboard_auto_paste: enabled });
+    } catch (err) {
+      console.error('Failed to set clipboard_auto_paste:', err);
+    }
+  },
+
+  toggleClipboardAutoPaste: async () => {
+    try {
+      const currentValue = get().clipboard_auto_paste;
+      const newValue = !currentValue;
+      await invoke('set_setting', { key: 'clipboard_auto_paste', value: newValue.toString() });
+      set({ clipboard_auto_paste: newValue });
+      return newValue;
+    } catch (err) {
+      console.error('Failed to toggle clipboard_auto_paste:', err);
+      return get().clipboard_auto_paste;
     }
   },
 

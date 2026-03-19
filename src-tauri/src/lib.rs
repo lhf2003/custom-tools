@@ -102,6 +102,9 @@ pub fn run() {
             // Setup window event handlers (after settings initialized)
             setup_window_handlers(app.handle());
 
+            // Initialize previous focused window state for auto-paste
+            app.manage(PreviousFocusedWindow::new());
+
             // Start clipboard manager
             let clipboard_manager = clipboard::ClipboardManager::new(app.handle().clone())
                 .map_err(|e| {
@@ -173,6 +176,7 @@ pub fn run() {
             commands::clipboard::delete_clipboard_item,
             commands::clipboard::clear_clipboard_history,
             commands::clipboard::copy_to_clipboard,
+            commands::clipboard::paste_to_clipboard_item,
             commands::clipboard::get_clipboard_image_base64,
             commands::clipboard::handle_pasted_file,
             commands::clipboard::read_clipboard_image,
@@ -283,6 +287,32 @@ impl WindowFocusState {
     }
 }
 
+// State to store the previous focused window for auto-paste
+pub struct PreviousFocusedWindow {
+    hwnd: Arc<Mutex<isize>>, // 0 means no valid window
+}
+
+impl PreviousFocusedWindow {
+    pub fn new() -> Self {
+        Self {
+            hwnd: Arc::new(Mutex::new(0)),
+        }
+    }
+
+    pub fn store(&self, hwnd: isize) {
+        if let Ok(mut guard) = self.hwnd.lock() {
+            *guard = hwnd;
+        }
+    }
+
+    pub fn get(&self) -> Option<isize> {
+        self.hwnd.lock().ok().and_then(|hwnd| {
+            let h = *hwnd;
+            if h == 0 { None } else { Some(h) }
+        })
+    }
+}
+
 fn toggle_main_window(app_handle: &tauri::AppHandle) {
     if let Some(window) = app_handle.get_webview_window("main") {
         match window.is_visible() {
@@ -290,6 +320,21 @@ fn toggle_main_window(app_handle: &tauri::AppHandle) {
                 let _ = window.hide();
             }
             Ok(false) => {
+                // Capture the previous focused window before showing our window
+                // This is needed for auto-paste functionality
+                #[cfg(windows)]
+                if let Some(prev_window_state) = app_handle.try_state::<PreviousFocusedWindow>() {
+                    unsafe {
+                        use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+                        let hwnd = GetForegroundWindow();
+                        // Store the HWND value (0 is invalid/null)
+                        if hwnd.0 != 0 {
+                            prev_window_state.store(hwnd.0);
+                            log::info!("Captured previous window HWND: {}", hwnd.0);
+                        }
+                    }
+                }
+
                 // Set flag to ignore blur events for a short time after showing
                 // This prevents the window from immediately hiding due to focus race conditions
                 if let Some(focus_state) = app_handle.try_state::<WindowFocusState>() {

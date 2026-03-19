@@ -8,6 +8,11 @@ pub mod everything;
 pub mod icon;
 pub mod watcher;
 
+/// Convert Chinese text to pinyin initials
+fn to_pinyin_initials(text: &str) -> String {
+    rust_pinyin::get_pinyin(text)
+}
+
 use crate::db::app_cache::{self, AppCacheEntry};
 use crate::db::app_usage::{AppUsage, calculate_frequency_score};
 use crate::db::DatabaseState;
@@ -86,6 +91,7 @@ pub struct AppItem {
     pub name: String,
     pub path: String,
     pub icon: Option<String>,
+    pub pinyin_initials: String,
 }
 
 impl From<AppCacheEntry> for AppItem {
@@ -94,6 +100,7 @@ impl From<AppCacheEntry> for AppItem {
             name: entry.name,
             path: entry.path,
             icon: None,
+            pinyin_initials: entry.pinyin_initials,
         }
     }
 }
@@ -192,6 +199,7 @@ impl SearchIndex {
                         target_path,
                         last_modified,
                         is_valid: true,
+                        pinyin_initials: app.pinyin_initials.clone(),
                     }
                 }).collect();
 
@@ -247,6 +255,7 @@ impl SearchIndex {
                         target_path,
                         last_modified: app_cache::get_file_modified(path),
                         is_valid: true,
+                        pinyin_initials: app.pinyin_initials,
                     };
 
                     if let Err(e) = app_cache::save(&conn, &entry) {
@@ -326,10 +335,14 @@ impl SearchIndex {
         // Get the target path for deduplication
         let target_path = parse_shortcut_target(path).unwrap_or_else(|| path.to_string_lossy().to_string());
 
+        // Pre-compute pinyin initials for Chinese search support
+        let pinyin_initials = to_pinyin_initials(&name);
+
         let app = AppItem {
             name,
             path: path.to_string_lossy().to_string(),
             icon: None,
+            pinyin_initials,
         };
 
         Some((app, target_path))
@@ -340,7 +353,7 @@ impl SearchIndex {
             return self.get_all();
         }
 
-        // 使用 nucleo 进行模糊匹配
+        // 使用 nucleo 进行模糊匹配（同时匹配应用名称和拼音首字母）
         let pattern = Pattern::parse(query, CaseMatching::Smart, Normalization::Smart);
         let mut matcher = nucleo::Matcher::new(nucleo::Config::DEFAULT);
 
@@ -349,8 +362,27 @@ impl SearchIndex {
             .iter()
             .filter_map(|app| {
                 let mut buf = Vec::new();
-                pattern.score(nucleo::Utf32Str::new(&app.name, &mut buf), &mut matcher)
-                    .map(|score| (score, app.clone()))
+
+                // 先尝试匹配应用名称
+                let name_score = pattern.score(nucleo::Utf32Str::new(&app.name, &mut buf), &mut matcher);
+
+                // 再尝试匹配拼音首字母（支持中文拼音搜索如 "wx" 匹配 "微信"）
+                buf.clear();
+                let pinyin_score = if !app.pinyin_initials.is_empty() {
+                    pattern.score(nucleo::Utf32Str::new(&app.pinyin_initials, &mut buf), &mut matcher)
+                } else {
+                    None
+                };
+
+                // 取两者中较高的分数
+                let best_score = match (name_score, pinyin_score) {
+                    (Some(n), Some(p)) => Some(n.max(p)),
+                    (Some(n), None) => Some(n),
+                    (None, Some(p)) => Some(p),
+                    (None, None) => None,
+                };
+
+                best_score.map(|score| (score, app.clone()))
             })
             .collect();
 
@@ -385,20 +417,39 @@ impl SearchIndex {
             .iter()
             .filter_map(|app| {
                 let mut buf = Vec::new();
-                pattern.score(nucleo::Utf32Str::new(&app.name, &mut buf), &mut matcher)
-                    .map(|match_score| {
-                        // Base match score (normalized to 0-1)
-                        let base_score = match_score as f64 / u32::MAX as f64;
 
-                        // Frequency bonus (30% weight)
-                        let freq_bonus = usage_map
-                            .get(app.path.as_str())
-                            .map(|u| calculate_frequency_score(u, now))
-                            .unwrap_or(0.0) * 0.3;
+                // 先尝试匹配应用名称
+                let name_score = pattern.score(nucleo::Utf32Str::new(&app.name, &mut buf), &mut matcher);
 
-                        let total_score = base_score * 0.7 + freq_bonus;
-                        (total_score, app.clone())
-                    })
+                // 再尝试匹配拼音首字母（支持中文拼音搜索如 "wx" 匹配 "微信"）
+                buf.clear();
+                let pinyin_score = if !app.pinyin_initials.is_empty() {
+                    pattern.score(nucleo::Utf32Str::new(&app.pinyin_initials, &mut buf), &mut matcher)
+                } else {
+                    None
+                };
+
+                // 取两者中较高的分数
+                let best_match_score = match (name_score, pinyin_score) {
+                    (Some(n), Some(p)) => Some(n.max(p)),
+                    (Some(n), None) => Some(n),
+                    (None, Some(p)) => Some(p),
+                    (None, None) => None,
+                };
+
+                best_match_score.map(|match_score| {
+                    // Base match score (normalized to 0-1)
+                    let base_score = match_score as f64 / u32::MAX as f64;
+
+                    // Frequency bonus (30% weight)
+                    let freq_bonus = usage_map
+                        .get(app.path.as_str())
+                        .map(|u| calculate_frequency_score(u, now))
+                        .unwrap_or(0.0) * 0.3;
+
+                    let total_score = base_score * 0.7 + freq_bonus;
+                    (total_score, app.clone())
+                })
             })
             .collect();
 

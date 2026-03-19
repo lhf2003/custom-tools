@@ -271,7 +271,6 @@ export function EverythingView() {
           onClick={handleDownloadEverything}
           className="flex items-center gap-2 px-6 py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors"
         >
-          <Download className="w-5 h-5" />
           <span>前往官网下载</span>
           <ExternalLink className="w-4 h-4 ml-1" />
         </button>

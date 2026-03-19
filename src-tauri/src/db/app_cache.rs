@@ -9,6 +9,7 @@ pub struct AppCacheEntry {
     pub target_path: String,
     pub last_modified: i64,
     pub is_valid: bool,
+    pub pinyin_initials: String,
 }
 
 /// Initialize app cache table
@@ -20,6 +21,7 @@ pub fn init_table(conn: &Connection) -> Result<()> {
             target_path TEXT NOT NULL,
             last_modified INTEGER NOT NULL,
             is_valid BOOLEAN DEFAULT 1,
+            pinyin_initials TEXT DEFAULT '',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )",
@@ -43,7 +45,7 @@ pub fn init_table(conn: &Connection) -> Result<()> {
 /// Load all valid apps from cache
 pub fn load_all(conn: &Connection) -> Result<Vec<AppCacheEntry>> {
     let mut stmt = conn.prepare(
-        "SELECT path, name, target_path, last_modified, is_valid
+        "SELECT path, name, target_path, last_modified, is_valid, pinyin_initials
          FROM app_cache
          WHERE is_valid = 1
          ORDER BY name COLLATE NOCASE"
@@ -56,6 +58,7 @@ pub fn load_all(conn: &Connection) -> Result<Vec<AppCacheEntry>> {
             target_path: row.get(2)?,
             last_modified: row.get(3)?,
             is_valid: row.get(4)?,
+            pinyin_initials: row.get(5)?,
         })
     })?;
 
@@ -65,13 +68,14 @@ pub fn load_all(conn: &Connection) -> Result<Vec<AppCacheEntry>> {
 /// Save or update a single app entry
 pub fn save(conn: &Connection, entry: &AppCacheEntry) -> Result<()> {
     conn.execute(
-        "INSERT INTO app_cache (path, name, target_path, last_modified, is_valid, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, CURRENT_TIMESTAMP)
+        "INSERT INTO app_cache (path, name, target_path, last_modified, is_valid, pinyin_initials, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, CURRENT_TIMESTAMP)
          ON CONFLICT(path) DO UPDATE SET
             name = ?2,
             target_path = ?3,
             last_modified = ?4,
             is_valid = ?5,
+            pinyin_initials = ?6,
             updated_at = CURRENT_TIMESTAMP",
         [
             &entry.path,
@@ -79,6 +83,7 @@ pub fn save(conn: &Connection, entry: &AppCacheEntry) -> Result<()> {
             &entry.target_path,
             &entry.last_modified.to_string(),
             &entry.is_valid.to_string(),
+            &entry.pinyin_initials,
         ],
     )?;
 
@@ -91,13 +96,14 @@ pub fn save_batch(conn: &mut Connection, entries: &[AppCacheEntry]) -> Result<()
 
     for entry in entries {
         tx.execute(
-            "INSERT INTO app_cache (path, name, target_path, last_modified, is_valid, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, CURRENT_TIMESTAMP)
+            "INSERT INTO app_cache (path, name, target_path, last_modified, is_valid, pinyin_initials, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, CURRENT_TIMESTAMP)
              ON CONFLICT(path) DO UPDATE SET
                 name = ?2,
                 target_path = ?3,
                 last_modified = ?4,
                 is_valid = ?5,
+                pinyin_initials = ?6,
                 updated_at = CURRENT_TIMESTAMP",
             [
                 &entry.path,
@@ -105,6 +111,7 @@ pub fn save_batch(conn: &mut Connection, entries: &[AppCacheEntry]) -> Result<()
                 &entry.target_path,
                 &entry.last_modified.to_string(),
                 &entry.is_valid.to_string(),
+                &entry.pinyin_initials,
             ],
         )?;
     }

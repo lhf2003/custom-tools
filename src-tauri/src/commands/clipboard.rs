@@ -1,6 +1,6 @@
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{Manager, State};
 use sha2::{Digest, Sha256};
 
 use crate::db::DatabaseState;
@@ -748,6 +748,179 @@ unsafe fn read_dib_data_and_save(ptr: *mut std::ffi::c_void) -> Result<String, S
 
     log::info!("Screenshot saved: {}", image_path.display());
     Ok(image_path.to_string_lossy().to_string())
+}
+
+/// Paste clipboard item to previous focused window
+/// This copies the item to clipboard, hides the window, and simulates Ctrl+V
+#[tauri::command]
+pub fn paste_to_clipboard_item(
+    db_state: State<DatabaseState>,
+    app_handle: tauri::AppHandle,
+    id: i64,
+) -> Result<(), String> {
+    // First copy to clipboard
+    copy_to_clipboard(db_state, app_handle.clone(), id)?;
+
+    // Check if auto-paste is enabled
+    let auto_paste_enabled = if let Some(settings_state) = app_handle.try_state::<crate::commands::settings::SettingsState>() {
+        settings_state.0.lock().map(|mgr| mgr.get_settings().clipboard_auto_paste).unwrap_or(true)
+    } else {
+        true // Default to enabled if settings not available
+    };
+
+    // Get the previous focused window
+    let prev_hwnd = app_handle.try_state::<crate::PreviousFocusedWindow>()
+        .and_then(|state| state.get());
+
+    // Hide the window first
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.hide();
+    }
+
+    // If auto-paste is enabled and we have a valid previous window, try to paste
+    if auto_paste_enabled {
+        if let Some(hwnd) = prev_hwnd {
+            #[cfg(windows)]
+            {
+                // Small delay to ensure window is hidden and target is ready
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                unsafe { simulate_paste_to_window(hwnd) };
+            }
+        } else {
+            log::info!("No previous focused window available, only copied to clipboard");
+        }
+    } else {
+        log::info!("Auto-paste is disabled, only copied to clipboard");
+    }
+
+    Ok(())
+}
+
+/// Simulate Ctrl+V keystrokes to paste clipboard content
+/// Uses the ALT-key trick to reliably SetForegroundWindow on Windows
+#[cfg(windows)]
+unsafe fn simulate_paste_to_window(target_hwnd: isize) {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SetForegroundWindow, BringWindowToTop, IsWindow, IsWindowVisible
+    };
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, KEYBD_EVENT_FLAGS,
+        VK_MENU, VK_CONTROL, VK_V
+    };
+    use windows::Win32::Foundation::HWND;
+
+    // Validate the window still exists
+    let hwnd = HWND(target_hwnd);
+    if IsWindow(hwnd).as_bool() == false {
+        log::warn!("Target window is no longer valid");
+        return;
+    }
+
+    // Only paste if window is visible (not minimized)
+    if !IsWindowVisible(hwnd).as_bool() {
+        log::info!("Target window is not visible, skipping paste");
+        return;
+    }
+
+    // The ALT-key trick: Send ALT keypress to unlock SetForegroundWindow restrictions
+    let alt_input = INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: VK_MENU,
+                wScan: 0,
+                dwFlags: KEYBD_EVENT_FLAGS(0), // KEYDOWN
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+    let alt_up_input = INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: VK_MENU,
+                wScan: 0,
+                dwFlags: KEYEVENTF_KEYUP,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+
+    // Send ALT to unlock foreground window restrictions
+    SendInput(&[alt_input, alt_up_input], std::mem::size_of::<INPUT>() as i32);
+
+    // Set the target window to foreground
+    if SetForegroundWindow(hwnd).as_bool() {
+        log::info!("Successfully set foreground window");
+    } else {
+        log::warn!("Failed to set foreground window");
+    }
+    let _ = BringWindowToTop(hwnd);
+
+    // Small delay for focus to take effect
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
+    // Create Ctrl+V input sequence
+    let ctrl_down = INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: VK_CONTROL,
+                wScan: 0,
+                dwFlags: KEYBD_EVENT_FLAGS(0),
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+    let v_down = INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: VK_V,
+                wScan: 0,
+                dwFlags: KEYBD_EVENT_FLAGS(0),
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+    let v_up = INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: VK_V,
+                wScan: 0,
+                dwFlags: KEYEVENTF_KEYUP,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+    let ctrl_up = INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: VK_CONTROL,
+                wScan: 0,
+                dwFlags: KEYEVENTF_KEYUP,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+
+    // Send Ctrl+V
+    let inputs = [ctrl_down, v_down, v_up, ctrl_up];
+    let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+
+    if sent as usize == inputs.len() {
+        log::info!("Successfully sent Ctrl+V to paste");
+    } else {
+        log::warn!("SendInput only sent {} of {} keystrokes", sent, inputs.len());
+    }
 }
 
 /// Read image file and return as base64 for display
