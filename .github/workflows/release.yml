@@ -24,6 +24,25 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Update version from tag
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = $tag -replace '^v', ''
+          Write-Host "Updating version to: $version"
+
+          # Update tauri.conf.json (replace version field in-place)
+          $tauriConf = Get-Content "src-tauri/tauri.conf.json" -Raw
+          $tauriConf = $tauriConf -replace '"version":\s*"[^"]*"', "`"version`": `"$version`""
+          Set-Content "src-tauri/tauri.conf.json" $tauriConf -Encoding UTF8 -NoNewline
+
+          # Update Cargo.toml (only the first version line in [package])
+          $cargoToml = Get-Content "src-tauri/Cargo.toml" -Raw
+          $cargoToml = $cargoToml -replace '(?m)^version = "[^"]+"', "version = `"$version`""
+          Set-Content "src-tauri/Cargo.toml" $cargoToml -Encoding UTF8 -NoNewline
+
+          Write-Host "Version updated successfully to $version"
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
