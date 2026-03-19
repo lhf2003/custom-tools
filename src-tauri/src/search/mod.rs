@@ -523,10 +523,14 @@ impl Default for SearchIndex {
 /// Launch an application by its shortcut path
 #[cfg(windows)]
 pub fn launch_app(path: &str) -> anyhow::Result<()> {
+    use std::os::windows::process::CommandExt;
     use std::process::Command;
+
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
 
     Command::new("cmd")
         .args(["/c", "start", "", path])
+        .creation_flags(CREATE_NO_WINDOW)
         .spawn()?;
 
     Ok(())
