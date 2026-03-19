@@ -7,6 +7,7 @@ export interface AppSettings {
   startup_launch: boolean;
   theme: string;
   window_opacity: number;
+  clipboard_keep_days: number;
 }
 
 export interface ShortcutConfig {
@@ -32,6 +33,7 @@ interface SettingsState extends AppSettings {
   setStartupLaunch: (enabled: boolean) => Promise<void>;
   toggleStartupLaunch: () => Promise<boolean>;
   setSetting: (key: string, value: string) => Promise<void>;
+  setClipboardKeepDays: (days: number) => Promise<void>;
 
   // Shortcut Actions
   loadShortcuts: () => Promise<void>;
@@ -47,6 +49,7 @@ const defaultSettings: AppSettings = {
   startup_launch: false,
   theme: 'system',
   window_opacity: 0.95,
+  clipboard_keep_days: 30,
 };
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
@@ -134,6 +137,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       }
     } catch (err) {
       console.error('Failed to set setting:', err);
+    }
+  },
+
+  setClipboardKeepDays: async (days: number) => {
+    try {
+      await invoke('set_setting', { key: 'clipboard_keep_days', value: days.toString() });
+      set({ clipboard_keep_days: days });
+    } catch (err) {
+      console.error('Failed to set clipboard_keep_days:', err);
     }
   },
 

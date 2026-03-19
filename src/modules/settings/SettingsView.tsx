@@ -463,9 +463,11 @@ function GeneralSettings() {
     always_on_top,
     hide_on_blur,
     startup_launch,
+    clipboard_keep_days,
     toggleAlwaysOnTop,
     toggleHideOnBlur,
     setStartupLaunch,
+    setClipboardKeepDays,
   } = useSettingsStore();
 
   const handleStartupChange = (enabled: boolean) => {
@@ -508,9 +510,11 @@ function GeneralSettings() {
 
         <SettingCard
           title="剪贴板历史保存天数"
-          description="超过此天数的历史将被自动清理"
+          description="超过此天数的历史将被自动清理（0=永久保存）"
         >
           <select
+            value={clipboard_keep_days}
+            onChange={(e) => setClipboardKeepDays(parseInt(e.target.value))}
             className="bg-zinc-700 text-white text-sm rounded-lg px-3 py-2 outline-none cursor-pointer border border-zinc-600 hover:border-zinc-500 transition-colors appearance-none min-w-[100px]"
             style={{
               backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='white'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
@@ -520,10 +524,10 @@ function GeneralSettings() {
               paddingRight: '32px'
             }}
           >
-            <option value="7" className="bg-zinc-700 text-white">7天</option>
-            <option value="30" className="bg-zinc-700 text-white">30天</option>
-            <option value="90" className="bg-zinc-700 text-white">90天</option>
-            <option value="0" className="bg-zinc-700 text-white">永久</option>
+            <option value={7} className="bg-zinc-700 text-white">7天</option>
+            <option value={30} className="bg-zinc-700 text-white">30天</option>
+            <option value={90} className="bg-zinc-700 text-white">90天</option>
+            <option value={0} className="bg-zinc-700 text-white">永久</option>
           </select>
         </SettingCard>
       </div>
