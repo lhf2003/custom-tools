@@ -311,7 +311,7 @@ export function PasswordView() {
 
   return (
     <div className="w-full h-full overflow-x-auto">
-      <div className="w-[850px] h-full flex" style={{ backgroundColor: '#333333' }}>
+      <div className="min-w-[850px] w-full h-full flex" style={{ backgroundColor: '#333333' }}>
         {/* Left Sidebar - Password List Only */}
         <aside className="w-64 border-r border-zinc-600/30 flex flex-col flex-shrink-0" style={{ backgroundColor: '#2a2a2a' }}>
           {/* Header with Search */}
@@ -557,15 +557,16 @@ function PasswordDetail({
                 <h2 className="text-xl font-semibold text-zinc-200">{entry.title}</h2>
               </div>
               {entry.url && (
-                <a
-                  href={entry.url.startsWith('http') ? entry.url : `https://${entry.url}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-zinc-500 hover:text-indigo-400 text-sm flex items-center gap-1 mt-1 transition-colors"
+                <button
+                  onClick={() => {
+                    const url = entry.url?.startsWith('http') ? entry.url : `https://${entry.url}`;
+                    invoke('open_external_url', { url });
+                  }}
+                  className="text-zinc-500 hover:text-indigo-400 text-sm flex items-center gap-1 mt-1 transition-colors cursor-pointer"
                 >
                   {entry.url}
                   <ExternalLink size={12} />
-                </a>
+                </button>
               )}
             </div>
           </div>

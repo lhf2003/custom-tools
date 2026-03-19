@@ -214,6 +214,7 @@ pub fn run() {
             commands::settings::reset_shortcut,
             commands::settings::reset_all_shortcuts,
             commands::settings::check_shortcut_conflict,
+            commands::system::open_external_url,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
