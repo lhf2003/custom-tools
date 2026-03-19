@@ -261,7 +261,7 @@ export function EverythingView() {
 
   if (hasEverything === false) {
     return (
-      <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center">
+      <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center bg-[#333]">
         <HardDrive className="w-16 h-16 text-zinc-600 mb-4" />
         <h2 className="text-lg font-semibold text-zinc-300 mb-2">Everything 未安装</h2>
         <p className="text-sm text-zinc-500 max-w-md mb-6">
@@ -269,7 +269,7 @@ export function EverythingView() {
         </p>
         <button
           onClick={handleDownloadEverything}
-          className="flex items-center gap-2 px-6 py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors"
+          className="flex items-center gap-2 px-6 py-3 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-500/30 rounded-lg transition-colors"
         >
           <span>前往官网下载</span>
           <ExternalLink className="w-4 h-4 ml-1" />
