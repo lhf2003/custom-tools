@@ -550,7 +550,11 @@ impl SearchIndex {
 
         match result {
             Ok(json) => serde_json::from_str(&json).unwrap_or_default(),
-            Err(_) => Vec::new(),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Vec::new(),
+            Err(e) => {
+                log::warn!("Failed to load custom_scan_dirs: {}", e);
+                Vec::new()
+            }
         }
     }
 }
