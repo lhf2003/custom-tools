@@ -213,6 +213,7 @@ pub fn run() {
             commands::search::is_everything_available,
             commands::search::search_everything,
             commands::search::get_everything_version,
+            commands::search::install_everything,
             commands::search::open_file,
             commands::settings::get_settings,
             commands::settings::set_setting,
@@ -231,6 +232,13 @@ pub fn run() {
             // Updater commands
             commands::updater::check_for_update,
             commands::updater::download_and_install_update,
+            // Changelog commands
+            commands::changelog::add_changelog,
+            commands::changelog::mark_changelog_read,
+            commands::changelog::mark_all_changelogs_read,
+            commands::changelog::get_changelogs,
+            commands::changelog::check_version_changelog,
+            commands::changelog::cleanup_old_changelogs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

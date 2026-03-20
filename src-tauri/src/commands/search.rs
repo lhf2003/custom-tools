@@ -129,8 +129,8 @@ pub async fn extract_app_icon(path: String) -> Result<Option<String>, String> {
 // Everything integration commands
 
 #[tauri::command]
-pub fn is_everything_available() -> bool {
-    everything::is_available()
+pub fn is_everything_available() -> everything::EverythingStatus {
+    everything::check_status()
 }
 
 #[tauri::command]
@@ -141,6 +141,103 @@ pub fn search_everything(query: String, limit: usize) -> Vec<everything::FileRes
 #[tauri::command]
 pub fn get_everything_version() -> Option<String> {
     everything::get_version()
+}
+
+/// Download and install Everything client and/or es.exe into the app's own
+/// `<exe_dir>/Everything/` directory using a PowerShell script.
+///
+/// Stable download URLs (voidtools.com). Update versions when new builds are released:
+///   Everything portable x64: 1.4.1.1032
+///   ES CLI x64:              1.1.0.36
+#[tauri::command]
+pub async fn install_everything(install_client: bool, install_es: bool) -> Result<(), String> {
+    if !install_client && !install_es {
+        return Ok(());
+    }
+
+    let install_dir = everything::bundled_install_dir()
+        .ok_or("无法确定应用安装目录")?;
+
+    std::fs::create_dir_all(&install_dir)
+        .map_err(|e| format!("创建目录失败: {}", e))?;
+
+    // Escape single quotes in the path for PowerShell single-quoted strings
+    let dest = install_dir.to_string_lossy().replace('\'', "''");
+
+    // Script header: set $dest variable (requires Rust format! for interpolation)
+    let mut script = format!(
+        "$ErrorActionPreference = 'Stop'\n\
+         $ProgressPreference = 'SilentlyContinue'\n\
+         $dest = '{}'\n\
+         New-Item -ItemType Directory -Force -Path $dest | Out-Null\n",
+        dest
+    );
+
+    // Helper function: download → validate ZIP magic bytes → extract → verify binary.
+    // Uses raw string to avoid backslash/brace escaping issues.
+    // $dest is passed as parameter $d to avoid PowerShell scope lookup surprises.
+    script.push_str(r#"
+$h = @{ 'User-Agent' = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+
+function Fetch-AndExtract($url, $tmp, $d, $expect) {
+    Write-Output "Downloading $url ..."
+    Invoke-WebRequest -Uri $url -OutFile $tmp -UseBasicParsing -Headers $h
+    # Validate ZIP magic bytes (PK = 0x50 0x4B); catch HTML-instead-of-ZIP silently
+    $bytes = [System.IO.File]::ReadAllBytes($tmp)
+    if ($bytes.Length -lt 4 -or $bytes[0] -ne 0x50 -or $bytes[1] -ne 0x4B) {
+        $preview = [System.Text.Encoding]::UTF8.GetString($bytes[0..[Math]::Min(199, $bytes.Length - 1)])
+        Remove-Item $tmp -ErrorAction SilentlyContinue
+        throw "下载内容不是有效的 ZIP 文件（可能是服务器错误页面）: $preview"
+    }
+    Write-Output "Extracting to $d ..."
+    Expand-Archive -Path $tmp -DestinationPath $d -Force
+    Remove-Item $tmp -ErrorAction SilentlyContinue
+    if (-not (Test-Path $expect)) {
+        throw "解压完成但未找到预期文件: $expect"
+    }
+    Write-Output "OK: $expect"
+}
+"#);
+
+    if install_client {
+        script.push_str(
+            "Fetch-AndExtract \
+             'https://www.voidtools.com/Everything-1.4.1.1032.x64.zip' \
+             \"$dest\\ev_tmp.zip\" $dest \"$dest\\Everything.exe\"\n"
+        );
+    }
+
+    if install_es {
+        script.push_str(
+            "Fetch-AndExtract \
+             'https://www.voidtools.com/ES-1.1.0.36.x64.zip' \
+             \"$dest\\es_tmp.zip\" $dest \"$dest\\es.exe\"\n"
+        );
+    }
+
+    if install_client {
+        script.push_str(r#"if (Test-Path "$dest\Everything.exe") {
+    Start-Process -FilePath "$dest\Everything.exe" -ArgumentList '-startup','-no-setup-wizard' -WindowStyle Hidden
+}
+"#);
+    }
+
+    tokio::task::spawn_blocking(move || {
+        let output = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", &script])
+            .output()
+            .map_err(|e| format!("无法启动 PowerShell: {}", e))?;
+
+        if output.status.success() {
+            Ok(())
+        } else {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(format!("{}{}", stdout, stderr).trim().to_string())
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

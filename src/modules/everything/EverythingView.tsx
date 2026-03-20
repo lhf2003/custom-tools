@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Search, FileText, Folder, HardDrive, ExternalLink, AlertCircle, Settings, ChevronDown, Download } from 'lucide-react';
+import { Search, FileText, Folder, HardDrive, ExternalLink, ChevronDown, RefreshCw, Power } from 'lucide-react';
+
+type EverythingStatus = 'available' | 'not_installed' | 'service_not_running' | null;
 import { invoke } from '@tauri-apps/api/core';
 
 interface FileResult {
@@ -39,11 +41,133 @@ const safeInvoke = async (cmd: string, args?: Record<string, unknown>) => {
   return Promise.resolve(null);
 };
 
+interface InstallOption {
+  key: 'client' | 'es';
+  label: string;
+  description: string;
+}
+
+const INSTALL_OPTIONS: InstallOption[] = [
+  {
+    key: 'client',
+    label: 'Everything 客户端',
+    description: '文件索引服务，搜索功能必须依赖此服务运行',
+  },
+  {
+    key: 'es',
+    label: 'es.exe 命令行工具',
+    description: '本应用通过此工具与 Everything 服务通信',
+  },
+];
+
+function EverythingInstallPage({ onInstalled }: { onInstalled: () => void }) {
+  const [selected, setSelected] = useState<Record<'client' | 'es', boolean>>({
+    client: true,
+    es: true,
+  });
+  const [isInstalling, setIsInstalling] = useState(false);
+  const [installError, setInstallError] = useState<string | null>(null);
+
+  const handleInstall = async () => {
+    setIsInstalling(true);
+    setInstallError(null);
+    try {
+      await safeInvoke('install_everything', {
+        installClient: selected.client,
+        installEs: selected.es,
+      });
+      // Wait briefly for Everything service to start before re-checking
+      await new Promise((r) => setTimeout(r, 1500));
+      onInstalled();
+    } catch (err) {
+      setInstallError(String(err));
+    } finally {
+      setIsInstalling(false);
+    }
+  };
+
+  const handleOpenWebsite = async () => {
+    try {
+      await safeInvoke('open_external_url', { url: 'https://www.voidtools.com' });
+    } catch (err) {
+      console.error('Failed to open website:', err);
+    }
+  };
+
+  const noneSelected = !selected.client && !selected.es;
+
+  return (
+    <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center bg-[#333]">
+      <HardDrive className="w-14 h-14 text-zinc-600 mb-4" />
+      <h2 className="text-lg font-semibold text-zinc-300 mb-1">Everything 未安装</h2>
+      <p className="text-sm text-zinc-500 max-w-sm mb-6">
+        此功能需要 Everything 文件搜索工具支持，选择要安装的组件后一键完成。
+        <br />
+        <span className="text-zinc-600 text-xs">将安装至：当前应用安装目录 / Everything</span>
+      </p>
+
+      {/* Install options */}
+      <div className="w-full max-w-sm space-y-2 mb-6">
+        {INSTALL_OPTIONS.map((opt) => (
+          <label
+            key={opt.key}
+            className="flex items-start gap-3 p-3 rounded-lg bg-[#2d2d2d] border border-white/5 cursor-pointer hover:border-blue-500/30 transition-colors"
+          >
+            <input
+              type="checkbox"
+              checked={selected[opt.key]}
+              onChange={(e) => setSelected((s) => ({ ...s, [opt.key]: e.target.checked }))}
+              className="mt-0.5 accent-blue-500"
+            />
+            <div className="text-left">
+              <p className="text-sm font-medium text-zinc-200">{opt.label}</p>
+              <p className="text-xs text-zinc-500 mt-0.5">{opt.description}</p>
+            </div>
+          </label>
+        ))}
+      </div>
+
+      {/* Error message */}
+      {installError && (
+        <div className="w-full max-w-sm mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-left">
+          <p className="text-xs text-red-400 break-all">{installError}</p>
+        </div>
+      )}
+
+      {/* Action buttons */}
+      <div className="flex gap-3">
+        <button
+          onClick={handleInstall}
+          disabled={noneSelected || isInstalling}
+          className="flex items-center gap-2 px-5 py-2.5 bg-blue-500 hover:bg-blue-600 disabled:bg-zinc-600 disabled:cursor-not-allowed rounded-lg text-white text-sm font-medium transition-colors"
+        >
+          {isInstalling ? (
+            <>
+              <RefreshCw className="w-4 h-4 animate-spin" />
+              <span>安装中...</span>
+            </>
+          ) : (
+            <span>一键安装</span>
+          )}
+        </button>
+        <button
+          onClick={handleOpenWebsite}
+          className="flex items-center gap-2 px-5 py-2.5 bg-[#2d2d2d] hover:bg-[#3a3a3a] text-zinc-400 border border-white/10 rounded-lg text-sm transition-colors"
+        >
+          <ExternalLink className="w-4 h-4" />
+          <span>官网</span>
+        </button>
+      </div>
+
+    </div>
+  );
+}
+
 export function EverythingView() {
   const [query, setQuery] = useState('');
   const [files, setFiles] = useState<FileResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [hasEverything, setHasEverything] = useState<boolean | null>(null);
+  const [everythingStatus, setEverythingStatus] = useState<EverythingStatus>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<FileCategory>('all');
   const [selectedFile, setSelectedFile] = useState<FileResult | null>(null);
@@ -51,18 +175,20 @@ export function EverythingView() {
   const [sortDesc, setSortDesc] = useState(true);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Check Everything availability on mount
-  useEffect(() => {
-    const checkEverything = async () => {
-      try {
-        const available = await safeInvoke('is_everything_available') as boolean;
-        setHasEverything(available);
-      } catch (err) {
-        setHasEverything(false);
-      }
-    };
-    checkEverything();
+  // Check Everything availability (also called on retry)
+  const checkEverything = useCallback(async () => {
+    setEverythingStatus(null);
+    try {
+      const status = await safeInvoke('is_everything_available') as EverythingStatus;
+      setEverythingStatus(status ?? 'not_installed');
+    } catch {
+      setEverythingStatus('not_installed');
+    }
   }, []);
+
+  useEffect(() => {
+    checkEverything();
+  }, [checkEverything]);
 
   // Resize window when view mounts
   useEffect(() => {
@@ -83,18 +209,7 @@ export function EverythingView() {
 
   // Search files
   const searchFiles = useCallback(async (searchQuery: string, category: FileCategory) => {
-    if (!hasEverything) {
-      setError('Everything 未安装或不可用');
-      return;
-    }
-
-    // Allow empty query when category filter is active
-    const hasQuery = searchQuery.trim().length > 0;
-    const hasCategoryFilter = category !== 'all';
-
-    if (!hasQuery && !hasCategoryFilter) {
-      setFiles([]);
-      setSelectedFile(null);
+    if (everythingStatus !== 'available') {
       return;
     }
 
@@ -136,7 +251,7 @@ export function EverythingView() {
     } finally {
       setIsLoading(false);
     }
-  }, [hasEverything]);
+  }, [everythingStatus]);
 
   // Debounced search
   useEffect(() => {
@@ -242,41 +357,33 @@ export function EverythingView() {
     return ext.toUpperCase() + ' 文件';
   };
 
-  if (hasEverything === null) {
+  if (everythingStatus === null) {
     return (
-      <div className="w-full h-full flex items-center justify-center text-zinc-500">
+      <div className="w-full h-full flex items-center justify-center text-zinc-500 bg-[#333]">
         <div className="animate-pulse">正在检查 Everything...</div>
       </div>
     );
   }
 
-  // Handle download Everything
-  const handleDownloadEverything = async () => {
-    try {
-      await safeInvoke('open_external_url', { url: 'https://www.voidtools.com' });
-    } catch (err) {
-      console.error('Failed to open download page:', err);
-    }
-  };
+  if (everythingStatus === 'not_installed') {
+    return <EverythingInstallPage onInstalled={checkEverything} />;
+  }
 
-  if (hasEverything === false) {
+  if (everythingStatus === 'service_not_running') {
     return (
       <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center bg-[#333]">
-        <HardDrive className="w-16 h-16 text-zinc-600 mb-4" />
-        <h2 className="text-lg font-semibold text-zinc-300 mb-2">Everything 未安装</h2>
+        <Power className="w-16 h-16 text-yellow-600 mb-4" />
+        <h2 className="text-lg font-semibold text-zinc-300 mb-2">Everything 服务未运行</h2>
         <p className="text-sm text-zinc-500 max-w-md mb-6">
-          此功能需要安装 Everything 文件搜索工具。Everything 是一款免费的 Windows 文件搜索工具，可以毫秒级查找本地文件。
+          检测到 Everything 已安装，但服务未启动。请打开 Everything 应用程序后重试。
         </p>
         <button
-          onClick={handleDownloadEverything}
-          className="flex items-center gap-2 px-6 py-3 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-500/30 rounded-lg transition-colors"
+          onClick={checkEverything}
+          className="flex items-center gap-2 px-6 py-3 bg-yellow-500/20 hover:bg-yellow-500/30 text-yellow-300 border border-yellow-500/30 rounded-lg transition-colors"
         >
-          <span>前往官网下载</span>
-          <ExternalLink className="w-4 h-4 ml-1" />
+          <RefreshCw className="w-4 h-4" />
+          <span>重新检测</span>
         </button>
-        <p className="text-xs text-zinc-600 mt-4">
-          安装完成后请重启本应用
-        </p>
       </div>
     );
   }
@@ -339,17 +446,8 @@ export function EverythingView() {
               </div>
             ) : sortedFiles.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-zinc-500">
-                {query || selectedCategory !== 'all' ? (
-                  <>
-                    <Search className="w-12 h-12 mb-3 opacity-30" />
-                    <p className="text-sm">未找到匹配的文件</p>
-                  </>
-                ) : (
-                  <>
-                    <HardDrive className="w-12 h-12 mb-3 opacity-30" />
-                    <p className="text-sm">输入关键词或选择分类开始搜索</p>
-                  </>
-                )}
+                <Search className="w-12 h-12 mb-3 opacity-30" />
+                <p className="text-sm">未找到匹配的文件</p>
               </div>
             ) : (
               <div className="divide-y divide-white/5">
