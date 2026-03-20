@@ -248,3 +248,38 @@ pub fn toggle_auto_update(state: State<'_, SettingsState>) -> Result<bool, Strin
 
     Ok(new_value)
 }
+
+/// 获取自定义扫描目录列表（存在主 DB settings 表中，key = "custom_scan_dirs"）
+#[tauri::command]
+pub fn get_custom_scan_dirs(
+    db_state: tauri::State<'_, crate::db::DatabaseState>,
+) -> Result<Vec<String>, String> {
+    let conn = rusqlite::Connection::open(&db_state.0).map_err(|e| e.to_string())?;
+    let result: rusqlite::Result<String> = conn.query_row(
+        "SELECT value FROM settings WHERE key = 'custom_scan_dirs'",
+        [],
+        |row| row.get(0),
+    );
+    match result {
+        Ok(json) => serde_json::from_str(&json).map_err(|e| e.to_string()),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(Vec::new()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// 保存自定义扫描目录列表
+#[tauri::command]
+pub fn set_custom_scan_dirs(
+    dirs: Vec<String>,
+    db_state: tauri::State<'_, crate::db::DatabaseState>,
+) -> Result<(), String> {
+    let conn = rusqlite::Connection::open(&db_state.0).map_err(|e| e.to_string())?;
+    let json = serde_json::to_string(&dirs).map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('custom_scan_dirs', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = ?1",
+        [&json],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}

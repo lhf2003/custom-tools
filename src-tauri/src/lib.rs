@@ -230,6 +230,8 @@ pub fn run() {
             commands::settings::reset_all_shortcuts,
             commands::settings::check_shortcut_conflict,
             commands::settings::toggle_auto_update,
+            commands::settings::get_custom_scan_dirs,
+            commands::settings::set_custom_scan_dirs,
             commands::system::open_external_url,
             commands::system::save_image_to_downloads,
             commands::system::save_image_to_path,

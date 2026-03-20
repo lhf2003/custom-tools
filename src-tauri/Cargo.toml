@@ -48,6 +48,7 @@ window-vibrancy = "0.7.1"
 tauri-plugin-process = "2.3.1"
 tauri-plugin-dialog = "2"
 rust-pinyin = "0.1"
+winreg = "0.52"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.52", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_DataExchange", "Win32_System_Threading", "Win32_UI_Shell", "Win32_Storage_FileSystem", "Win32_System_Memory", "Win32_System_LibraryLoader", "Win32_Graphics_Gdi", "Win32_System_Com", "Win32_System_Ole", "Win32_Graphics_Imaging", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_UI_Input_KeyboardAndMouse"] }

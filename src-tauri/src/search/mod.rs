@@ -5,6 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use nucleo::pattern::{CaseMatching, Normalization, Pattern};
 
 pub mod everything;
+pub mod registry;
+pub mod uwp;
 pub mod icon;
 pub mod watcher;
 
@@ -201,6 +203,50 @@ impl SearchIndex {
             let desktop = PathBuf::from(user_profile).join("Desktop");
             if desktop.exists() {
                 self.scan_directory(&desktop, &mut apps, &mut seen)?;
+            }
+        }
+
+        // Registry apps (green software without Start Menu shortcuts)
+        let registry_apps = registry::scan();
+        log::info!("Registry scan found {} apps", registry_apps.len());
+        for reg_app in registry_apps {
+            let key = format!("{}|{}", reg_app.name.to_lowercase(), reg_app.exe_path.to_lowercase());
+            if seen.insert(key) {
+                let pinyin = to_pinyin_initials(&reg_app.name);
+                apps.push(AppItem {
+                    name: reg_app.name,
+                    path: reg_app.exe_path,
+                    icon: None,
+                    pinyin_initials: pinyin,
+                });
+            }
+        }
+
+        // UWP apps (Microsoft Store)
+        let uwp_apps = uwp::scan();
+        log::info!("UWP scan found {} apps", uwp_apps.len());
+        for uwp_app in uwp_apps {
+            let launch = uwp::launch_path(&uwp_app.app_id);
+            let key = format!("{}|{}", uwp_app.name.to_lowercase(), launch.to_lowercase());
+            if seen.insert(key) {
+                let pinyin = to_pinyin_initials(&uwp_app.name);
+                apps.push(AppItem {
+                    name: uwp_app.name,
+                    path: launch,
+                    icon: None,
+                    pinyin_initials: pinyin,
+                });
+            }
+        }
+
+        // Custom directories configured by user
+        let custom_dirs = self.load_custom_dirs();
+        for dir_path in custom_dirs {
+            let dir = PathBuf::from(&dir_path);
+            if dir.exists() {
+                if let Err(e) = self.scan_directory(&dir, &mut apps, &mut seen) {
+                    log::warn!("Failed to scan custom dir {}: {}", dir_path, e);
+                }
             }
         }
 
@@ -483,6 +529,30 @@ impl SearchIndex {
     pub fn is_indexed(&self) -> bool {
         self.indexed
     }
+
+    /// Read custom scan directories from the database settings table.
+    fn load_custom_dirs(&self) -> Vec<String> {
+        let db_state = match &self.db_state {
+            Some(s) => s,
+            None => return Vec::new(),
+        };
+
+        let conn = match rusqlite::Connection::open(&db_state.0) {
+            Ok(c) => c,
+            Err(_) => return Vec::new(),
+        };
+
+        let result: rusqlite::Result<String> = conn.query_row(
+            "SELECT value FROM settings WHERE key = 'custom_scan_dirs'",
+            [],
+            |row| row.get(0),
+        );
+
+        match result {
+            Ok(json) => serde_json::from_str(&json).unwrap_or_default(),
+            Err(_) => Vec::new(),
+        }
+    }
 }
 
 impl Default for SearchIndex {
@@ -499,10 +569,18 @@ pub fn launch_app(path: &str) -> anyhow::Result<()> {
 
     const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-    Command::new("cmd")
-        .args(["/c", "start", "", path])
-        .creation_flags(CREATE_NO_WINDOW)
-        .spawn()?;
+    if path.starts_with("shell:") {
+        // UWP app: launch via explorer.exe
+        Command::new("explorer.exe")
+            .arg(path)
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()?;
+    } else {
+        Command::new("cmd")
+            .args(["/c", "start", "", path])
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()?;
+    }
 
     Ok(())
 }
