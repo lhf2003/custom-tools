@@ -819,16 +819,22 @@ function SearchSettings() {
   }, []);
 
   const save = async (newDirs: string[]) => {
+    const prev = dirs;
     setDirs(newDirs);
-    await safeInvoke('set_custom_scan_dirs', { dirs: newDirs }).catch(console.error);
+    try {
+      await safeInvoke('set_custom_scan_dirs', { dirs: newDirs });
+    } catch (e) {
+      console.error('Failed to save custom dirs:', e);
+      setDirs(prev); // rollback
+    }
   };
 
   const addDir = async () => {
     if (typeof window !== 'undefined' && (window as unknown as { __TAURI__?: unknown }).__TAURI__) {
       const { open } = await import('@tauri-apps/plugin-dialog');
       const selected = await open({ directory: true, multiple: false });
-      if (selected && !dirs.includes(selected as string)) {
-        await save([...dirs, selected as string]);
+      if (typeof selected === 'string' && !dirs.includes(selected)) {
+        await save([...dirs, selected]);
       }
     }
   };
@@ -865,7 +871,12 @@ function SearchSettings() {
             </div>
             <button
               onClick={addDir}
-              className="px-3 py-1.5 text-xs bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 rounded-lg transition-colors cursor-pointer"
+              disabled={loading}
+              className={`px-3 py-1.5 text-xs rounded-lg transition-colors cursor-pointer ${
+                loading
+                  ? 'bg-white/5 text-white/30 cursor-not-allowed'
+                  : 'bg-blue-500/20 hover:bg-blue-500/30 text-blue-400'
+              }`}
             >
               + 添加目录
             </button>
