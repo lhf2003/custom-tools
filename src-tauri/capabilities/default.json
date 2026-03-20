@@ -24,6 +24,7 @@
     "updater:allow-download-and-install",
     "process:default",
     "process:allow-restart",
-    "dialog:allow-save"
+    "dialog:allow-save",
+    "dialog:allow-open"
   ]
 }
