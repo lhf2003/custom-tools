@@ -7,6 +7,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { useAppStore } from '@/stores/appStore';
 import { JsonTreeView } from './JsonTreeView';
 import { renderJsonToCanvas } from './jsonCanvas';
+import { JsonExportPreviewModal } from './JsonExportPreviewModal';
 
 type DisplayMode = 'tree' | 'text';
 
@@ -19,7 +20,7 @@ export function JsonFormatterView() {
   const [rawText, setRawText] = useState('');
   const [copied, setCopied] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [exportMsg, setExportMsg] = useState<string | null>(null);
+  const [previewData, setPreviewData] = useState<{ imageDataUrl: string; filename: string } | null>(null);
 
   // Tree expand/collapse state: defaultExpanded controls initial state of all nodes;
   // treeKey forces a re-mount (clearing per-node overrides) when all-expand/collapse is triggered.
@@ -68,27 +69,19 @@ export function JsonFormatterView() {
     }
   }, [formattedText]);
 
-  const handleExportImage = useCallback(async () => {
+  const handleExportImage = useCallback(() => {
     if (parsedJson === null) return;
     setExporting(true);
-    setExportMsg(null);
     try {
-      // Render full JSON tree directly to Canvas (bypasses html-to-image /
-      // SVG foreignObject which fails in Tauri WebView2 with external CSS).
       const canvas = renderJsonToCanvas(
         parsedJson as Record<string, unknown> | unknown[],
         2,
       );
-      const base64Data = canvas.toDataURL('image/png').replace('data:image/png;base64,', '');
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      const filename = `json-${timestamp}.png`;
-      const savedPath = await invoke<string>('save_image_to_downloads', { base64Data, filename });
-      setExportMsg(`已保存至 ${savedPath}`);
-      setTimeout(() => setExportMsg(null), 4000);
-    } catch (err) {
-      console.error('Export failed:', err);
-      setExportMsg('导出失败');
-      setTimeout(() => setExportMsg(null), 3000);
+      setPreviewData({
+        imageDataUrl: canvas.toDataURL('image/png'),
+        filename: `json-${timestamp}.png`,
+      });
     } finally {
       setExporting(false);
     }
@@ -199,14 +192,13 @@ export function JsonFormatterView() {
         </button>
       </div>
 
-      {/* ── Export result banner ──────────────────────────────────────────── */}
-      {exportMsg && (
-        <div className={`flex items-center gap-2 px-4 py-1.5 border-b flex-shrink-0 text-xs
-          ${exportMsg === '导出失败'
-            ? 'bg-red-900/30 border-red-800/50 text-red-300'
-            : 'bg-emerald-900/30 border-emerald-800/50 text-emerald-300'}`}>
-          <span>{exportMsg}</span>
-        </div>
+      {/* ── Export preview modal ──────────────────────────────────────────── */}
+      {previewData && (
+        <JsonExportPreviewModal
+          imageDataUrl={previewData.imageDataUrl}
+          defaultFilename={previewData.filename}
+          onClose={() => setPreviewData(null)}
+        />
       )}
 
       {/* ── Parse error banner ────────────────────────────────────────────── */}
