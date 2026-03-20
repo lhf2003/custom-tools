@@ -79,8 +79,8 @@ function EverythingInstallPage({ onInstalled }: { onInstalled: () => void }) {
       // Wait briefly for Everything service to start before re-checking
       await new Promise((r) => setTimeout(r, 1500));
       onInstalled();
-    } catch (err) {
-      setInstallError(String(err));
+    } catch {
+      setInstallError('下载失败，请点击下方官方链接手动下载');
     } finally {
       setIsInstalling(false);
     }
@@ -88,7 +88,7 @@ function EverythingInstallPage({ onInstalled }: { onInstalled: () => void }) {
 
   const handleOpenWebsite = async () => {
     try {
-      await safeInvoke('open_external_url', { url: 'https://www.voidtools.com' });
+      await safeInvoke('open_external_url', { url: 'https://www.voidtools.com/zh-cn/downloads/' });
     } catch (err) {
       console.error('Failed to open website:', err);
     }
@@ -101,7 +101,7 @@ function EverythingInstallPage({ onInstalled }: { onInstalled: () => void }) {
       <HardDrive className="w-14 h-14 text-zinc-600 mb-4" />
       <h2 className="text-lg font-semibold text-zinc-300 mb-1">Everything 未安装</h2>
       <p className="text-sm text-zinc-500 max-w-sm mb-6">
-        此功能需要 Everything 文件搜索工具支持，选择要安装的组件后一键完成。
+        此功能需要 Everything 文件搜索工具支持
         <br />
         <span className="text-zinc-600 text-xs">将安装至：当前应用安装目录 / Everything</span>
       </p>
@@ -129,9 +129,7 @@ function EverythingInstallPage({ onInstalled }: { onInstalled: () => void }) {
 
       {/* Error message */}
       {installError && (
-        <div className="w-full max-w-sm mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-left">
-          <p className="text-xs text-red-400 break-all">{installError}</p>
-        </div>
+        <p className="text-xs text-red-400 mb-4">{installError}</p>
       )}
 
       {/* Action buttons */}
@@ -375,7 +373,7 @@ export function EverythingView() {
         <Power className="w-16 h-16 text-yellow-600 mb-4" />
         <h2 className="text-lg font-semibold text-zinc-300 mb-2">Everything 服务未运行</h2>
         <p className="text-sm text-zinc-500 max-w-md mb-6">
-          检测到 Everything 已安装，但服务未启动。请打开 Everything 应用程序后重试。
+          检测到服务未启动。请打开 Everything 应用程序后重试。
         </p>
         <button
           onClick={checkEverything}
