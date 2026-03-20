@@ -2,6 +2,7 @@ use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
 };
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use pbkdf2::pbkdf2_hmac;
 use rand::RngCore;
 use sha2::Sha256;
@@ -65,13 +66,13 @@ impl CryptoManager {
         result.extend_from_slice(&ciphertext);
 
         // Base64 encode
-        Ok(base64::encode(&result))
+        Ok(STANDARD.encode(&result))
     }
 
     /// Decrypt ciphertext
     pub fn decrypt(&self, ciphertext: &str) -> anyhow::Result<String> {
         // Base64 decode
-        let data = base64::decode(ciphertext)?;
+        let data = STANDARD.decode(ciphertext)?;
 
         if data.len() < 28 {
             return Err(anyhow::anyhow!("Invalid ciphertext length"));
@@ -100,7 +101,7 @@ impl CryptoManager {
     /// This method extracts the salt from the ciphertext and re-derives the key
     pub fn decrypt_with_password(ciphertext: &str, master_password: &str) -> anyhow::Result<String> {
         // Base64 decode
-        let data = base64::decode(ciphertext)?;
+        let data = STANDARD.decode(ciphertext)?;
 
         if data.len() < 28 {
             return Err(anyhow::anyhow!("Invalid ciphertext length"));

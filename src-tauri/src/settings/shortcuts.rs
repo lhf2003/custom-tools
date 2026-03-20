@@ -51,7 +51,7 @@ impl ShortcutAction {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn from_id(s: &str) -> Option<Self> {
         match s {
             "toggle_window" => Some(ShortcutAction::ToggleWindow),
             "open_clipboard" => Some(ShortcutAction::OpenClipboard),
@@ -170,10 +170,8 @@ impl ShortcutManager {
         })?;
 
         let mut user_overrides: HashMap<String, (Option<String>, bool)> = HashMap::new();
-        for row in rows {
-            if let Ok((id, custom_keys, enabled)) = row {
-                user_overrides.insert(id, (custom_keys, enabled));
-            }
+        for (id, custom_keys, enabled) in rows.flatten() {
+            user_overrides.insert(id, (custom_keys, enabled));
         }
 
         // 合并默认配置和用户覆盖
@@ -473,69 +471,17 @@ fn parse_key_code(key: &str) -> Result<Code, String> {
 /// 处理快捷键动作
 fn handle_shortcut_action(app_handle: &AppHandle, action_id: &str) {
     use tauri::Emitter;
-    use crate::PreviousFocusedWindow;
-    use std::time::Duration;
 
     match action_id {
         "toggle_window" => {
-            // 直接处理窗口显示/隐藏
-            if let Some(window) = app_handle.get_webview_window("main") {
-                match window.is_visible() {
-                    Ok(true) => { let _ = window.hide(); }
-                    Ok(false) => {
-                        // Capture the previous focused window before showing our window
-                        #[cfg(windows)]
-                        {
-                            log::info!("[Shortcut] Attempting to capture previous focused window...");
-                            if let Some(prev_window_state) = app_handle.try_state::<PreviousFocusedWindow>() {
-                                unsafe {
-                                    use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
-                                    let hwnd = GetForegroundWindow();
-                                    log::info!("[Shortcut] GetForegroundWindow returned: {}", hwnd.0);
-                                    if hwnd.0 != 0 {
-                                        prev_window_state.store(hwnd.0);
-                                        log::info!("[Shortcut] Captured previous window HWND: {}", hwnd.0);
-                                    } else {
-                                        log::warn!("[Shortcut] GetForegroundWindow returned null");
-                                    }
-                                }
-                            } else {
-                                log::warn!("[Shortcut] PreviousFocusedWindow state not found");
-                            }
-                        }
-
-                        const TOP_PADDING: i32 = 100;
-                        let _ = window.center();
-                        if let Ok(pos) = window.outer_position() {
-                            let monitor = window.current_monitor().ok().flatten()
-                                .or_else(|| window.primary_monitor().ok().flatten());
-                            if let Some(m) = monitor {
-                                let y = m.position().y + TOP_PADDING;
-                                let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: pos.x, y }));
-                            }
-                        }
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
-                    Err(e) => log::error!("Failed to check window visibility: {}", e),
-                }
-            }
+            // 复用 lib.rs 的 toggle_main_window（含 HWND 捕获、防闪烁、窗口定位）
+            crate::toggle_main_window(app_handle);
         }
         "open_clipboard" | "open_notes" | "open_passwords" | "open_settings" => {
-            // Capture previous window before showing
+            // 捕获前台窗口以支持自动粘贴
             #[cfg(windows)]
-            {
-                if let Some(prev_window_state) = app_handle.try_state::<PreviousFocusedWindow>() {
-                    unsafe {
-                        use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
-                        let hwnd = GetForegroundWindow();
-                        if hwnd.0 != 0 {
-                            prev_window_state.store(hwnd.0);
-                            log::info!("[Shortcut] Captured HWND for {}: {}", action_id, hwnd.0);
-                        }
-                    }
-                }
-            }
+            crate::capture_prev_window_hwnd(app_handle);
+
             if let Some(window) = app_handle.get_webview_window("main") {
                 let _ = window.show();
                 let _ = window.set_focus();

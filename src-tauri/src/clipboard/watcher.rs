@@ -20,7 +20,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use super::{ClipboardContent, ClipboardEvent};
 
 thread_local! {
-    static CLIPBOARD_SENDER: RefCell<Option<Sender<ClipboardEvent>>> = RefCell::new(None);
+    static CLIPBOARD_SENDER: RefCell<Option<Sender<ClipboardEvent>>> = const { RefCell::new(None) };
 }
 
 /// Windows clipboard watcher using WM_CLIPBOARDUPDATE
@@ -253,9 +253,10 @@ impl ClipboardWatcher {
     unsafe fn read_dib_data(ptr: *mut std::ffi::c_void) -> anyhow::Result<Vec<u8>> {
         use std::slice;
 
-        // BITMAPINFOHEADER structure
+        // BITMAPINFOHEADER structure (mirrors Windows API, field names preserved for clarity)
         #[repr(C)]
-        struct BITMAPINFOHEADER {
+        #[allow(non_camel_case_types, non_snake_case)]
+        struct BitmapInfoHeader {
             biSize: u32,
             biWidth: i32,
             biHeight: i32,
@@ -269,12 +270,12 @@ impl ClipboardWatcher {
             biClrImportant: u32,
         }
 
-        let header = &*(ptr as *const BITMAPINFOHEADER);
+        let header = &*(ptr as *const BitmapInfoHeader);
 
         let width = header.biWidth as u32;
-        let height = header.biHeight.abs() as u32;
+        let height = header.biHeight.unsigned_abs();
         let bit_count = header.biBitCount as u32;
-        let row_size = ((width * bit_count + 31) / 32) * 4; // DWORD aligned
+        let row_size = (width * bit_count).div_ceil(32) * 4; // DWORD aligned
 
         log::debug!("DIB: {}x{} @ {} bits per pixel", width, height, bit_count);
 
@@ -301,7 +302,7 @@ impl ClipboardWatcher {
 
         for y in 0..height {
             let src_y = if is_top_down { y } else { height - 1 - y };
-            let row_start = (src_y * row_size as u32) as usize;
+            let row_start = (src_y * row_size) as usize;
 
             for x in 0..width {
                 let pixel_offset = row_start + (x * (bit_count / 8)) as usize;
@@ -396,7 +397,7 @@ impl ClipboardWatcher {
         if let Ok(handle) = hdrop_handle {
             if !handle.is_invalid() {
                 log::info!("CF_HDROP handle acquired, reading file list...");
-                let hdrop = HDROP(handle.0 as isize);
+                let hdrop = HDROP(handle.0);
                 match Self::read_hdrop_data(hdrop) {
                     Ok(files) => {
                         log::info!("File list read successfully: {} files", files.len());

@@ -3,8 +3,6 @@ use tauri_plugin_autostart::ManagerExt;
 use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
 use std::time::Duration;
 
-// Tray icon resource ID (must match the one in build.rs if defined there)
-const TRAY_ICON_ID: u32 = 1;
 
 pub mod clipboard;
 pub mod commands;
@@ -27,6 +25,7 @@ pub fn run() {
             None,
         ))
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // Setup system tray
             setup_system_tray(app.handle())?;
@@ -233,6 +232,7 @@ pub fn run() {
             commands::settings::toggle_auto_update,
             commands::system::open_external_url,
             commands::system::save_image_to_downloads,
+            commands::system::save_image_to_path,
             // Updater commands
             commands::updater::check_for_update,
             commands::updater::download_and_install_update,
@@ -304,6 +304,12 @@ pub struct PreviousFocusedWindow {
     hwnd: Arc<Mutex<isize>>, // 0 means no valid window
 }
 
+impl Default for PreviousFocusedWindow {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PreviousFocusedWindow {
     pub fn new() -> Self {
         Self {
@@ -325,38 +331,37 @@ impl PreviousFocusedWindow {
     }
 }
 
-fn toggle_main_window(app_handle: &tauri::AppHandle) {
+/// 捕获当前前台窗口的 HWND，存入 PreviousFocusedWindow 状态（用于自动粘贴）。
+#[cfg(windows)]
+pub(crate) fn capture_prev_window_hwnd(app_handle: &tauri::AppHandle) {
+    if let Some(prev_window_state) = app_handle.try_state::<PreviousFocusedWindow>() {
+        unsafe {
+            use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+            let hwnd = GetForegroundWindow();
+            if hwnd.0 != 0 {
+                prev_window_state.store(hwnd.0);
+                log::info!("Captured previous window HWND: {}", hwnd.0);
+            } else {
+                log::warn!("GetForegroundWindow returned null, cannot capture");
+            }
+        }
+    } else {
+        log::warn!("PreviousFocusedWindow state not found");
+    }
+}
+
+pub(crate) fn toggle_main_window(app_handle: &tauri::AppHandle) {
     if let Some(window) = app_handle.get_webview_window("main") {
         match window.is_visible() {
             Ok(true) => {
                 let _ = window.hide();
             }
             Ok(false) => {
-                // Capture the previous focused window before showing our window
-                // This is needed for auto-paste functionality
+                // Capture the previous focused window for auto-paste functionality
                 #[cfg(windows)]
-                {
-                    log::info!("Attempting to capture previous focused window...");
-                    if let Some(prev_window_state) = app_handle.try_state::<PreviousFocusedWindow>() {
-                        unsafe {
-                            use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
-                            let hwnd = GetForegroundWindow();
-                            log::info!("GetForegroundWindow returned: {}", hwnd.0);
-                            // Store the HWND value (0 is invalid/null)
-                            if hwnd.0 != 0 {
-                                prev_window_state.store(hwnd.0);
-                                log::info!("Captured previous window HWND: {}", hwnd.0);
-                            } else {
-                                log::warn!("GetForegroundWindow returned null, cannot capture");
-                            }
-                        }
-                    } else {
-                        log::warn!("PreviousFocusedWindow state not found, cannot capture HWND");
-                    }
-                }
+                capture_prev_window_hwnd(app_handle);
 
-                // Set flag to ignore blur events for a short time after showing
-                // This prevents the window from immediately hiding due to focus race conditions
+                // Ignore blur events briefly to prevent immediate re-hide
                 if let Some(focus_state) = app_handle.try_state::<WindowFocusState>() {
                     focus_state.set_ignore_blur_for(Duration::from_millis(300));
                 }

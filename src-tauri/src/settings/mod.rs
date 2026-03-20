@@ -79,47 +79,45 @@ impl SettingsManager {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?;
 
-        for row in rows {
-            if let Ok((key, value)) = row {
-                match key.as_str() {
-                    "always_on_top" => {
-                        if let Ok(v) = value.parse::<bool>() {
-                            settings.always_on_top = v;
-                        }
+        for (key, value) in rows.flatten() {
+            match key.as_str() {
+                "always_on_top" => {
+                    if let Ok(v) = value.parse::<bool>() {
+                        settings.always_on_top = v;
                     }
-                    "hide_on_blur" => {
-                        if let Ok(v) = value.parse::<bool>() {
-                            settings.hide_on_blur = v;
-                        }
-                    }
-                    "startup_launch" => {
-                        if let Ok(v) = value.parse::<bool>() {
-                            settings.startup_launch = v;
-                        }
-                    }
-                    "theme" => settings.theme = value,
-                    "window_opacity" => {
-                        if let Ok(v) = value.parse::<f32>() {
-                            settings.window_opacity = v.clamp(0.5, 1.0);
-                        }
-                    }
-                    "clipboard_keep_days" => {
-                        if let Ok(v) = value.parse::<i32>() {
-                            settings.clipboard_keep_days = v.max(0);
-                        }
-                    }
-                    "auto_update" => {
-                        if let Ok(v) = value.parse::<bool>() {
-                            settings.auto_update = v;
-                        }
-                    }
-                    "clipboard_auto_paste" => {
-                        if let Ok(v) = value.parse::<bool>() {
-                            settings.clipboard_auto_paste = v;
-                        }
-                    }
-                    _ => {}
                 }
+                "hide_on_blur" => {
+                    if let Ok(v) = value.parse::<bool>() {
+                        settings.hide_on_blur = v;
+                    }
+                }
+                "startup_launch" => {
+                    if let Ok(v) = value.parse::<bool>() {
+                        settings.startup_launch = v;
+                    }
+                }
+                "theme" => settings.theme = value,
+                "window_opacity" => {
+                    if let Ok(v) = value.parse::<f32>() {
+                        settings.window_opacity = v.clamp(0.5, 1.0);
+                    }
+                }
+                "clipboard_keep_days" => {
+                    if let Ok(v) = value.parse::<i32>() {
+                        settings.clipboard_keep_days = v.max(0);
+                    }
+                }
+                "auto_update" => {
+                    if let Ok(v) = value.parse::<bool>() {
+                        settings.auto_update = v;
+                    }
+                }
+                "clipboard_auto_paste" => {
+                    if let Ok(v) = value.parse::<bool>() {
+                        settings.clipboard_auto_paste = v;
+                    }
+                }
+                _ => {}
             }
         }
 

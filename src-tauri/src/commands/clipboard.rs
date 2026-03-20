@@ -598,7 +598,7 @@ unsafe fn read_hdrop_data(handle: windows::Win32::Foundation::HANDLE) -> Result<
     use windows::Win32::UI::Shell::DragQueryFileW;
     use windows::Win32::UI::Shell::HDROP;
 
-    let hdrop = HDROP(handle.0 as isize);
+    let hdrop = HDROP(handle.0);
     let file_count = DragQueryFileW(hdrop, 0xFFFFFFFF, None);
 
     if file_count == 0 {
@@ -628,9 +628,10 @@ unsafe fn read_hdrop_data(handle: windows::Win32::Foundation::HANDLE) -> Result<
 unsafe fn read_dib_data_and_save(ptr: *mut std::ffi::c_void) -> Result<String, String> {
     use std::slice;
 
-    // BITMAPINFOHEADER structure
+    // BITMAPINFOHEADER structure (mirrors Windows API, field names preserved for clarity)
     #[repr(C)]
-    struct BITMAPINFOHEADER {
+    #[allow(non_camel_case_types, non_snake_case)]
+    struct BitmapInfoHeader {
         biSize: u32,
         biWidth: i32,
         biHeight: i32,
@@ -644,17 +645,17 @@ unsafe fn read_dib_data_and_save(ptr: *mut std::ffi::c_void) -> Result<String, S
         biClrImportant: u32,
     }
 
-    let header = &*(ptr as *const BITMAPINFOHEADER);
+    let header = &*(ptr as *const BitmapInfoHeader);
 
     let width = header.biWidth as u32;
-    let height = header.biHeight.abs() as u32;
+    let height = header.biHeight.unsigned_abs();
     let bit_count = header.biBitCount as u32;
 
     if width == 0 || height == 0 {
         return Err("Invalid image dimensions".to_string());
     }
 
-    let row_size = ((width * bit_count + 31) / 32) * 4;
+    let row_size = (width * bit_count).div_ceil(32) * 4;
 
     // Calculate pixel data offset
     let header_size = header.biSize as usize;
@@ -683,7 +684,7 @@ unsafe fn read_dib_data_and_save(ptr: *mut std::ffi::c_void) -> Result<String, S
 
     for y in 0..height {
         let src_y = if is_top_down { y } else { height - 1 - y };
-        let row_start = (src_y * row_size as u32) as usize;
+        let row_start = (src_y * row_size) as usize;
 
         for x in 0..width {
             let pixel_offset = row_start + (x * (bit_count / 8)) as usize;
@@ -819,7 +820,7 @@ unsafe fn simulate_paste_to_window(target_hwnd: isize) {
 
     // Validate the window still exists
     let hwnd = HWND(target_hwnd);
-    if IsWindow(hwnd).as_bool() == false {
+    if !IsWindow(hwnd).as_bool() {
         log::warn!("Target window is no longer valid");
         return;
     }

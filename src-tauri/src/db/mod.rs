@@ -167,7 +167,7 @@ impl Database {
         for (key, value) in &defaults {
             self.conn.execute(
                 "INSERT OR IGNORE INTO settings (key, value) VALUES (?1, ?2)",
-                &[key, value],
+                [key, value],
             )?;
         }
 

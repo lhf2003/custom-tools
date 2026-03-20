@@ -15,7 +15,7 @@ pub fn record_launch(conn: &Connection, path: &str, name: &str) -> Result<()> {
             launch_count = launch_count + 1,
             last_launch = ?3,
             updated_at = CURRENT_TIMESTAMP",
-        &[path, name, &now.to_string()],
+        rusqlite::params![path, name, now],
     )?;
 
     Ok(())
@@ -29,7 +29,7 @@ pub fn record_search(conn: &Connection, path: &str, name: &str) -> Result<()> {
          ON CONFLICT(path) DO UPDATE SET
             search_count = search_count + 1,
             updated_at = CURRENT_TIMESTAMP",
-        &[path, name],
+        rusqlite::params![path, name],
     )?;
 
     Ok(())

@@ -1,6 +1,6 @@
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+
 use tauri::State;
 
 use crate::db::DatabaseState;

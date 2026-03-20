@@ -29,7 +29,6 @@ pub struct ClipboardEvent {
 /// Clipboard manager that handles watching and storing
 pub struct ClipboardManager {
     watcher: Arc<Mutex<ClipboardWatcher>>,
-    app_handle: AppHandle,
 }
 
 impl ClipboardManager {
@@ -71,10 +70,7 @@ impl ClipboardManager {
             }
         });
 
-        Ok(Self {
-            watcher,
-            app_handle,
-        })
+        Ok(Self { watcher })
     }
 
     async fn handle_clipboard_event(

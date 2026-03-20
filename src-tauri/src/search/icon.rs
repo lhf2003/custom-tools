@@ -8,7 +8,7 @@ use xxhash_rust::xxh3::xxh3_64;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
 const ICON_SIZE: i32 = 256;  // 高清图标尺寸
-const ICON_DISPLAY_SIZE: i32 = 48;  // 前端显示尺寸（用于后备方案）
+
 const MEMORY_CACHE_SIZE: usize = 100;
 const DISK_CACHE_DAYS: u64 = 7;
 
@@ -90,10 +90,7 @@ fn write_disk_cache(cache_key: &str, png_data: &[u8]) -> Result<()> {
 #[cfg(windows)]
 pub fn extract_icon(path: &str) -> Result<Option<String>> {
     // 1. 获取文件修改时间
-    let mod_time = match get_file_mod_time(path) {
-        Ok(t) => t,
-        Err(_) => 0,
-    };
+    let mod_time = get_file_mod_time(path).unwrap_or_default();
 
     let path_hash = xxh3_64(path.as_bytes());
 
@@ -108,15 +105,12 @@ pub fn extract_icon(path: &str) -> Result<Option<String>> {
 
     // 3. 检查磁盘缓存
     let cache_key = compute_cache_key(path, mod_time);
-    match read_disk_cache(&cache_key) {
-        Ok(cached) => {
-            log::debug!("Icon disk cache hit: {}", path);
-            // 回填内存缓存
-            let mut cache = MEMORY_CACHE.lock().map_err(|e| anyhow!("Lock error: {}", e))?;
-            cache.put((path_hash, mod_time), cached.clone());
-            return Ok(Some(cached));
-        }
-        Err(_) => {}
+    if let Ok(cached) = read_disk_cache(&cache_key) {
+        log::debug!("Icon disk cache hit: {}", path);
+        // 回填内存缓存
+        let mut cache = MEMORY_CACHE.lock().map_err(|e| anyhow!("Lock error: {}", e))?;
+        cache.put((path_hash, mod_time), cached.clone());
+        return Ok(Some(cached));
     }
 
     // 4. 实时提取图标
@@ -204,7 +198,7 @@ fn extract_icon_highres(path: &str) -> Result<Vec<u8>> {
 fn extract_icon_fallback(path: &str) -> Result<Vec<u8>> {
     use windows::Win32::Graphics::Gdi::{
         CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetDIBits, ReleaseDC,
-        SelectObject, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, BITMAP,
+        BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, BITMAP,
         GetObjectW,
     };
     use windows::Win32::UI::Shell::ExtractIconExW;
@@ -324,7 +318,7 @@ fn extract_icon_fallback(path: &str) -> Result<Vec<u8>> {
         // 10. 转为 PNG
         let img = image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(
             width as u32,
-            height.abs() as u32,
+            height.unsigned_abs(),
             buffer,
         ).ok_or_else(|| anyhow!("Failed to create image buffer"))?;
 
@@ -339,7 +333,7 @@ fn extract_icon_fallback(path: &str) -> Result<Vec<u8>> {
 #[cfg(windows)]
 fn hbitmap_to_png(hbitmap: windows::Win32::Graphics::Gdi::HBITMAP) -> Result<Vec<u8>> {
     use windows::Win32::Graphics::Gdi::{
-        CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetDIBits, ReleaseDC,
+        CreateCompatibleDC, DeleteDC, GetDC, GetDIBits, ReleaseDC,
         BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, BITMAP, GetObjectW,
     };
 
@@ -417,8 +411,8 @@ fn hbitmap_to_png(hbitmap: windows::Win32::Graphics::Gdi::HBITMAP) -> Result<Vec
 #[cfg(windows)]
 fn extract_icon_shgetfileinfo(path: &str) -> Result<Vec<u8>> {
     use windows::Win32::Graphics::Gdi::{
-        CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, GetDIBits, PatBlt, ReleaseDC,
-        SelectObject, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, BLACKNESS, TRANSPARENT,
+        CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetDIBits, ReleaseDC,
+        SelectObject, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS,
     };
     use windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES;
     use windows::Win32::UI::Shell::{SHGetFileInfoW, SHGFI_ICON, SHGFI_LARGEICON};
@@ -486,7 +480,7 @@ fn extract_icon_shgetfileinfo(path: &str) -> Result<Vec<u8>> {
         let old_bm = SelectObject(hdc_mem, hbm);
 
         // 绘制图标（缩放到 48x48）
-        DrawIconEx(
+        let _ = DrawIconEx(
             hdc_mem,
             0,
             0,

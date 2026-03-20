@@ -150,7 +150,7 @@ fn parse_csv_results(output: &str) -> Vec<FileResult> {
 
     lines
         .filter(|line| !line.trim().is_empty())
-        .filter_map(|line| parse_csv_line(line))
+        .filter_map(parse_csv_line)
         .collect()
 }
 

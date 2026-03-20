@@ -199,7 +199,7 @@ impl NotesManager {
         let full_path = self.root_path.join(relative_path);
 
         // Add .md extension if not present
-        let full_path = if !full_path.extension().map_or(false, |ext| ext == "md") {
+        let full_path = if !full_path.extension().is_some_and(|ext| ext == "md") {
             full_path.with_extension("md")
         } else {
             full_path
