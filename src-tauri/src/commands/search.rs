@@ -129,18 +129,24 @@ pub async fn extract_app_icon(path: String) -> Result<Option<String>, String> {
 // Everything integration commands
 
 #[tauri::command]
-pub fn is_everything_available() -> everything::EverythingStatus {
-    everything::check_status()
+pub async fn is_everything_available() -> everything::EverythingStatus {
+    tokio::task::spawn_blocking(everything::check_status)
+        .await
+        .unwrap_or(everything::EverythingStatus::NotInstalled)
 }
 
 #[tauri::command]
-pub fn search_everything(query: String, limit: usize) -> Vec<everything::FileResult> {
-    everything::search_files(&query, limit)
+pub async fn search_everything(query: String, limit: usize) -> Vec<everything::FileResult> {
+    tokio::task::spawn_blocking(move || everything::search_files(&query, limit))
+        .await
+        .unwrap_or_default()
 }
 
 #[tauri::command]
-pub fn get_everything_version() -> Option<String> {
-    everything::get_version()
+pub async fn get_everything_version() -> Option<String> {
+    tokio::task::spawn_blocking(everything::get_version)
+        .await
+        .unwrap_or(None)
 }
 
 /// Download and install Everything client and/or es.exe into the app's own

@@ -43,6 +43,18 @@ jobs:
 
           Write-Host "Version updated successfully to $version"
 
+      - name: Get tag message
+        id: tag_message
+        shell: pwsh
+        run: |
+          $msg = git tag -l --format='%(contents)' "${{ github.ref_name }}"
+          if (-not $msg) { $msg = "## 更新内容`n- 版本 ${{ github.ref_name }}" }
+          # GitHub Actions multiline output
+          $delimiter = "EOF_$(Get-Random)"
+          "body<<$delimiter" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          $msg | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          $delimiter | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
@@ -52,9 +64,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
-          releaseBody: |
-            ## 更新内容
-            - 自动构建发布
+          releaseBody: ${{ steps.tag_message.outputs.body }}
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true

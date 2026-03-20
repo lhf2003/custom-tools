@@ -1,6 +1,11 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 /// File search result from Everything
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct FileResult {
@@ -20,6 +25,14 @@ pub enum EverythingStatus {
     ServiceNotRunning,
     /// Everything is available and service is responding
     Available,
+}
+
+/// Create a Command with CREATE_NO_WINDOW on Windows to suppress console flash.
+fn make_cmd(path: &PathBuf) -> Command {
+    let mut cmd = Command::new(path);
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd
 }
 
 /// Find es.exe: checks app's own Everything directory first, then system-wide paths.
@@ -74,7 +87,7 @@ pub fn check_status() -> EverythingStatus {
 
     // es.exe exits with code 0 when the service is running (even with no results),
     // and non-zero when it cannot connect to the Everything IPC service.
-    let output = Command::new(&es_path).args(["-n", "1", "*"]).output();
+    let output = make_cmd(&es_path).args(["-n", "1", "*"]).output();
 
     match output {
         Ok(out) if out.status.success() => EverythingStatus::Available,
@@ -83,6 +96,8 @@ pub fn check_status() -> EverythingStatus {
 }
 
 /// Search files using Everything CLI.
+/// Uses -csv -size -date-modified to read size and mtime from the Everything
+/// index directly, avoiding per-file fs::metadata calls.
 pub fn search_files(query: &str, limit: usize) -> Vec<FileResult> {
     let es_path = match find_es_exe() {
         Some(p) => p,
@@ -94,8 +109,11 @@ pub fn search_files(query: &str, limit: usize) -> Vec<FileResult> {
 
     log::info!("Everything search query: '{}'", search_query);
 
-    let mut cmd = Command::new(&es_path);
-    cmd.arg("-n").arg(limit.to_string());
+    let mut cmd = make_cmd(&es_path);
+    cmd.arg("-n").arg(limit.to_string())
+       .arg("-csv")
+       .arg("-size")
+       .arg("-date-modified");
 
     // Split by whitespace so "app ext:xls;xlsx" becomes two separate args (AND logic)
     for part in search_query.split_whitespace() {
@@ -119,42 +137,94 @@ pub fn search_files(query: &str, limit: usize) -> Vec<FileResult> {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let results = parse_results(&stdout);
+    let results = parse_csv_results(&stdout);
     log::info!("Everything found {} results", results.len());
     results
 }
 
-/// Parse es.exe output (one path per line) into FileResult structs.
-fn parse_results(output: &str) -> Vec<FileResult> {
-    output
-        .lines()
-        .filter(|line| !line.is_empty())
-        .filter_map(|line| {
-            let path = PathBuf::from(line.trim());
-            let name = path.file_name()?.to_string_lossy().to_string();
+/// Parse es.exe CSV output (with -csv -size -date-modified).
+/// First line is the header row and is skipped.
+fn parse_csv_results(output: &str) -> Vec<FileResult> {
+    let mut lines = output.lines();
+    lines.next(); // skip header: "Filename","Size","Date Modified"
 
-            let (size, modified) = std::fs::metadata(&path)
-                .map(|m| {
-                    let size = m.len();
-                    let modified = m
-                        .modified()
-                        .ok()
-                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0);
-                    (size, modified)
-                })
-                .unwrap_or((0, 0));
-
-            Some(FileResult { name, path: line.trim().to_string(), size, modified })
-        })
+    lines
+        .filter(|line| !line.trim().is_empty())
+        .filter_map(|line| parse_csv_line(line))
         .collect()
+}
+
+fn parse_csv_line(line: &str) -> Option<FileResult> {
+    let fields = split_csv_fields(line);
+    if fields.len() < 3 {
+        return None;
+    }
+
+    let path_str = fields[0].trim().to_string();
+    if path_str.is_empty() {
+        return None;
+    }
+
+    let path = PathBuf::from(&path_str);
+    let name = path.file_name()?.to_string_lossy().to_string();
+    let size = fields[1].trim().parse::<u64>().unwrap_or(0);
+    let modified = parse_date_to_unix(fields[2].trim());
+
+    Some(FileResult { name, path: path_str, size, modified })
+}
+
+/// Split a CSV line respecting double-quoted fields (RFC 4180).
+fn split_csv_fields(line: &str) -> Vec<String> {
+    let mut fields = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    let mut chars = line.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => {
+                if in_quotes && chars.peek() == Some(&'"') {
+                    // Escaped double-quote inside quoted field
+                    chars.next();
+                    current.push('"');
+                } else {
+                    in_quotes = !in_quotes;
+                }
+            }
+            ',' if !in_quotes => {
+                fields.push(std::mem::take(&mut current));
+            }
+            _ => current.push(c),
+        }
+    }
+    fields.push(current);
+    fields
+}
+
+/// Parse es.exe date string to Unix timestamp.
+/// Tries common date formats used by es.exe across different Windows locales.
+fn parse_date_to_unix(date_str: &str) -> u64 {
+    use chrono::NaiveDateTime;
+
+    let formats = [
+        "%m/%d/%Y %H:%M:%S",   // US: 01/15/2024 10:30:25
+        "%Y/%m/%d %H:%M:%S",   // CN: 2024/01/15 10:30:25
+        "%Y-%m-%d %H:%M:%S",   // ISO: 2024-01-15 10:30:25
+        "%d/%m/%Y %H:%M:%S",   // EU: 15/01/2024 10:30:25
+    ];
+
+    for fmt in formats {
+        if let Ok(dt) = NaiveDateTime::parse_from_str(date_str, fmt) {
+            return dt.and_utc().timestamp().max(0) as u64;
+        }
+    }
+    0
 }
 
 /// Get Everything version string via es.exe.
 pub fn get_version() -> Option<String> {
     let es_path = find_es_exe()?;
-    let output = Command::new(&es_path).arg("-version").output().ok()?;
+    let output = make_cmd(&es_path).arg("-version").output().ok()?;
     if output.status.success() {
         Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
     } else {
