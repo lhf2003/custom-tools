@@ -232,6 +232,7 @@ pub fn run() {
             commands::settings::check_shortcut_conflict,
             commands::settings::toggle_auto_update,
             commands::system::open_external_url,
+            commands::system::save_image_to_downloads,
             // Updater commands
             commands::updater::check_for_update,
             commands::updater::download_and_install_update,

@@ -23,6 +23,7 @@ import { MarkdownView } from '@/modules/markdown/MarkdownView';
 import { PasswordView } from '@/modules/password/PasswordView';
 import { SettingsView } from '@/modules/settings/SettingsView';
 import { EverythingView } from '@/modules/everything/EverythingView';
+import { JsonFormatterView } from '@/modules/json_formatter';
 import { TopNavigationBar } from '@/components/TopNavigationBar';
 import { UpdateNotification } from '@/components/UpdateNotification';
 import { ChangelogDialog } from '@/components/ChangelogDialog';
@@ -249,6 +250,24 @@ function App() {
           },
         ],
       },
+      json_formatter: {
+        title: 'JSON 格式化',
+        menuItems: [
+          {
+            id: 'always-on-top',
+            label: always_on_top ? '取消置顶' : '窗口置顶',
+            icon: Pin,
+            onClick: handleToggleAlwaysOnTop,
+          },
+          {
+            id: 'settings',
+            label: '设置',
+            icon: Settings,
+            separator: true,
+            onClick: () => setActiveView('settings'),
+          },
+        ],
+      },
     };
     return configs;
   }, [always_on_top, handleToggleAlwaysOnTop, setActiveView]);
@@ -342,6 +361,8 @@ function App() {
         return <SettingsView />;
       case 'everything':
         return <EverythingView />;
+      case 'json_formatter':
+        return <JsonFormatterView />;
       default:
         return <LauncherView />;
     }

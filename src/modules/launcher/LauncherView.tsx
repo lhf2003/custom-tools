@@ -1,4 +1,4 @@
-import { Search, Command, FileText, Lock, Settings, User, RefreshCw, HardDrive } from 'lucide-react';
+import { Search, Command, FileText, Lock, Settings, User, RefreshCw, HardDrive, Braces } from 'lucide-react';
 import { useEffect, useState, useCallback } from 'react';
 import { useAppStore } from '@/stores/appStore';
 import { useSearch } from '@/hooks/useSearch';
@@ -76,6 +76,7 @@ const builtInTools = [
   { id: 'markdown', name: 'Markdown笔记', icon: FileText, color: 'bg-zinc-700' },
   { id: 'password', name: '密码管理', icon: Lock, color: 'bg-amber-500' },
   { id: 'everything', name: '文件搜索', icon: HardDrive, color: 'bg-cyan-600' },
+  { id: 'json_formatter', name: 'JSON格式化', icon: Braces, color: 'bg-emerald-600' },
   { id: 'settings', name: '设置', icon: Settings, color: 'bg-zinc-600' },
 ];
 
@@ -90,7 +91,7 @@ interface AppItemData {
 const ITEMS_PER_ROW = 9;
 
 export function LauncherView() {
-  const { searchQuery, setSearchQuery, setActiveView } = useAppStore();
+  const { searchQuery, setSearchQuery, setActiveView, setJsonFormatterData } = useAppStore();
   const { apps, isLoading, searchApps, launchApp, getRecentApps, recordAppUsage } = useSearch();
   const [recentItems, setRecentItems] = useState<AppItemData[]>([]);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -131,8 +132,32 @@ export function LauncherView() {
     loadRecentItems();
   }, []);
 
+  // Detect if text is valid, non-trivial JSON (object or array)
+  const detectJson = useCallback((text: string): boolean => {
+    const trimmed = text.trim();
+    if (!trimmed || (trimmed[0] !== '{' && trimmed[0] !== '[')) return false;
+    try {
+      const parsed = JSON.parse(trimmed);
+      return typeof parsed === 'object' && parsed !== null;
+    } catch {
+      return false;
+    }
+  }, []);
+
   // Handle paste event for files and images
   const handlePaste = useCallback(async (e: React.ClipboardEvent) => {
+    // Read raw text before preventing default to detect JSON
+    const rawText = e.clipboardData?.getData('text/plain') ?? '';
+
+    // If the pasted content looks like JSON, open the JSON formatter
+    if (detectJson(rawText)) {
+      e.preventDefault();
+      setJsonFormatterData(rawText);
+      setSearchQuery('');
+      setActiveView('json_formatter');
+      return;
+    }
+
     e.preventDefault();
 
     try {
@@ -171,7 +196,7 @@ export function LauncherView() {
       console.error('Failed to handle paste:', err);
       await handleBrowserPaste(e);
     }
-  }, []);
+  }, [detectJson, setJsonFormatterData, setSearchQuery, setActiveView]);
 
   // Browser fallback for file paste (when files are dropped or pasted from file manager)
   const handleBrowserPaste = async (e: React.ClipboardEvent) => {

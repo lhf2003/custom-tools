@@ -17,6 +17,10 @@ interface AppState {
   searchQuery: string;
   setSearchQuery: (query: string) => void;
 
+  // JSON Formatter data (set when pasting JSON in launcher)
+  jsonFormatterData: string | null;
+  setJsonFormatterData: (data: string | null) => void;
+
   // Loading states
   isLoading: boolean;
   setLoading: (loading: boolean) => void;
@@ -45,6 +49,10 @@ export const useAppStore = create<AppState>((set) => ({
   // Search
   searchQuery: '',
   setSearchQuery: (query) => set({ searchQuery: query }),
+
+  // JSON Formatter
+  jsonFormatterData: null,
+  setJsonFormatterData: (data) => set({ jsonFormatterData: data }),
 
   // Loading
   isLoading: false,
