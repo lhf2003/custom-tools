@@ -1,7 +1,4 @@
 import { useState, useCallback, useEffect } from 'react';
-import { createRoot } from 'react-dom/client';
-import { flushSync } from 'react-dom';
-import { toPng } from 'html-to-image';
 import {
   Copy, Download, Check, AlignLeft, GitBranch,
   AlertCircle, ChevronsDownUp, ChevronsUpDown,
@@ -9,6 +6,7 @@ import {
 import { invoke } from '@tauri-apps/api/core';
 import { useAppStore } from '@/stores/appStore';
 import { JsonTreeView } from './JsonTreeView';
+import { renderJsonToCanvas } from './jsonCanvas';
 
 type DisplayMode = 'tree' | 'text';
 
@@ -74,30 +72,14 @@ export function JsonFormatterView() {
     if (parsedJson === null) return;
     setExporting(true);
     setExportMsg(null);
-
-    // Render the full JSON tree (always expanded) into an off-screen container
-    // so that scrollable-overflow clipping never truncates the output.
-    const container = document.createElement('div');
-    container.style.cssText =
-      'position:fixed;top:-100000px;left:0;width:800px;background:#18181b;padding:8px 0;';
-    document.body.appendChild(container);
-
-    const root = createRoot(container);
     try {
-      flushSync(() => {
-        root.render(
-          <JsonTreeView
-            data={parsedJson as Record<string, unknown> | unknown[]}
-            defaultExpanded={true}
-          />
-        );
-      });
-
-      const dataUrl = await toPng(container, {
-        backgroundColor: '#18181b',
-        pixelRatio: 2,
-      });
-      const base64Data = dataUrl.replace('data:image/png;base64,', '');
+      // Render full JSON tree directly to Canvas (bypasses html-to-image /
+      // SVG foreignObject which fails in Tauri WebView2 with external CSS).
+      const canvas = renderJsonToCanvas(
+        parsedJson as Record<string, unknown> | unknown[],
+        2,
+      );
+      const base64Data = canvas.toDataURL('image/png').replace('data:image/png;base64,', '');
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       const filename = `json-${timestamp}.png`;
       const savedPath = await invoke<string>('save_image_to_downloads', { base64Data, filename });
@@ -108,8 +90,6 @@ export function JsonFormatterView() {
       setExportMsg('导出失败');
       setTimeout(() => setExportMsg(null), 3000);
     } finally {
-      root.unmount();
-      document.body.removeChild(container);
       setExporting(false);
     }
   }, [parsedJson]);
