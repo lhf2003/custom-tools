@@ -30,6 +30,14 @@ import { ChangelogDialog } from '@/components/ChangelogDialog';
 import type { VersionCheckResult } from '@/components/ChangelogDialog';
 import type { ViewMode, MenuItem } from '@/types';
 
+// Map backend module id to frontend ViewMode — static, no runtime dependencies
+const MODULE_VIEW_MAP: Record<string, ViewMode> = {
+  clipboard: 'clipboard',
+  notes: 'markdown',
+  passwords: 'password',
+  settings: 'settings',
+};
+
 function App() {
   const { activeView, setActiveView, toggleWindow } = useAppStore();
   const { always_on_top, toggleAlwaysOnTop, loadSettings } = useSettingsStore();
@@ -44,6 +52,23 @@ function App() {
       console.error('Failed to toggle always on top:', err);
     }
   }, [toggleAlwaysOnTop]);
+
+  // Common menu items shared across all views
+  const commonMenuItems = useMemo((): MenuItem[] => [
+    {
+      id: 'always-on-top',
+      label: always_on_top ? '取消置顶' : '窗口置顶',
+      icon: Pin,
+      onClick: handleToggleAlwaysOnTop,
+    },
+    {
+      id: 'settings',
+      label: '设置',
+      icon: Settings,
+      separator: true,
+      onClick: () => setActiveView('settings'),
+    },
+  ], [always_on_top, handleToggleAlwaysOnTop, setActiveView]);
 
   // View configurations for navigation bar
   const viewConfigs = useMemo(() => {
@@ -87,19 +112,7 @@ function App() {
               console.log('Export clipboard data');
             },
           },
-          {
-            id: 'always-on-top',
-            label: always_on_top ? '取消置顶' : '窗口置顶',
-            icon: Pin,
-            onClick: handleToggleAlwaysOnTop,
-          },
-          {
-            id: 'settings',
-            label: '设置',
-            icon: Settings,
-            separator: true,
-            onClick: () => setActiveView('settings'),
-          },
+          ...commonMenuItems,
         ],
       },
       markdown: {
@@ -141,19 +154,7 @@ function App() {
               console.log('Export all notes');
             },
           },
-          {
-            id: 'always-on-top',
-            label: always_on_top ? '取消置顶' : '窗口置顶',
-            icon: Pin,
-            separator: true,
-            onClick: () => toggleAlwaysOnTop(),
-          },
-          {
-            id: 'settings',
-            label: '设置',
-            icon: Settings,
-            onClick: () => setActiveView('settings'),
-          },
+          ...commonMenuItems,
         ],
       },
       password: {
@@ -184,19 +185,7 @@ function App() {
               window.dispatchEvent(new CustomEvent('password:lock'));
             },
           },
-          {
-            id: 'always-on-top',
-            label: always_on_top ? '取消置顶' : '窗口置顶',
-            icon: Pin,
-            onClick: handleToggleAlwaysOnTop,
-          },
-          {
-            id: 'settings',
-            label: '设置',
-            icon: Settings,
-            separator: true,
-            onClick: () => setActiveView('settings'),
-          },
+          ...commonMenuItems,
         ],
       },
       settings: {
@@ -219,7 +208,7 @@ function App() {
             label: always_on_top ? '取消置顶' : '窗口置顶',
             icon: Pin,
             separator: true,
-            onClick: () => toggleAlwaysOnTop(),
+            onClick: handleToggleAlwaysOnTop,
           },
           {
             id: 'about',
@@ -234,48 +223,20 @@ function App() {
       },
       everything: {
         title: '文件搜索',
-        menuItems: [
-          {
-            id: 'always-on-top',
-            label: always_on_top ? '取消置顶' : '窗口置顶',
-            icon: Pin,
-            onClick: handleToggleAlwaysOnTop,
-          },
-          {
-            id: 'settings',
-            label: '设置',
-            icon: Settings,
-            separator: true,
-            onClick: () => setActiveView('settings'),
-          },
-        ],
+        menuItems: [...commonMenuItems],
       },
       json_formatter: {
         title: 'JSON 格式化',
-        menuItems: [
-          {
-            id: 'always-on-top',
-            label: always_on_top ? '取消置顶' : '窗口置顶',
-            icon: Pin,
-            onClick: handleToggleAlwaysOnTop,
-          },
-          {
-            id: 'settings',
-            label: '设置',
-            icon: Settings,
-            separator: true,
-            onClick: () => setActiveView('settings'),
-          },
-        ],
+        menuItems: [...commonMenuItems],
       },
     };
     return configs;
-  }, [always_on_top, handleToggleAlwaysOnTop, setActiveView]);
+  }, [always_on_top, commonMenuItems, handleToggleAlwaysOnTop, setActiveView]);
 
   // Load settings on mount
   useEffect(() => {
     loadSettings();
-  }, []);
+  }, [loadSettings]);
 
   // Check for unread changelogs on mount (after auto-update)
   useEffect(() => {
@@ -298,7 +259,9 @@ function App() {
 
   // Clean up old changelog entries on mount (keep last 10 versions)
   useEffect(() => {
-    invoke('cleanup_old_changelogs', { keepCount: 10 }).catch(() => {});
+    invoke('cleanup_old_changelogs', { keepCount: 10 }).catch((err: unknown) => {
+      console.error('Failed to cleanup old changelogs:', err);
+    });
   }, []);
 
   // Handle keyboard shortcuts
@@ -321,23 +284,16 @@ function App() {
   useEffect(() => {
     const unlisten = listen('shortcut:open_module', (event) => {
       const moduleId = event.payload as string;
-
-      // Map backend module id to frontend ViewMode
-      const viewMap: Record<string, ViewMode> = {
-        'clipboard': 'clipboard',
-        'notes': 'markdown',
-        'passwords': 'password',
-        'settings': 'settings',
-      };
-
-      const viewMode = viewMap[moduleId];
+      const viewMode = MODULE_VIEW_MAP[moduleId];
       if (viewMode) {
         setActiveView(viewMode);
       }
     });
 
     return () => {
-      unlisten.then((fn) => fn());
+      unlisten.then((fn) => fn()).catch((err: unknown) => {
+        console.error('Failed to cleanup shortcut listener:', err);
+      });
     };
   }, [setActiveView]);
 

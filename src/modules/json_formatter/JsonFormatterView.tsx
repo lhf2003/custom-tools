@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAppStore } from '@/stores/appStore';
+import { WINDOW_SIZE } from '../../constants/window';
 import { JsonTreeView } from './JsonTreeView';
 import { renderJsonToCanvas } from './jsonCanvas';
 import { JsonExportPreviewModal } from './JsonExportPreviewModal';
@@ -50,7 +51,7 @@ export function JsonFormatterView() {
 
   // Resize window to fit content
   useEffect(() => {
-    invoke('resize_window', { height: 560 }).catch(() => {});
+    invoke('resize_window', { height: WINDOW_SIZE.JSON_FORMATTER.height }).catch(() => {});
   }, []);
 
   const formattedText = parsedJson !== null
@@ -64,8 +65,8 @@ export function JsonFormatterView() {
       await navigator.clipboard.writeText(formattedText);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch {
-      /* Tauri clipboard context — fail silently */
+    } catch (err) {
+      console.error('[JsonFormatterView] Failed to copy to clipboard:', err);
     }
   }, [formattedText]);
 

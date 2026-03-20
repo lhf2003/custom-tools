@@ -1,84 +1,27 @@
-import { Search, Command, FileText, Lock, Settings, User, RefreshCw, HardDrive, Braces } from 'lucide-react';
+import { Search, User, RefreshCw } from 'lucide-react';
 import { useEffect, useState, useCallback } from 'react';
 import { useAppStore } from '@/stores/appStore';
 import { useSearch } from '@/hooks/useSearch';
+import type { ViewMode } from '@/types';
+import { safeInvoke } from '../../utils/tauri';
+import { THEME } from '../../constants/theme';
+import { WINDOW_SIZE } from '../../constants/window';
+import { BUILT_IN_TOOLS } from '../../constants/tools';
 
-// Safe invoke that only works in Tauri environment
-const safeInvoke = async (cmd: string, args?: Record<string, unknown>) => {
-  if (typeof window !== 'undefined' && (window as unknown as { __TAURI__?: unknown }).__TAURI__) {
-    const { invoke } = await import('@tauri-apps/api/core');
-    return invoke(cmd, args);
-  }
-  // In browser, return mock data for development
-  console.log(`[Browser Mode] Would invoke: ${cmd}`, args);
+const VIEW_MODES: readonly ViewMode[] = [
+  'launcher',
+  'clipboard',
+  'markdown',
+  'password',
+  'settings',
+  'everything',
+  'json_formatter',
+] as const;
 
-  // Mock data for browser development
-  if (cmd === 'search_apps') {
-    return [
-      { name: '剪贴板', path: 'builtin://clipboard' },
-      { name: 'Markdown笔记', path: 'builtin://markdown' },
-      { name: '密码管理', path: 'builtin://password' },
-      { name: 'Google Chrome', path: 'C:\\Program Files\\Google\\Chrome\\chrome.exe' },
-      { name: 'Visual Studio Code', path: 'C:\\Users\\user\\AppData\\Local\\Programs\\VSCode\\Code.exe' },
-      { name: 'Obsidian', path: 'C:\\Users\\user\\AppData\\Local\\Obsidian\\Obsidian.exe' },
-      { name: 'PowerShell', path: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe' },
-      { name: '文件资源管理器', path: 'C:\\Windows\\explorer.exe' },
-      { name: '记事本', path: 'C:\\Windows\\notepad.exe' },
-      { name: '画图', path: 'C:\\Windows\\System32\\mspaint.exe' },
-      { name: '计算器', path: 'C:\\Windows\\System32\\calc.exe' },
-      { name: '终端', path: 'C:\\Users\\user\\AppData\\Local\\Microsoft\\WindowsApps\\wt.exe' },
-    ];
-  }
-  if (cmd === 'get_recent_apps') {
-    return [
-      { name: '剪贴板', path: 'builtin://clipboard' },
-      { name: 'Google Chrome', path: 'C:\\Program Files\\Google\\Chrome\\chrome.exe' },
-      { name: 'Visual Studio Code', path: 'C:\\Users\\user\\AppData\\Local\\Programs\\VSCode\\Code.exe' },
-      { name: 'Obsidian', path: 'C:\\Users\\user\\AppData\\Local\\Obsidian\\Obsidian.exe' },
-      { name: 'PowerShell', path: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe' },
-      { name: 'Markdown笔记', path: 'builtin://markdown' },
-      { name: '密码管理', path: 'builtin://password' },
-      { name: '文件资源管理器', path: 'C:\\Windows\\explorer.exe' },
-      { name: '记事本', path: 'C:\\Windows\\notepad.exe' },
-    ];
-  }
-  if (cmd === 'extract_app_icon') {
-    return null; // No icons in browser mode
-  }
-  if (cmd === 'resize_window') {
-    // In browser mode, just log - no actual window to resize
-    return Promise.resolve();
-  }
-  if (cmd === 'hide_window') {
-    // In browser mode, just log - no actual window to hide
-    return Promise.resolve();
-  }
-  if (cmd === 'handle_pasted_file') {
-    console.log('[Browser Mode] Would handle pasted file:', args);
-    return Promise.resolve();
-  }
-  if (cmd === 'read_clipboard_image') {
-    // In browser mode, return none - browser API can't read screenshot DIB data
-    console.log('[Browser Mode] Would read clipboard image from backend');
-    return Promise.resolve({ success: false, result_type: 'none', path: null, message: 'Browser mode - use backend API' });
-  }
-  if (cmd === 'record_app_usage') {
-    console.log('[Browser Mode] Would record app usage:', args);
-    return Promise.resolve();
-  }
+function isViewMode(value: string): value is ViewMode {
+  return (VIEW_MODES as readonly string[]).includes(value);
+}
 
-  return Promise.resolve();
-};
-
-// Built-in tools definition with Lucide icons
-const builtInTools = [
-  { id: 'clipboard', name: '剪贴板', icon: Command, color: 'bg-blue-500' },
-  { id: 'markdown', name: 'Markdown笔记', icon: FileText, color: 'bg-zinc-700' },
-  { id: 'password', name: '密码管理', icon: Lock, color: 'bg-amber-500' },
-  { id: 'everything', name: '文件搜索', icon: HardDrive, color: 'bg-cyan-600' },
-  { id: 'json_formatter', name: 'JSON格式化', icon: Braces, color: 'bg-emerald-600' },
-  { id: 'settings', name: '设置', icon: Settings, color: 'bg-zinc-600' },
-];
 
 interface AppItemData {
   name: string;
@@ -117,7 +60,7 @@ export function LauncherView() {
   useEffect(() => {
     const setWindowHeight = async () => {
       try {
-        const height = isExpanded ? 600 : 200;
+        const height = isExpanded ? WINDOW_SIZE.LAUNCHER.expanded : WINDOW_SIZE.LAUNCHER.collapsed;
         await safeInvoke('resize_window', { height });
       } catch (err) {
         console.error('Failed to resize window:', err);
@@ -127,10 +70,67 @@ export function LauncherView() {
     setWindowHeight();
   }, [isExpanded]);
 
+  const loadRecentItems = useCallback(async () => {
+    try {
+      // Get recently used apps from database
+      const recentApps = await getRecentApps(14);
+
+      let items: AppItemData[] = [];
+
+      if (recentApps.length > 0) {
+        // Use actual recently used apps
+        items = recentApps.map(app => {
+          const isBuiltIn = app.path.startsWith('builtin://');
+          return {
+            name: app.name,
+            path: app.path,
+            isBuiltIn,
+            toolId: isBuiltIn ? app.path.replace('builtin://', '') : undefined,
+          };
+        });
+      }
+
+      // If no recent apps, fetch from search
+      if (items.length === 0) {
+        const allApps = await safeInvoke('search_apps', { query: '' }) as { name: string; path: string }[] || [];
+        items = allApps.slice(0, 14).map(app => {
+          const isBuiltIn = app.path.startsWith('builtin://');
+          return {
+            name: app.name,
+            path: app.path,
+            isBuiltIn,
+            toolId: isBuiltIn ? app.path.replace('builtin://', '') : undefined,
+          };
+        });
+      }
+
+      // Fallback: if still empty, show built-in tools
+      if (items.length === 0) {
+        items = BUILT_IN_TOOLS.map(tool => ({
+          name: tool.name,
+          path: `builtin://${tool.id}`,
+          isBuiltIn: true,
+          toolId: tool.id,
+        }));
+      }
+
+      setRecentItems(items);
+    } catch (err) {
+      console.error('Failed to load recent items:', err);
+      // On error, fallback to built-in tools
+      setRecentItems(BUILT_IN_TOOLS.map(tool => ({
+        name: tool.name,
+        path: `builtin://${tool.id}`,
+        isBuiltIn: true,
+        toolId: tool.id,
+      })));
+    }
+  }, [getRecentApps]);
+
   // Load recent items (only actually used apps)
   useEffect(() => {
     loadRecentItems();
-  }, []);
+  }, [loadRecentItems]);
 
   // Detect if text is valid, non-trivial JSON (object or array)
   const detectJson = useCallback((text: string): boolean => {
@@ -221,63 +221,6 @@ export function LauncherView() {
     }
   };
 
-  const loadRecentItems = async () => {
-    try {
-      // Get recently used apps from database
-      const recentApps = await getRecentApps(14);
-
-      let items: AppItemData[] = [];
-
-      if (recentApps.length > 0) {
-        // Use actual recently used apps
-        items = recentApps.map(app => {
-          const isBuiltIn = app.path.startsWith('builtin://');
-          return {
-            name: app.name,
-            path: app.path,
-            isBuiltIn,
-            toolId: isBuiltIn ? app.path.replace('builtin://', '') : undefined,
-          };
-        });
-      }
-
-      // If no recent apps, fetch from search
-      if (items.length === 0) {
-        const allApps = await safeInvoke('search_apps', { query: '' }) as { name: string; path: string }[] || [];
-        items = allApps.slice(0, 14).map(app => {
-          const isBuiltIn = app.path.startsWith('builtin://');
-          return {
-            name: app.name,
-            path: app.path,
-            isBuiltIn,
-            toolId: isBuiltIn ? app.path.replace('builtin://', '') : undefined,
-          };
-        });
-      }
-
-      // Fallback: if still empty, show built-in tools
-      if (items.length === 0) {
-        items = builtInTools.map(tool => ({
-          name: tool.name,
-          path: `builtin://${tool.id}`,
-          isBuiltIn: true,
-          toolId: tool.id,
-        }));
-      }
-
-      setRecentItems(items);
-    } catch (err) {
-      console.error('Failed to load recent items:', err);
-      // On error, fallback to built-in tools
-      setRecentItems(builtInTools.map(tool => ({
-        name: tool.name,
-        path: `builtin://${tool.id}`,
-        isBuiltIn: true,
-        toolId: tool.id,
-      })));
-    }
-  };
-
   const handleItemClick = async (item: AppItemData) => {
     // Optimistic update: immediately move clicked item to first position
     setRecentItems(prev => {
@@ -285,9 +228,9 @@ export function LauncherView() {
       return [item, ...filtered];
     });
 
-    if (item.isBuiltIn && item.toolId) {
+    if (item.isBuiltIn && item.toolId && isViewMode(item.toolId)) {
       // For built-in tools, switch view and record usage
-      setActiveView(item.toolId as any);
+      setActiveView(item.toolId);
       // Record usage in background (built-in tools don't go through launch_app)
       recordAppUsage(item.path, item.name).catch(err => {
         console.error('Failed to record built-in tool usage:', err);
@@ -337,7 +280,7 @@ export function LauncherView() {
   // Get all results for keyboard navigation during search
   const getAllResults = () => {
     if (!searchQuery) return displayedItems;
-    const filteredTools = builtInTools.filter(tool =>
+    const filteredTools = BUILT_IN_TOOLS.filter(tool =>
       tool.name.toLowerCase().includes(searchQuery.toLowerCase())
     );
     const toolItems: AppItemData[] = filteredTools.map(tool => ({
@@ -355,7 +298,7 @@ export function LauncherView() {
   return (
     <div
       className="w-full h-full flex flex-col rounded-2xl overflow-hidden outline-none"
-      style={{ backgroundColor: '#333333' }}
+      style={{ backgroundColor: THEME.BG_PRIMARY }}
       onKeyDown={handleKeyDown}
       tabIndex={0}
     >
@@ -465,7 +408,7 @@ function ItemCard({
 
   // For built-in tools, use Lucide icon
   if (item.isBuiltIn) {
-    const tool = builtInTools.find(t => t.id === item.toolId);
+    const tool = BUILT_IN_TOOLS.find(t => t.id === item.toolId);
     if (tool) {
       const Icon = tool.icon;
       return (
@@ -570,7 +513,7 @@ function SearchResults({
   onItemClick: (item: AppItemData) => void;
 }) {
   // Filter built-in tools based on query
-  const filteredTools = builtInTools.filter(tool =>
+  const filteredTools = BUILT_IN_TOOLS.filter(tool =>
     tool.name.toLowerCase().includes(query.toLowerCase())
   );
 

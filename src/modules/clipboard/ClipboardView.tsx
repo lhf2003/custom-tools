@@ -17,6 +17,8 @@ import {
 import { invoke } from '@tauri-apps/api/core';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { THEME } from '../../constants/theme';
+import { WINDOW_SIZE } from '../../constants/window';
 
 interface ClipboardItemData {
   id: number;
@@ -41,7 +43,7 @@ export function ClipboardView() {
   useEffect(() => {
     const resizeWindow = async () => {
       try {
-        await invoke('resize_window', { height: 500 });
+        await invoke('resize_window', { height: WINDOW_SIZE.CLIPBOARD.height });
       } catch (err) {
         console.error('Failed to resize window:', err);
       }
@@ -146,8 +148,10 @@ export function ClipboardView() {
     try {
       await invoke('toggle_clipboard_favorite', { id });
       fetchClipboardHistory();
-    } catch (err) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
       console.error('Failed to toggle favorite:', err);
+      setError(`收藏操作失败: ${message}`);
     }
   };
 
@@ -155,16 +159,20 @@ export function ClipboardView() {
     try {
       await invoke('delete_clipboard_item', { id });
       fetchClipboardHistory();
-    } catch (err) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
       console.error('Failed to delete clipboard item:', err);
+      setError(`删除失败: ${message}`);
     }
   };
 
   const handleCopyToClipboard = async (id: number) => {
     try {
       await invoke('copy_to_clipboard', { id });
-    } catch (err) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
       console.error('Failed to copy to clipboard:', err);
+      setError(`复制失败: ${message}`);
     }
   };
 
@@ -212,7 +220,7 @@ export function ClipboardView() {
   }, [items]);
 
   return (
-    <div className="w-full h-full flex" style={{ backgroundColor: '#333333' }}>
+    <div className="w-full h-full flex" style={{ backgroundColor: THEME.BG_PRIMARY }}>
       {/* Left Sidebar - Tabs */}
       <aside className="w-16 border-r border-zinc-600/30 flex flex-col items-center py-4 gap-1">
         {tabs.map((tab) => {
@@ -280,7 +288,7 @@ export function ClipboardView() {
             <div className="space-y-4">
               {Object.entries(groupedItems).map(([date, dateItems]) => (
                 <div key={date}>
-                  <h3 className="text-zinc-500 text-[11px] font-medium mb-1.5 px-1 -mt-2 pt-2 pb-0.5 sticky -top-2 tracking-wide z-10" style={{ backgroundColor: '#333333' }}>
+                  <h3 className="text-zinc-500 text-[11px] font-medium mb-1.5 px-1 -mt-2 pt-2 pb-0.5 sticky -top-2 tracking-wide z-10" style={{ backgroundColor: THEME.BG_PRIMARY }}>
                     {date}
                   </h3>
                   <div className="space-y-2">
@@ -413,6 +421,15 @@ function ClipboardItem({
   const [clickTimer, setClickTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [thumbnail, setThumbnail] = useState<string | null>(null);
+
+  // Cleanup pending click timer on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      if (clickTimer !== null) {
+        clearTimeout(clickTimer);
+      }
+    };
+  }, [clickTimer]);
 
   // Load image thumbnail for image type or image files
   useEffect(() => {

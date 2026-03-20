@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Search, Plus, Copy, Eye, EyeOff, Lock, Trash2, X, Globe, Shield, LayoutGrid, MoreHorizontal, ExternalLink } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import { WINDOW_SIZE } from '../../constants/window';
+import { THEME } from '../../constants/theme';
 
 interface PasswordCategory {
   id: number;
@@ -35,8 +37,8 @@ export function PasswordView() {
   useEffect(() => {
     const resizeWindow = async () => {
       try {
-        await invoke('resize_window', { height: 550, width: 920 });
-      } catch (err) {
+        await invoke('resize_window', { height: WINDOW_SIZE.PASSWORD.height, width: WINDOW_SIZE.PASSWORD.width });
+      } catch (err: unknown) {
         console.error('Failed to resize window:', err);
       }
     };
@@ -48,7 +50,8 @@ export function PasswordView() {
   const [isLoading, setIsLoading] = useState(true);
   const [categories, setCategories] = useState<PasswordCategory[]>([]);
   const [entries, setEntries] = useState<PasswordEntry[]>([]);
-  const [selectedCategory] = useState<number | 'all'>('all');
+  // TODO: selectedCategory filtering is not yet implemented in the backend call
+  // const [selectedCategory] = useState<number | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [selectedEntryId, setSelectedEntryId] = useState<number | null>(null);
@@ -72,7 +75,7 @@ export function PasswordView() {
     try {
       const unlocked = await invoke<boolean>('is_password_manager_unlocked');
       setIsUnlocked(unlocked);
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Failed to check unlock status:', err);
     } finally {
       setIsLoading(false);
@@ -83,12 +86,21 @@ export function PasswordView() {
     checkUnlockStatus();
   }, [checkUnlockStatus]);
 
+  const handleLock = useCallback(async () => {
+    try {
+      await invoke('lock_password_manager');
+      setIsUnlocked(false);
+      setDecryptedPasswords({});
+      setShowPasswordMap({});
+    } catch (err: unknown) {
+      console.error('[Password] Failed to lock:', err);
+      setError('锁定失败，请重试');
+    }
+  }, []);
+
   // Listen for menu actions from navigation bar
   useEffect(() => {
     const handleNewEntry = () => setShowCreateModal(true);
-    const handleLockFromMenu = async () => {
-      await handleLock();
-    };
 
     window.addEventListener('password:new-entry', handleNewEntry);
     window.addEventListener('password:lock', handleLock);
@@ -97,43 +109,43 @@ export function PasswordView() {
       window.removeEventListener('password:new-entry', handleNewEntry);
       window.removeEventListener('password:lock', handleLock);
     };
+  }, [handleLock]);
+
+  const loadCategories = useCallback(async () => {
+    try {
+      const cats = await invoke<PasswordCategory[]>('get_password_categories');
+      setCategories(cats);
+    } catch (err: unknown) {
+      console.error('Failed to load categories:', err);
+      const message = err instanceof Error ? err.message : String(err);
+      setError(`加载分类失败: ${message}`);
+    }
   }, []);
+
+  const loadEntries = useCallback(async () => {
+    try {
+      const ents = await invoke<PasswordEntry[]>('get_password_entries', {
+        categoryId: undefined,
+        favoriteOnly: false,
+        search: searchQuery || undefined,
+      });
+      setEntries(ents);
+    } catch (err: unknown) {
+      console.error('[Password] Failed to load entries:', err);
+      const message = err instanceof Error ? err.message : String(err);
+      setError(`加载密码列表失败: ${message}`);
+    }
+  }, [searchQuery]);
 
   // Load data when unlocked
   useEffect(() => {
     if (isUnlocked) {
       loadCategories();
       loadEntries();
-      // Reset selected entry when category or search changes
+      // Reset selected entry when search changes
       setSelectedEntryId(null);
     }
-  }, [isUnlocked, selectedCategory, searchQuery]);
-
-  const loadCategories = async () => {
-    try {
-      const cats = await invoke<PasswordCategory[]>('get_password_categories');
-      setCategories(cats);
-    } catch (err) {
-      console.error('Failed to load categories:', err);
-    }
-  };
-
-  const loadEntries = async () => {
-    try {
-      console.log('[Password] Loading entries with params:', { searchQuery });
-
-      const ents = await invoke<PasswordEntry[]>('get_password_entries', {
-        categoryId: undefined,
-        favoriteOnly: false,
-        search: searchQuery || undefined,
-      });
-
-      console.log('[Password] Loaded entries count:', ents.length, 'entries:', ents);
-      setEntries(ents);
-    } catch (err) {
-      console.error('[Password] Failed to load entries:', err);
-    }
-  };
+  }, [isUnlocked, searchQuery, loadCategories, loadEntries]);
 
   const handleUnlock = async () => {
     if (!masterPassword) return;
@@ -148,25 +160,17 @@ export function PasswordView() {
         setIsUnlocked(true);
         setMasterPassword('');
       }
-    } catch (err) {
+    } catch (err: unknown) {
       setError(err instanceof Error ? err.message : '解锁失败');
     }
   };
 
-  const handleLock = async () => {
-    await invoke('lock_password_manager');
-    setIsUnlocked(false);
-    setDecryptedPasswords({});
-    setShowPasswordMap({});
-  };
-
   const handleCreateEntry = async () => {
     if (!newEntry.title || !newEntry.password) {
-      console.log('[Password] Validation failed: title or password is empty');
+      setError('标题和密码为必填项');
       return;
     }
 
-    // 构建请求参数 - Rust 后端期望包装在 request 对象中
     const request = {
       title: newEntry.title,
       username: newEntry.username || null,
@@ -176,27 +180,17 @@ export function PasswordView() {
       category_id: newEntry.category_id ? Number(newEntry.category_id) : null,
     };
 
-    console.log('[Password] Creating entry with request:', request);
-
     try {
       setError(null);
-      console.log('[Password] Calling create_password_entry...');
-      const result = await invoke('create_password_entry', { request });
-      console.log('[Password] Create entry success, ID:', result);
+      await invoke('create_password_entry', { request });
 
-      console.log('[Password] Closing modal and resetting form...');
       setShowCreateModal(false);
       setNewEntry({ title: '', username: '', password: '', url: '', notes: '' });
 
-      console.log('[Password] Reloading entries...');
       await loadEntries();
-      console.log('[Password] Entries reloaded successfully');
-    } catch (err: any) {
-      console.error('[Password] Create entry error:', err);
-      // Tauri 错误可能是字符串或对象
-      const errorMsg = typeof err === 'string' ? err : (err?.message || String(err));
-      console.error('[Password] Error message:', errorMsg);
-      setError(`创建失败: ${errorMsg}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(`创建失败: ${message}`);
     }
   };
 
@@ -206,51 +200,46 @@ export function PasswordView() {
     try {
       await invoke('delete_password_entry', { id });
       loadEntries();
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Failed to delete entry:', err);
+      const message = err instanceof Error ? err.message : String(err);
+      setError(`删除失败: ${message}`);
     }
   };
 
   const handleShowPassword = async (id: number) => {
-    console.log('[Password] Toggle show password for id:', id, 'current state:', showPasswordMap[id]);
-
     if (showPasswordMap[id]) {
-      // Hide
-      console.log('[Password] Hiding password');
       setShowPasswordMap(prev => ({ ...prev, [id]: false }));
       return;
     }
 
-    // Check if already decrypted
     if (decryptedPasswords[id]) {
-      console.log('[Password] Already decrypted, showing');
       setShowPasswordMap(prev => ({ ...prev, [id]: true }));
       return;
     }
 
-    // Decrypt
-    console.log('[Password] Decrypting password for id:', id);
     try {
       const password = await invoke<string>('get_decrypted_password', { id });
-      console.log('[Password] Decrypted successfully, length:', password.length);
       setDecryptedPasswords(prev => ({ ...prev, [id]: password }));
       setShowPasswordMap(prev => ({ ...prev, [id]: true }));
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('[Password] Failed to decrypt password:', err);
+      const message = err instanceof Error ? err.message : String(err);
+      setError(`解密失败: ${message}`);
     }
   };
 
   const copyToClipboard = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Failed to copy:', err);
     }
   };
 
   if (isLoading) {
     return (
-      <div className="w-full h-full flex items-center justify-center text-zinc-500" style={{ backgroundColor: '#333333' }}>
+      <div className="w-full h-full flex items-center justify-center text-zinc-500" style={{ backgroundColor: THEME.BG_PRIMARY }}>
         <div className="animate-spin mr-2">⌛</div>
         <span>加载中...</span>
       </div>
@@ -259,9 +248,9 @@ export function PasswordView() {
 
   if (!isUnlocked) {
     return (
-      <div className="w-full h-full flex items-center justify-center" style={{ backgroundColor: '#333333' }}>
+      <div className="w-full h-full flex items-center justify-center" style={{ backgroundColor: THEME.BG_PRIMARY }}>
         <div className="rounded-2xl p-8 w-80 text-center border border-zinc-600/30 shadow-2xl"
-             style={{ backgroundColor: '#2a2a2a' }}>
+             style={{ backgroundColor: THEME.BG_SECONDARY }}>
           {/* Icon with gradient background */}
           <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-500 flex items-center justify-center mx-auto mb-4 shadow-lg">
             <Lock size={32} className="text-white" />
@@ -311,9 +300,9 @@ export function PasswordView() {
 
   return (
     <div className="w-full h-full overflow-x-auto">
-      <div className="min-w-[850px] w-full h-full flex" style={{ backgroundColor: '#333333' }}>
+      <div className="min-w-[850px] w-full h-full flex" style={{ backgroundColor: THEME.BG_PRIMARY }}>
         {/* Left Sidebar - Password List Only */}
-        <aside className="w-64 border-r border-zinc-600/30 flex flex-col flex-shrink-0" style={{ backgroundColor: '#2a2a2a' }}>
+        <aside className="w-64 border-r border-zinc-600/30 flex flex-col flex-shrink-0" style={{ backgroundColor: THEME.BG_SECONDARY }}>
           {/* Header with Search */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-600/30">
             <h3 className="text-zinc-400 text-sm font-medium">密码管理</h3>
@@ -385,7 +374,7 @@ export function PasswordView() {
         </aside>
 
         {/* Right - Detail View */}
-        <div className="flex-1 flex flex-col min-w-0" style={{ backgroundColor: '#333333' }}>
+        <div className="flex-1 flex flex-col min-w-0" style={{ backgroundColor: THEME.BG_PRIMARY }}>
         {selectedEntry ? (
           <PasswordDetail
             entry={selectedEntry}
@@ -540,7 +529,6 @@ function PasswordDetail({
   onDelete,
   onEdit,
 }: PasswordDetailProps) {
-  console.log('[Password] PasswordDetail render - showPassword:', showPassword, 'decryptedPassword:', decryptedPassword ? '[存在]' : '[空]');
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
@@ -558,9 +546,13 @@ function PasswordDetail({
               </div>
               {entry.url && (
                 <button
-                  onClick={() => {
+                  onClick={async () => {
                     const url = entry.url?.startsWith('http') ? entry.url : `https://${entry.url}`;
-                    invoke('open_external_url', { url });
+                    try {
+                      await invoke('open_external_url', { url });
+                    } catch (err: unknown) {
+                      console.error('Failed to open external URL:', err);
+                    }
                   }}
                   className="text-zinc-500 hover:text-indigo-400 text-sm flex items-center gap-1 mt-1 transition-colors cursor-pointer"
                 >
@@ -695,7 +687,7 @@ function Modal({ children, onClose }: { children: React.ReactNode; onClose: () =
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
       <div
         className="rounded-2xl p-6 w-96 relative border border-zinc-600/30 shadow-2xl"
-        style={{ backgroundColor: '#2a2a2a' }}
+        style={{ backgroundColor: THEME.BG_SECONDARY }}
         onClick={(e) => e.stopPropagation()}
       >
         <button

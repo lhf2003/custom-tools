@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { FileText, Plus, Folder, Loader2 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import MDEditor from '@uiw/react-md-editor';
 import type { NoteItemData, NoteContentData, CreateNoteRequest } from './types';
-import { MARKDOWN_WINDOW_HEIGHT } from './constants';
 import { useNotes } from './hooks/useNotes';
 import { Modal, EmptyState, SortableNoteTree, ErrorBoundary } from './components';
+import { THEME } from '@/constants/theme';
+import { WINDOW_SIZE } from '@/constants/window';
 
 export function MarkdownView() {
   // Listen for menu actions from navigation bar
@@ -20,7 +21,7 @@ export function MarkdownView() {
       window.removeEventListener('markdown:new-note', handleNewNote);
       window.removeEventListener('markdown:new-folder', handleNewFolder);
     };
-  }, []);
+  }, [openCreateModal]);
 
   // Resize window when view mounts, restore on unmount
   useEffect(() => {
@@ -28,8 +29,8 @@ export function MarkdownView() {
 
     const resizeWindow = async () => {
       try {
-        originalHeight = 400; // Default launcher height
-        await invoke('resize_window', { height: MARKDOWN_WINDOW_HEIGHT });
+        originalHeight = WINDOW_SIZE.LAUNCHER.collapsed;
+        await invoke('resize_window', { height: WINDOW_SIZE.MARKDOWN.height });
       } catch (err) {
         console.error('Failed to resize window:', err);
       }
@@ -136,31 +137,41 @@ export function MarkdownView() {
   };
 
   const handleMove = async (sourcePath: string, targetFolder: string) => {
-    await invoke('move_note', {
-      request: {
-        source_path: sourcePath,
-        target_folder: targetFolder,
-      },
-    });
-    loadNoteTree();
+    try {
+      await invoke('move_note', {
+        request: {
+          source_path: sourcePath,
+          target_folder: targetFolder,
+        },
+      });
+      loadNoteTree();
+    } catch (err: unknown) {
+      console.error('Failed to move note:', err);
+      setError(err instanceof Error ? err.message : '移动笔记失败');
+    }
   };
 
   const handleReorder = async (parentPath: string, itemNames: string[]) => {
-    await invoke('reorder_notes', {
-      request: {
-        parent_path: parentPath,
-        item_names: itemNames,
-      },
-    });
-    loadNoteTree();
+    try {
+      await invoke('reorder_notes', {
+        request: {
+          parent_path: parentPath,
+          item_names: itemNames,
+        },
+      });
+      loadNoteTree();
+    } catch (err: unknown) {
+      console.error('Failed to reorder notes:', err);
+      setError(err instanceof Error ? err.message : '排序更新失败');
+    }
   };
 
-  const openCreateModal = (type: 'file' | 'folder', parent: string = '') => {
+  const openCreateModal = useCallback((type: 'file' | 'folder', parent: string = '') => {
     setCreateType(type);
     setCreateParent(parent);
     setCreatePath('');
     setShowCreateModal(true);
-  };
+  }, [setCreateType, setCreateParent, setCreatePath, setShowCreateModal]);
 
   const openRenameModal = (item: NoteItemData) => {
     setRenameItem(item);
@@ -169,7 +180,7 @@ export function MarkdownView() {
   };
 
   return (
-    <div className="w-full h-full flex" style={{ backgroundColor: '#333333' }}>
+    <div className="w-full h-full flex" style={{ backgroundColor: THEME.BG_PRIMARY }}>
       {/* File Tree Sidebar */}
       <aside className="w-48 border-r border-zinc-600/30 flex flex-col">
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-600/30">

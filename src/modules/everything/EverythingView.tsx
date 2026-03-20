@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Search, FileText, Folder, HardDrive, ExternalLink, ChevronDown, RefreshCw, Power } from 'lucide-react';
+import { safeInvoke } from '../../utils/tauri';
+import { THEME } from '../../constants/theme';
+import { WINDOW_SIZE } from '../../constants/window';
 
 type EverythingStatus = 'available' | 'not_installed' | 'service_not_running' | null;
-import { invoke } from '@tauri-apps/api/core';
 
 interface FileResult {
   name: string;
@@ -32,15 +34,6 @@ const categories: Category[] = [
   { id: 'archive', name: '压缩文件', ext: ['zip', 'rar', '7z', 'tar', 'gz', 'bz2'] },
 ];
 
-// Safe invoke for browser mode
-const safeInvoke = async (cmd: string, args?: Record<string, unknown>) => {
-  if (typeof window !== 'undefined' && (window as unknown as { __TAURI__?: unknown }).__TAURI__) {
-    return invoke(cmd, args);
-  }
-  console.log(`[Browser Mode] Would invoke: ${cmd}`, args);
-  return Promise.resolve(null);
-};
-
 interface InstallOption {
   key: 'client' | 'es';
   label: string;
@@ -67,6 +60,7 @@ function EverythingInstallPage({ onInstalled }: { onInstalled: () => void }) {
   });
   const [isInstalling, setIsInstalling] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
+  const [isWebsiteHovered, setIsWebsiteHovered] = useState(false);
 
   const handleInstall = async () => {
     setIsInstalling(true);
@@ -97,7 +91,7 @@ function EverythingInstallPage({ onInstalled }: { onInstalled: () => void }) {
   const noneSelected = !selected.client && !selected.es;
 
   return (
-    <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center bg-[#333]">
+    <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center" style={{ backgroundColor: THEME.BG_PRIMARY }}>
       <HardDrive className="w-14 h-14 text-zinc-600 mb-4" />
       <h2 className="text-lg font-semibold text-zinc-300 mb-1">Everything 未安装</h2>
       <p className="text-sm text-zinc-500 max-w-sm mb-6">
@@ -111,7 +105,8 @@ function EverythingInstallPage({ onInstalled }: { onInstalled: () => void }) {
         {INSTALL_OPTIONS.map((opt) => (
           <label
             key={opt.key}
-            className="flex items-start gap-3 p-3 rounded-lg bg-[#2d2d2d] border border-white/5 cursor-pointer hover:border-blue-500/30 transition-colors"
+            className="flex items-start gap-3 p-3 rounded-lg border border-white/5 cursor-pointer hover:border-blue-500/30 transition-colors"
+            style={{ backgroundColor: THEME.BG_TERTIARY }}
           >
             <input
               type="checkbox"
@@ -150,7 +145,10 @@ function EverythingInstallPage({ onInstalled }: { onInstalled: () => void }) {
         </button>
         <button
           onClick={handleOpenWebsite}
-          className="flex items-center gap-2 px-5 py-2.5 bg-[#2d2d2d] hover:bg-[#3a3a3a] text-zinc-400 border border-white/10 rounded-lg text-sm transition-colors"
+          className="flex items-center gap-2 px-5 py-2.5 text-zinc-400 border border-white/10 rounded-lg text-sm transition-colors"
+          style={{ backgroundColor: isWebsiteHovered ? THEME.BTN_BG : THEME.BG_TERTIARY }}
+          onMouseEnter={() => setIsWebsiteHovered(true)}
+          onMouseLeave={() => setIsWebsiteHovered(false)}
         >
           <ExternalLink className="w-4 h-4" />
           <span>官网</span>
@@ -171,6 +169,7 @@ export function EverythingView() {
   const [selectedFile, setSelectedFile] = useState<FileResult | null>(null);
   const [sortBy, setSortBy] = useState<'modified' | 'size' | 'name'>('modified');
   const [sortDesc, setSortDesc] = useState(true);
+  const [isOpenFolderHovered, setIsOpenFolderHovered] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Check Everything availability (also called on retry)
@@ -192,7 +191,7 @@ export function EverythingView() {
   useEffect(() => {
     const resizeWindow = async () => {
       try {
-        await safeInvoke('resize_window', { height: 500 });
+        await safeInvoke('resize_window', { height: WINDOW_SIZE.EVERYTHING.height });
       } catch (err) {
         console.error('Failed to resize window:', err);
       }
@@ -319,29 +318,43 @@ export function EverythingView() {
     });
   };
 
+  // Render a generic file type icon badge with a given color and label
+  const renderFileIcon = (color: string, label: string) => (
+    <div
+      className="w-10 h-10 rounded flex items-center justify-center"
+      style={{ backgroundColor: `${color}33` }}
+    >
+      <span className="text-xs font-bold" style={{ color }}>{label}</span>
+    </div>
+  );
+
+  // Map category id to icon color
+  const CATEGORY_ICON_COLOR: Partial<Record<FileCategory, string>> = {
+    image:   '#c084fc',
+    video:   '#f87171',
+    audio:   '#f472b6',
+    archive: '#facc15',
+    excel:   '#4ade80',
+    word:    '#60a5fa',
+    ppt:     '#fb923c',
+    pdf:     '#f87171',
+  };
+
   // Get file icon component
   const getFileIcon = (filename: string, isFolder?: boolean) => {
     if (isFolder) return <Folder className="w-10 h-10 text-blue-400" />;
 
-    const ext = filename.split('.').pop()?.toLowerCase() || '';
+    const ext = filename.split('.').pop()?.toLowerCase() ?? '';
 
-    // Map extension to color
-    if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg', 'ico'].includes(ext))
-      return <div className="w-10 h-10 rounded bg-purple-500/20 flex items-center justify-center"><span className="text-xs font-bold text-purple-400">{ext.toUpperCase()}</span></div>;
-    if (['mp4', 'avi', 'mkv', 'mov', 'wmv'].includes(ext))
-      return <div className="w-10 h-10 rounded bg-red-500/20 flex items-center justify-center"><span className="text-xs font-bold text-red-400">{ext.toUpperCase()}</span></div>;
-    if (['mp3', 'wav', 'flac', 'aac', 'ogg'].includes(ext))
-      return <div className="w-10 h-10 rounded bg-pink-500/20 flex items-center justify-center"><span className="text-xs font-bold text-pink-400">{ext.toUpperCase()}</span></div>;
-    if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext))
-      return <div className="w-10 h-10 rounded bg-yellow-500/20 flex items-center justify-center"><span className="text-xs font-bold text-yellow-400">{ext.toUpperCase()}</span></div>;
-    if (['xls', 'xlsx', 'csv'].includes(ext))
-      return <div className="w-10 h-10 rounded bg-green-500/20 flex items-center justify-center"><span className="text-xs font-bold text-green-400">{ext.toUpperCase()}</span></div>;
-    if (['doc', 'docx'].includes(ext))
-      return <div className="w-10 h-10 rounded bg-blue-500/20 flex items-center justify-center"><span className="text-xs font-bold text-blue-400">{ext.toUpperCase()}</span></div>;
-    if (['ppt', 'pptx'].includes(ext))
-      return <div className="w-10 h-10 rounded bg-orange-500/20 flex items-center justify-center"><span className="text-xs font-bold text-orange-400">{ext.toUpperCase()}</span></div>;
-    if (['pdf'].includes(ext))
-      return <div className="w-10 h-10 rounded bg-red-400/20 flex items-center justify-center"><span className="text-xs font-bold text-red-400">PDF</span></div>;
+    const matchedCategory = categories.find(
+      (cat) => cat.id !== 'all' && cat.id !== 'folder' && cat.ext.includes(ext)
+    );
+
+    if (matchedCategory) {
+      const color = CATEGORY_ICON_COLOR[matchedCategory.id] ?? '#94a3b8';
+      const label = matchedCategory.id === 'pdf' ? 'PDF' : ext.toUpperCase();
+      return renderFileIcon(color, label);
+    }
 
     return <FileText className="w-10 h-10 text-zinc-400" />;
   };
@@ -357,7 +370,7 @@ export function EverythingView() {
 
   if (everythingStatus === null) {
     return (
-      <div className="w-full h-full flex items-center justify-center text-zinc-500 bg-[#333]">
+      <div className="w-full h-full flex items-center justify-center text-zinc-500" style={{ backgroundColor: THEME.BG_PRIMARY }}>
         <div className="animate-pulse">正在检查 Everything...</div>
       </div>
     );
@@ -369,7 +382,7 @@ export function EverythingView() {
 
   if (everythingStatus === 'service_not_running') {
     return (
-      <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center bg-[#333]">
+      <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center" style={{ backgroundColor: THEME.BG_PRIMARY }}>
         <Power className="w-16 h-16 text-yellow-600 mb-4" />
         <h2 className="text-lg font-semibold text-zinc-300 mb-2">Everything 服务未运行</h2>
         <p className="text-sm text-zinc-500 max-w-md mb-6">
@@ -387,9 +400,9 @@ export function EverythingView() {
   }
 
   return (
-    <div className="w-full h-full flex flex-col bg-[#2d2d2d]">
+    <div className="w-full h-full flex flex-col" style={{ backgroundColor: THEME.BG_TERTIARY }}>
       {/* Search Bar */}
-      <div className="flex items-center px-4 py-3 border-b border-white/5 bg-[#333]">
+      <div className="flex items-center px-4 py-3 border-b border-white/5" style={{ backgroundColor: THEME.BG_PRIMARY }}>
         <Search className="w-4 h-4 text-zinc-500 mr-3" />
         <input
           ref={inputRef}
@@ -404,7 +417,7 @@ export function EverythingView() {
       {/* Main Content - Three Column Layout */}
       <div className="flex-1 flex overflow-hidden min-h-0">
         {/* Left Sidebar - Categories */}
-        <div className="w-24 border-r border-white/5 bg-[#2d2d2d] h-full overflow-y-auto">
+        <div className="w-24 border-r border-white/5 h-full overflow-y-auto" style={{ backgroundColor: THEME.BG_TERTIARY }}>
           {categories.map((cat) => (
             <button
               key={cat.id}
@@ -421,7 +434,7 @@ export function EverythingView() {
         </div>
 
         {/* Middle - File List */}
-        <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-[#333]">
+        <div className="flex-1 flex flex-col min-w-0 min-h-0" style={{ backgroundColor: THEME.BG_PRIMARY }}>
           {/* File List Header */}
           <div className="flex items-center justify-between px-4 py-2 border-b border-white/5 text-xs text-zinc-500">
             <span>共 {files.length} 条结果</span>
@@ -478,7 +491,7 @@ export function EverythingView() {
         </div>
 
         {/* Right - File Details */}
-        <div className="w-72 border-l border-white/5 bg-[#2d2d2d] p-4 overflow-y-auto">
+        <div className="w-72 border-l border-white/5 p-4 overflow-y-auto" style={{ backgroundColor: THEME.BG_TERTIARY }}>
           {selectedFile ? (
             <div className="flex flex-col items-center">
               {/* File Icon */}
@@ -519,7 +532,10 @@ export function EverythingView() {
                 </button>
                 <button
                   onClick={() => handleOpenFolder(selectedFile.path)}
-                  className="flex-1 px-3 py-2 bg-[#3a3a3a] hover:bg-[#444] rounded text-zinc-200 text-sm"
+                  className="flex-1 px-3 py-2 rounded text-zinc-200 text-sm"
+                  style={{ backgroundColor: isOpenFolderHovered ? THEME.BTN_BG_HOVER : THEME.BTN_BG }}
+                  onMouseEnter={() => setIsOpenFolderHovered(true)}
+                  onMouseLeave={() => setIsOpenFolderHovered(false)}
                 >
                   打开目录
                 </button>

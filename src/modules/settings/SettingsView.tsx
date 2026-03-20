@@ -1,17 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Command, Settings, Palette, Keyboard, RotateCcw, AlertCircle, BookOpen, Command as CommandIcon, FileText, Lock, HardDrive, Search } from 'lucide-react';
+import { Command, Settings, Palette, Keyboard, RotateCcw, AlertCircle, BookOpen, Command as CommandIcon, Search } from 'lucide-react';
+import { BUILT_IN_TOOLS } from '../../constants/tools';
 import { useSettingsStore, type ShortcutConfig } from '@/stores/settingsStore';
-
-// Safe invoke that only works in Tauri environment
-const safeInvoke = async (cmd: string, args?: Record<string, unknown>) => {
-  if (typeof window !== 'undefined' && (window as unknown as { __TAURI__?: unknown }).__TAURI__) {
-    const { invoke } = await import('@tauri-apps/api/core');
-    return invoke(cmd, args);
-  }
-  // In browser, just log
-  console.log(`[Browser Mode] Would invoke: ${cmd}`, args);
-  return Promise.resolve();
-};
+import { safeInvoke } from '@/utils/tauri';
+import { THEME } from '@/constants/theme';
+import { WINDOW_SIZE } from '@/constants/window';
 
 const settingTabs = [
   { id: 'general', name: '通用', icon: Settings },
@@ -20,8 +13,6 @@ const settingTabs = [
   { id: 'search', name: '搜索', icon: Search },
   { id: 'manual', name: '操作手册', icon: BookOpen },
 ];
-
-const FIXED_HEIGHT = 500; // 设置页面固定高度
 
 // ==================== Shared Components ====================
 
@@ -76,7 +67,7 @@ export function SettingsView() {
   useEffect(() => {
     const setFixedHeight = async () => {
       try {
-        await safeInvoke('resize_window', { height: FIXED_HEIGHT });
+        await safeInvoke('resize_window', { height: WINDOW_SIZE.SETTINGS.height });
       } catch (err) {
         console.error('Failed to resize window:', err);
       }
@@ -88,7 +79,7 @@ export function SettingsView() {
   return (
     <div
       className="w-full h-full flex"
-      style={{ backgroundColor: '#333' }}
+      style={{ backgroundColor: THEME.BG_PRIMARY }}
     >
       {/* Settings Sidebar */}
       <aside className="w-40 border-r border-white/10 p-3 flex flex-col flex-shrink-0">
@@ -349,6 +340,32 @@ const KEY_NAME_MAP: Record<string, string> = {
   'ArrowRight': 'Right',
 };
 
+function formatKey(key: string): string {
+  const mapped = KEY_NAME_MAP[key] || key;
+  if (mapped.length === 1 || Object.values(KEY_NAME_MAP).includes(mapped)) {
+    return mapped;
+  }
+  return mapped.charAt(0).toUpperCase() + mapped.slice(1);
+}
+
+function buildCombo(e: React.KeyboardEvent): string {
+  const parts: string[] = [];
+
+  // 修饰键顺序：Ctrl -> Shift -> Alt -> Meta
+  if (e.ctrlKey) parts.push('Ctrl');
+  if (e.shiftKey) parts.push('Shift');
+  if (e.altKey) parts.push('Alt');
+  if (e.metaKey) parts.push('Meta');
+
+  // 主键（如果不是纯修饰键）
+  const mainKey = formatKey(e.key);
+  if (!['Ctrl', 'Shift', 'Alt', 'Meta'].includes(mainKey)) {
+    parts.push(mainKey);
+  }
+
+  return parts.join('+');
+}
+
 function KeyRecorder({ value, onChange, onSave, onCancel }: KeyRecorderProps) {
   const [currentCombo, setCurrentCombo] = useState<string>('');
   const [pressedKeys, setPressedKeys] = useState<Set<string>>(new Set());
@@ -357,35 +374,6 @@ function KeyRecorder({ value, onChange, onSave, onCancel }: KeyRecorderProps) {
   useEffect(() => {
     containerRef.current?.focus();
   }, []);
-
-  const formatKey = (key: string): string => {
-    // 使用映射表或原值
-    const mapped = KEY_NAME_MAP[key] || key;
-    // 单个大写字母或已映射的特殊键直接返回
-    if (mapped.length === 1 || Object.values(KEY_NAME_MAP).includes(mapped)) {
-      return mapped;
-    }
-    // 其他情况首字母大写
-    return mapped.charAt(0).toUpperCase() + mapped.slice(1);
-  };
-
-  const buildCombo = (e: React.KeyboardEvent): string => {
-    const parts: string[] = [];
-
-    // 修饰键顺序：Ctrl -> Shift -> Alt -> Meta
-    if (e.ctrlKey) parts.push('Ctrl');
-    if (e.shiftKey) parts.push('Shift');
-    if (e.altKey) parts.push('Alt');
-    if (e.metaKey) parts.push('Meta');
-
-    // 主键（如果不是纯修饰键）
-    const mainKey = formatKey(e.key);
-    if (!['Ctrl', 'Shift', 'Alt', 'Meta'].includes(mainKey)) {
-      parts.push(mainKey);
-    }
-
-    return parts.join('+');
-  };
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -557,8 +545,39 @@ function GeneralSettings() {
 
 // ==================== Appearance Settings ====================
 
+// Maps between UI display labels and the store's theme values
+const THEME_LABEL_MAP: Record<string, string> = {
+  light: '浅色',
+  dark: '深色',
+  system: '跟随系统',
+};
+const THEME_VALUE_MAP: Record<string, string> = {
+  '浅色': 'light',
+  '深色': 'dark',
+  '跟随系统': 'system',
+};
+
 function AppearanceSettings() {
-  const [activeTheme, setActiveTheme] = useState('深色');
+  const { theme, window_opacity, setSetting } = useSettingsStore();
+
+  // Derive display label from store value; default to '跟随系统' for unknown values
+  const activeTheme = THEME_LABEL_MAP[theme] ?? '跟随系统';
+
+  const handleThemeChange = (label: string) => {
+    const storeValue = THEME_VALUE_MAP[label] ?? 'system';
+    setSetting('theme', storeValue);
+  };
+
+  // window_opacity is stored as 0–1; slider shows 0–100
+  const opacityPercent = Math.round(window_opacity * 100);
+
+  const handleOpacityChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const percent = parseInt(e.target.value, 10);
+    setSetting('window_opacity', percent / 100);
+  };
+
+  // TODO: 连接到 settingsStore 持久化（store 暂无 window_border_radius 字段）
+  const [borderRadius, setBorderRadius] = useState(16);
 
   return (
     <>
@@ -576,17 +595,17 @@ function AppearanceSettings() {
       <div className="space-y-3">
         <SettingCard title="主题" description="选择您喜欢的界面风格">
           <div className="flex gap-2">
-            {['浅色', '深色', '跟随系统'].map((theme) => (
+            {['浅色', '深色', '跟随系统'].map((label) => (
               <button
-                key={theme}
-                onClick={() => setActiveTheme(theme)}
+                key={label}
+                onClick={() => handleThemeChange(label)}
                 className={`px-4 py-2 rounded-lg text-sm transition-all duration-200 cursor-pointer ${
-                  activeTheme === theme
+                  activeTheme === label
                     ? 'bg-blue-500/20 text-blue-400 border border-blue-500/40'
                     : 'bg-white/5 text-white/70 border border-white/10 hover:bg-white/10 hover:text-white'
                 }`}
               >
-                {theme}
+                {label}
               </button>
             ))}
           </div>
@@ -599,7 +618,8 @@ function AppearanceSettings() {
               type="range"
               min="0"
               max="100"
-              defaultValue="90"
+              value={opacityPercent}
+              onChange={handleOpacityChange}
               className="w-32 accent-blue-500 cursor-pointer"
             />
             <span className="text-white/40 text-xs">100%</span>
@@ -607,16 +627,21 @@ function AppearanceSettings() {
         </SettingCard>
 
         <SettingCard title="窗口圆角" description="调整窗口边框圆角大小">
-          <div className="flex items-center gap-3">
-            <span className="text-white/40 text-xs">0px</span>
-            <input
-              type="range"
-              min="0"
-              max="24"
-              defaultValue="16"
-              className="w-32 accent-blue-500 cursor-pointer"
-            />
-            <span className="text-white/40 text-xs">24px</span>
+          <div className="flex flex-col items-end gap-1">
+            <div className="flex items-center gap-3 opacity-40">
+              <span className="text-white/40 text-xs">0px</span>
+              <input
+                type="range"
+                min="0"
+                max="24"
+                value={borderRadius}
+                onChange={(e) => setBorderRadius(parseInt(e.target.value, 10))}
+                className="w-32 accent-blue-500 cursor-not-allowed"
+                disabled
+              />
+              <span className="text-white/40 text-xs">24px</span>
+            </div>
+            <span className="text-white/30 text-xs">暂未开放</span>
           </div>
         </SettingCard>
       </div>
@@ -627,36 +652,9 @@ function AppearanceSettings() {
 // ==================== Manual Settings ====================
 
 function ManualSettings() {
-  const builtInTools = [
-    {
-      id: 'clipboard',
-      name: '剪贴板',
-      icon: CommandIcon,
-      color: 'bg-blue-500',
-      description: '记录并管理您的剪贴板历史，支持文本、图片、文件等多种格式。可收藏常用内容，快速粘贴历史记录。',
-    },
-    {
-      id: 'markdown',
-      name: 'Markdown笔记',
-      icon: FileText,
-      color: 'bg-zinc-700',
-      description: '轻量级Markdown编辑器，支持实时预览。适合快速记录想法、待办事项或撰写文档。',
-    },
-    {
-      id: 'password',
-      name: '密码管理',
-      icon: Lock,
-      color: 'bg-amber-500',
-      description: '安全存储账号密码，使用AES-GCM加密保护。支持分类管理、快速复制，一键填充网站登录信息。',
-    },
-    {
-      id: 'everything',
-      name: '文件搜索',
-      icon: HardDrive,
-      color: 'bg-cyan-600',
-      description: '集成Everything搜索引擎，毫秒级查找本地文件。支持模糊匹配、快速打开文件所在位置。',
-    },
-  ];
+  const toolsWithDescription = BUILT_IN_TOOLS.filter(
+    (tool): tool is typeof tool & { description: string } => tool.description !== undefined,
+  );
 
   return (
     <>
@@ -677,7 +675,7 @@ function ManualSettings() {
           内置工具
         </h3>
         <div className="space-y-3">
-          {builtInTools.map((tool) => {
+          {toolsWithDescription.map((tool) => {
             const Icon = tool.icon;
             return (
               <div
@@ -830,12 +828,14 @@ function SearchSettings() {
   };
 
   const addDir = async () => {
-    if (typeof window !== 'undefined' && (window as unknown as { __TAURI__?: unknown }).__TAURI__) {
+    try {
       const { open } = await import('@tauri-apps/plugin-dialog');
       const selected = await open({ directory: true, multiple: false });
       if (typeof selected === 'string' && !dirs.includes(selected)) {
         await save([...dirs, selected]);
       }
+    } catch (e) {
+      console.error('Failed to open directory picker:', e);
     }
   };
 
