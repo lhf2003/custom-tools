@@ -83,6 +83,20 @@ export function useUpdater() {
         onProgress: channel,
       });
 
+      // Save changelog before relaunching
+      if (updateInfo?.version && updateInfo?.body) {
+        try {
+          await invoke('add_changelog', {
+            version: updateInfo.version,
+            releaseDate: updateInfo.date,
+            content: updateInfo.body,
+          });
+          console.log('Changelog saved for version', updateInfo.version);
+        } catch (err) {
+          console.error('Failed to save changelog:', err);
+        }
+      }
+
       // Relaunch the app after successful install
       await relaunch();
     } catch (err) {

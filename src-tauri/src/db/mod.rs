@@ -142,6 +142,18 @@ impl Database {
             [],
         )?;
 
+        // Changelog table - stores version history and update notes
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS changelog (
+                version TEXT PRIMARY KEY,
+                release_date TEXT,
+                content TEXT NOT NULL,
+                is_read BOOLEAN DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )",
+            [],
+        )?;
+
         // Insert default settings
         let defaults = [
             ("theme", "system"),

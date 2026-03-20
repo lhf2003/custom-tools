@@ -49,6 +49,9 @@ pub fn run() {
             // Initialize database
             db::init(app.handle())?;
 
+            // Initialize pending update cache (populated by check_for_update)
+            app.manage(commands::updater::PendingUpdate(Mutex::new(None)));
+
             // Initialize settings manager first (needed by window handlers)
             let settings_db_path = app
                 .path()

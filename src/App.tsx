@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useCallback } from 'react';
+import { useEffect, useMemo, useCallback, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
 import {
   Trash2,
   Star,
@@ -24,11 +25,15 @@ import { SettingsView } from '@/modules/settings/SettingsView';
 import { EverythingView } from '@/modules/everything/EverythingView';
 import { TopNavigationBar } from '@/components/TopNavigationBar';
 import { UpdateNotification } from '@/components/UpdateNotification';
+import { ChangelogDialog } from '@/components/ChangelogDialog';
+import type { VersionCheckResult } from '@/components/ChangelogDialog';
 import type { ViewMode, MenuItem } from '@/types';
 
 function App() {
   const { activeView, setActiveView, toggleWindow } = useAppStore();
   const { always_on_top, toggleAlwaysOnTop, loadSettings } = useSettingsStore();
+  const [showChangelog, setShowChangelog] = useState(false);
+  const [changelogData, setChangelogData] = useState<VersionCheckResult | null>(null);
 
   // Stable callback for toggle always on top
   const handleToggleAlwaysOnTop = useCallback(async () => {
@@ -253,6 +258,30 @@ function App() {
     loadSettings();
   }, []);
 
+  // Check for unread changelogs on mount (after auto-update)
+  useEffect(() => {
+    const checkChangelogs = async () => {
+      try {
+        const result = await invoke<VersionCheckResult>('check_version_changelog');
+        if (result.unread_changelogs.length > 0) {
+          setChangelogData(result);
+          setShowChangelog(true);
+        }
+      } catch (err) {
+        console.error('Failed to check changelogs:', err);
+      }
+    };
+
+    // Delay slightly to ensure app is fully loaded
+    const timer = setTimeout(checkChangelogs, 1000);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Clean up old changelog entries on mount (keep last 10 versions)
+  useEffect(() => {
+    invoke('cleanup_old_changelogs', { keepCount: 10 }).catch(() => {});
+  }, []);
+
   // Handle keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -344,6 +373,13 @@ function App() {
 
       {/* Update Notification */}
       <UpdateNotification />
+
+      {/* Changelog Dialog - shown after auto-update */}
+      <ChangelogDialog
+        isOpen={showChangelog}
+        onClose={() => setShowChangelog(false)}
+        initialData={changelogData}
+      />
     </div>
   );
 }
