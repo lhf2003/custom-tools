@@ -70,7 +70,7 @@ pub fn get_default_shortcuts() -> Vec<ShortcutConfig> {
             id: "toggle_window".to_string(),
             name: "呼出搜索".to_string(),
             description: "显示/隐藏主窗口".to_string(),
-            default_keys: "Ctrl+Shift+Space".to_string(),
+            default_keys: "Alt+Space".to_string(),
             custom_keys: None,
             enabled: true,
         },
@@ -158,11 +158,15 @@ impl ShortcutManager {
         // 从数据库加载用户自定义
         let mut stmt = conn.prepare("SELECT id, custom_keys, enabled FROM shortcuts")?;
         let rows = stmt.query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, Option<String>>(1)?,
-                row.get::<_, bool>(2)?,
-            ))
+            let id: String = row.get(0)?;
+            let custom_keys: Option<String> = row.get(1)?;
+            // 兼容旧数据：enabled 可能是整数 0/1 或文本 "true"/"false"
+            let enabled = match row.get::<_, rusqlite::types::Value>(2)? {
+                rusqlite::types::Value::Integer(i) => i != 0,
+                rusqlite::types::Value::Text(ref s) => s != "false" && s != "0",
+                _ => true,
+            };
+            Ok((id, custom_keys, enabled))
         })?;
 
         let mut user_overrides: HashMap<String, (Option<String>, bool)> = HashMap::new();
@@ -206,11 +210,11 @@ impl ShortcutManager {
             return Err(rusqlite::Error::InvalidParameterName(id.to_string()));
         }
 
-        // 更新数据库
+        // 更新数据库（enabled 存为整数 0/1，custom_keys 为 None 时存 NULL）
         conn.execute(
             "INSERT OR REPLACE INTO shortcuts (id, custom_keys, enabled, updated_at)
              VALUES (?1, ?2, ?3, datetime('now'))",
-            [id, custom_keys.as_deref().unwrap_or(""), &enabled.to_string()],
+            rusqlite::params![id, custom_keys.as_deref().filter(|s| !s.is_empty()), enabled as i64],
         )?;
 
         // 更新内存缓存

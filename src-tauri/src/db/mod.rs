@@ -157,7 +157,7 @@ impl Database {
         // Insert default settings
         let defaults = [
             ("theme", "system"),
-            ("shortcut_show", "Win+Space"),
+            ("shortcut_show", "Alt+Space"),
             ("clipboard_max_items", "100"),
             ("clipboard_keep_days", "30"),
             ("password_auto_lock", "300"),

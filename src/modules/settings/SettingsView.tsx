@@ -568,6 +568,7 @@ function AppearanceSettings() {
           <h2 className="text-white text-lg font-semibold">外观设置</h2>
           <p className="text-white/40 text-xs">个性化您的界面</p>
         </div>
+        <span className="ml-auto px-2 py-1 text-[11px] text-white/60 bg-white/10 rounded-md border border-white/10">敬请期待</span>
       </div>
 
       <div className="space-y-3">
@@ -752,7 +753,7 @@ function ManualSettings() {
             <div className="flex items-start gap-3">
               <div className="flex-shrink-0">
                 <kbd className="px-2 py-1 rounded bg-white/10 border border-white/10 text-white/70 text-xs font-mono">
-                  Ctrl+Shift+Space
+                  Alt+Space
                 </kbd>
               </div>
               <div>
