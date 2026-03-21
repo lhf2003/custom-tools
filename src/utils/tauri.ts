@@ -44,3 +44,34 @@ export async function safeInvoke<T>(
     return null;
   }
 }
+
+// --- Debounced window resize ---
+// 防止频繁视图切换时多个并发 SetWindowPos 导致 DWM Acrylic 合成层与
+// WebView2 内容层脱节，出现全屏 Acrylic 而无实际内容的渲染 bug。
+// 只保留最后一次 resize 请求，60ms 后执行。
+let _resizeTimer: ReturnType<typeof setTimeout> | null = null;
+let _pendingHeight: number | null = null;
+let _pendingWidth: number | null = null;
+
+export function debouncedResize(height: number, width?: number): void {
+  _pendingHeight = height;
+  _pendingWidth = width ?? null;
+
+  if (_resizeTimer !== null) {
+    clearTimeout(_resizeTimer);
+  }
+
+  _resizeTimer = setTimeout(async () => {
+    _resizeTimer = null;
+    const h = _pendingHeight;
+    const w = _pendingWidth;
+    _pendingHeight = null;
+    _pendingWidth = null;
+
+    if (h === null) return;
+
+    const args: Record<string, unknown> = { height: h };
+    if (w !== null) args.width = w;
+    await safeInvoke('resize_window', args);
+  }, 60);
+}

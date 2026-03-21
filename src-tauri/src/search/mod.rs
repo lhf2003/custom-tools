@@ -27,7 +27,7 @@ fn parse_shortcut_target(path: &Path) -> Option<String> {
         CoCreateInstance, IPersistFile, STGM_READ,
     };
     use windows::Win32::UI::Shell::{IShellLinkW, ShellLink, SLGP_RAWPATH};
-    use windows_core::ComInterface;
+    use windows_core::Interface;
 
     // Initialize COM (ignore result since it may already be initialized)
     unsafe {

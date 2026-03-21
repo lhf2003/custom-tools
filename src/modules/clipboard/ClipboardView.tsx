@@ -19,6 +19,7 @@ import { convertFileSrc } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { THEME } from '../../constants/theme';
 import { WINDOW_SIZE } from '../../constants/window';
+import { debouncedResize } from '../../utils/tauri';
 
 interface ClipboardItemData {
   id: number;
@@ -41,14 +42,7 @@ type TabType = 'all' | 'text' | 'image' | 'file' | 'favorite';
 export function ClipboardView() {
   // Resize window when view mounts
   useEffect(() => {
-    const resizeWindow = async () => {
-      try {
-        await invoke('resize_window', { height: WINDOW_SIZE.CLIPBOARD.height });
-      } catch (err) {
-        console.error('Failed to resize window:', err);
-      }
-    };
-    resizeWindow();
+    debouncedResize(WINDOW_SIZE.CLIPBOARD.height);
   }, []);
 
   const [activeTab, setActiveTab] = useState<TabType>('all');

@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { useAppStore } from '@/stores/appStore';
 import { useSearch } from '@/hooks/useSearch';
 import type { ViewMode } from '@/types';
-import { safeInvoke } from '../../utils/tauri';
+import { safeInvoke, debouncedResize } from '../../utils/tauri';
 import { THEME } from '../../constants/theme';
 import { WINDOW_SIZE } from '../../constants/window';
 import { BUILT_IN_TOOLS } from '../../constants/tools';
@@ -58,16 +58,8 @@ export function LauncherView() {
 
   // Set window height based on expanded state
   useEffect(() => {
-    const setWindowHeight = async () => {
-      try {
-        const height = isExpanded ? WINDOW_SIZE.LAUNCHER.expanded : WINDOW_SIZE.LAUNCHER.collapsed;
-        await safeInvoke('resize_window', { height });
-      } catch (err) {
-        console.error('Failed to resize window:', err);
-      }
-    };
-
-    setWindowHeight();
+    const height = isExpanded ? WINDOW_SIZE.LAUNCHER.expanded : WINDOW_SIZE.LAUNCHER.collapsed;
+    debouncedResize(height);
   }, [isExpanded]);
 
   const loadRecentItems = useCallback(async () => {
@@ -297,7 +289,7 @@ export function LauncherView() {
 
   return (
     <div
-      className="w-full h-full flex flex-col rounded-2xl overflow-hidden outline-none"
+      className="w-full h-full flex flex-col rounded-lg overflow-hidden outline-none"
       style={{ backgroundColor: THEME.BG_PRIMARY }}
       onKeyDown={handleKeyDown}
       tabIndex={0}

@@ -7,43 +7,12 @@ import { useNotes } from './hooks/useNotes';
 import { Modal, EmptyState, SortableNoteTree, ErrorBoundary } from './components';
 import { THEME } from '@/constants/theme';
 import { WINDOW_SIZE } from '@/constants/window';
+import { debouncedResize } from '@/utils/tauri';
 
 export function MarkdownView() {
-  // Listen for menu actions from navigation bar
+  // Resize window when view mounts
   useEffect(() => {
-    const handleNewNote = () => openCreateModal('file');
-    const handleNewFolder = () => openCreateModal('folder');
-
-    window.addEventListener('markdown:new-note', handleNewNote);
-    window.addEventListener('markdown:new-folder', handleNewFolder);
-
-    return () => {
-      window.removeEventListener('markdown:new-note', handleNewNote);
-      window.removeEventListener('markdown:new-folder', handleNewFolder);
-    };
-  }, [openCreateModal]);
-
-  // Resize window when view mounts, restore on unmount
-  useEffect(() => {
-    let originalHeight: number | null = null;
-
-    const resizeWindow = async () => {
-      try {
-        originalHeight = WINDOW_SIZE.LAUNCHER.collapsed;
-        await invoke('resize_window', { height: WINDOW_SIZE.MARKDOWN.height });
-      } catch (err) {
-        console.error('Failed to resize window:', err);
-      }
-    };
-    resizeWindow();
-
-    return () => {
-      if (originalHeight) {
-        invoke('resize_window', { height: originalHeight }).catch((err) => {
-          console.error('Failed to restore window height:', err);
-        });
-      }
-    };
+    debouncedResize(WINDOW_SIZE.MARKDOWN.height);
   }, []);
 
   const {
@@ -172,6 +141,20 @@ export function MarkdownView() {
     setCreatePath('');
     setShowCreateModal(true);
   }, [setCreateType, setCreateParent, setCreatePath, setShowCreateModal]);
+
+  // Listen for menu actions from navigation bar (must be after openCreateModal)
+  useEffect(() => {
+    const handleNewNote = () => openCreateModal('file');
+    const handleNewFolder = () => openCreateModal('folder');
+
+    window.addEventListener('markdown:new-note', handleNewNote);
+    window.addEventListener('markdown:new-folder', handleNewFolder);
+
+    return () => {
+      window.removeEventListener('markdown:new-note', handleNewNote);
+      window.removeEventListener('markdown:new-folder', handleNewFolder);
+    };
+  }, [openCreateModal]);
 
   const openRenameModal = (item: NoteItemData) => {
     setRenameItem(item);

@@ -29,6 +29,7 @@ import { UpdateNotification } from '@/components/UpdateNotification';
 import { ChangelogDialog } from '@/components/ChangelogDialog';
 import type { VersionCheckResult } from '@/components/ChangelogDialog';
 import type { ViewMode, MenuItem } from '@/types';
+import { THEME } from '@/constants/theme';
 
 // Map backend module id to frontend ViewMode — static, no runtime dependencies
 const MODULE_VIEW_MAP: Record<string, ViewMode> = {
@@ -328,7 +329,7 @@ function App() {
   const currentConfig = isHome ? null : viewConfigs[activeView as Exclude<ViewMode, 'launcher'>];
 
   return (
-    <div className="w-full h-full bg-transparent flex flex-col relative selection:bg-blue-500/30 rounded-2xl overflow-hidden">
+    <div className="w-full h-full bg-transparent flex flex-col relative selection:bg-blue-500/30 rounded-lg overflow-hidden">
       {isHome ? (
         // Launcher view - no navigation bar
         <main className="flex-1 overflow-hidden">{renderView()}</main>
@@ -344,7 +345,7 @@ function App() {
               onBack={handleBack}
             />
           </div>
-          <main className="flex-1 overflow-hidden isolate">{renderView()}</main>
+          <main className="flex-1 overflow-hidden isolate" style={{ backgroundColor: THEME.BG_PRIMARY }}>{renderView()}</main>
         </>
       )}
 

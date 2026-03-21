@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Command, Settings, Palette, Keyboard, RotateCcw, AlertCircle, BookOpen, Command as CommandIcon, Search } from 'lucide-react';
 import { BUILT_IN_TOOLS } from '../../constants/tools';
 import { useSettingsStore, type ShortcutConfig } from '@/stores/settingsStore';
-import { safeInvoke } from '@/utils/tauri';
+import { safeInvoke, debouncedResize } from '@/utils/tauri';
 import { THEME } from '@/constants/theme';
 import { WINDOW_SIZE } from '@/constants/window';
 
@@ -47,12 +47,12 @@ function Toggle({ enabled = false, onToggle }: ToggleProps) {
   return (
     <button
       onClick={() => onToggle?.(!enabled)}
-      className={`relative w-12 h-7 rounded-full transition-colors duration-200 cursor-pointer ${
+      className={`relative w-12 h-7 rounded-full overflow-hidden transition-colors duration-200 cursor-pointer ${
         enabled ? 'bg-blue-500' : 'bg-zinc-600 hover:bg-zinc-500'
       }`}
     >
       <span
-        className={`absolute top-1 w-5 h-5 rounded-full bg-white transition-transform duration-200 ${
+        className={`absolute top-1 left-0 w-5 h-5 rounded-full bg-white transition-transform duration-200 ${
           enabled ? 'translate-x-6' : 'translate-x-1'
         }`}
       />
@@ -65,15 +65,7 @@ export function SettingsView() {
 
   // 设置固定窗口高度
   useEffect(() => {
-    const setFixedHeight = async () => {
-      try {
-        await safeInvoke('resize_window', { height: WINDOW_SIZE.SETTINGS.height });
-      } catch (err) {
-        console.error('Failed to resize window:', err);
-      }
-    };
-
-    setFixedHeight();
+    debouncedResize(WINDOW_SIZE.SETTINGS.height);
   }, []);
 
   return (

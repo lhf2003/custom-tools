@@ -20,7 +20,7 @@ export function TopNavigationBar({
                                  }: TopNavigationBarProps) {
   return (
       <header
-          className="h-12 bg-zinc-800/40 border-b border-white/10 flex items-center px-4 shrink-0 relative select-none"
+          className="h-12 bg-zinc-800/50 border-b border-white/15 flex items-center px-4 shrink-0 relative select-none"
       >
         {/* Left: Back button */}
         <div className="flex items-center gap-3 relative z-10">

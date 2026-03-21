@@ -1,20 +1,4 @@
 use tauri::Manager;
-use window_vibrancy::{apply_blur, apply_mica};
-
-/// Apply Windows vibrancy effect (Mica or Blur fallback)
-#[cfg(target_os = "windows")]
-fn apply_vibrancy_effect(window: &tauri::WebviewWindow) {
-    // Try Mica first (Windows 11), fallback to Blur (Windows 10)
-    if let Err(e) = apply_mica(window, Some(true)) {
-        log::warn!("Failed to apply Mica effect, trying Blur: {}", e);
-        if let Err(e) = apply_blur(window, None::<(u8, u8, u8, u8)>) {
-            log::warn!("Failed to apply Blur effect: {}", e);
-        }
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-fn apply_vibrancy_effect(_window: &tauri::WebviewWindow) {}
 
 /// Position window at top of screen with padding (centered horizontally)
 fn position_window_at_top(window: &tauri::WebviewWindow) -> Result<(), String> {
@@ -53,8 +37,6 @@ pub async fn show_window(app_handle: tauri::AppHandle) -> Result<(), String> {
     if let Some(window) = app_handle.get_webview_window("main") {
         position_window_at_top(&window)?;
         window.show().map_err(|e| e.to_string())?;
-        // Apply vibrancy effect after window is shown
-        apply_vibrancy_effect(&window);
         window.set_focus().map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -80,8 +62,6 @@ pub async fn toggle_window(app_handle: tauri::AppHandle) -> Result<bool, String>
         } else {
             position_window_at_top(&window)?;
             window.show().map_err(|e| e.to_string())?;
-            // Apply vibrancy effect after window is shown
-            apply_vibrancy_effect(&window);
             window.set_focus().map_err(|e| e.to_string())?;
             Ok(true)
         }

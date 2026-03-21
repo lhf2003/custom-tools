@@ -23,6 +23,10 @@ thread_local! {
     static CLIPBOARD_SENDER: RefCell<Option<Sender<ClipboardEvent>>> = const { RefCell::new(None) };
 }
 
+/// HWND contains *mut c_void in windows 0.61 which is !Send, but we only use it
+/// from the dedicated message-loop thread, so this is safe.
+unsafe impl Send for ClipboardWatcher {}
+
 /// Windows clipboard watcher using WM_CLIPBOARDUPDATE
 pub struct ClipboardWatcher {
     sender: Sender<ClipboardEvent>,
@@ -127,11 +131,11 @@ impl ClipboardWatcher {
                 0,
                 None,
                 None,
-                hinstance,
+                Some(hinstance.into()),
                 None,
-            );
+            )?;
 
-            if hwnd.0 == 0 {
+            if hwnd.0.is_null() {
                 return Err(anyhow::anyhow!("Failed to create window"));
             }
 

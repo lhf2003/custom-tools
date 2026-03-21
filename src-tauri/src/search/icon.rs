@@ -187,7 +187,7 @@ fn extract_icon_highres(path: &str) -> Result<Vec<u8>> {
         let png_data = hbitmap_to_png(hbitmap)?;
 
         // 清理
-        let _ = DeleteObject(hbitmap);
+        let _ = DeleteObject(hbitmap.into());
 
         Ok(png_data)
     }
@@ -224,7 +224,7 @@ fn extract_icon_fallback(path: &str) -> Result<Vec<u8>> {
         }
 
         // 2. 提取大图标
-        let mut hicon: HICON = HICON(0);
+        let mut hicon: HICON = HICON(std::ptr::null_mut());
         let extracted = ExtractIconExW(
             PCWSTR(path_wide.as_ptr()),
             0,
@@ -233,7 +233,7 @@ fn extract_icon_fallback(path: &str) -> Result<Vec<u8>> {
             1,
         );
 
-        if extracted == 0 || hicon.0 == 0 {
+        if extracted == 0 || hicon.0.is_null() {
             return extract_icon_shgetfileinfo(path);
         }
 
@@ -246,11 +246,11 @@ fn extract_icon_fallback(path: &str) -> Result<Vec<u8>> {
 
         // 4. 创建内存 DC
         let hdc_screen = GetDC(None);
-        let hdc_mem = CreateCompatibleDC(hdc_screen);
+        let hdc_mem = CreateCompatibleDC(Some(hdc_screen));
 
         if hdc_mem.is_invalid() {
-            let _ = DeleteObject(icon_info.hbmMask);
-            let _ = DeleteObject(icon_info.hbmColor);
+            let _ = DeleteObject(icon_info.hbmMask.into());
+            let _ = DeleteObject(icon_info.hbmColor.into());
             let _ = DestroyIcon(hicon);
             let _ = ReleaseDC(None, hdc_screen);
             return Err(anyhow!("Failed to create memory DC"));
@@ -259,7 +259,7 @@ fn extract_icon_fallback(path: &str) -> Result<Vec<u8>> {
         // 5. 获取图标位图尺寸
         let mut bmp: BITMAP = std::mem::zeroed();
         GetObjectW(
-            icon_info.hbmColor,
+            icon_info.hbmColor.into(),
             std::mem::size_of::<BITMAP>() as i32,
             Some(&mut bmp as *mut _ as *mut _),
         );
@@ -301,8 +301,8 @@ fn extract_icon_fallback(path: &str) -> Result<Vec<u8>> {
 
         // 8. 清理资源
         let _ = DeleteDC(hdc_mem);
-        let _ = DeleteObject(icon_info.hbmMask);
-        let _ = DeleteObject(icon_info.hbmColor);
+        let _ = DeleteObject(icon_info.hbmMask.into());
+        let _ = DeleteObject(icon_info.hbmColor.into());
         let _ = DestroyIcon(hicon);
         let _ = ReleaseDC(None, hdc_screen);
 
@@ -339,12 +339,12 @@ fn hbitmap_to_png(hbitmap: windows::Win32::Graphics::Gdi::HBITMAP) -> Result<Vec
 
     unsafe {
         let hdc_screen = GetDC(None);
-        let hdc_mem = CreateCompatibleDC(hdc_screen);
+        let hdc_mem = CreateCompatibleDC(Some(hdc_screen));
 
         // 获取位图信息
         let mut bmp: BITMAP = std::mem::zeroed();
         GetObjectW(
-            hbitmap,
+            hbitmap.into(),
             std::mem::size_of::<BITMAP>() as i32,
             Some(&mut bmp as *mut _ as *mut _),
         );
@@ -432,7 +432,7 @@ fn extract_icon_shgetfileinfo(path: &str) -> Result<Vec<u8>> {
             SHGFI_ICON | SHGFI_LARGEICON,
         );
 
-        if result == 0 || shfi.hIcon.0 == 0 {
+        if result == 0 || shfi.hIcon.0.is_null() {
             return Err(anyhow!("SHGetFileInfo failed"));
         }
 
@@ -447,7 +447,7 @@ fn extract_icon_shgetfileinfo(path: &str) -> Result<Vec<u8>> {
 
         // 创建内存 DC
         let hdc_screen = GetDC(None);
-        let hdc_mem = CreateCompatibleDC(hdc_screen);
+        let hdc_mem = CreateCompatibleDC(Some(hdc_screen));
 
         // 创建 48x48 DIB section
         let mut bmi = BITMAPINFO {
@@ -469,7 +469,7 @@ fn extract_icon_shgetfileinfo(path: &str) -> Result<Vec<u8>> {
 
         let mut bits: *mut u8 = std::ptr::null_mut();
         let hbm = windows::Win32::Graphics::Gdi::CreateDIBSection(
-            hdc_mem,
+            Some(hdc_mem),
             &bmi,
             DIB_RGB_COLORS,
             &mut bits as *mut _ as *mut *mut _,
@@ -477,7 +477,7 @@ fn extract_icon_shgetfileinfo(path: &str) -> Result<Vec<u8>> {
             0,
         )?;
 
-        let old_bm = SelectObject(hdc_mem, hbm);
+        let old_bm = SelectObject(hdc_mem, hbm.into());
 
         // 绘制图标（缩放到 48x48）
         let _ = DrawIconEx(
@@ -507,11 +507,11 @@ fn extract_icon_shgetfileinfo(path: &str) -> Result<Vec<u8>> {
         );
 
         // 清理
-        let _ = SelectObject(hdc_mem, old_bm);
-        let _ = DeleteObject(hbm);
+        let _ = SelectObject(hdc_mem, old_bm.into());
+        let _ = DeleteObject(hbm.into());
         let _ = DeleteDC(hdc_mem);
-        let _ = DeleteObject(icon_info.hbmMask);
-        let _ = DeleteObject(icon_info.hbmColor);
+        let _ = DeleteObject(icon_info.hbmMask.into());
+        let _ = DeleteObject(icon_info.hbmColor.into());
         let _ = DestroyIcon(hicon);
         let _ = ReleaseDC(None, hdc_screen);
 

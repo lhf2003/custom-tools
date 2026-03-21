@@ -67,6 +67,35 @@ pub fn run() {
                 if let Err(e) = window.set_always_on_top(settings.always_on_top) {
                     log::warn!("Failed to set always_on_top: {}", e);
                 }
+
+                // Apply OS-level Acrylic blur effect (Windows 10 Fall Creators Update+)
+                #[cfg(target_os = "windows")]
+                if let Err(e) = window_vibrancy::apply_acrylic(&window, Some((18, 18, 18, 120))) {
+                    log::warn!("Failed to apply acrylic vibrancy: {}", e);
+                }
+
+                // Apply rounded window corners at compositor level (Windows 11+)
+                // This clips the Acrylic background to match the visual rounded corners,
+                // preventing the gray rectangular fill in the four corners.
+                #[cfg(target_os = "windows")]
+                {
+                    use windows::Win32::Graphics::Dwm::{
+                        DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+                    };
+                    if let Ok(hwnd) = window.hwnd() {
+                        let preference = DWMWCP_ROUND;
+                        unsafe {
+                            if let Err(e) = DwmSetWindowAttribute(
+                                hwnd,
+                                DWMWA_WINDOW_CORNER_PREFERENCE,
+                                &preference as *const _ as *const core::ffi::c_void,
+                                std::mem::size_of_val(&preference) as u32,
+                            ) {
+                                log::warn!("Failed to set rounded window corners: {}", e);
+                            }
+                        }
+                    }
+                }
             }
 
             // Apply startup_launch setting
@@ -340,9 +369,9 @@ pub(crate) fn capture_prev_window_hwnd(app_handle: &tauri::AppHandle) {
         unsafe {
             use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
             let hwnd = GetForegroundWindow();
-            if hwnd.0 != 0 {
-                prev_window_state.store(hwnd.0);
-                log::info!("Captured previous window HWND: {}", hwnd.0);
+            if !hwnd.0.is_null() {
+                prev_window_state.store(hwnd.0 as isize);
+                log::info!("Captured previous window HWND: {}", hwnd.0 as isize);
             } else {
                 log::warn!("GetForegroundWindow returned null, cannot capture");
             }

@@ -3,6 +3,7 @@ import { Search, Plus, Copy, Eye, EyeOff, Lock, Trash2, X, Globe, Shield, Layout
 import { invoke } from '@tauri-apps/api/core';
 import { WINDOW_SIZE } from '../../constants/window';
 import { THEME } from '../../constants/theme';
+import { debouncedResize } from '../../utils/tauri';
 
 interface PasswordCategory {
   id: number;
@@ -35,14 +36,7 @@ interface CreateEntryRequest {
 export function PasswordView() {
   // Resize window when view mounts
   useEffect(() => {
-    const resizeWindow = async () => {
-      try {
-        await invoke('resize_window', { height: WINDOW_SIZE.PASSWORD.height, width: WINDOW_SIZE.PASSWORD.width });
-      } catch (err: unknown) {
-        console.error('Failed to resize window:', err);
-      }
-    };
-    resizeWindow();
+    debouncedResize(WINDOW_SIZE.PASSWORD.height, WINDOW_SIZE.PASSWORD.width);
   }, []);
 
   const [isUnlocked, setIsUnlocked] = useState(false);

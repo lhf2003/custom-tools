@@ -3,9 +3,9 @@ import {
   Copy, Download, Check, AlignLeft, GitBranch,
   AlertCircle, ChevronsDownUp, ChevronsUpDown,
 } from 'lucide-react';
-import { invoke } from '@tauri-apps/api/core';
 import { useAppStore } from '@/stores/appStore';
 import { WINDOW_SIZE } from '../../constants/window';
+import { debouncedResize } from '../../utils/tauri';
 import { JsonTreeView } from './JsonTreeView';
 import { renderJsonToCanvas } from './jsonCanvas';
 import { JsonExportPreviewModal } from './JsonExportPreviewModal';
@@ -51,7 +51,7 @@ export function JsonFormatterView() {
 
   // Resize window to fit content
   useEffect(() => {
-    invoke('resize_window', { height: WINDOW_SIZE.JSON_FORMATTER.height }).catch(() => {});
+    debouncedResize(WINDOW_SIZE.JSON_FORMATTER.height);
   }, []);
 
   const formattedText = parsedJson !== null

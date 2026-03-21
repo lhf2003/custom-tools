@@ -233,13 +233,13 @@ pub fn copy_to_clipboard(
 #[cfg(windows)]
 fn copy_image_to_windows_clipboard(image_data: &[u8]) -> Result<(), String> {
     use windows::Win32::System::DataExchange::{OpenClipboard, CloseClipboard, SetClipboardData, EmptyClipboard};
-    use windows::Win32::Foundation::{HWND, HANDLE};
+    use windows::Win32::Foundation::HANDLE;
     use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE, GMEM_ZEROINIT};
     use windows::Win32::Graphics::Gdi::BITMAPINFOHEADER;
 
     unsafe {
         // Open clipboard
-        if OpenClipboard(HWND(0)).is_err() {
+        if OpenClipboard(None).is_err() {
             return Err("Failed to open clipboard".to_string());
         }
 
@@ -313,8 +313,8 @@ fn copy_image_to_windows_clipboard(image_data: &[u8]) -> Result<(), String> {
         // Set CF_DIB data to clipboard
         // Note: After SetClipboardData succeeds, the system owns the memory and we should not free it
         const CF_DIB: u32 = 8;
-        let handle = HANDLE(hglobal.0 as isize);
-        let result = SetClipboardData(CF_DIB, handle);
+        let handle = HANDLE(hglobal.0);
+        let result = SetClipboardData(CF_DIB, Some(handle));
         if result.is_err() {
             let _ = CloseClipboard();
             return Err("Failed to set clipboard data".to_string());
@@ -480,11 +480,10 @@ fn handle_pasted_generic_file(
 #[tauri::command]
 pub fn read_clipboard_image() -> Result<ClipboardReadResult, String> {
     use windows::Win32::System::DataExchange::{OpenClipboard, CloseClipboard};
-    use windows::Win32::Foundation::HWND;
 
     unsafe {
-        // Open clipboard (HWND(0) means current process)
-        if OpenClipboard(HWND(0)).is_err() {
+        // Open clipboard (None means current process)
+        if OpenClipboard(None).is_err() {
             return Ok(ClipboardReadResult {
                 success: false,
                 result_type: "none".to_string(),
@@ -819,8 +818,8 @@ unsafe fn simulate_paste_to_window(target_hwnd: isize) {
     use windows::Win32::Foundation::HWND;
 
     // Validate the window still exists
-    let hwnd = HWND(target_hwnd);
-    if !IsWindow(hwnd).as_bool() {
+    let hwnd = HWND(target_hwnd as *mut _);
+    if !IsWindow(Some(hwnd)).as_bool() {
         log::warn!("Target window is no longer valid");
         return;
     }
