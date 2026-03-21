@@ -19,7 +19,7 @@ import { convertFileSrc } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { THEME } from '../../constants/theme';
 import { WINDOW_SIZE } from '../../constants/window';
-import { debouncedResize } from '../../utils/tauri';
+import { immediateResize } from '../../utils/tauri';
 
 interface ClipboardItemData {
   id: number;
@@ -40,9 +40,10 @@ interface ClipboardQuery {
 type TabType = 'all' | 'text' | 'image' | 'file' | 'favorite';
 
 export function ClipboardView() {
-  // Resize window when view mounts
+  // Resize window when view mounts — use immediateResize to cancel any
+  // pending debounce left by LauncherView and apply the correct size at once.
   useEffect(() => {
-    debouncedResize(WINDOW_SIZE.CLIPBOARD.height);
+    immediateResize(WINDOW_SIZE.CLIPBOARD.height);
   }, []);
 
   const [activeTab, setActiveTab] = useState<TabType>('all');

@@ -53,6 +53,25 @@ let _resizeTimer: ReturnType<typeof setTimeout> | null = null;
 let _pendingHeight: number | null = null;
 let _pendingWidth: number | null = null;
 
+/**
+ * Immediately resize the window, cancelling any pending debounced resize.
+ * Use this on view mount to avoid the 60 ms gap where the old view's size is
+ * still visible. Cancelling the pending timer ensures only one SetWindowPos
+ * call reaches the OS, so the DWM Acrylic layer stays in sync.
+ */
+export function immediateResize(height: number, width?: number): void {
+  if (_resizeTimer !== null) {
+    clearTimeout(_resizeTimer);
+    _resizeTimer = null;
+  }
+  _pendingHeight = null;
+  _pendingWidth = null;
+
+  const args: Record<string, unknown> = { height };
+  if (width !== undefined) args.width = width;
+  safeInvoke('resize_window', args);
+}
+
 export function debouncedResize(height: number, width?: number): void {
   _pendingHeight = height;
   _pendingWidth = width ?? null;
