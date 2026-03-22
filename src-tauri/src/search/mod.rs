@@ -568,22 +568,30 @@ impl Default for SearchIndex {
 /// Launch an application by its shortcut path
 #[cfg(windows)]
 pub fn launch_app(path: &str) -> anyhow::Result<()> {
-    use std::os::windows::process::CommandExt;
-    use std::process::Command;
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    use windows_core::PCWSTR;
 
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    // Null-terminated UTF-16 path
+    let path_wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
 
-    if path.starts_with("shell:") {
-        // UWP app: launch via explorer.exe
-        Command::new("explorer.exe")
-            .arg(path)
-            .creation_flags(CREATE_NO_WINDOW)
-            .spawn()?;
-    } else {
-        Command::new("cmd")
-            .args(["/c", "start", "", path])
-            .creation_flags(CREATE_NO_WINDOW)
-            .spawn()?;
+    // ShellExecuteW launches through the Windows Shell. The resulting process
+    // is independent of the Tauri app's Job Object and won't be killed on exit.
+    // It handles both regular paths (.lnk / .exe) and UWP shell: URIs.
+    let result = unsafe {
+        ShellExecuteW(
+            None,           // no parent HWND
+            PCWSTR::null(), // default verb: "open"
+            PCWSTR(path_wide.as_ptr()),
+            PCWSTR::null(), // no parameters
+            PCWSTR::null(), // default working directory
+            SW_SHOWNORMAL,
+        )
+    };
+
+    // ShellExecuteW returns > 32 on success; <= 32 indicates an error code
+    if result.0 as isize <= 32 {
+        anyhow::bail!("ShellExecuteW failed with error code {}", result.0 as isize);
     }
 
     Ok(())

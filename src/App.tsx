@@ -24,6 +24,7 @@ import { PasswordView } from '@/modules/password/PasswordView';
 import { SettingsView } from '@/modules/settings/SettingsView';
 import { EverythingView } from '@/modules/everything/EverythingView';
 import { JsonFormatterView } from '@/modules/json_formatter';
+import { ChatView } from '@/modules/chat/ChatView';
 import { TopNavigationBar } from '@/components/TopNavigationBar';
 import { UpdateNotification } from '@/components/UpdateNotification';
 import { ChangelogDialog } from '@/components/ChangelogDialog';
@@ -74,9 +75,9 @@ function App() {
   // View configurations for navigation bar
   const viewConfigs = useMemo(() => {
     const configs: Record<
-      Exclude<ViewMode, 'launcher'>,
+      Exclude<ViewMode, 'launcher' | 'chat'>,
       { title: string; menuItems: MenuItem[] }
-    > = {
+    > & Record<'chat', { title: string; menuItems: MenuItem[] }> = {
       clipboard: {
         title: '剪贴板历史',
         menuItems: [
@@ -230,6 +231,10 @@ function App() {
         title: 'JSON 格式化',
         menuItems: [...commonMenuItems],
       },
+      chat: {
+        title: 'AI 对话',
+        menuItems: [...commonMenuItems],
+      },
     };
     return configs;
   }, [always_on_top, commonMenuItems, handleToggleAlwaysOnTop, setActiveView]);
@@ -320,6 +325,8 @@ function App() {
         return <EverythingView />;
       case 'json_formatter':
         return <JsonFormatterView />;
+      case 'chat':
+        return <ChatView />;
       default:
         return <LauncherView />;
     }

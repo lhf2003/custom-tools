@@ -16,6 +16,7 @@ const VIEW_MODES: readonly ViewMode[] = [
   'settings',
   'everything',
   'json_formatter',
+  'chat',
 ] as const;
 
 function isViewMode(value: string): value is ViewMode {
@@ -240,6 +241,12 @@ export function LauncherView() {
 
   // Handle keyboard navigation
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.shiftKey && e.key === 'Tab') {
+      e.preventDefault();
+      setActiveView('chat');
+      return;
+    }
+
     const items = searchQuery ? getAllResults() : displayedItems;
     const maxIndex = items.length - 1;
 
@@ -267,7 +274,7 @@ export function LauncherView() {
         }
         break;
     }
-  }, [searchQuery, displayedItems, selectedIndex]);
+  }, [searchQuery, displayedItems, selectedIndex, setActiveView]);
 
   // Get all results for keyboard navigation during search
   const getAllResults = () => {

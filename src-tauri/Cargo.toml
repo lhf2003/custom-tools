@@ -45,6 +45,8 @@ notify = { version = "6.1", default-features = false, features = ["macos_kqueue"
 chrono = "0.4"
 open = "5.0"
 window-vibrancy = "0.7.1"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+futures-util = "0.3"
 tauri-plugin-process = "2.3.1"
 tauri-plugin-dialog = "2"
 rust-pinyin = "0.1"

@@ -36,4 +36,10 @@ export const WINDOW_SIZE = {
   JSON_FORMATTER: {
     height: 560,
   },
+  CHAT: {
+    /** Height when only the input box is visible (collapsed). */
+    collapsed: 160,
+    /** Height when a response is displayed (expanded). */
+    expanded: 560,
+  },
 } as const;

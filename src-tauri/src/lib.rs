@@ -7,6 +7,7 @@ use std::time::Duration;
 pub mod clipboard;
 pub mod commands;
 pub mod db;
+pub mod llm;
 pub mod notes;
 pub mod password;
 pub mod search;
@@ -274,6 +275,9 @@ pub fn run() {
             commands::changelog::get_changelogs,
             commands::changelog::check_version_changelog,
             commands::changelog::cleanup_old_changelogs,
+            commands::llm::call_llm,
+            commands::llm::test_llm_connection,
+            commands::llm::call_llm_stream,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

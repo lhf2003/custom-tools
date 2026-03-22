@@ -15,19 +15,25 @@ pub struct AppSettings {
     pub clipboard_keep_days: i32,
     pub auto_update: bool,
     pub clipboard_auto_paste: bool,
+    pub llm_base_url: String,
+    pub llm_api_key: String,
+    pub llm_model: String,
 }
 
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            always_on_top: false,  // 默认不置顶
-            hide_on_blur: true,    // 默认点击外部隐藏
+            always_on_top: false,
+            hide_on_blur: true,
             startup_launch: false,
             theme: "system".to_string(),
             window_opacity: 0.95,
-            clipboard_keep_days: 30,  // 默认保存30天
-            auto_update: true,  // 默认开启自动更新
-            clipboard_auto_paste: true,  // 默认开启自动粘贴
+            clipboard_keep_days: 30,
+            auto_update: true,
+            clipboard_auto_paste: true,
+            llm_base_url: "https://api.openai.com/v1".to_string(),
+            llm_api_key: String::new(),
+            llm_model: "gpt-4o-mini".to_string(),
         }
     }
 }
@@ -117,6 +123,9 @@ impl SettingsManager {
                         settings.clipboard_auto_paste = v;
                     }
                 }
+                "llm_base_url" => settings.llm_base_url = value,
+                "llm_api_key" => settings.llm_api_key = value,
+                "llm_model" => settings.llm_model = value,
                 _ => {}
             }
         }
@@ -179,6 +188,9 @@ impl SettingsManager {
                         cache.clipboard_auto_paste = v;
                     }
                 }
+                "llm_base_url" => cache.llm_base_url = value.to_string(),
+                "llm_api_key" => cache.llm_api_key = value.to_string(),
+                "llm_model" => cache.llm_model = value.to_string(),
                 _ => {}
             }
         }

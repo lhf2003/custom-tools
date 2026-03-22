@@ -10,6 +10,9 @@ export interface AppSettings {
   clipboard_keep_days: number;
   auto_update: boolean;
   clipboard_auto_paste: boolean;
+  llm_base_url: string;
+  llm_api_key: string;
+  llm_model: string;
 }
 
 export interface ShortcutConfig {
@@ -40,6 +43,10 @@ interface SettingsState extends AppSettings {
   toggleAutoUpdate: () => Promise<boolean>;
   setClipboardAutoPaste: (enabled: boolean) => Promise<void>;
   toggleClipboardAutoPaste: () => Promise<boolean>;
+  setLlmBaseUrl: (url: string) => Promise<void>;
+  setLlmApiKey: (key: string) => Promise<void>;
+  setLlmModel: (model: string) => Promise<void>;
+  testLlmConnection: () => Promise<string>;
 
   // Shortcut Actions
   loadShortcuts: () => Promise<void>;
@@ -58,6 +65,9 @@ const defaultSettings: AppSettings = {
   clipboard_keep_days: 30,
   auto_update: true,
   clipboard_auto_paste: true,
+  llm_base_url: 'https://api.openai.com/v1',
+  llm_api_key: '',
+  llm_model: 'gpt-4o-mini',
 };
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
@@ -197,6 +207,38 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       console.error('Failed to toggle clipboard_auto_paste:', err);
       return get().clipboard_auto_paste;
     }
+  },
+
+  setLlmBaseUrl: async (url: string) => {
+    try {
+      await invoke('set_setting', { key: 'llm_base_url', value: url });
+      set({ llm_base_url: url });
+    } catch (err) {
+      console.error('Failed to set llm_base_url:', err);
+    }
+  },
+
+  setLlmApiKey: async (key: string) => {
+    try {
+      await invoke('set_setting', { key: 'llm_api_key', value: key });
+      set({ llm_api_key: key });
+    } catch (err) {
+      console.error('Failed to set llm_api_key:', err);
+    }
+  },
+
+  setLlmModel: async (model: string) => {
+    try {
+      await invoke('set_setting', { key: 'llm_model', value: model });
+      set({ llm_model: model });
+    } catch (err) {
+      console.error('Failed to set llm_model:', err);
+    }
+  },
+
+  testLlmConnection: async () => {
+    const result = await invoke<string>('test_llm_connection');
+    return result;
   },
 
   // ==================== Shortcut Actions ====================

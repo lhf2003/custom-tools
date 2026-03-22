@@ -1,5 +1,5 @@
 // View modes
-type ViewMode = 'launcher' | 'clipboard' | 'markdown' | 'password' | 'settings' | 'everything' | 'json_formatter';
+type ViewMode = 'launcher' | 'clipboard' | 'markdown' | 'password' | 'settings' | 'everything' | 'json_formatter' | 'chat';
 
 // Navigation menu item
 export interface MenuItem {
