@@ -1,4 +1,5 @@
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc::channel;
@@ -9,6 +10,10 @@ pub use watcher::ClipboardWatcher;
 
 use crate::commands::settings::SettingsState;
 use crate::db::DatabaseState;
+
+/// Shared flag to suppress clipboard recording when the app writes internally.
+/// Set to `true` before an internal clipboard write; the event processor clears it.
+pub struct ClipboardSuppressFlag(pub Arc<AtomicBool>);
 
 /// Clipboard content types
 #[derive(Debug, Clone)]
@@ -32,7 +37,7 @@ pub struct ClipboardManager {
 }
 
 impl ClipboardManager {
-    pub fn new(app_handle: AppHandle) -> anyhow::Result<Self> {
+    pub fn new(app_handle: AppHandle, suppress_flag: Arc<AtomicBool>) -> anyhow::Result<Self> {
         let (tx, mut rx) = channel::<ClipboardEvent>(100);
 
         let watcher = Arc::new(Mutex::new(ClipboardWatcher::new(tx)?));
@@ -51,6 +56,11 @@ impl ClipboardManager {
         let app_handle_clone = app_handle.clone();
         tauri::async_runtime::spawn(async move {
             while let Some(event) = rx.recv().await {
+                // Skip recording when this app wrote to clipboard internally
+                if suppress_flag.swap(false, Ordering::Relaxed) {
+                    log::debug!("Clipboard update suppressed (internal write)");
+                    continue;
+                }
                 if let Err(e) = Self::handle_clipboard_event(&app_handle_clone, event).await {
                     log::error!("Failed to handle clipboard event: {}", e);
                 }

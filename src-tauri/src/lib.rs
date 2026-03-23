@@ -138,7 +138,9 @@ pub fn run() {
             app.manage(PreviousFocusedWindow::new());
 
             // Start clipboard manager
-            let clipboard_manager = clipboard::ClipboardManager::new(app.handle().clone())
+            let suppress_flag = Arc::new(AtomicBool::new(false));
+            app.manage(clipboard::ClipboardSuppressFlag(Arc::clone(&suppress_flag)));
+            let clipboard_manager = clipboard::ClipboardManager::new(app.handle().clone(), suppress_flag)
                 .map_err(|e| {
                     log::error!("Failed to create clipboard manager: {}", e);
                     e

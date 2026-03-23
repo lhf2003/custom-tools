@@ -2,7 +2,9 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, State};
 use sha2::{Digest, Sha256};
+use std::sync::atomic::Ordering;
 
+use crate::clipboard::ClipboardSuppressFlag;
 use crate::db::DatabaseState;
 
 /// Result type for clipboard read operations
@@ -178,6 +180,7 @@ pub fn clear_clipboard_history(db_state: State<DatabaseState>) -> Result<(), Str
 pub fn copy_to_clipboard(
     db_state: State<DatabaseState>,
     app_handle: tauri::AppHandle,
+    suppress_flag: State<ClipboardSuppressFlag>,
     id: i64,
 ) -> Result<(), String> {
     use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -191,6 +194,9 @@ pub fn copy_to_clipboard(
             |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
         )
         .map_err(|e| e.to_string())?;
+
+    // Signal the clipboard watcher to skip the next event (our own write)
+    suppress_flag.0.store(true, Ordering::Relaxed);
 
     match content_type.as_str() {
         "text" => {
@@ -211,13 +217,19 @@ pub fn copy_to_clipboard(
             #[cfg(not(windows))]
             {
                 log::warn!("Image clipboard copy not implemented for non-Windows platforms");
+                // Writing didn't happen, clear the flag
+                suppress_flag.0.store(false, Ordering::Relaxed);
             }
         }
         "file" => {
             // TODO: Implement file list clipboard write
             log::info!("File list copy not yet implemented");
+            // Writing didn't happen, clear the flag
+            suppress_flag.0.store(false, Ordering::Relaxed);
         }
-        _ => {}
+        _ => {
+            suppress_flag.0.store(false, Ordering::Relaxed);
+        }
     }
 
     // Update usage count and last used time
@@ -756,10 +768,11 @@ unsafe fn read_dib_data_and_save(ptr: *mut std::ffi::c_void) -> Result<String, S
 pub fn paste_to_clipboard_item(
     db_state: State<DatabaseState>,
     app_handle: tauri::AppHandle,
+    suppress_flag: State<ClipboardSuppressFlag>,
     id: i64,
 ) -> Result<(), String> {
-    // First copy to clipboard
-    copy_to_clipboard(db_state, app_handle.clone(), id)?;
+    // First copy to clipboard (suppress_flag is forwarded to avoid duplicate history entry)
+    copy_to_clipboard(db_state, app_handle.clone(), suppress_flag, id)?;
 
     // Check if auto-paste is enabled
     let auto_paste_enabled = if let Some(settings_state) = app_handle.try_state::<crate::commands::settings::SettingsState>() {

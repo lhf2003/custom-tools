@@ -20,6 +20,7 @@ import { listen } from '@tauri-apps/api/event';
 import { THEME } from '../../constants/theme';
 import { WINDOW_SIZE } from '../../constants/window';
 import { immediateResize } from '../../utils/tauri';
+import { imageCache } from './imageCache';
 
 interface ClipboardItemData {
   id: number;
@@ -153,6 +154,7 @@ export function ClipboardView() {
   const handleDelete = async (id: number) => {
     try {
       await invoke('delete_clipboard_item', { id });
+      imageCache.remove(id);
       fetchClipboardHistory();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -172,17 +174,24 @@ export function ClipboardView() {
   };
 
   const handlePreviewImage = async (item: ClipboardItemData) => {
+    const cached = imageCache.get(item.id);
+    if (cached) {
+      setPreviewImage(cached);
+      return;
+    }
+
     if (item.content_type === 'image') {
       try {
         const base64 = await invoke<string>('get_clipboard_image_base64', { id: item.id });
+        imageCache.set(item.id, base64);
         setPreviewImage(base64);
       } catch (err) {
         console.error('Failed to load image:', err);
       }
     } else if (item.content_type === 'file' && isImageFile(item.content)) {
-      // For image files, load via backend to get base64 for preview
       try {
         const base64 = await invoke<string>('read_image_file_as_base64', { path: item.content });
+        imageCache.set(item.id, base64);
         setPreviewImage(base64);
       } catch (err) {
         console.error('Failed to load image preview:', err);
@@ -426,17 +435,30 @@ function ClipboardItem({
     };
   }, [clickTimer]);
 
-  // Load image thumbnail for image type or image files
+  // Load image thumbnail for image type or image files, with LRU cache
   useEffect(() => {
     if (item.content_type === 'image') {
+      const cached = imageCache.get(item.id);
+      if (cached) {
+        setThumbnail(cached);
+        return;
+      }
       invoke<string>('get_clipboard_image_base64', { id: item.id })
-        .then(setThumbnail)
+        .then((data) => {
+          imageCache.set(item.id, data);
+          setThumbnail(data);
+        })
         .catch((err) => console.error('Failed to load thumbnail:', err));
     } else if (item.content_type === 'file' && isImageFile(item.content)) {
-      // For image files, load via backend to get base64
+      const cached = imageCache.get(item.id);
+      if (cached) {
+        setThumbnail(cached);
+        return;
+      }
       const loadImageFromFile = async () => {
         try {
           const base64 = await invoke<string>('read_image_file_as_base64', { path: item.content });
+          imageCache.set(item.id, base64);
           setThumbnail(base64);
         } catch (err) {
           console.error('Failed to load image from file:', err);
