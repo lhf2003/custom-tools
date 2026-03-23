@@ -38,6 +38,7 @@ const MODULE_VIEW_MAP: Record<string, ViewMode> = {
   notes: 'markdown',
   passwords: 'password',
   settings: 'settings',
+  everything: 'everything',
 };
 
 function App() {

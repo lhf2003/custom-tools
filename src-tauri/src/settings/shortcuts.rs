@@ -38,6 +38,7 @@ pub enum ShortcutAction {
     OpenNotes,
     OpenPasswords,
     OpenSettings,
+    OpenEverything,
 }
 
 impl ShortcutAction {
@@ -48,6 +49,7 @@ impl ShortcutAction {
             ShortcutAction::OpenNotes => "open_notes",
             ShortcutAction::OpenPasswords => "open_passwords",
             ShortcutAction::OpenSettings => "open_settings",
+            ShortcutAction::OpenEverything => "open_everything",
         }
     }
 
@@ -58,6 +60,7 @@ impl ShortcutAction {
             "open_notes" => Some(ShortcutAction::OpenNotes),
             "open_passwords" => Some(ShortcutAction::OpenPasswords),
             "open_settings" => Some(ShortcutAction::OpenSettings),
+            "open_everything" => Some(ShortcutAction::OpenEverything),
             _ => None,
         }
     }
@@ -102,7 +105,15 @@ pub fn get_default_shortcuts() -> Vec<ShortcutConfig> {
             id: "open_settings".to_string(),
             name: "打开设置".to_string(),
             description: "快速访问设置页面".to_string(),
-            default_keys: "Ctrl+Shift+,".to_string(),
+            default_keys: "Ctrl+Shift+S".to_string(),
+            custom_keys: None,
+            enabled: true,
+        },
+        ShortcutConfig {
+            id: "open_everything".to_string(),
+            name: "打开文件搜索".to_string(),
+            description: "快速访问文件搜索（Everything）".to_string(),
+            default_keys: "Ctrl+Shift+F".to_string(),
             custom_keys: None,
             enabled: true,
         },
@@ -189,8 +200,18 @@ impl ShortcutManager {
 
     /// 获取所有快捷键配置
     pub fn get_all_configs(&self) -> Vec<ShortcutConfig> {
+        const ORDER: &[&str] = &[
+            "toggle_window",
+            "open_clipboard",
+            "open_notes",
+            "open_everything",
+            "open_settings",
+            "open_passwords",
+        ];
         let mut configs: Vec<_> = self.configs.values().cloned().collect();
-        configs.sort_by(|a, b| a.id.cmp(&b.id));
+        configs.sort_by_key(|c| {
+            ORDER.iter().position(|&id| id == c.id).unwrap_or(usize::MAX)
+        });
         configs
     }
 
@@ -477,7 +498,7 @@ fn handle_shortcut_action(app_handle: &AppHandle, action_id: &str) {
             // 复用 lib.rs 的 toggle_main_window（含 HWND 捕获、防闪烁、窗口定位）
             crate::toggle_main_window(app_handle);
         }
-        "open_clipboard" | "open_notes" | "open_passwords" | "open_settings" => {
+        "open_clipboard" | "open_notes" | "open_passwords" | "open_settings" | "open_everything" => {
             // 捕获前台窗口以支持自动粘贴
             #[cfg(windows)]
             crate::capture_prev_window_hwnd(app_handle);
@@ -491,6 +512,7 @@ fn handle_shortcut_action(app_handle: &AppHandle, action_id: &str) {
                 "open_notes" => "notes",
                 "open_passwords" => "passwords",
                 "open_settings" => "settings",
+                "open_everything" => "everything",
                 _ => "",
             };
             let _ = app_handle.emit("shortcut:open_module", module);
