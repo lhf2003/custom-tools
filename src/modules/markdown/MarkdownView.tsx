@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { FileText, Plus, Folder, Loader2 } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { FileText, Plus, Folder, Loader2, Search } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import MDEditor from '@uiw/react-md-editor';
 import type { NoteItemData, NoteContentData, CreateNoteRequest } from './types';
@@ -157,6 +157,20 @@ export function MarkdownView() {
     };
   }, [openCreateModal]);
 
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const searchResults = useMemo(() => {
+    if (!searchQuery.trim()) return [];
+    const query = searchQuery.toLowerCase();
+    const flatten = (items: NoteItemData[]): NoteItemData[] =>
+      items.flatMap((item) => [
+        ...(!item.is_folder ? [item] : []),
+        ...(item.children ? flatten(item.children) : []),
+      ]);
+    return flatten(notes).filter((item) => item.name.toLowerCase().includes(query));
+  }, [searchQuery, notes]);
+
   const openRenameModal = (item: NoteItemData) => {
     setRenameItem(item);
     setRenameValue(item.name);
@@ -167,24 +181,31 @@ export function MarkdownView() {
     <div className="w-full h-full flex" style={{ backgroundColor: THEME.BG_PRIMARY }}>
       {/* File Tree Sidebar */}
       <aside className="w-48 border-r border-zinc-600/30 flex flex-col">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-600/30">
-          <h3 className="text-zinc-400 text-sm font-medium">笔记</h3>
-          <div className="flex gap-1">
-            <button
-              onClick={() => openCreateModal('file')}
-              className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700/50 transition-all duration-200 cursor-pointer"
-              title="新建笔记"
-            >
-              <Plus size={16} />
-            </button>
-            <button
-              onClick={() => openCreateModal('folder')}
-              className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700/50 transition-all duration-200 cursor-pointer"
-              title="新建文件夹"
-            >
-              <Folder size={16} />
-            </button>
+        <div className="flex items-center gap-1 px-2 py-2 border-b border-zinc-600/30">
+          <div className="flex-1 flex items-center gap-1.5 bg-zinc-700/40 rounded-lg px-2 py-1.5 min-w-0">
+            <Search size={12} className="text-zinc-500 shrink-0" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="搜索笔记..."
+              className="bg-transparent text-xs text-zinc-300 placeholder:text-zinc-500 outline-none flex-1 min-w-0"
+            />
           </div>
+          <button
+            onClick={() => openCreateModal('file')}
+            className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700/50 transition-all duration-200 cursor-pointer shrink-0"
+            title="新建笔记"
+          >
+            <Plus size={14} />
+          </button>
+          <button
+            onClick={() => openCreateModal('folder')}
+            className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700/50 transition-all duration-200 cursor-pointer shrink-0"
+            title="新建文件夹"
+          >
+            <Folder size={14} />
+          </button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-2">
@@ -203,6 +224,28 @@ export function MarkdownView() {
                 重试
               </button>
             </div>
+          ) : searchQuery.trim() ? (
+            searchResults.length === 0 ? (
+              <div className="flex items-center justify-center h-full">
+                <p className="text-xs text-zinc-500">无匹配结果</p>
+              </div>
+            ) : (
+              <div className="space-y-0.5">
+                {searchResults.map((item) => (
+                  <button
+                    key={item.path}
+                    onClick={() => setSelectedNote(item.path)}
+                    className={`w-full text-left px-2 py-1.5 rounded-md text-xs truncate transition-colors cursor-pointer ${
+                      selectedNote === item.path
+                        ? 'bg-blue-500/20 text-blue-300'
+                        : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/40'
+                    }`}
+                  >
+                    {item.name.replace(/\.md$/, '')}
+                  </button>
+                ))}
+              </div>
+            )
           ) : notes.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-zinc-500 p-4 text-center">
               <div className="w-12 h-12 rounded-xl bg-zinc-700/30 flex items-center justify-center mb-3">
