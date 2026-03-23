@@ -28,6 +28,12 @@ pub fn init_table(conn: &Connection) -> Result<()> {
         [],
     )?;
 
+    // Migration: add pinyin_initials column if not exists
+    let _ = conn.execute(
+        "ALTER TABLE app_cache ADD COLUMN pinyin_initials TEXT DEFAULT ''",
+        [],
+    );
+
     // Create index for fast lookup
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_app_cache_valid ON app_cache(is_valid)",
