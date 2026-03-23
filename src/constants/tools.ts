@@ -5,6 +5,7 @@ import {
   HardDrive,
   Settings,
   Braces,
+  MessageCircle,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -40,6 +41,30 @@ export interface BuiltInTool {
  */
 export const BUILT_IN_TOOLS: readonly BuiltInTool[] = [
   {
+    id: 'chat',
+    name: 'AI 聊天',
+    icon: MessageCircle,
+    color: 'bg-violet-600',
+    description:
+      '接入 OpenAI / DeepSeek / Ollama 等兼容接口的 AI 对话助手，支持普通聊天、知识问答、文本翻译三种模式，对话记录本地保存。',
+  },
+  {
+    id: 'json_formatter',
+    name: 'JSON格式化',
+    icon: Braces,
+    color: 'bg-emerald-600',
+    description:
+      '在线格式化与校验 JSON 数据，支持折叠/展开树形视图、一键压缩或美化、导出为文件，帮助快速定位语法错误。',
+  },
+  {
+    id: 'everything',
+    name: '文件搜索',
+    icon: HardDrive,
+    color: 'bg-cyan-600',
+    description:
+      '集成Everything搜索引擎，毫秒级查找本地文件。支持模糊匹配、快速打开文件所在位置。',
+  },
+  {
     id: 'clipboard',
     name: '剪贴板',
     icon: Command,
@@ -62,20 +87,6 @@ export const BUILT_IN_TOOLS: readonly BuiltInTool[] = [
     color: 'bg-amber-500',
     description:
       '安全存储账号密码，使用AES-GCM加密保护。支持分类管理、快速复制，一键填充网站登录信息。',
-  },
-  {
-    id: 'everything',
-    name: '文件搜索',
-    icon: HardDrive,
-    color: 'bg-cyan-600',
-    description:
-      '集成Everything搜索引擎，毫秒级查找本地文件。支持模糊匹配、快速打开文件所在位置。',
-  },
-  {
-    id: 'json_formatter',
-    name: 'JSON格式化',
-    icon: Braces,
-    color: 'bg-emerald-600',
   },
   {
     id: 'settings',
