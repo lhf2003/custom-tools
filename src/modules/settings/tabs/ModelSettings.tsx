@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   Bot,
   Plus,
@@ -19,6 +19,201 @@ import {
   Languages,
 } from 'lucide-react';
 import { useLlmProviderStore, type Provider, type ProviderType, type Model, type Scene } from '@/stores/llmProviderStore';
+
+// Custom Select Component
+interface SelectOption {
+  value: string;
+  label: string;
+  disabled?: boolean;
+}
+
+interface CustomSelectProps {
+  value: string;
+  options: SelectOption[];
+  onChange: (value: string) => void;
+  placeholder?: string;
+  disabled?: boolean;
+  className?: string;
+  icon?: React.ReactNode;
+}
+
+function CustomSelect({
+  value,
+  options,
+  onChange,
+  placeholder = '请选择',
+  disabled = false,
+  className = '',
+  icon,
+}: CustomSelectProps) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const [dropdownPosition, setDropdownPosition] = useState<'top' | 'bottom'>('bottom');
+  const [dropdownMaxHeight, setDropdownMaxHeight] = useState(192);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  const selectedOption = options.find((opt) => opt.value === value);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    if (isOpen) {
+      const selectedIndex = options.findIndex((opt) => opt.value === value);
+      setHighlightedIndex(selectedIndex >= 0 ? selectedIndex : 0);
+    }
+  }, [isOpen, options, value]);
+
+  // Calculate dropdown position based on available space
+  useEffect(() => {
+    if (isOpen && containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      const itemHeight = 36; // Estimated height per option
+      const padding = 8; // py-1 = 4px * 2
+      const estimatedHeight = Math.min(options.length * itemHeight + padding, 192);
+
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const spaceAbove = rect.top;
+
+      // If space below is insufficient and space above is sufficient, expand upward
+      if (spaceBelow < estimatedHeight && spaceAbove > estimatedHeight) {
+        setDropdownPosition('top');
+        setDropdownMaxHeight(Math.min(spaceAbove - 16, 192));
+      } else {
+        setDropdownPosition('bottom');
+        setDropdownMaxHeight(Math.min(spaceBelow - 16, 192));
+      }
+    }
+  }, [isOpen, options.length]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (disabled) return;
+
+    switch (e.key) {
+      case 'Enter':
+      case ' ':
+        e.preventDefault();
+        if (isOpen && highlightedIndex >= 0) {
+          onChange(options[highlightedIndex].value);
+          setIsOpen(false);
+        } else {
+          setIsOpen(!isOpen);
+        }
+        break;
+      case 'Escape':
+        setIsOpen(false);
+        break;
+      case 'ArrowDown':
+        e.preventDefault();
+        if (!isOpen) {
+          setIsOpen(true);
+        } else {
+          setHighlightedIndex((prev) =>
+            prev < options.length - 1 ? prev + 1 : prev
+          );
+        }
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        if (!isOpen) {
+          setIsOpen(true);
+        } else {
+          setHighlightedIndex((prev) => (prev > 0 ? prev - 1 : prev));
+        }
+        break;
+    }
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      className={`relative ${className}`}
+      onKeyDown={handleKeyDown}
+      tabIndex={disabled ? -1 : 0}
+    >
+      <button
+        type="button"
+        onClick={() => !disabled && setIsOpen(!isOpen)}
+        disabled={disabled}
+        className={`
+          w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm
+          border transition-all duration-200 ease-out
+          ${disabled
+            ? 'bg-zinc-800/50 border-zinc-700/50 text-white/30 cursor-not-allowed'
+            : 'bg-gradient-to-b from-zinc-800 to-zinc-900 border-zinc-700 text-white/90 hover:border-violet-500/50 hover:shadow-lg hover:shadow-violet-500/10 focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 cursor-pointer'
+          }
+          ${isOpen ? 'border-violet-500 ring-2 ring-violet-500/20' : ''}
+        `}
+      >
+        {icon && <span className="text-white/50">{icon}</span>}
+        <span className={`flex-1 text-left truncate ${!selectedOption ? 'text-white/40' : ''}`}>
+          {selectedOption?.label || placeholder}
+        </span>
+        <ChevronDown
+          size={14}
+          className={`text-white/50 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+        />
+      </button>
+
+      {/* Dropdown Menu */}
+      <div
+        ref={listRef}
+        style={{ maxHeight: dropdownMaxHeight }}
+        className={`
+          absolute z-50 w-full py-1 rounded-lg
+          bg-gradient-to-b from-zinc-800 to-zinc-900
+          border border-zinc-700 shadow-xl shadow-black/50
+          transition-all duration-200 ease-out
+          ${dropdownPosition === 'top'
+            ? 'bottom-full mb-1 origin-bottom'
+            : 'top-full mt-1 origin-top'
+          }
+          ${isOpen ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 pointer-events-none'}
+          ${dropdownPosition === 'top' && !isOpen ? 'translate-y-2' : ''}
+          ${dropdownPosition === 'bottom' && !isOpen ? '-translate-y-2' : ''}
+        `}
+      >
+        <div className="overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-600 scrollbar-track-transparent h-full">
+          {options.length === 0 ? (
+            <div className="px-3 py-2 text-white/40 text-sm text-center">暂无选项</div>
+          ) : (
+            options.map((option, index) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => {
+                  onChange(option.value);
+                  setIsOpen(false);
+                }}
+                disabled={option.disabled}
+                onMouseEnter={() => setHighlightedIndex(index)}
+                className={`
+                  w-full px-3 py-2 text-left text-sm transition-colors duration-150
+                  ${option.disabled
+                    ? 'text-white/30 cursor-not-allowed'
+                    : 'text-white/80 hover:text-white hover:bg-violet-500/20 cursor-pointer'
+                  }
+                  ${value === option.value ? 'bg-violet-500/10 text-violet-300' : ''}
+                  ${highlightedIndex === index && !option.disabled ? 'bg-violet-500/20' : ''}
+                `}
+              >
+                {option.label}
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // Provider type options
 const PROVIDER_TYPES: { value: ProviderType; label: string; baseUrl: string; apiKeyRequired: boolean }[] = [
@@ -548,65 +743,65 @@ export function ModelSettings() {
                   </div>
 
                   {/* Provider & Model Select */}
-                  <div className="flex items-center gap-2">
-                    <select
-                      value={config?.provider_id || ''}
-                      onChange={async (e) => {
-                        const providerId = parseInt(e.target.value);
+                  <div className="flex items-center gap-3">
+                    <CustomSelect
+                      value={config?.provider_id?.toString() || ''}
+                      options={[
+                        { value: '', label: '选择提供商' },
+                        ...providers
+                          .filter((p) => p.is_active)
+                          .map((provider) => ({
+                            value: provider.id.toString(),
+                            label: provider.label,
+                          })),
+                      ]}
+                      onChange={async (value) => {
+                        const providerId = parseInt(value);
                         if (providerId) {
-                          // Load models for this provider if not already loaded
                           let providerModels = models[providerId];
                           if (!providerModels) {
                             providerModels = await loadModels(providerId);
                           }
-                          // Try to select first active model
                           const activeModels = providerModels?.filter((m) => m.is_active);
                           if (activeModels && activeModels.length > 0) {
                             await setSceneModel(scene, providerId, activeModels[0].model_id);
                           } else if (providerModels && providerModels.length > 0) {
-                            // Provider has models but none are active - select first one anyway
                             await setSceneModel(scene, providerId, providerModels[0].model_id);
                           } else {
-                            // No models available - just set provider, model will be empty
                             await setSceneModel(scene, providerId, '');
                           }
                         } else {
-                          // Clear selection
                           await setSceneModel(scene, 0, '');
                         }
                       }}
-                      className="bg-zinc-800 text-white text-sm rounded-lg px-3 py-2 outline-none border border-zinc-700 focus:border-violet-500/60 cursor-pointer"
-                    >
-                      <option value="">选择提供商</option>
-                      {providers
-                        .filter((p) => p.is_active)
-                        .map((provider) => (
-                          <option key={provider.id} value={provider.id}>
-                            {provider.label}
-                          </option>
-                        ))}
-                    </select>
+                      placeholder="选择提供商"
+                      className="w-36"
+                    />
 
-                    <select
+                    <CustomSelect
                       value={config?.model_id || ''}
-                      onChange={(e) => {
+                      options={
+                        config?.provider_id && models[config.provider_id]
+                          ? [
+                              { value: '', label: '选择模型' },
+                              ...models[config.provider_id]
+                                .filter((m) => m.is_active)
+                                .map((model) => ({
+                                  value: model.model_id,
+                                  label: model.name,
+                                })),
+                            ]
+                          : [{ value: '', label: '选择模型' }]
+                      }
+                      onChange={(value) => {
                         if (config?.provider_id) {
-                          handleSceneModelChange(scene, config.provider_id, e.target.value);
+                          handleSceneModelChange(scene, config.provider_id, value);
                         }
                       }}
                       disabled={!config?.provider_id}
-                      className="bg-zinc-800 text-white text-sm rounded-lg px-3 py-2 outline-none border border-zinc-700 focus:border-violet-500/60 cursor-pointer disabled:opacity-50 min-w-[140px]"
-                    >
-                      <option value="">选择模型</option>
-                      {config?.provider_id &&
-                        models[config.provider_id]
-                          ?.filter((m) => m.is_active)
-                          .map((model) => (
-                            <option key={model.id} value={model.model_id}>
-                              {model.name}
-                            </option>
-                          ))}
-                    </select>
+                      placeholder="选择模型"
+                      className="w-40"
+                    />
                   </div>
                 </div>
               );
