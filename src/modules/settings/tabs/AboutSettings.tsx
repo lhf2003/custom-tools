@@ -21,7 +21,7 @@ export function AboutSettings() {
           </div>
           <div>
             <h3 className="text-white text-base font-semibold">Custom Tools</h3>
-            <p className="text-white/40 text-xs mt-0.5">版本 0.1.3</p>
+            <p className="text-white/40 text-xs mt-0.5">版本 0.1.6</p>
             <p className="text-white/30 text-xs mt-1">Windows 效率启动器</p>
           </div>
         </div>

@@ -43,6 +43,52 @@ jobs:
 
           Write-Host "Version updated successfully to $version"
 
+      # Tag message 约定格式（第一行为类型 feat/fix/refactor，后续 "- " 开头为条目）：
+      # feat
+      # - 新增功能描述
+      # - 另一项改动
+      - name: Sync version and changelog to UI
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = $tag -replace '^v', ''
+          $today = Get-Date -Format 'yyyy-MM-dd'
+
+          # 读取 tag message，跳过空行
+          $msgLines = (git tag -l --format='%(contents)' $tag) -split "`n" |
+            ForEach-Object { $_.Trim() } |
+            Where-Object { $_ -ne '' }
+
+          # 解析类型（第一行）和条目（- 开头）
+          $tagType = 'feat'
+          $items = [System.Collections.Generic.List[string]]::new()
+          for ($i = 0; $i -lt $msgLines.Count; $i++) {
+            $line = $msgLines[$i]
+            if ($i -eq 0 -and $line -in @('feat', 'fix', 'refactor')) {
+              $tagType = $line
+            } elseif ($line -match '^[-*]\s+(.+)') {
+              $items.Add($Matches[1])
+            }
+          }
+
+          # 1. 更新 AboutSettings.tsx 版本号
+          $aboutPath = "src/modules/settings/tabs/AboutSettings.tsx"
+          $aboutContent = [System.IO.File]::ReadAllText($aboutPath, [System.Text.Encoding]::UTF8)
+          $aboutContent = $aboutContent -replace '版本 \d+\.\d+\.\d+', "版本 $version"
+          [System.IO.File]::WriteAllText($aboutPath, $aboutContent, [System.Text.Encoding]::UTF8)
+          Write-Host "Updated AboutSettings.tsx: 版本 $version"
+
+          # 2. 在 ChangelogSettings.tsx CHANGELOG 数组开头插入新条目
+          $changelogPath = "src/modules/settings/tabs/ChangelogSettings.tsx"
+          $changelogContent = [System.IO.File]::ReadAllText($changelogPath, [System.Text.Encoding]::UTF8)
+
+          $itemLines = ($items | ForEach-Object { "      '$_'," }) -join "`n"
+          $newEntry = "  {`n    version: '$version',`n    date: '$today',`n    tag: '$tagType',`n    items: [`n$itemLines`n    ],`n  },"
+
+          $changelogContent = $changelogContent -replace '(const CHANGELOG: ChangelogEntry\[\] = \[)', "`$1`n$newEntry"
+          [System.IO.File]::WriteAllText($changelogPath, $changelogContent, [System.Text.Encoding]::UTF8)
+          Write-Host "Updated ChangelogSettings.tsx: added v$version entry"
+
       - name: Get tag message
         id: tag_message
         shell: pwsh
