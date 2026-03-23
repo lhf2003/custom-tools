@@ -13,6 +13,7 @@ export interface AppSettings {
   llm_base_url: string;
   llm_api_key: string;
   llm_model: string;
+  llm_thinking_mode: boolean;
 }
 
 export interface ShortcutConfig {
@@ -46,6 +47,8 @@ interface SettingsState extends AppSettings {
   setLlmBaseUrl: (url: string) => Promise<void>;
   setLlmApiKey: (key: string) => Promise<void>;
   setLlmModel: (model: string) => Promise<void>;
+  setLlmThinkingMode: (enabled: boolean) => Promise<void>;
+  toggleLlmThinkingMode: () => Promise<boolean>;
   testLlmConnection: () => Promise<string>;
 
   // Shortcut Actions
@@ -68,6 +71,7 @@ const defaultSettings: AppSettings = {
   llm_base_url: 'https://api.openai.com/v1',
   llm_api_key: '',
   llm_model: 'gpt-4o-mini',
+  llm_thinking_mode: false,
 };
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
@@ -233,6 +237,28 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       set({ llm_model: model });
     } catch (err) {
       console.error('Failed to set llm_model:', err);
+    }
+  },
+
+  setLlmThinkingMode: async (enabled: boolean) => {
+    try {
+      await invoke('set_setting', { key: 'llm_thinking_mode', value: enabled.toString() });
+      set({ llm_thinking_mode: enabled });
+    } catch (err) {
+      console.error('Failed to set llm_thinking_mode:', err);
+    }
+  },
+
+  toggleLlmThinkingMode: async () => {
+    try {
+      const currentValue = get().llm_thinking_mode;
+      const newValue = !currentValue;
+      await invoke('set_setting', { key: 'llm_thinking_mode', value: newValue.toString() });
+      set({ llm_thinking_mode: newValue });
+      return newValue;
+    } catch (err) {
+      console.error('Failed to toggle llm_thinking_mode:', err);
+      return get().llm_thinking_mode;
     }
   },
 

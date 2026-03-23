@@ -1,68 +1,247 @@
-import { useState } from 'react';
-import { Bot, Eye, EyeOff, CheckCircle, XCircle } from 'lucide-react';
-import { useSettingsStore } from '@/stores/settingsStore';
+import { useState, useEffect } from 'react';
+import {
+  Bot,
+  Plus,
+  Trash2,
+  RefreshCw,
+  CheckCircle,
+  XCircle,
+  AlertCircle,
+  ChevronDown,
+  ChevronRight,
+  Settings,
+  Eye,
+  EyeOff,
+  Save,
+  TestTube,
+  MessageSquare,
+  HelpCircle,
+  Languages,
+} from 'lucide-react';
+import { useLlmProviderStore, type Provider, type ProviderType, type Model, type Scene } from '@/stores/llmProviderStore';
 
-interface ProviderPreset {
-  label: string;
-  baseUrl: string;
-  apiKeyRequired: boolean;
-  defaultModel: string;
-}
-
-const PROVIDER_PRESETS: ProviderPreset[] = [
-  { label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', apiKeyRequired: true, defaultModel: 'gpt-4o-mini' },
-  { label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', apiKeyRequired: true, defaultModel: 'deepseek-chat' },
-  { label: 'Ollama 本地', baseUrl: 'http://localhost:11434/api/chat', apiKeyRequired: false, defaultModel: 'llama3.2' },
+// Provider type options
+const PROVIDER_TYPES: { value: ProviderType; label: string; baseUrl: string; apiKeyRequired: boolean }[] = [
+  { value: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', apiKeyRequired: true },
+  { value: 'deepseek', label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', apiKeyRequired: true },
+  { value: 'bailian', label: '百炼', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', apiKeyRequired: true },
+  { value: 'ollama', label: 'Ollama 本地', baseUrl: 'http://localhost:11434', apiKeyRequired: false },
+  { value: 'custom', label: '自定义', baseUrl: '', apiKeyRequired: true },
 ];
 
-const MODEL_PRESETS = [
-  { label: 'GPT-4o Mini', value: 'gpt-4o-mini' },
-  { label: 'GPT-4o', value: 'gpt-4o' },
-  { label: 'DeepSeek Chat', value: 'deepseek-chat' },
-  { label: 'Claude 3.5 Haiku', value: 'claude-3-5-haiku-20241022' },
-  { label: 'Llama 3.2', value: 'llama3.2' },
-  { label: 'Qwen 2.5', value: 'qwen2.5' },
-  { label: 'Mistral', value: 'mistral' },
-];
+// Scene labels
+const SCENE_LABELS: Record<Scene, { label: string; icon: typeof MessageSquare; description: string }> = {
+  chat: { label: '闲聊', icon: MessageSquare, description: '日常对话场景' },
+  qa: { label: '问答', icon: HelpCircle, description: '知识问答场景' },
+  translate: { label: '翻译', icon: Languages, description: '翻译场景' },
+};
+
+// Provider type badge color
+const getProviderTypeColor = (type: ProviderType) => {
+  switch (type) {
+    case 'openai':
+      return 'bg-green-500/20 text-green-400 border-green-500/30';
+    case 'deepseek':
+      return 'bg-blue-500/20 text-blue-400 border-blue-500/30';
+    case 'bailian':
+      return 'bg-orange-500/20 text-orange-400 border-orange-500/30';
+    case 'ollama':
+      return 'bg-purple-500/20 text-purple-400 border-purple-500/30';
+    case 'custom':
+      return 'bg-gray-500/20 text-gray-400 border-gray-500/30';
+    default:
+      return 'bg-gray-500/20 text-gray-400 border-gray-500/30';
+  }
+};
+
+// Connection status badge
+const getConnectionStatusBadge = (status: string) => {
+  switch (status) {
+    case 'connected':
+      return { icon: CheckCircle, className: 'text-green-400', label: '已连接' };
+    case 'error':
+      return { icon: XCircle, className: 'text-red-400', label: '错误' };
+    case 'disconnected':
+      return { icon: AlertCircle, className: 'text-yellow-400', label: '断开' };
+    default:
+      return { icon: AlertCircle, className: 'text-gray-400', label: '未知' };
+  }
+};
 
 export function ModelSettings() {
-  const { llm_base_url, llm_api_key, llm_model, setLlmBaseUrl, setLlmApiKey, setLlmModel, testLlmConnection } =
-    useSettingsStore();
+  const {
+    providers,
+    models,
+    sceneConfigs,
+    isLoading,
+    loadProviders,
+    createProvider,
+    updateProvider,
+    deleteProvider,
+    testProviderConnection,
+    refreshProviderModels,
+    setProviderActive,
+    loadModels,
+    setModelActive,
+    loadSceneConfigs,
+    setSceneModel,
+  } = useLlmProviderStore();
 
-  const [baseUrl, setBaseUrl] = useState(llm_base_url);
-  const [apiKey, setApiKey] = useState(llm_api_key);
-  const [model, setModel] = useState(llm_model);
-  const [showKey, setShowKey] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [expandedProvider, setExpandedProvider] = useState<number | null>(null);
+  const [isAddingProvider, setIsAddingProvider] = useState(false);
+  const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
+  const [testingProvider, setTestingProvider] = useState<number | null>(null);
+  const [refreshingProvider, setRefreshingProvider] = useState<number | null>(null);
 
-  const activeProvider = PROVIDER_PRESETS.find((p) => p.baseUrl === baseUrl);
+  // Form state for new/edit provider
+  const [formData, setFormData] = useState({
+    name: '',
+    label: '',
+    providerType: 'openai' as ProviderType,
+    baseUrl: '',
+    apiKey: '',
+  });
+  const [showApiKey, setShowApiKey] = useState(false);
 
-  const applyProvider = (provider: ProviderPreset) => {
-    setBaseUrl(provider.baseUrl);
-    setModel(provider.defaultModel);
-    if (!provider.apiKeyRequired) setApiKey('');
-    setTestResult(null);
-  };
+  useEffect(() => {
+    loadProviders();
+    loadSceneConfigs();
+  }, []);
 
-  const handleSave = async () => {
-    await Promise.all([setLlmBaseUrl(baseUrl), setLlmApiKey(apiKey), setLlmModel(model)]);
-    setTestResult(null);
-  };
-
-  const handleTest = async () => {
-    setTesting(true);
-    setTestResult(null);
-    await Promise.all([setLlmBaseUrl(baseUrl), setLlmApiKey(apiKey), setLlmModel(model)]);
-    try {
-      const reply = await testLlmConnection();
-      setTestResult({ ok: true, msg: reply });
-    } catch (err) {
-      setTestResult({ ok: false, msg: String(err) });
-    } finally {
-      setTesting(false);
+  // Load models when expanding a provider
+  const handleToggleExpand = async (providerId: number) => {
+    if (expandedProvider === providerId) {
+      setExpandedProvider(null);
+    } else {
+      setExpandedProvider(providerId);
+      if (!models[providerId]) {
+        await loadModels(providerId);
+      }
     }
   };
+
+  // Start adding new provider
+  const handleStartAdd = () => {
+    setIsAddingProvider(true);
+    setEditingProvider(null);
+    setFormData({
+      name: '',
+      label: '',
+      providerType: 'openai',
+      baseUrl: PROVIDER_TYPES[0].baseUrl,
+      apiKey: '',
+    });
+  };
+
+  // Start editing provider
+  const handleStartEdit = (provider: Provider) => {
+    setEditingProvider(provider);
+    setIsAddingProvider(false);
+    setFormData({
+      name: provider.name,
+      label: provider.label,
+      providerType: provider.provider_type,
+      baseUrl: provider.base_url,
+      apiKey: '', // API key is encrypted, user needs to re-enter
+    });
+  };
+
+  // Cancel form
+  const handleCancelForm = () => {
+    setIsAddingProvider(false);
+    setEditingProvider(null);
+    setFormData({ name: '', label: '', providerType: 'openai', baseUrl: '', apiKey: '' });
+  };
+
+  // Handle provider type change
+  const handleProviderTypeChange = (type: ProviderType) => {
+    const preset = PROVIDER_TYPES.find((p) => p.value === type);
+    setFormData((prev) => ({
+      ...prev,
+      providerType: type,
+      baseUrl: preset?.baseUrl || prev.baseUrl,
+    }));
+  };
+
+  // Save provider (create or update)
+  const handleSaveProvider = async () => {
+    console.log('[DEBUG] handleSaveProvider called', { formData, editingProvider: !!editingProvider });
+    try {
+      if (editingProvider) {
+        console.log('[DEBUG] Updating existing provider:', editingProvider.id);
+        await updateProvider({
+          id: editingProvider.id,
+          name: formData.name,
+          label: formData.label,
+          baseUrl: formData.baseUrl,
+          apiKey: formData.apiKey || null,
+        });
+        console.log('[DEBUG] Provider updated successfully');
+      } else {
+        console.log('[DEBUG] Creating new provider with data:', {
+          name: formData.name,
+          label: formData.label,
+          base_url: formData.baseUrl,
+          providerType: formData.providerType,
+        });
+        await createProvider({
+          name: formData.name,
+          label: formData.label,
+          baseUrl: formData.baseUrl,
+          apiKey: formData.apiKey || null,
+          providerType: formData.providerType,
+        });
+        console.log('[DEBUG] Provider created successfully');
+      }
+      handleCancelForm();
+    } catch (err) {
+      console.error('[DEBUG] handleSaveProvider error:', err);
+      // Error handled in store
+    }
+  };
+
+  // Test connection
+  const handleTestConnection = async (providerId: number) => {
+    setTestingProvider(providerId);
+    try {
+      await testProviderConnection(providerId);
+    } finally {
+      setTestingProvider(null);
+    }
+  };
+
+  // Refresh models
+  const handleRefreshModels = async (providerId: number) => {
+    setRefreshingProvider(providerId);
+    try {
+      await refreshProviderModels(providerId);
+    } finally {
+      setRefreshingProvider(null);
+    }
+  };
+
+  // Delete provider
+  const handleDeleteProvider = async (providerId: number) => {
+    if (confirm('确定要删除此提供商吗？')) {
+      await deleteProvider(providerId);
+    }
+  };
+
+  // Toggle model active state
+  const handleToggleModelActive = async (model: Model) => {
+    await setModelActive(model.id, !model.is_active);
+  };
+
+  // Handle scene model selection
+  const handleSceneModelChange = async (scene: Scene, providerId: number, modelId: string) => {
+    // Ensure models are loaded before setting scene model
+    if (!models[providerId]) {
+      await loadModels(providerId);
+    }
+    await setSceneModel(scene, providerId, modelId);
+  };
+
+  const isFormValid = formData.name && formData.label && formData.baseUrl;
 
   return (
     <>
@@ -72,148 +251,368 @@ export function ModelSettings() {
         </div>
         <div>
           <h2 className="text-white text-lg font-semibold">AI 模型</h2>
-          <p className="text-white/40 text-xs">配置 OpenAI 兼容的大模型接口</p>
+          <p className="text-white/40 text-xs">配置多提供商 LLM 服务</p>
         </div>
       </div>
 
       <div className="space-y-4">
-        {/* 供应商快捷配置 */}
-        <div className="rounded-xl p-4 border border-white/10 bg-white/[0.02]">
-          <p className="text-white/90 text-sm font-medium mb-1">快速配置</p>
-          <p className="text-white/40 text-xs mb-3">选择服务商后自动填入地址和默认模型</p>
-          <div className="flex flex-wrap gap-2">
-            {PROVIDER_PRESETS.map((provider) => (
-              <button
-                key={provider.label}
-                onClick={() => applyProvider(provider)}
-                className={`px-3 py-1.5 rounded-lg text-xs transition-all cursor-pointer ${
-                  activeProvider?.label === provider.label
-                    ? 'bg-violet-500/20 text-violet-300 border border-violet-500/40'
-                    : 'bg-white/5 text-white/50 border border-white/10 hover:bg-white/10 hover:text-white/80'
-                }`}
-              >
-                {provider.label}
-                {!provider.apiKeyRequired && (
-                  <span className="ml-1.5 text-[10px] text-green-400/70">无需 Key</span>
-                )}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* API 基础地址 */}
-        <div className="rounded-xl p-4 border border-white/10 bg-white/[0.02]">
-          <p className="text-white/90 text-sm font-medium mb-1">API 基础地址</p>
-          <p className="text-white/40 text-xs mb-3">
-            OpenAI 兼容填 <code className="text-white/30">/v1</code> 结尾；Ollama 填完整路径{' '}
-            <code className="text-white/30">/api/chat</code>
-          </p>
-          <input
-            type="text"
-            value={baseUrl}
-            onChange={(e) => setBaseUrl(e.target.value)}
-            placeholder="https://api.openai.com/v1"
-            className="w-full bg-zinc-800 text-white text-sm rounded-lg px-3 py-2 outline-none border border-zinc-700 focus:border-violet-500/60 transition-colors placeholder:text-white/20"
-          />
-        </div>
-
-        {/* API Key */}
-        <div className="rounded-xl p-4 border border-white/10 bg-white/[0.02]">
-          <div className="flex items-center gap-2 mb-1">
-            <p className="text-white/90 text-sm font-medium">API Key</p>
-            {activeProvider && !activeProvider.apiKeyRequired && (
-              <span className="px-1.5 py-0.5 text-[10px] rounded bg-green-500/15 text-green-400 border border-green-500/20">
-                可选
-              </span>
-            )}
-          </div>
-          <p className="text-white/40 text-xs mb-3">
-            {activeProvider && !activeProvider.apiKeyRequired
-              ? 'Ollama 等本地模型无需 API Key，留空即可'
-              : '密钥仅存储在本地，不会上传至任何服务器'}
-          </p>
-          <div className="relative">
-            <input
-              type={showKey ? 'text' : 'password'}
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="sk-..."
-              className="w-full bg-zinc-800 text-white text-sm rounded-lg px-3 py-2 pr-10 outline-none border border-zinc-700 focus:border-violet-500/60 transition-colors placeholder:text-white/20"
-            />
+        {/* Provider List */}
+        <div className="rounded-xl border border-white/10 bg-white/[0.02] overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+            <h3 className="text-white/90 text-sm font-medium">提供商列表</h3>
             <button
-              onClick={() => setShowKey((v) => !v)}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/70 transition-colors cursor-pointer"
+              onClick={handleStartAdd}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-500/20 text-violet-300 text-xs border border-violet-500/30 hover:bg-violet-500/30 transition-colors cursor-pointer"
             >
-              {showKey ? <EyeOff size={15} /> : <Eye size={15} />}
+              <Plus size={14} />
+              添加提供商
             </button>
           </div>
+
+          {isLoading ? (
+            <div className="p-8 text-center text-white/40 text-sm">加载中...</div>
+          ) : providers.length === 0 ? (
+            <div className="p-8 text-center text-white/40 text-sm">
+              暂无提供商，点击上方按钮添加
+            </div>
+          ) : (
+            <div className="divide-y divide-white/5">
+              {providers.map((provider) => (
+                <div key={provider.id} className="group">
+                  {/* Provider Header */}
+                  <div
+                    className="flex items-center gap-3 px-4 py-3 hover:bg-white/[0.03] cursor-pointer transition-colors"
+                    onClick={() => handleToggleExpand(provider.id)}
+                  >
+                    {expandedProvider === provider.id ? (
+                      <ChevronDown size={16} className="text-white/40" />
+                    ) : (
+                      <ChevronRight size={16} className="text-white/40" />
+                    )}
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-white text-sm font-medium truncate">
+                          {provider.label}
+                        </span>
+                      </div>
+                      <div className="text-white/40 text-xs truncate">{provider.base_url}</div>
+                    </div>
+
+                    {/* Status Badge */}
+                    <div className="flex items-center gap-1.5">
+                      {(() => {
+                        const status = getConnectionStatusBadge(provider.connection_status);
+                        const Icon = status.icon;
+                        return (
+                          <>
+                            <Icon size={14} className={status.className} />
+                            <span className={`text-xs ${status.className}`}>{status.label}</span>
+                          </>
+                        );
+                      })()}
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleStartEdit(provider);
+                        }}
+                        className="p-1.5 rounded-lg text-white/40 hover:text-white/70 hover:bg-white/10 transition-colors cursor-pointer"
+                        title="编辑"
+                      >
+                        <Settings size={14} />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleTestConnection(provider.id);
+                        }}
+                        disabled={testingProvider === provider.id}
+                        className="p-1.5 rounded-lg text-white/40 hover:text-green-400 hover:bg-green-500/10 transition-colors cursor-pointer disabled:opacity-50"
+                        title="测试连接"
+                      >
+                        <TestTube size={14} className={testingProvider === provider.id ? 'animate-pulse' : ''} />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteProvider(provider.id);
+                        }}
+                        className="p-1.5 rounded-lg text-white/40 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
+                        title="删除"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Expanded Models List */}
+                  {expandedProvider === provider.id && (
+                    <div className="px-4 pb-4 bg-black/20">
+                      <div className="flex items-center justify-between py-2">
+                        <span className="text-white/60 text-xs">可用模型</span>
+                        <button
+                          onClick={() => handleRefreshModels(provider.id)}
+                          disabled={refreshingProvider === provider.id}
+                          className="flex items-center gap-1 text-white/40 hover:text-white/70 text-xs transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          <RefreshCw
+                            size={12}
+                            className={refreshingProvider === provider.id ? 'animate-spin' : ''}
+                          />
+                          刷新
+                        </button>
+                      </div>
+
+                      {models[provider.id] ? (
+                        models[provider.id].length > 0 ? (
+                          <div className="space-y-1">
+                            {models[provider.id].map((model) => (
+                              <div
+                                key={model.id}
+                                className="flex items-center justify-between px-3 py-2 rounded-lg bg-white/[0.03] hover:bg-white/[0.05] transition-colors"
+                              >
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-white/80 text-sm truncate">{model.name}</div>
+                                  {model.description && (
+                                    <div className="text-white/30 text-xs truncate">
+                                      {model.description}
+                                    </div>
+                                  )}
+                                </div>
+                                <label className="flex items-center gap-2 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={model.is_active}
+                                    onChange={() => handleToggleModelActive(model)}
+                                    className="w-4 h-4 rounded border-white/20 bg-white/5 text-violet-500 focus:ring-violet-500/50"
+                                  />
+                                  <span className="text-white/50 text-xs">启用</span>
+                                </label>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-center py-4 text-white/30 text-xs">
+                            暂无模型，点击刷新获取
+                          </div>
+                        )
+                      ) : (
+                        <div className="text-center py-4 text-white/30 text-xs">加载中...</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
-        {/* 模型名称 */}
-        <div className="rounded-xl p-4 border border-white/10 bg-white/[0.02]">
-          <p className="text-white/90 text-sm font-medium mb-1">模型名称</p>
-          <p className="text-white/40 text-xs mb-3">填写具体的模型标识符，或点击下方快捷选择</p>
-          <input
-            type="text"
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            placeholder="gpt-4o-mini"
-            className="w-full bg-zinc-800 text-white text-sm rounded-lg px-3 py-2 outline-none border border-zinc-700 focus:border-violet-500/60 transition-colors placeholder:text-white/20 mb-3"
-          />
-          <div className="flex flex-wrap gap-2">
-            {MODEL_PRESETS.map((preset) => (
-              <button
-                key={preset.value}
-                onClick={() => setModel(preset.value)}
-                className={`px-3 py-1.5 rounded-lg text-xs transition-all cursor-pointer ${
-                  model === preset.value
-                    ? 'bg-violet-500/20 text-violet-300 border border-violet-500/40'
-                    : 'bg-white/5 text-white/50 border border-white/10 hover:bg-white/10 hover:text-white/80'
-                }`}
-              >
-                {preset.label}
-              </button>
-            ))}
-          </div>
-        </div>
+        {/* Add/Edit Provider Modal */}
+        {(isAddingProvider || editingProvider) && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+            <div className="w-full max-w-lg rounded-xl p-6 border border-violet-500/30 bg-zinc-900 shadow-2xl">
+              <div className="space-y-4">
+                {/* Provider Type */}
+                {!editingProvider && (
+                  <div>
+                    <label className="block text-white/60 text-xs mb-2">提供商类型</label>
+                    <div className="flex flex-wrap gap-2">
+                      {PROVIDER_TYPES.map((type) => (
+                        <button
+                          key={type.value}
+                          onClick={() => handleProviderTypeChange(type.value)}
+                          className={`px-3 py-1.5 rounded-lg text-xs border transition-all cursor-pointer ${
+                            formData.providerType === type.value
+                              ? 'bg-violet-500/20 text-violet-300 border-violet-500/40'
+                              : 'bg-white/5 text-white/50 border-white/10 hover:bg-white/10'
+                          }`}
+                        >
+                          {type.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
-        {/* 操作按钮 */}
-        <div className="flex items-center gap-3">
-          <button
-            onClick={handleSave}
-            className="px-5 py-2 rounded-lg bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-all duration-200 cursor-pointer"
-          >
-            保存
-          </button>
-          <button
-            onClick={handleTest}
-            disabled={testing}
-            className="px-5 py-2 rounded-lg bg-white/5 text-white/70 text-sm border border-white/10 hover:bg-white/10 hover:text-white transition-all duration-200 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
-          >
-            {testing && (
-              <span className="inline-block w-3.5 h-3.5 border-2 border-white/20 border-t-white/70 rounded-full animate-spin" />
-            )}
-            测试连接
-          </button>
-        </div>
+                {/* Name & Label */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-white/60 text-xs mb-1.5">名称 (唯一标识)</label>
+                    <input
+                      type="text"
+                      value={formData.name}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
+                      placeholder="如: openai-main"
+                      disabled={!!editingProvider}
+                      className="w-full bg-zinc-800 text-white text-sm rounded-lg px-3 py-2 outline-none border border-zinc-700 focus:border-violet-500/60 transition-colors placeholder:text-white/20 disabled:opacity-50"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-white/60 text-xs mb-1.5">显示名称</label>
+                    <input
+                      type="text"
+                      value={formData.label}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, label: e.target.value }))}
+                      placeholder="如: OpenAI 主账号"
+                      className="w-full bg-zinc-800 text-white text-sm rounded-lg px-3 py-2 outline-none border border-zinc-700 focus:border-violet-500/60 transition-colors placeholder:text-white/20"
+                    />
+                  </div>
+                </div>
 
-        {/* 测试结果 */}
-        {testResult && (
-          <div
-            className={`flex items-start gap-3 rounded-xl p-4 border text-sm ${
-              testResult.ok
-                ? 'bg-green-500/5 border-green-500/30 text-green-300'
-                : 'bg-red-500/5 border-red-500/30 text-red-300'
-            }`}
-          >
-            {testResult.ok ? (
-              <CheckCircle size={16} className="flex-shrink-0 mt-0.5" />
-            ) : (
-              <XCircle size={16} className="flex-shrink-0 mt-0.5" />
-            )}
-            <span className="break-all leading-relaxed">{testResult.msg}</span>
+                {/* Base URL */}
+                <div>
+                  <label className="block text-white/60 text-xs mb-1.5">API 基础地址</label>
+                  <input
+                    type="text"
+                    value={formData.baseUrl}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, baseUrl: e.target.value }))}
+                    placeholder="https://api.openai.com/v1"
+                    className="w-full bg-zinc-800 text-white text-sm rounded-lg px-3 py-2 outline-none border border-zinc-700 focus:border-violet-500/60 transition-colors placeholder:text-white/20"
+                  />
+                  <p className="text-white/30 text-xs mt-1">
+                    OpenAI 兼容填 /v1 结尾；Ollama 填 http://localhost:11434
+                  </p>
+                </div>
+
+                {/* API Key */}
+                <div>
+                  <label className="block text-white/60 text-xs mb-1.5">
+                    API Key
+                    {!PROVIDER_TYPES.find((t) => t.value === formData.providerType)?.apiKeyRequired && (
+                      <span className="ml-1.5 text-[10px] text-green-400/70">(可选)</span>
+                    )}
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showApiKey ? 'text' : 'password'}
+                      value={formData.apiKey}
+                      onChange={(e) => setFormData((prev) => ({ ...prev, apiKey: e.target.value }))}
+                      placeholder={editingProvider ? '留空表示不修改' : 'sk-...'}
+                      className="w-full bg-zinc-800 text-white text-sm rounded-lg px-3 py-2 pr-10 outline-none border border-zinc-700 focus:border-violet-500/60 transition-colors placeholder:text-white/20"
+                    />
+                    <button
+                      onClick={() => setShowApiKey((v) => !v)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white/70 transition-colors cursor-pointer"
+                    >
+                      {showApiKey ? <EyeOff size={15} /> : <Eye size={15} />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex items-center gap-3 pt-3">
+                  <button
+                    onClick={handleSaveProvider}
+                    disabled={!isFormValid}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    <Save size={14} />
+                    保存
+                  </button>
+                  <button
+                    onClick={handleCancelForm}
+                    className="px-4 py-2 rounded-lg bg-white/5 text-white/70 text-sm border border-white/10 hover:bg-white/10 hover:text-white transition-all cursor-pointer"
+                  >
+                    取消
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         )}
+
+        {/* Scene Configuration */}
+        <div className="rounded-xl border border-white/10 bg-white/[0.02] overflow-hidden">
+          <div className="px-4 py-3 border-b border-white/10">
+            <h3 className="text-white/90 text-sm font-medium">场景模型配置</h3>
+            <p className="text-white/40 text-xs mt-0.5">为不同场景选择默认使用的模型</p>
+          </div>
+
+          <div className="divide-y divide-white/5">
+            {(Object.keys(SCENE_LABELS) as Scene[]).map((scene) => {
+              const config = sceneConfigs[scene];
+              const SceneIcon = SCENE_LABELS[scene].icon;
+
+              return (
+                <div key={scene} className="px-4 py-3 flex items-center gap-4">
+                  <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0">
+                    <SceneIcon size={16} className="text-white/60" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-white/80 text-sm">{SCENE_LABELS[scene].label}</div>
+                    <div className="text-white/40 text-xs">{SCENE_LABELS[scene].description}</div>
+                  </div>
+
+                  {/* Provider & Model Select */}
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={config?.provider_id || ''}
+                      onChange={async (e) => {
+                        const providerId = parseInt(e.target.value);
+                        if (providerId) {
+                          // Load models for this provider if not already loaded
+                          let providerModels = models[providerId];
+                          if (!providerModels) {
+                            providerModels = await loadModels(providerId);
+                          }
+                          // Try to select first active model
+                          const activeModels = providerModels?.filter((m) => m.is_active);
+                          if (activeModels && activeModels.length > 0) {
+                            await setSceneModel(scene, providerId, activeModels[0].model_id);
+                          } else if (providerModels && providerModels.length > 0) {
+                            // Provider has models but none are active - select first one anyway
+                            await setSceneModel(scene, providerId, providerModels[0].model_id);
+                          } else {
+                            // No models available - just set provider, model will be empty
+                            await setSceneModel(scene, providerId, '');
+                          }
+                        } else {
+                          // Clear selection
+                          await setSceneModel(scene, 0, '');
+                        }
+                      }}
+                      className="bg-zinc-800 text-white text-sm rounded-lg px-3 py-2 outline-none border border-zinc-700 focus:border-violet-500/60 cursor-pointer"
+                    >
+                      <option value="">选择提供商</option>
+                      {providers
+                        .filter((p) => p.is_active)
+                        .map((provider) => (
+                          <option key={provider.id} value={provider.id}>
+                            {provider.label}
+                          </option>
+                        ))}
+                    </select>
+
+                    <select
+                      value={config?.model_id || ''}
+                      onChange={(e) => {
+                        if (config?.provider_id) {
+                          handleSceneModelChange(scene, config.provider_id, e.target.value);
+                        }
+                      }}
+                      disabled={!config?.provider_id}
+                      className="bg-zinc-800 text-white text-sm rounded-lg px-3 py-2 outline-none border border-zinc-700 focus:border-violet-500/60 cursor-pointer disabled:opacity-50 min-w-[140px]"
+                    >
+                      <option value="">选择模型</option>
+                      {config?.provider_id &&
+                        models[config.provider_id]
+                          ?.filter((m) => m.is_active)
+                          .map((model) => (
+                            <option key={model.id} value={model.model_id}>
+                              {model.name}
+                            </option>
+                          ))}
+                    </select>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </>
   );

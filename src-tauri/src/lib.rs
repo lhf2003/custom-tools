@@ -8,6 +8,7 @@ pub mod clipboard;
 pub mod commands;
 pub mod db;
 pub mod llm;
+pub mod llm_provider;
 pub mod notes;
 pub mod password;
 pub mod search;
@@ -284,6 +285,20 @@ pub fn run() {
             commands::chat::save_chat_message,
             commands::chat::get_session_messages,
             commands::chat::get_latest_session,
+            // LLM Provider commands
+            llm_provider::commands::get_llm_providers,
+            llm_provider::commands::create_llm_provider,
+            llm_provider::commands::update_llm_provider,
+            llm_provider::commands::delete_llm_provider,
+            llm_provider::commands::test_llm_provider_connection,
+            llm_provider::commands::get_llm_models,
+            llm_provider::commands::fetch_llm_models,
+            llm_provider::commands::activate_llm_model,
+            llm_provider::commands::deactivate_llm_model,
+            llm_provider::commands::get_active_llm_models,
+            llm_provider::commands::get_scene_configs,
+            llm_provider::commands::set_scene_model,
+            llm_provider::commands::get_scene_model,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

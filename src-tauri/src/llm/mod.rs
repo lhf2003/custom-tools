@@ -12,6 +12,17 @@ struct ChatRequest<'a> {
     model: &'a str,
     messages: &'a [ChatMessage],
     stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<&'a str>,
+}
+
+#[derive(Debug, Serialize)]
+struct OllamaChatRequest<'a> {
+    model: &'a str,
+    messages: &'a [ChatMessage],
+    stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    options: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 // OpenAI 格式响应（非流式）
@@ -59,6 +70,7 @@ pub async fn call_llm(
     api_key: &str,
     model: &str,
     messages: Vec<ChatMessage>,
+    thinking_mode: bool,
 ) -> Result<String, String> {
     if model.is_empty() {
         return Err("模型名称未配置".to_string());
@@ -74,13 +86,34 @@ pub async fn call_llm(
     };
 
     let client = reqwest::Client::new();
-    let request = ChatRequest {
-        model,
-        messages: &messages,
-        stream: false,
-    };
 
-    let mut req_builder = client.post(&url).json(&request);
+    let mut req_builder = if is_ollama_native {
+        // Ollama 使用原生格式
+        let options = if thinking_mode {
+            let mut opts = serde_json::Map::new();
+            opts.insert("temperature".to_string(), serde_json::json!(0.7));
+            opts.insert("num_ctx".to_string(), serde_json::json!(8192));
+            Some(opts)
+        } else {
+            None
+        };
+        let request = OllamaChatRequest {
+            model,
+            messages: &messages,
+            stream: false,
+            options,
+        };
+        client.post(&url).json(&request)
+    } else {
+        // OpenAI 兼容格式
+        let request = ChatRequest {
+            model,
+            messages: &messages,
+            stream: false,
+            reasoning_effort: if thinking_mode { Some("medium") } else { None },
+        };
+        client.post(&url).json(&request)
+    };
     if !api_key.is_empty() {
         req_builder = req_builder.header("Authorization", format!("Bearer {}", api_key));
     }
@@ -120,6 +153,7 @@ pub async fn call_llm_stream(
     api_key: &str,
     model: &str,
     messages: Vec<ChatMessage>,
+    thinking_mode: bool,
     app_handle: &tauri::AppHandle,
 ) -> Result<(), String> {
     if model.is_empty() {
@@ -137,16 +171,42 @@ pub async fn call_llm_stream(
     };
 
     let client = reqwest::Client::new();
-    let request = ChatRequest {
-        model,
-        messages: &messages,
-        stream: true,
-    };
 
-    let mut req_builder = client.post(&url).json(&request);
-    if !api_key.is_empty() {
-        req_builder = req_builder.header("Authorization", format!("Bearer {}", api_key));
-    }
+    let req_builder = if is_ollama_native {
+        // Ollama 使用原生格式
+        let options = if thinking_mode {
+            let mut opts = serde_json::Map::new();
+            opts.insert("temperature".to_string(), serde_json::json!(0.7));
+            opts.insert("num_ctx".to_string(), serde_json::json!(8192));
+            Some(opts)
+        } else {
+            None
+        };
+        let request = OllamaChatRequest {
+            model,
+            messages: &messages,
+            stream: true,
+            options,
+        };
+        let mut builder = client.post(&url).json(&request);
+        if !api_key.is_empty() {
+            builder = builder.header("Authorization", format!("Bearer {}", api_key));
+        }
+        builder
+    } else {
+        // OpenAI 兼容格式
+        let request = ChatRequest {
+            model,
+            messages: &messages,
+            stream: true,
+            reasoning_effort: if thinking_mode { Some("medium") } else { None },
+        };
+        let mut builder = client.post(&url).json(&request);
+        if !api_key.is_empty() {
+            builder = builder.header("Authorization", format!("Bearer {}", api_key));
+        }
+        builder
+    };
 
     let response = req_builder
         .send()

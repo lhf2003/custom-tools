@@ -18,6 +18,7 @@ pub struct AppSettings {
     pub llm_base_url: String,
     pub llm_api_key: String,
     pub llm_model: String,
+    pub llm_thinking_mode: bool,
 }
 
 impl Default for AppSettings {
@@ -34,6 +35,7 @@ impl Default for AppSettings {
             llm_base_url: "https://api.openai.com/v1".to_string(),
             llm_api_key: String::new(),
             llm_model: "gpt-4o-mini".to_string(),
+            llm_thinking_mode: false,
         }
     }
 }
@@ -126,6 +128,11 @@ impl SettingsManager {
                 "llm_base_url" => settings.llm_base_url = value,
                 "llm_api_key" => settings.llm_api_key = value,
                 "llm_model" => settings.llm_model = value,
+                "llm_thinking_mode" => {
+                    if let Ok(v) = value.parse::<bool>() {
+                        settings.llm_thinking_mode = v;
+                    }
+                }
                 _ => {}
             }
         }
@@ -191,6 +198,11 @@ impl SettingsManager {
                 "llm_base_url" => cache.llm_base_url = value.to_string(),
                 "llm_api_key" => cache.llm_api_key = value.to_string(),
                 "llm_model" => cache.llm_model = value.to_string(),
+                "llm_thinking_mode" => {
+                    if let Ok(v) = value.parse::<bool>() {
+                        cache.llm_thinking_mode = v;
+                    }
+                }
                 _ => {}
             }
         }

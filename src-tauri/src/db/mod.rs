@@ -199,6 +199,74 @@ impl Database {
             )?;
         }
 
+        // LLM Providers table - stores provider configurations with encrypted API keys
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS llm_providers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                label TEXT NOT NULL,
+                base_url TEXT NOT NULL,
+                api_key_encrypted TEXT,
+                provider_type TEXT NOT NULL DEFAULT 'openai',
+                is_active BOOLEAN DEFAULT 1,
+                connection_status TEXT DEFAULT 'unknown',
+                last_connected_at DATETIME,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )",
+            [],
+        )?;
+
+        // LLM Models table - stores models fetched from providers
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS llm_models (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider_id INTEGER NOT NULL REFERENCES llm_providers(id) ON DELETE CASCADE,
+                model_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                description TEXT,
+                is_active BOOLEAN DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(provider_id, model_id)
+            )",
+            [],
+        )?;
+
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_llm_models_provider ON llm_models(provider_id)",
+            [],
+        )?;
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_llm_models_active ON llm_models(is_active)",
+            [],
+        )?;
+
+        // LLM Scene Configs table - maps scenes to models
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS llm_scene_configs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scene TEXT NOT NULL UNIQUE CHECK (scene IN ('chat', 'qa', 'translate')),
+                provider_id INTEGER NOT NULL REFERENCES llm_providers(id),
+                model_id TEXT NOT NULL,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )",
+            [],
+        )?;
+
+        // Insert default scene configs if not exists
+        let default_scenes = [
+            ("chat", "", ""),
+            ("qa", "", ""),
+            ("translate", "", ""),
+        ];
+        for (scene, _, _) in &default_scenes {
+            self.conn.execute(
+                "INSERT OR IGNORE INTO llm_scene_configs (scene, provider_id, model_id) VALUES (?1, 0, ?2)",
+                [scene, ""],
+            )?;
+        }
+
         Ok(())
     }
 }
