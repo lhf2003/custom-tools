@@ -568,31 +568,22 @@ impl Default for SearchIndex {
 /// Launch an application by its shortcut path
 #[cfg(windows)]
 pub fn launch_app(path: &str) -> anyhow::Result<()> {
-    use windows::Win32::UI::Shell::ShellExecuteW;
-    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-    use windows_core::PCWSTR;
-
-    // Null-terminated UTF-16 path
-    let path_wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
-
-    // ShellExecuteW launches through the Windows Shell. The resulting process
-    // is independent of the Tauri app's Job Object and won't be killed on exit.
-    // It handles both regular paths (.lnk / .exe) and UWP shell: URIs.
-    let result = unsafe {
-        ShellExecuteW(
-            None,           // no parent HWND
-            PCWSTR::null(), // default verb: "open"
-            PCWSTR(path_wide.as_ptr()),
-            PCWSTR::null(), // no parameters
-            PCWSTR::null(), // default working directory
-            SW_SHOWNORMAL,
-        )
-    };
-
-    // ShellExecuteW returns > 32 on success; <= 32 indicates an error code
-    if result.0 as isize <= 32 {
-        anyhow::bail!("ShellExecuteW failed with error code {}", result.0 as isize);
-    }
+    // 通过 explorer.exe 启动应用，而不是直接使用 ShellExecuteW。
+    //
+    // 原因：在 Windows 上，直接用 ShellExecuteW 启动的进程可能会被包含在
+    // Tauri 进程的 Windows Job Object 中。当 Tauri 退出时，Job Object 关闭，
+    // 导致所有子进程（包括已启动的第三方应用）被强制终止。
+    //
+    // 通过 explorer.exe 启动时，新创建的 explorer.exe 进程会将启动请求
+    // 委托给已在运行的 Explorer 实例（桌面会话主进程，不在 Tauri 的
+    // Job Object 中），然后自身退出。目标应用由现有 Explorer 实例启动，
+    // 完全独立于 Tauri 的进程树，不受 Tauri 退出影响。
+    //
+    // 此方式支持所有路径类型：.exe、.lnk 快捷方式、shell:AppsFolder\...（UWP）。
+    std::process::Command::new("explorer.exe")
+        .arg(path)
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("Failed to launch app via explorer: {}", e))?;
 
     Ok(())
 }
