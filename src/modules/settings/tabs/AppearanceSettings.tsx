@@ -25,7 +25,7 @@ export function AppearanceSettings() {
 
   const opacityPercent = Math.round(window_opacity * 100);
   const handleOpacityChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setSetting('window_opacity', parseInt(e.target.value, 10) / 100);
+    setSetting('window_opacity', (parseInt(e.target.value, 10) / 100).toString());
   };
 
   // TODO: 连接到 settingsStore 持久化（store 暂无 window_border_radius 字段）
