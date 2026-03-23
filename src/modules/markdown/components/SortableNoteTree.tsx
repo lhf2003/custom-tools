@@ -74,18 +74,18 @@ function SortableTreeItem({
   return (
     <div ref={setNodeRef} style={style}>
       <div
-        className={`group flex items-center gap-1 px-2 py-1.5 rounded-lg text-sm transition-all duration-200 ${
+        className={`group flex items-center gap-1 py-0.5 rounded text-sm transition-all duration-200 ${
           isSelected
             ? 'bg-zinc-600/50 text-zinc-100'
             : 'text-zinc-400 hover:bg-zinc-700/30 hover:text-zinc-200'
         }`}
-        style={{ paddingLeft: `${8 + level * 16}px` }}
+        style={{ paddingLeft: `${level * 12}px` }}
       >
         {/* Drag Handle */}
         <button
           {...attributes}
           {...listeners}
-          className="text-zinc-600 cursor-grab active:cursor-grabbing p-1 -ml-1 rounded hover:bg-zinc-600/30 inline-flex items-center touch-none"
+          className="text-zinc-600 cursor-grab active:cursor-grabbing py-0.5 px-0.5 rounded hover:bg-zinc-600/30 inline-flex items-center touch-none"
           title="拖拽移动"
         >
           <GripVertical size={12} />
@@ -94,7 +94,7 @@ function SortableTreeItem({
         {/* Content Area */}
         <div
           onClick={() => (item.is_folder ? onToggle(item.path) : onSelect(item.path))}
-          className="flex items-center gap-1 flex-1 min-w-0 cursor-pointer"
+          className="flex items-center gap-0.5 flex-1 min-w-0 cursor-pointer"
         >
           {item.is_folder ? (
             <span className="text-zinc-500 w-4 shrink-0">
@@ -103,21 +103,18 @@ function SortableTreeItem({
           ) : (
             <span className="w-4 shrink-0" />
           )}
-          <span className="text-zinc-500 mr-1">
-            {item.is_folder ? <Folder size={14} /> : <FileText size={14} />}
-          </span>
-          <span className="truncate">{item.name}</span>
+          <span className="truncate">{item.is_folder ? item.name : item.name.replace(/\.md$/, '')}</span>
         </div>
 
         {/* Actions */}
-        <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-opacity duration-200">
+        <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0 transition-opacity duration-200">
           {item.is_folder && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 onCreate(item.path);
               }}
-              className="p-1 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-600/50 transition-colors cursor-pointer"
+              className="p-0.5 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-600/50 transition-colors cursor-pointer"
               title="新建笔记"
             >
               <Plus size={12} />
@@ -128,7 +125,7 @@ function SortableTreeItem({
               e.stopPropagation();
               onRename(item);
             }}
-            className="p-1 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-600/50 transition-colors cursor-pointer"
+            className="p-0.5 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-600/50 transition-colors cursor-pointer"
             title="重命名"
           >
             <Edit3 size={12} />
@@ -138,7 +135,7 @@ function SortableTreeItem({
               e.stopPropagation();
               onDelete(item);
             }}
-            className="p-1 rounded text-zinc-500 hover:text-red-400 hover:bg-zinc-600/50 transition-colors cursor-pointer"
+            className="p-0.5 rounded text-zinc-500 hover:text-red-400 hover:bg-zinc-600/50 transition-colors cursor-pointer"
             title="删除"
           >
             <Trash2 size={12} />
@@ -146,25 +143,6 @@ function SortableTreeItem({
         </div>
       </div>
 
-      {/* Children */}
-      {item.is_folder && isExpanded && item.children && item.children.length > 0 && (
-        <div className="mt-0.5">
-          {item.children.map((child) => (
-            <SortableTreeItem
-              key={child.path}
-              item={child}
-              selectedId={selectedId}
-              expandedFolders={expandedFolders}
-              onSelect={onSelect}
-              onToggle={onToggle}
-              onCreate={onCreate}
-              onRename={onRename}
-              onDelete={onDelete}
-              level={level + 1}
-            />
-          ))}
-        </div>
-      )}
     </div>
   );
 }

@@ -66,7 +66,6 @@ export function useNotes() {
         setEditorContent(content.content);
       } catch (err) {
         console.error('Failed to load note:', err);
-        setError('加载笔记内容失败');
       }
     };
 

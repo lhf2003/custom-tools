@@ -58,7 +58,8 @@ export function MarkdownView() {
       loadNoteTree();
 
       if (createType === 'file') {
-        setSelectedNote(fullPath);
+        const selectedPath = fullPath.endsWith('.md') ? fullPath : `${fullPath}.md`;
+        setSelectedNote(selectedPath);
       }
     } catch (err) {
       console.error('Failed to create:', err);

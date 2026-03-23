@@ -20,19 +20,17 @@ export function TopNavigationBar({
                                  }: TopNavigationBarProps) {
   return (
       <header
-          className="h-12 bg-zinc-800/50 border-b border-white/15 flex items-center px-4 shrink-0 relative select-none"
+          className="h-12 bg-zinc-800/50 border-b border-white/15 flex items-center pl-0 pr-4 shrink-0 relative select-none"
       >
         {/* Left: Back button */}
-        <div className="flex items-center gap-3 relative z-10">
+        <div className="flex items-stretch relative z-10 self-stretch">
           <button
               onClick={onBack}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-zinc-300 hover:text-white hover:bg-zinc-700/50 transition-all duration-200 cursor-pointer"
+              className="flex items-center justify-center w-10 self-stretch text-zinc-300 hover:text-white hover:bg-zinc-700/50 transition-all duration-200 cursor-pointer"
               title="返回主页 (Esc)"
           >
-            <ArrowLeft size={18} />
-            <span className="text-sm font-medium">返回</span>
+            <ArrowLeft size={16} />
           </button>
-          <div className="w-px h-5 bg-zinc-700/50" />
         </div>
 
         {/* Center: Drag region - 使用 data-tauri-drag-region="true" 启用系统级拖拽 */}
