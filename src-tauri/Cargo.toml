@@ -1,7 +1,7 @@
 [package]
-name = "custom-tools"
-version = "0.1.3"
-description = "A Windows productivity tool like uTools"
+name = "flowhub"
+version = "0.1.6"
+description = "A Windows productivity launcher with fuzzy search, clipboard, password manager, notes, and AI chat"
 authors = ["custom"]
 license = "MIT"
 repository = ""
@@ -9,7 +9,7 @@ edition = "2021"
 rust-version = "1.77.2"
 
 [lib]
-name = "custom_tools_lib"
+name = "flowhub_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

@@ -906,51 +906,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "custom-tools"
-version = "0.1.3"
-dependencies = [
- "aes-gcm",
- "anyhow",
- "base64 0.22.1",
- "chrono",
- "dirs 5.0.1",
- "futures-util",
- "image",
- "log",
- "lru",
- "notify",
- "nucleo",
- "once_cell",
- "open",
- "pbkdf2",
- "rand 0.8.5",
- "reqwest 0.12.28",
- "rusqlite",
- "rust-pinyin",
- "serde",
- "serde_json",
- "sha2",
- "tauri",
- "tauri-build",
- "tauri-plugin-autostart",
- "tauri-plugin-clipboard-manager",
- "tauri-plugin-dialog",
- "tauri-plugin-fs",
- "tauri-plugin-global-shortcut",
- "tauri-plugin-log",
- "tauri-plugin-notification",
- "tauri-plugin-process",
- "tauri-plugin-shell",
- "tauri-plugin-updater",
- "tokio",
- "window-vibrancy 0.7.1",
- "windows",
- "windows-core 0.61.2",
- "winreg 0.52.0",
- "xxhash-rust",
-]
-
-[[package]]
 name = "darling"
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1438,6 +1393,51 @@ checksum = "843fba2746e448b37e26a819579957415c8cef339bf08564fe8b7ddbd959573c"
 dependencies = [
  "crc32fast",
  "miniz_oxide",
+]
+
+[[package]]
+name = "flowhub"
+version = "0.1.6"
+dependencies = [
+ "aes-gcm",
+ "anyhow",
+ "base64 0.22.1",
+ "chrono",
+ "dirs 5.0.1",
+ "futures-util",
+ "image",
+ "log",
+ "lru",
+ "notify",
+ "nucleo",
+ "once_cell",
+ "open",
+ "pbkdf2",
+ "rand 0.8.5",
+ "reqwest 0.12.28",
+ "rusqlite",
+ "rust-pinyin",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-autostart",
+ "tauri-plugin-clipboard-manager",
+ "tauri-plugin-dialog",
+ "tauri-plugin-fs",
+ "tauri-plugin-global-shortcut",
+ "tauri-plugin-log",
+ "tauri-plugin-notification",
+ "tauri-plugin-process",
+ "tauri-plugin-shell",
+ "tauri-plugin-updater",
+ "tokio",
+ "window-vibrancy 0.7.1",
+ "windows",
+ "windows-core 0.61.2",
+ "winreg 0.52.0",
+ "xxhash-rust",
 ]
 
 [[package]]
