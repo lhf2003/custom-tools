@@ -332,8 +332,8 @@ function App() {
     }
   };
 
-  const isHome = activeView === 'launcher';
-  const currentConfig = isHome ? null : viewConfigs[activeView as Exclude<ViewMode, 'launcher'>];
+  const isHome = activeView === 'launcher' || activeView === 'chat';
+  const currentConfig = isHome ? null : viewConfigs[activeView as Exclude<ViewMode, 'launcher' | 'chat'>];
 
   return (
     <div className="w-full h-full bg-transparent flex flex-col relative selection:bg-blue-500/30 rounded-lg overflow-hidden">

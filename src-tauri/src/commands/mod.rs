@@ -1,4 +1,5 @@
 pub mod changelog;
+pub mod chat;
 pub mod clipboard;
 pub mod llm;
 pub mod notes;

@@ -37,9 +37,9 @@ export const WINDOW_SIZE = {
     height: 560,
   },
   CHAT: {
-    /** Height when only the input box is visible (collapsed). */
-    collapsed: 160,
-    /** Height when a response is displayed (expanded). */
-    expanded: 560,
+    /** Height when only the input box is visible. */
+    collapsed: 62,
+    /** Height when a response is displayed below the input. */
+    expanded: 600,
   },
 } as const;
