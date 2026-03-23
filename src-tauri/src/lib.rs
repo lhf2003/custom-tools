@@ -454,8 +454,10 @@ fn setup_system_tray(app_handle: &tauri::AppHandle) -> Result<(), Box<dyn std::e
             }
         })
         .on_tray_icon_event(|tray, event| {
-            if let tauri::tray::TrayIconEvent::Click { button, .. } = event {
-                if button == tauri::tray::MouseButton::Left {
+            if let tauri::tray::TrayIconEvent::Click { button, button_state, .. } = event {
+                if button == tauri::tray::MouseButton::Left
+                    && button_state == tauri::tray::MouseButtonState::Up
+                {
                     let app = tray.app_handle();
                     toggle_main_window(app);
                 }
