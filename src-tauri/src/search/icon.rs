@@ -507,7 +507,7 @@ fn extract_icon_shgetfileinfo(path: &str) -> Result<Vec<u8>> {
         );
 
         // 清理
-        let _ = SelectObject(hdc_mem, old_bm.into());
+        let _ = SelectObject(hdc_mem, old_bm);
         let _ = DeleteObject(hbm.into());
         let _ = DeleteDC(hdc_mem);
         let _ = DeleteObject(icon_info.hbmMask.into());

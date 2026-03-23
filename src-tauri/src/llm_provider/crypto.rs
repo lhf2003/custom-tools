@@ -2,6 +2,8 @@ use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
 };
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
 use pbkdf2::pbkdf2_hmac;
 use rand::RngCore;
 use sha2::Sha256;
@@ -55,7 +57,7 @@ pub fn encrypt(plaintext: &str, app_data_dir: &Path) -> Result<String, String> {
     result.extend_from_slice(&nonce_bytes);
     result.extend_from_slice(&ciphertext);
 
-    Ok(base64::encode(&result))
+    Ok(STANDARD.encode(&result))
 }
 
 /// 使用 AES-256-GCM 解密文本
@@ -69,7 +71,7 @@ pub fn decrypt(ciphertext_b64: &str, app_data_dir: &Path) -> Result<String, Stri
         .map_err(|e| format!("Failed to create cipher: {}", e))?;
 
     // 解码 base64
-    let ciphertext = base64::decode(ciphertext_b64)
+    let ciphertext = STANDARD.decode(ciphertext_b64)
         .map_err(|e| format!("Base64 decode failed: {}", e))?;
 
     if ciphertext.len() < NONCE_SIZE {

@@ -258,7 +258,12 @@ export function ChatView() {
     }
 
     try {
-      await invoke('call_llm_stream', { messages: newMessages });
+      // 使用场景调用命令，根据当前模式选择对应的提供商和模型
+      await invoke('call_llm_stream_by_scene', {
+        scene: mode,
+        messages: newMessages,
+        thinkingMode: false,
+      });
     } catch (err) {
       setIsLoading(false);
       setError(typeof err === 'string' ? err : '发送失败，请检查 AI 模型设置');

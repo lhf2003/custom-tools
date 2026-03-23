@@ -370,7 +370,7 @@ impl ClipboardWatcher {
 
         if let Ok(handle) = text_handle {
             if !handle.is_invalid() {
-                let hglobal = HGLOBAL(handle.0 as *mut std::ffi::c_void);
+                let hglobal = HGLOBAL(handle.0);
                 let ptr = GlobalLock(hglobal);
                 if !ptr.is_null() {
                     let size = GlobalSize(hglobal);
@@ -425,7 +425,7 @@ impl ClipboardWatcher {
         if let Ok(handle) = dib_handle {
             if !handle.is_invalid() {
                 log::info!("CF_DIB handle acquired, attempting to read...");
-                let hglobal = HGLOBAL(handle.0 as *mut std::ffi::c_void);
+                let hglobal = HGLOBAL(handle.0);
                 let ptr = GlobalLock(hglobal);
                 if !ptr.is_null() {
                     log::info!("DIB data locked, processing...");

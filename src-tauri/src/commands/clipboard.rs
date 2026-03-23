@@ -553,7 +553,7 @@ unsafe fn read_clipboard_content_inner() -> Result<ClipboardReadResult, String> 
     if let Ok(handle) = GetClipboardData(CF_DIB) {
         if !handle.is_invalid() {
             // Convert HANDLE to HGLOBAL (HANDLE is isize, HGLOBAL is *mut c_void)
-            let hglobal = windows::Win32::Foundation::HGLOBAL(handle.0 as *mut std::ffi::c_void);
+            let hglobal = windows::Win32::Foundation::HGLOBAL(handle.0);
             let ptr = GlobalLock(hglobal);
             if !ptr.is_null() {
                 let result = read_dib_data_and_save(ptr);

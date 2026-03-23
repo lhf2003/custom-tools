@@ -58,8 +58,8 @@ export interface TestConnectionResult {
 export interface CreateProviderRequest {
   name: string;
   label: string;
-  base_url: string;
-  api_key: string | null;
+  baseUrl: string;  // camelCase to match Rust serde
+  apiKey: string | null;  // camelCase to match Rust serde
   providerType: ProviderType;
 }
 
@@ -67,9 +67,9 @@ export interface UpdateProviderRequest {
   id: number;
   name?: string;
   label?: string;
-  base_url?: string;
-  api_key?: string | null;
-  is_active?: boolean;
+  baseUrl?: string;  // camelCase to match Rust serde
+  apiKey?: string | null;  // camelCase to match Rust serde
+  isActive?: boolean;  // camelCase to match Rust serde
 }
 
 interface LlmProviderState {
@@ -172,7 +172,7 @@ export const useLlmProviderStore = create<LlmProviderState>((set, get) => ({
 
   refreshProviderModels: async (id) => {
     try {
-      const models = await invoke<Model[]>('refresh_llm_provider_models', { id });
+      const models = await invoke<Model[]>('fetch_llm_models', { providerId: id });
       set((state) => ({
         models: { ...state.models, [id]: models },
       }));
@@ -185,10 +185,8 @@ export const useLlmProviderStore = create<LlmProviderState>((set, get) => ({
 
   setProviderActive: async (id, isActive) => {
     try {
-      const provider = await invoke<Provider>('set_llm_provider_active', { id, isActive });
-      set((state) => ({
-        providers: state.providers.map((p) => (p.id === provider.id ? provider : p)),
-      }));
+      await invoke<void>('update_llm_provider', { req: { id, isActive } });
+      await get().loadProviders();
     } catch (err) {
       console.error('Failed to set provider active:', err);
       throw err;
@@ -210,7 +208,7 @@ export const useLlmProviderStore = create<LlmProviderState>((set, get) => ({
 
   setModelActive: async (modelId, isActive) => {
     try {
-      const model = await invoke<Model>('set_llm_model_active', { modelId, isActive });
+      const model = await invoke<Model>(isActive ? 'activate_llm_model' : 'deactivate_llm_model', { modelId });
       set((state) => ({
         models: {
           ...state.models,
@@ -227,7 +225,7 @@ export const useLlmProviderStore = create<LlmProviderState>((set, get) => ({
 
   loadSceneConfigs: async () => {
     try {
-      const configs = await invoke<SceneConfig[]>('get_llm_scene_configs');
+      const configs = await invoke<SceneConfig[]>('get_scene_configs');
       const sceneConfigs: Record<Scene, SceneConfig | null> = { chat: null, qa: null, translate: null };
       configs.forEach((config) => {
         sceneConfigs[config.scene] = config;
@@ -241,10 +239,8 @@ export const useLlmProviderStore = create<LlmProviderState>((set, get) => ({
 
   setSceneModel: async (scene, providerId, modelId) => {
     try {
-      const config = await invoke<SceneConfig>('set_llm_scene_model', {
-        scene,
-        providerId,
-        modelId,
+      const config = await invoke<SceneConfig>('set_scene_model', {
+        req: { scene, providerId, modelId },
       });
       set((state) => ({
         sceneConfigs: { ...state.sceneConfigs, [scene]: config },
@@ -257,7 +253,7 @@ export const useLlmProviderStore = create<LlmProviderState>((set, get) => ({
 
   getSceneModelInfo: async (scene) => {
     try {
-      const info = await invoke<SceneModelInfo | null>('get_llm_scene_model_info', { scene });
+      const info = await invoke<SceneModelInfo | null>('get_scene_model', { scene });
       set((state) => ({
         sceneModelInfo: { ...state.sceneModelInfo, [scene]: info },
       }));

@@ -247,23 +247,19 @@ impl Database {
             "CREATE TABLE IF NOT EXISTS llm_scene_configs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 scene TEXT NOT NULL UNIQUE CHECK (scene IN ('chat', 'qa', 'translate')),
-                provider_id INTEGER NOT NULL REFERENCES llm_providers(id),
-                model_id TEXT NOT NULL,
+                provider_id INTEGER REFERENCES llm_providers(id),
+                model_id TEXT,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )",
             [],
         )?;
 
-        // Insert default scene configs if not exists
-        let default_scenes = [
-            ("chat", "", ""),
-            ("qa", "", ""),
-            ("translate", "", ""),
-        ];
-        for (scene, _, _) in &default_scenes {
+        // Insert default scene configs if not exists (provider_id and model_id are NULL initially)
+        let default_scenes = ["chat", "qa", "translate"];
+        for scene in &default_scenes {
             self.conn.execute(
-                "INSERT OR IGNORE INTO llm_scene_configs (scene, provider_id, model_id) VALUES (?1, 0, ?2)",
-                [scene, ""],
+                "INSERT OR IGNORE INTO llm_scene_configs (scene, provider_id, model_id) VALUES (?1, NULL, NULL)",
+                [scene],
             )?;
         }
 

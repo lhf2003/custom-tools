@@ -15,20 +15,15 @@ pub struct Provider {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderType {
+    #[default]
     OpenAi,
     Ollama,
     DeepSeek,
     Bailian,
     Custom,
-}
-
-impl Default for ProviderType {
-    fn default() -> Self {
-        ProviderType::OpenAi
-    }
 }
 
 impl std::fmt::Display for ProviderType {
@@ -58,19 +53,14 @@ impl std::str::FromStr for ProviderType {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectionStatus {
+    #[default]
     Unknown,
     Connected,
     Disconnected,
     Error,
-}
-
-impl Default for ConnectionStatus {
-    fn default() -> Self {
-        ConnectionStatus::Unknown
-    }
 }
 
 impl std::fmt::Display for ConnectionStatus {
@@ -119,18 +109,13 @@ pub struct SceneConfig {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Scene {
+    #[default]
     Chat,
     Qa,
     Translate,
-}
-
-impl Default for Scene {
-    fn default() -> Self {
-        Scene::Chat
-    }
 }
 
 impl std::fmt::Display for Scene {
@@ -157,6 +142,7 @@ impl std::str::FromStr for Scene {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateProviderRequest {
     pub name: String,
     pub label: String,
@@ -166,6 +152,7 @@ pub struct CreateProviderRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateProviderRequest {
     pub id: i64,
     pub name: Option<String>,
@@ -176,6 +163,7 @@ pub struct UpdateProviderRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SetSceneModelRequest {
     pub scene: Scene,
     pub provider_id: i64,

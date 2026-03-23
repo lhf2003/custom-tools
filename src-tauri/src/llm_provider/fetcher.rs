@@ -23,6 +23,7 @@ struct OllamaModel {
     name: String,
     #[serde(default)]
     size: Option<i64>,
+    #[allow(dead_code)]
     #[serde(default)]
     digest: Option<String>,
 }
@@ -91,6 +92,7 @@ async fn fetch_ollama_models(
 #[derive(Debug, Deserialize)]
 struct OpenAiModel {
     id: String,
+    #[allow(dead_code)]
     #[serde(default)]
     object: Option<String>,
     #[serde(default)]
