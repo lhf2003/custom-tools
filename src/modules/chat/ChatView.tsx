@@ -397,12 +397,12 @@ export function ChatView() {
 
   return (
     <div
-      className="w-full h-full flex flex-col select-none"
+      className="w-full h-full flex flex-col select-none bg-transparent"
       data-tauri-drag-region
     >
       {/* ── Input area (single-row) ──────────────────────────────── */}
       <div className="px-3 py-2 shrink-0" data-tauri-drag-region>
-        <div className="flex items-center gap-2 px-4 py-2.5 glass-panel-adaptive shadow-lg">
+        <div className="flex items-center gap-2 px-3 py-2">
           <ModeIcon className="w-4 h-4 text-zinc-500 shrink-0" />
 
           <textarea
@@ -525,11 +525,11 @@ export function ChatView() {
                 className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 {msg.role === 'user' ? (
-                  <div className="max-w-[80%] px-4 py-2.5 rounded-2xl bg-zinc-500/20 backdrop-blur-md border border-white/10 shadow-sm text-sm text-zinc-100 break-words">
+                  <div className="max-w-[80%] px-3 py-2 rounded-xl bg-zinc-700/60 text-sm text-zinc-200 break-words">
                     {msg.content}
                   </div>
                 ) : (
-                  <div className="max-w-[90%] prose prose-invert prose-sm max-w-none prose-p:my-1.5 prose-headings:mt-3 prose-headings:mb-1.5 prose-pre:bg-zinc-900/40 prose-pre:backdrop-blur-md prose-pre:border prose-pre:border-white/10 prose-pre:shadow-sm prose-code:text-emerald-300 prose-code:bg-zinc-500/20 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded-md prose-a:text-blue-400 prose-strong:text-zinc-100">
+                  <div className="max-w-[90%] prose prose-invert prose-sm max-w-none prose-p:my-1.5 prose-headings:mt-3 prose-headings:mb-1.5 prose-pre:bg-zinc-800 prose-pre:border prose-pre:border-zinc-700 prose-code:text-emerald-300 prose-code:bg-zinc-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-a:text-blue-400 prose-strong:text-zinc-200">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
                       {msg.content}
                     </ReactMarkdown>
@@ -559,7 +559,7 @@ export function ChatView() {
             {/* Streaming assistant response */}
             {streamText.length > 0 && (
               <div className="flex justify-start">
-                <div className="max-w-[90%] prose prose-invert prose-sm max-w-none prose-p:my-1.5 prose-headings:mt-3 prose-headings:mb-1.5 prose-pre:bg-zinc-900/40 prose-pre:backdrop-blur-md prose-pre:border prose-pre:border-white/10 prose-pre:shadow-sm prose-code:text-emerald-300 prose-code:bg-zinc-500/20 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded-md prose-a:text-blue-400 prose-strong:text-zinc-100">
+                <div className="max-w-[90%] prose prose-invert prose-sm max-w-none prose-p:my-1.5 prose-headings:mt-3 prose-headings:mb-1.5 prose-pre:bg-zinc-800 prose-pre:border prose-pre:border-zinc-700 prose-code:text-emerald-300 prose-code:bg-zinc-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-a:text-blue-400 prose-strong:text-zinc-200">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
                     {streamText}
                   </ReactMarkdown>
