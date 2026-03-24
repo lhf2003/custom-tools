@@ -14,6 +14,8 @@ struct ChatRequest<'a> {
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     reasoning_effort: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extra_body: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -23,6 +25,7 @@ struct OllamaChatRequest<'a> {
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     options: Option<serde_json::Map<String, serde_json::Value>>,
+    think: bool,
 }
 
 // OpenAI 格式响应（非流式）
@@ -69,6 +72,7 @@ pub async fn call_llm(
     base_url: &str,
     api_key: &str,
     model: &str,
+    provider_type: &str,
     messages: Vec<ChatMessage>,
     thinking_mode: bool,
 ) -> Result<String, String> {
@@ -77,10 +81,10 @@ pub async fn call_llm(
     }
 
     let trimmed = base_url.trim_end_matches('/');
-    // 以 /api/chat 结尾时使用 Ollama 原生格式，否则追加 /chat/completions 使用 OpenAI 格式
-    let is_ollama_native = trimmed.ends_with("/api/chat");
+    // 提供商类型为 ollama 时使用 Ollama 原生格式，否则使用 OpenAI 兼容格式
+    let is_ollama_native = provider_type == "ollama";
     let url = if is_ollama_native {
-        trimmed.to_string()
+        format!("{}/api/chat", trimmed)
     } else {
         format!("{}/chat/completions", trimmed)
     };
@@ -102,15 +106,26 @@ pub async fn call_llm(
             messages: &messages,
             stream: false,
             options,
+            think: thinking_mode,
         };
         client.post(&url).json(&request)
     } else {
         // OpenAI 兼容格式
+        // 检测是否为百炼平台
+        let is_bailian = base_url.contains("bailian") || base_url.contains("aliyun");
+        let extra_body = if is_bailian && thinking_mode {
+            let mut body = serde_json::Map::new();
+            body.insert("enable_thinking".to_string(), serde_json::json!(true));
+            Some(body)
+        } else {
+            None
+        };
         let request = ChatRequest {
             model,
             messages: &messages,
             stream: false,
-            reasoning_effort: if thinking_mode { Some("medium") } else { None },
+            reasoning_effort: if thinking_mode && !is_bailian { Some("medium") } else { None },
+            extra_body,
         };
         client.post(&url).json(&request)
     };
@@ -152,6 +167,7 @@ pub async fn call_llm_stream(
     base_url: &str,
     api_key: &str,
     model: &str,
+    provider_type: &str,
     messages: Vec<ChatMessage>,
     thinking_mode: bool,
     app_handle: &tauri::AppHandle,
@@ -163,9 +179,9 @@ pub async fn call_llm_stream(
     }
 
     let trimmed = base_url.trim_end_matches('/');
-    let is_ollama_native = trimmed.ends_with("/api/chat");
+    let is_ollama_native = provider_type == "ollama";
     let url = if is_ollama_native {
-        trimmed.to_string()
+        format!("{}/api/chat", trimmed)
     } else {
         format!("{}/chat/completions", trimmed)
     };
@@ -187,6 +203,7 @@ pub async fn call_llm_stream(
             messages: &messages,
             stream: true,
             options,
+            think: thinking_mode,
         };
         let mut builder = client.post(&url).json(&request);
         if !api_key.is_empty() {
@@ -195,11 +212,21 @@ pub async fn call_llm_stream(
         builder
     } else {
         // OpenAI 兼容格式
+        // 检测是否为百炼平台
+        let is_bailian = base_url.contains("bailian") || base_url.contains("aliyun");
+        let extra_body = if is_bailian && thinking_mode {
+            let mut body = serde_json::Map::new();
+            body.insert("enable_thinking".to_string(), serde_json::json!(true));
+            Some(body)
+        } else {
+            None
+        };
         let request = ChatRequest {
             model,
             messages: &messages,
             stream: true,
-            reasoning_effort: if thinking_mode { Some("medium") } else { None },
+            reasoning_effort: if thinking_mode && !is_bailian { Some("medium") } else { None },
+            extra_body,
         };
         let mut builder = client.post(&url).json(&request);
         if !api_key.is_empty() {

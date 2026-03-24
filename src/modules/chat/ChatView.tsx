@@ -12,6 +12,7 @@ import {
   Languages,
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
+import { useLlmProviderStore } from '@/stores/llmProviderStore';
 import { invoke } from '@tauri-apps/api/core';
 import { debouncedResize } from '@/utils/tauri';
 import { WINDOW_SIZE } from '@/constants/window';
@@ -84,6 +85,7 @@ const MODE_ORDER: ChatMode[] = ['chat', 'qa', 'translate'];
 
 export function ChatView() {
   const { setActiveView } = useAppStore();
+  const { sceneConfigs } = useLlmProviderStore();
 
   const [mode, setMode] = useState<ChatMode>('chat');
   const [input, setInput] = useState('');
@@ -258,11 +260,15 @@ export function ChatView() {
     }
 
     try {
+      // 从场景配置获取思考模式设置
+      const sceneConfig = sceneConfigs[mode];
+      const thinkingMode = sceneConfig?.thinking_mode ?? false;
+
       // 使用场景调用命令，根据当前模式选择对应的提供商和模型
       await invoke('call_llm_stream_by_scene', {
         scene: mode,
         messages: newMessages,
-        thinkingMode: false,
+        thinkingMode,
       });
     } catch (err) {
       setIsLoading(false);
@@ -391,7 +397,7 @@ export function ChatView() {
 
   return (
     <div
-      className="w-full h-full flex flex-col select-none"
+      className="w-full h-full flex flex-col select-none bg-transparent"
       data-tauri-drag-region
     >
       {/* ── Input area (single-row) ──────────────────────────────── */}
