@@ -71,8 +71,14 @@ export function MarkdownView() {
     if (!renameItem || !renameValue.trim()) return;
 
     try {
+      // 确保文件名以 .md 结尾
+      let finalName = renameValue.trim();
+      if (!finalName.endsWith('.md')) {
+        finalName += '.md';
+      }
+
       const newPath = await invoke<string>('rename_note', {
-        request: { old_path: renameItem.path, new_name: renameValue },
+        request: { old_path: renameItem.path, new_name: finalName },
       });
 
       setShowRenameModal(false);
@@ -171,9 +177,44 @@ export function MarkdownView() {
     return flatten(notes).filter((item) => item.name.toLowerCase().includes(query));
   }, [searchQuery, notes]);
 
+  const [editingTitle, setEditingTitle] = useState('');
+
+  // Handle title rename on blur
+  const handleTitleRename = async () => {
+    if (!selectedNote || !noteContent || !editingTitle.trim()) return;
+
+    const trimmedTitle = editingTitle.trim();
+    // 确保文件名以 .md 结尾
+    const finalName = trimmedTitle.endsWith('.md') ? trimmedTitle : `${trimmedTitle}.md`;
+
+    // Only rename if title actually changed
+    if (finalName === noteContent.name) return;
+
+    try {
+      const newPath = await invoke<string>('rename_note', {
+        request: { old_path: selectedNote, new_name: finalName },
+      });
+      loadNoteTree();
+      setSelectedNote(newPath);
+    } catch (err) {
+      console.error('Failed to rename:', err);
+      setError(err instanceof Error ? err.message : '重命名失败');
+      // Reset to original name on error
+      setEditingTitle(noteContent.name.replace(/\.md$/, ''));
+    }
+  };
+
+  // Sync editing title when note changes
+  useEffect(() => {
+    if (noteContent) {
+      setEditingTitle(noteContent.name.replace(/\.md$/, ''));
+    }
+  }, [noteContent?.name]);
+
   const openRenameModal = (item: NoteItemData) => {
     setRenameItem(item);
-    setRenameValue(item.name);
+    // 不显示 .md 后缀
+    setRenameValue(item.name.replace(/\.md$/, ''));
     setShowRenameModal(true);
   };
 
@@ -281,9 +322,12 @@ export function MarkdownView() {
             <div className="px-6 py-3 border-b border-zinc-600/30 flex items-center justify-between">
               <input
                 type="text"
-                value={noteContent.name}
-                readOnly
+                value={editingTitle}
+                onChange={(e) => setEditingTitle(e.target.value)}
+                onBlur={handleTitleRename}
+                onKeyDown={(e) => e.key === 'Enter' && handleTitleRename()}
                 className="bg-transparent text-lg font-semibold text-zinc-200 outline-none flex-1"
+                placeholder="笔记标题"
               />
               <div className="flex items-center gap-2">
                 {isSaving && (
