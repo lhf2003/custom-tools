@@ -19,7 +19,7 @@ import {
   Languages,
   Brain,
 } from 'lucide-react';
-import { useLlmProviderStore, type Provider, type ProviderType, type Model, type Scene } from '@/stores/llmProviderStore';
+import { useLlmProviderStore, type Provider, type ProviderType, type Model, type Scene, type SceneConfig } from '@/stores/llmProviderStore';
 
 // Custom Select Component
 interface SelectOption {
@@ -301,8 +301,22 @@ export function ModelSettings() {
   const [showApiKey, setShowApiKey] = useState(false);
 
   useEffect(() => {
-    loadProviders();
-    loadSceneConfigs();
+    const initData = async () => {
+      await loadProviders();
+      await loadSceneConfigs();
+      // Auto-load models for configured scenes to ensure model dropdowns are populated
+      const { sceneConfigs, models, loadModels } = useLlmProviderStore.getState();
+      const configsToLoad = Object.values(sceneConfigs).filter(
+        (config): config is SceneConfig =>
+          config !== null &&
+          config.provider_id &&
+          !models[config.provider_id] // Only load if not already loaded
+      );
+      for (const config of configsToLoad) {
+        await loadModels(config.provider_id);
+      }
+    };
+    initData();
   }, []);
 
   // Load models when expanding a provider
