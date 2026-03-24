@@ -124,13 +124,7 @@ pub fn delete_clipboard_item(db_state: State<DatabaseState>, id: i64) -> Result<
     let conn = Connection::open(&db_state.0).map_err(|e| e.to_string())?;
 
     // Get content type and path for image cleanup
-    let (content_type, content): (String, String) = conn
-        .query_row(
-            "SELECT content_type, content FROM clipboard_history WHERE id = ?1",
-            params![id],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-        )
-        .map_err(|e| e.to_string())?;
+    let (content_type, content) = get_clipboard_item_for_cleanup(&conn, id)?;
 
     // Delete from database
     conn.execute(
@@ -140,9 +134,7 @@ pub fn delete_clipboard_item(db_state: State<DatabaseState>, id: i64) -> Result<
     .map_err(|e| e.to_string())?;
 
     // Cleanup image file if applicable
-    if content_type == "image" {
-        let _ = std::fs::remove_file(&content);
-    }
+    cleanup_image_file(&content_type, &content);
 
     Ok(())
 }
@@ -169,7 +161,7 @@ pub fn clear_clipboard_history(db_state: State<DatabaseState>) -> Result<(), Str
 
     // Cleanup image files
     for path in image_paths {
-        let _ = std::fs::remove_file(path);
+        cleanup_image_file("image", &path);
     }
 
     Ok(())
@@ -968,4 +960,340 @@ pub fn read_image_file_as_base64(path: String) -> Result<String, String> {
     // Convert to base64
     let base64_str = BASE64.encode(&image_data);
     Ok(format!("data:{};base64,{}", mime_type, base64_str))
+}
+
+/// Internal delete helper that works with just a connection and id
+/// Returns the content_type and content for cleanup purposes
+fn get_clipboard_item_for_cleanup(conn: &Connection, id: i64) -> Result<(String, String), String> {
+    conn.query_row(
+        "SELECT content_type, content FROM clipboard_history WHERE id = ?1",
+        params![id],
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Delete image file if content_type is image
+/// Logs warnings but does not return error on failure
+fn cleanup_image_file(content_type: &str, content: &str) {
+    if content_type == "image" {
+        if let Err(e) = std::fs::remove_file(content) {
+            log::warn!("Failed to delete image file '{}': {}", content, e);
+        } else {
+            log::info!("Deleted image file: {}", content);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+    use std::fs;
+    use std::path::PathBuf;
+
+    /// Helper function to create a test database connection
+    fn create_test_db() -> (Connection, PathBuf) {
+        let temp_dir = env::temp_dir().join(format!("clipboard_test_{}", std::process::id()));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let db_path = temp_dir.join("test.db");
+
+        // Create the clipboard_history table
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS clipboard_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content TEXT NOT NULL,
+                content_type TEXT NOT NULL,
+                content_hash TEXT UNIQUE,
+                source_app TEXT,
+                is_favorite INTEGER DEFAULT 0,
+                usage_count INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                last_used_at TEXT
+            )",
+            [],
+        ).unwrap();
+
+        (conn, temp_dir)
+    }
+
+    #[test]
+    fn test_cleanup_image_file_deletes_file() {
+        let temp_dir = env::temp_dir().join("clipboard_cleanup_test");
+        fs::create_dir_all(&temp_dir).unwrap();
+        let image_path = temp_dir.join("test_image.png");
+        fs::write(&image_path, "fake image data").unwrap();
+        assert!(image_path.exists());
+
+        // Cleanup should delete the file
+        cleanup_image_file("image", image_path.to_str().unwrap());
+
+        assert!(!image_path.exists(), "Image file should be deleted");
+
+        // Cleanup temp dir
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_cleanup_image_file_nonexistent_no_panic() {
+        // Should not panic when file doesn't exist
+        cleanup_image_file("image", "/nonexistent/path/image.png");
+    }
+
+    #[test]
+    fn test_cleanup_image_file_skips_non_image() {
+        let temp_dir = env::temp_dir().join("clipboard_cleanup_test2");
+        fs::create_dir_all(&temp_dir).unwrap();
+        let file_path = temp_dir.join("some_file.txt");
+        fs::write(&file_path, "some text").unwrap();
+        assert!(file_path.exists());
+
+        // Cleanup should skip non-image types
+        cleanup_image_file("text", file_path.to_str().unwrap());
+
+        // File should still exist
+        assert!(file_path.exists(), "Non-image file should not be deleted");
+
+        // Cleanup temp dir
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_get_clipboard_item_for_cleanup() {
+        let (conn, _temp_dir) = create_test_db();
+
+        // Insert a test record
+        conn.execute(
+            "INSERT INTO clipboard_history (content, content_type, content_hash, source_app)
+             VALUES ('/path/to/image.png', 'image', 'test_hash', 'TestApp')",
+            [],
+        ).unwrap();
+
+        let id: i64 = conn.query_row(
+            "SELECT id FROM clipboard_history WHERE content_hash = 'test_hash'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+
+        // Get item for cleanup
+        let (content_type, content) = get_clipboard_item_for_cleanup(&conn, id).unwrap();
+        assert_eq!(content_type, "image");
+        assert_eq!(content, "/path/to/image.png");
+    }
+
+    #[test]
+    fn test_delete_clipboard_item_integration() {
+        let (conn, temp_dir) = create_test_db();
+
+        // Create a test image file
+        let image_dir = temp_dir.join("clipboard-images");
+        fs::create_dir_all(&image_dir).unwrap();
+        let image_path = image_dir.join("test_image.png");
+        fs::write(&image_path, "fake image data").unwrap();
+        assert!(image_path.exists());
+
+        // Insert an image record
+        conn.execute(
+            "INSERT INTO clipboard_history (content, content_type, content_hash, source_app)
+             VALUES (?1, 'image', 'test_hash', 'TestApp')",
+            params![image_path.to_string_lossy().to_string()],
+        ).unwrap();
+
+        let id: i64 = conn.query_row(
+            "SELECT id FROM clipboard_history WHERE content_hash = 'test_hash'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+
+        // Get item info before deletion
+        let (content_type, content) = get_clipboard_item_for_cleanup(&conn, id).unwrap();
+
+        // Delete from database
+        conn.execute("DELETE FROM clipboard_history WHERE id = ?1", params![id]).unwrap();
+
+        // Cleanup image file
+        cleanup_image_file(&content_type, &content);
+
+        // Verify the image file was deleted
+        assert!(!image_path.exists(), "Image file should be deleted");
+
+        // Verify database record is gone
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM clipboard_history WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 0, "Database record should be deleted");
+    }
+
+    #[test]
+    fn test_clear_clipboard_history_deletes_image_files() {
+        let (conn, temp_dir) = create_test_db();
+
+        // Create test image files
+        let image_dir = temp_dir.join("clipboard-images");
+        fs::create_dir_all(&image_dir).unwrap();
+        let image_path1 = image_dir.join("image1.png");
+        let image_path2 = image_dir.join("image2.png");
+        fs::write(&image_path1, "fake image data 1").unwrap();
+        fs::write(&image_path2, "fake image data 2").unwrap();
+
+        // Insert records
+        conn.execute(
+            "INSERT INTO clipboard_history (content, content_type, content_hash, source_app)
+             VALUES (?1, 'image', 'hash1', 'TestApp')",
+            params![image_path1.to_string_lossy().to_string()],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO clipboard_history (content, content_type, content_hash, source_app)
+             VALUES (?1, 'image', 'hash2', 'TestApp')",
+            params![image_path2.to_string_lossy().to_string()],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO clipboard_history (content, content_type, content_hash, source_app)
+             VALUES ('text content', 'text', 'hash3', 'TestApp')",
+            [],
+        ).unwrap();
+
+        // Get all image paths before deletion
+        let mut stmt = conn
+            .prepare("SELECT content FROM clipboard_history WHERE content_type = 'image'")
+            .unwrap();
+        let image_paths: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        // Delete all records
+        conn.execute("DELETE FROM clipboard_history", []).unwrap();
+
+        // Cleanup image files
+        for path in image_paths {
+            cleanup_image_file("image", &path);
+        }
+
+        // Verify image files were deleted
+        assert!(!image_path1.exists(), "Image file 1 should be deleted");
+        assert!(!image_path2.exists(), "Image file 2 should be deleted");
+    }
+
+    #[test]
+    fn test_cleanup_old_items_by_age_deletes_image_files() {
+        let (conn, temp_dir) = create_test_db();
+
+        // Create test image files
+        let image_dir = temp_dir.join("clipboard-images");
+        fs::create_dir_all(&image_dir).unwrap();
+        let old_image_path = image_dir.join("old_image.png");
+        let recent_image_path = image_dir.join("recent_image.png");
+        fs::write(&old_image_path, "old image data").unwrap();
+        fs::write(&recent_image_path, "recent image data").unwrap();
+
+        // Insert an old record (31 days ago)
+        conn.execute(
+            "INSERT INTO clipboard_history (content, content_type, content_hash, source_app, created_at)
+             VALUES (?1, 'image', 'old_hash', 'TestApp', datetime('now', '-31 days'))",
+            params![old_image_path.to_string_lossy().to_string()],
+        ).unwrap();
+
+        // Insert a recent record (1 day ago)
+        conn.execute(
+            "INSERT INTO clipboard_history (content, content_type, content_hash, source_app, created_at)
+             VALUES (?1, 'image', 'recent_hash', 'TestApp', datetime('now', '-1 day'))",
+            params![recent_image_path.to_string_lossy().to_string()],
+        ).unwrap();
+
+        // Collect image paths for items older than 30 days
+        let mut stmt = conn
+            .prepare("SELECT content FROM clipboard_history WHERE content_type = 'image' AND created_at < datetime('now', '-30 days')")
+            .unwrap();
+        let image_paths: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        // Delete old items (simulating cleanup_old_items behavior)
+        let deleted = conn.execute(
+            "DELETE FROM clipboard_history WHERE created_at < datetime('now', '-30 days')",
+            [],
+        ).unwrap();
+
+        assert_eq!(deleted, 1, "Should delete 1 old item");
+
+        // Cleanup image files
+        for path in image_paths {
+            cleanup_image_file("image", &path);
+        }
+
+        // Verify old image file was deleted
+        assert!(!old_image_path.exists(), "Old image file should be deleted");
+        // Verify recent image file still exists
+        assert!(recent_image_path.exists(), "Recent image file should not be deleted");
+    }
+
+    #[test]
+    fn test_cleanup_old_items_by_limit_deletes_image_files() {
+        let (conn, temp_dir) = create_test_db();
+
+        // Create test image files
+        let image_dir = temp_dir.join("clipboard-images");
+        fs::create_dir_all(&image_dir).unwrap();
+
+        // Create 3 image files
+        let image_path1 = image_dir.join("image1.png");
+        let image_path2 = image_dir.join("image2.png");
+        let image_path3 = image_dir.join("image3.png");
+        fs::write(&image_path1, "image data 1").unwrap();
+        fs::write(&image_path2, "image data 2").unwrap();
+        fs::write(&image_path3, "image data 3").unwrap();
+
+        // Insert 3 records with explicit IDs (1 = oldest, 3 = newest)
+        conn.execute(
+            "INSERT INTO clipboard_history (id, content, content_type, content_hash, source_app, created_at)
+             VALUES (1, ?1, 'image', 'hash1', 'TestApp', datetime('now', '-3 days'))",
+            params![image_path1.to_string_lossy().to_string()],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO clipboard_history (id, content, content_type, content_hash, source_app, created_at)
+             VALUES (2, ?1, 'image', 'hash2', 'TestApp', datetime('now', '-2 days'))",
+            params![image_path2.to_string_lossy().to_string()],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO clipboard_history (id, content, content_type, content_hash, source_app, created_at)
+             VALUES (3, ?1, 'image', 'hash3', 'TestApp', datetime('now', '-1 day'))",
+            params![image_path3.to_string_lossy().to_string()],
+        ).unwrap();
+
+        // Get the oldest record (id = 1)
+        let mut stmt = conn
+            .prepare("SELECT content FROM clipboard_history WHERE id = 1")
+            .unwrap();
+        let paths_to_delete: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        // Delete the oldest record
+        let deleted = conn.execute(
+            "DELETE FROM clipboard_history WHERE id = 1",
+            [],
+        ).unwrap();
+
+        assert_eq!(deleted, 1, "Should delete 1 oldest item");
+
+        // Cleanup image files
+        for path in paths_to_delete {
+            cleanup_image_file("image", &path);
+        }
+
+        // Verify oldest image file was deleted
+        assert!(!image_path1.exists(), "Oldest image (id=1) should be deleted");
+        // Verify other image files still exist
+        assert!(image_path2.exists(), "Image id=2 should exist");
+        assert!(image_path3.exists(), "Image id=3 should exist");
+    }
 }

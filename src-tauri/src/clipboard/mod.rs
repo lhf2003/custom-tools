@@ -207,9 +207,31 @@ impl ClipboardManager {
             30 // Default: 30 days
         };
 
+        // Helper function to collect image paths for deletion
+        fn collect_image_paths(conn: &rusqlite::Connection, query: &str, params: &[&dyn rusqlite::ToSql]) -> anyhow::Result<Vec<String>> {
+            let mut stmt = conn.prepare(query)?;
+            let paths: Vec<String> = stmt
+                .query_map(params, |row| row.get(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(paths)
+        }
+
         // If keep_days is 0, keep all items (no cleanup by days)
         // But still keep max 500 items to prevent unlimited growth
         if keep_days == 0 {
+            // Collect image paths for items that will be deleted
+            let image_paths = collect_image_paths(
+                conn,
+                "SELECT content FROM clipboard_history
+                 WHERE id NOT IN (
+                     SELECT id FROM clipboard_history
+                     ORDER BY created_at DESC
+                     LIMIT 500
+                 )
+                 AND content_type = 'image'",
+                &[]
+            )?;
+
             let deleted = conn.execute(
                 "DELETE FROM clipboard_history
                  WHERE id NOT IN (
@@ -219,25 +241,70 @@ impl ClipboardManager {
                  )",
                 [],
             )?;
+
             if deleted > 0 {
                 log::info!("Cleaned up {} old clipboard items (max 500 limit)", deleted);
             }
+
+            // Cleanup image files
+            for path in image_paths {
+                if let Err(e) = std::fs::remove_file(&path) {
+                    log::warn!("Failed to delete image file '{}': {}", path, e);
+                } else {
+                    log::info!("Deleted image file: {}", path);
+                }
+            }
+
             return Ok(());
         }
 
         // Delete items older than keep_days
+        // Collect image paths first
+        let keep_days_str = format!("-{}", keep_days);
+        let image_paths_by_age = collect_image_paths(
+            conn,
+            "SELECT content FROM clipboard_history
+             WHERE created_at < datetime('now', ?1 || ' days')
+             AND content_type = 'image'
+             AND is_favorite = 0",
+            &[&keep_days_str as &dyn rusqlite::ToSql]
+        )?;
+
         let deleted = conn.execute(
             "DELETE FROM clipboard_history
              WHERE created_at < datetime('now', ?1 || ' days')
              AND is_favorite = 0",
-            [format!("-{}", keep_days)],
+            [&keep_days_str as &dyn rusqlite::ToSql],
         )?;
 
         if deleted > 0 {
             log::info!("Cleaned up {} clipboard items older than {} days", deleted, keep_days);
         }
 
+        // Cleanup image files from age-based deletion
+        for path in image_paths_by_age {
+            if let Err(e) = std::fs::remove_file(&path) {
+                log::warn!("Failed to delete image file '{}': {}", path, e);
+            } else {
+                log::info!("Deleted image file: {}", path);
+            }
+        }
+
         // Also apply max 500 limit as safety
+        // Collect image paths first
+        let image_paths_by_limit = collect_image_paths(
+            conn,
+            "SELECT content FROM clipboard_history
+             WHERE id NOT IN (
+                 SELECT id FROM clipboard_history
+                 ORDER BY created_at DESC
+                 LIMIT 500
+             )
+             AND content_type = 'image'
+             AND is_favorite = 0",
+            &[]
+        )?;
+
         let deleted_max = conn.execute(
             "DELETE FROM clipboard_history
              WHERE id NOT IN (
@@ -251,6 +318,15 @@ impl ClipboardManager {
 
         if deleted_max > 0 {
             log::info!("Cleaned up {} clipboard items (max 500 limit)", deleted_max);
+        }
+
+        // Cleanup image files from limit-based deletion
+        for path in image_paths_by_limit {
+            if let Err(e) = std::fs::remove_file(&path) {
+                log::warn!("Failed to delete image file '{}': {}", path, e);
+            } else {
+                log::info!("Deleted image file: {}", path);
+            }
         }
 
         Ok(())
