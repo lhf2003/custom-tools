@@ -31,13 +31,15 @@ function estimateBytes(dataUrl: string): number {
 
 /** Evict least-recently-used entries until total size is within the limit. */
 function evictToLimit(): void {
-  const iter = cache.entries();
   while (totalBytes > MAX_CACHE_BYTES && cache.size > 0) {
-    const { value, done } = iter.next();
-    if (done) break;
-    const [key, entry] = value;
-    cache.delete(key);
-    totalBytes -= entry.bytes;
+    // Get the first (oldest) entry from the Map
+    const firstKey = cache.keys().next().value;
+    if (firstKey === undefined) break;
+    const entry = cache.get(firstKey);
+    if (entry) {
+      cache.delete(firstKey);
+      totalBytes -= entry.bytes;
+    }
   }
 }
 
