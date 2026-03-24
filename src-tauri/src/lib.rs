@@ -1,7 +1,171 @@
 use tauri::Manager;
+use tauri::Emitter;
 use tauri_plugin_autostart::ManagerExt;
 use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
 use std::time::Duration;
+
+/// Windows 窗口效果类型
+#[cfg(target_os = "windows")]
+#[derive(Debug, Clone, Copy)]
+pub enum WindowEffect {
+    /// Mica - Windows 11 原生效果（推荐）
+    Mica,
+    /// Acrylic - Windows 10 v1903+ / Windows 11（但有兼容性问题）
+    Acrylic,
+    /// Blur - 旧版 Windows 后备方案
+    Blur,
+    /// 无效果 - 纯 CSS 兜底
+    None,
+}
+
+#[cfg(target_os = "windows")]
+impl WindowEffect {
+    /// 根据 Windows 版本选择最佳效果
+    pub fn from_windows_version(major: u64, _minor: u64, build: u64) -> Self {
+        match (major, build) {
+            // Windows 11 (build 22000+)
+            // 使用 Mica，因为它在 Win11 上最稳定
+            (10, build) if build >= 22000 => WindowEffect::Mica,
+
+            // Windows 10 v1903+ (build 18362+)
+            // Acrylic 在 Win10 上工作正常
+            (10, build) if build >= 18362 => WindowEffect::Acrylic,
+
+            // Windows 7/8/8.1 或更旧的 Win10
+            // 使用简单的 Blur 效果
+            _ => WindowEffect::Blur,
+        }
+    }
+
+    /// 获取效果名称（用于日志）
+    pub fn name(&self) -> &'static str {
+        match self {
+            WindowEffect::Mica => "Mica",
+            WindowEffect::Acrylic => "Acrylic",
+            WindowEffect::Blur => "Blur",
+            WindowEffect::None => "None",
+        }
+    }
+}
+
+/// 应用窗口效果，带降级策略
+#[cfg(target_os = "windows")]
+pub fn apply_window_effect(
+    window: &tauri::WebviewWindow,
+    effect: WindowEffect,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match effect {
+        WindowEffect::Mica => {
+            // 尝试应用 Mica 效果
+            match window_vibrancy::apply_mica(window, Some(true)) {
+                Ok(_) => {
+                    log::info!("Successfully applied Mica effect");
+                    Ok(())
+                }
+                Err(e) => {
+                    log::warn!("Failed to apply Mica effect: {}, falling back to Acrylic", e);
+                    // 降级到 Acrylic
+                    apply_window_effect(window, WindowEffect::Acrylic)
+                }
+            }
+        }
+        WindowEffect::Acrylic => {
+            // 尝试应用 Acrylic 效果（使用半透明深色背景）
+            match window_vibrancy::apply_acrylic(window, Some((18, 18, 18, 120))) {
+                Ok(_) => {
+                    log::info!("Successfully applied Acrylic effect");
+                    Ok(())
+                }
+                Err(e) => {
+                    log::warn!("Failed to apply Acrylic effect: {}, falling back to Blur", e);
+                    // 降级到 Blur
+                    apply_window_effect(window, WindowEffect::Blur)
+                }
+            }
+        }
+        WindowEffect::Blur => {
+            // 尝试应用简单模糊效果
+            match window_vibrancy::apply_blur(window, Some((18, 18, 18, 120))) {
+                Ok(_) => {
+                    log::info!("Successfully applied Blur effect");
+                    Ok(())
+                }
+                Err(e) => {
+                    log::warn!("Failed to apply Blur effect: {}, using CSS fallback", e);
+                    // 降级到无效果（纯 CSS 兜底）
+                    apply_window_effect(window, WindowEffect::None)
+                }
+            }
+        }
+        WindowEffect::None => {
+            // 不应用任何 OS 级效果，依赖 CSS 样式
+            log::info!("Using CSS fallback for window background");
+            Ok(())
+        }
+    }
+}
+
+/// 获取 Windows 版本信息
+/// 使用 RtlGetVersion 获取真实版本（绕过 app manifest shim）
+#[cfg(target_os = "windows")]
+pub fn get_windows_version() -> Option<(u64, u64, u64)> {
+    use windows::core::PCSTR;
+    use windows::Win32::System::LibraryLoader::GetModuleHandleA;
+    use windows::Win32::System::LibraryLoader::GetProcAddress;
+
+    // RtlGetVersion 函数签名
+    type RtlGetVersionFn = unsafe extern "system" fn(*mut OSVERSIONINFOW) -> i32;
+
+    #[repr(C)]
+    #[derive(Debug)]
+    struct OSVERSIONINFOW {
+        dwOSVersionInfoSize: u32,
+        dwMajorVersion: u32,
+        dwMinorVersion: u32,
+        dwBuildNumber: u32,
+        dwPlatformId: u32,
+        szCSDVersion: [u16; 128],
+    }
+
+    unsafe {
+        // 获取 ntdll.dll 模块
+        let ntdll = GetModuleHandleA(PCSTR::from_raw("ntdll.dll\0".as_ptr()));
+        if ntdll.is_err() {
+            log::warn!("Failed to get ntdll.dll handle");
+            return None;
+        }
+        let ntdll = ntdll.unwrap();
+
+        // 获取 RtlGetVersion 函数地址
+        let rtl_get_version = GetProcAddress(
+            ntdll,
+            PCSTR::from_raw("RtlGetVersion\0".as_ptr()),
+        );
+
+        if let Some(rtl_get_version) = rtl_get_version {
+            let rtl_get_version: RtlGetVersionFn = std::mem::transmute(rtl_get_version);
+
+            let mut osvi: OSVERSIONINFOW = std::mem::zeroed();
+            osvi.dwOSVersionInfoSize = std::mem::size_of::<OSVERSIONINFOW>() as u32;
+
+            let status = rtl_get_version(&mut osvi);
+            if status == 0 {
+                // STATUS_SUCCESS
+                Some((
+                    osvi.dwMajorVersion as u64,
+                    osvi.dwMinorVersion as u64,
+                    osvi.dwBuildNumber as u64,
+                ))
+            } else {
+                log::warn!("RtlGetVersion returned non-success status: {}", status);
+                None
+            }
+        } else {
+            log::warn!("Failed to get RtlGetVersion function address");
+            None
+        }
+    }
+}
 
 
 pub mod clipboard;
@@ -28,6 +192,7 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_os::init())
         .setup(|app| {
             // Setup system tray
             setup_system_tray(app.handle())?;
@@ -70,10 +235,46 @@ pub fn run() {
                     log::warn!("Failed to set always_on_top: {}", e);
                 }
 
-                // Apply OS-level Acrylic blur effect (Windows 10 Fall Creators Update+)
+                // Apply OS-level window effects with version detection and fallback
                 #[cfg(target_os = "windows")]
-                if let Err(e) = window_vibrancy::apply_acrylic(&window, Some((18, 18, 18, 120))) {
-                    log::warn!("Failed to apply acrylic vibrancy: {}", e);
+                {
+                    // 获取 Windows 版本
+                    let win_version = get_windows_version();
+                    let effect = match win_version {
+                        Some((major, minor, build)) => {
+                            log::info!(
+                                "Detected Windows version: {}.{}.{}",
+                                major, minor, build
+                            );
+                            WindowEffect::from_windows_version(major, minor, build)
+                        }
+                        None => {
+                            log::warn!("Failed to detect Windows version, using safe fallback");
+                            WindowEffect::Blur
+                        }
+                    };
+
+                    log::info!("Applying window effect: {}", effect.name());
+
+                    if let Err(e) = apply_window_effect(&window, effect) {
+                        log::warn!("Failed to apply any window effect: {}", e);
+                    }
+                }
+
+                // 如果所有 OS 级效果都失败，前端会使用 CSS 兜底样式
+                // 通知前端当前的效果状态
+                #[cfg(target_os = "windows")]
+                {
+                    let effect_name = match get_windows_version() {
+                        Some((major, _, build)) => {
+                            let effect = WindowEffect::from_windows_version(major, 0, build);
+                            effect.name().to_string()
+                        }
+                        None => "Unknown".to_string(),
+                    };
+
+                    // 发送事件到前端，让前端知道当前的窗口效果类型
+                    let _ = window.emit("window-effect-changed", effect_name);
                 }
 
                 // Apply rounded window corners at compositor level (Windows 11+)

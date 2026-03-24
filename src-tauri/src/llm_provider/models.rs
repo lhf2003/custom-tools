@@ -106,6 +106,7 @@ pub struct SceneConfig {
     pub scene: Scene,
     pub provider_id: i64,
     pub model_id: String,
+    pub thinking_mode: bool,
     pub updated_at: String,
 }
 
@@ -168,6 +169,7 @@ pub struct SetSceneModelRequest {
     pub scene: Scene,
     pub provider_id: i64,
     pub model_id: String,
+    pub thinking_mode: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

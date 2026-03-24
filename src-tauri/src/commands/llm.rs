@@ -18,7 +18,14 @@ pub async fn call_llm(
         (s.llm_base_url, s.llm_api_key, s.llm_model, s.llm_thinking_mode)
     };
 
-    crate::llm::call_llm(&base_url, &api_key, &model, messages, thinking_mode).await
+    // 旧版设置：从 base_url 推断 provider_type
+    let provider_type = if base_url.contains("ollama") || base_url.contains("11434") {
+        "ollama"
+    } else {
+        "openai"
+    };
+
+    crate::llm::call_llm(&base_url, &api_key, &model, provider_type, messages, thinking_mode).await
 }
 
 /// 根据场景调用大模型接口
@@ -28,20 +35,25 @@ pub async fn call_llm_by_scene(
     app_handle: tauri::AppHandle,
     scene: String,
     messages: Vec<ChatMessage>,
-    thinking_mode: bool,
+    _thinking_mode: bool,
 ) -> Result<String, String> {
     let scene_enum: Scene = scene.parse().map_err(|e: String| e)?;
 
-    let (base_url, api_key, model) = {
+    let (base_url, api_key, model, provider_type, thinking_mode) = {
         let db_path = &db_state.0;
         let conn = rusqlite::Connection::open(db_path)
             .map_err(|e| format!("无法连接数据库: {}", e))?;
 
         let provider_db = LlmProviderDb;
         let (provider, model) = provider_db
-            .get_scene_model(&conn, scene_enum)
+            .get_scene_model(&conn, scene_enum.clone())
             .map_err(|e| format!("获取场景模型失败: {}", e))?
             .ok_or_else(|| format!("场景 '{}' 未配置模型", scene))?;
+
+        // 获取场景的 thinking_mode 配置
+        let thinking_mode = provider_db
+            .get_scene_thinking_mode(&conn, scene_enum.clone())
+            .unwrap_or(false);
 
         // 解密 API key
         let api_key = if let Some(encrypted) = provider.api_key_encrypted {
@@ -55,10 +67,12 @@ pub async fn call_llm_by_scene(
             String::new()
         };
 
-        (provider.base_url, api_key, model.model_id)
+        let provider_type_str = provider.provider_type.to_string();
+
+        (provider.base_url, api_key, model.model_id, provider_type_str, thinking_mode)
     };
 
-    crate::llm::call_llm(&base_url, &api_key, &model, messages, thinking_mode).await
+    crate::llm::call_llm(&base_url, &api_key, &model, &provider_type, messages, thinking_mode).await
 }
 
 /// 测试大模型连接（使用旧版设置）
@@ -77,7 +91,14 @@ pub async fn test_llm_connection(
         content: "Hello! Please reply with 'Connection successful!' only.".to_string(),
     }];
 
-    crate::llm::call_llm(&base_url, &api_key, &model, messages, thinking_mode).await
+    // 旧版设置：从 base_url 推断 provider_type
+    let provider_type = if base_url.contains("ollama") || base_url.contains("11434") {
+        "ollama"
+    } else {
+        "openai"
+    };
+
+    crate::llm::call_llm(&base_url, &api_key, &model, provider_type, messages, thinking_mode).await
 }
 
 /// 流式调用大模型接口（使用旧版设置，兼容模式）
@@ -94,7 +115,14 @@ pub async fn call_llm_stream(
         (s.llm_base_url, s.llm_api_key, s.llm_model, s.llm_thinking_mode)
     };
 
-    crate::llm::call_llm_stream(&base_url, &api_key, &model, messages, thinking_mode, &app_handle).await
+    // 旧版设置：从 base_url 推断 provider_type
+    let provider_type = if base_url.contains("ollama") || base_url.contains("11434") {
+        "ollama"
+    } else {
+        "openai"
+    };
+
+    crate::llm::call_llm_stream(&base_url, &api_key, &model, provider_type, messages, thinking_mode, &app_handle).await
 }
 
 /// 根据场景流式调用大模型接口
@@ -104,20 +132,25 @@ pub async fn call_llm_stream_by_scene(
     app_handle: tauri::AppHandle,
     scene: String,
     messages: Vec<ChatMessage>,
-    thinking_mode: bool,
+    _thinking_mode: bool,
 ) -> Result<(), String> {
     let scene_enum: Scene = scene.parse().map_err(|e: String| e)?;
 
-    let (base_url, api_key, model) = {
+    let (base_url, api_key, model, provider_type, thinking_mode) = {
         let db_path = &db_state.0;
         let conn = rusqlite::Connection::open(db_path)
             .map_err(|e| format!("无法连接数据库: {}", e))?;
 
         let provider_db = LlmProviderDb;
         let (provider, model) = provider_db
-            .get_scene_model(&conn, scene_enum)
+            .get_scene_model(&conn, scene_enum.clone())
             .map_err(|e| format!("获取场景模型失败: {}", e))?
             .ok_or_else(|| format!("场景 '{}' 未配置模型", scene))?;
+
+        // 获取场景的 thinking_mode 配置
+        let thinking_mode = provider_db
+            .get_scene_thinking_mode(&conn, scene_enum.clone())
+            .unwrap_or(false);
 
         // 解密 API key
         let api_key = if let Some(encrypted) = provider.api_key_encrypted {
@@ -131,8 +164,10 @@ pub async fn call_llm_stream_by_scene(
             String::new()
         };
 
-        (provider.base_url, api_key, model.model_id)
+        let provider_type_str = provider.provider_type.to_string();
+
+        (provider.base_url, api_key, model.model_id, provider_type_str, thinking_mode)
     };
 
-    crate::llm::call_llm_stream(&base_url, &api_key, &model, messages, thinking_mode, &app_handle).await
+    crate::llm::call_llm_stream(&base_url, &api_key, &model, &provider_type, messages, thinking_mode, &app_handle).await
 }

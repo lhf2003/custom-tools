@@ -41,6 +41,7 @@ export interface SceneConfig {
   scene: Scene;
   provider_id: number;
   model_id: string;
+  thinking_mode: boolean;
   updated_at: string;
 }
 
@@ -95,7 +96,8 @@ interface LlmProviderState {
 
   // Scene actions
   loadSceneConfigs: () => Promise<void>;
-  setSceneModel: (scene: Scene, providerId: number, modelId: string) => Promise<void>;
+  setSceneModel: (scene: Scene, providerId: number, modelId: string, thinkingMode?: boolean) => Promise<void>;
+  setSceneThinkingMode: (scene: Scene, thinkingMode: boolean) => Promise<void>;
   getSceneModelInfo: (scene: Scene) => Promise<SceneModelInfo | null>;
 }
 
@@ -237,16 +239,39 @@ export const useLlmProviderStore = create<LlmProviderState>((set, get) => ({
     }
   },
 
-  setSceneModel: async (scene, providerId, modelId) => {
+  setSceneModel: async (scene, providerId, modelId, thinkingMode = false) => {
     try {
       const config = await invoke<SceneConfig>('set_scene_model', {
-        req: { scene, providerId, modelId },
+        req: { scene, providerId, modelId, thinkingMode },
       });
       set((state) => ({
         sceneConfigs: { ...state.sceneConfigs, [scene]: config },
       }));
     } catch (err) {
       console.error('Failed to set scene model:', err);
+      throw err;
+    }
+  },
+
+  setSceneThinkingMode: async (scene, thinkingMode) => {
+    try {
+      const currentConfig = get().sceneConfigs[scene];
+      if (!currentConfig || !currentConfig.provider_id) {
+        throw new Error('请先选择提供商和模型');
+      }
+      const config = await invoke<SceneConfig>('set_scene_model', {
+        req: {
+          scene,
+          providerId: currentConfig.provider_id,
+          modelId: currentConfig.model_id,
+          thinkingMode,
+        },
+      });
+      set((state) => ({
+        sceneConfigs: { ...state.sceneConfigs, [scene]: config },
+      }));
+    } catch (err) {
+      console.error('Failed to set scene thinking mode:', err);
       throw err;
     }
   },

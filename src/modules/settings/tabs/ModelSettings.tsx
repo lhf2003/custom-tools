@@ -17,6 +17,7 @@ import {
   MessageSquare,
   HelpCircle,
   Languages,
+  Brain,
 } from 'lucide-react';
 import { useLlmProviderStore, type Provider, type ProviderType, type Model, type Scene } from '@/stores/llmProviderStore';
 
@@ -280,6 +281,7 @@ export function ModelSettings() {
     setModelActive,
     loadSceneConfigs,
     setSceneModel,
+    setSceneThinkingMode,
   } = useLlmProviderStore();
 
   const [expandedProvider, setExpandedProvider] = useState<number | null>(null);
@@ -433,7 +435,9 @@ export function ModelSettings() {
     if (!models[providerId]) {
       await loadModels(providerId);
     }
-    await setSceneModel(scene, providerId, modelId);
+    const currentConfig = sceneConfigs[scene];
+    const thinkingMode = currentConfig?.thinking_mode ?? false;
+    await setSceneModel(scene, providerId, modelId, thinkingMode);
   };
 
   const isFormValid = formData.name && formData.label && formData.baseUrl;
@@ -743,7 +747,7 @@ export function ModelSettings() {
                   </div>
 
                   {/* Provider & Model Select */}
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2">
                     <CustomSelect
                       value={config?.provider_id?.toString() || ''}
                       options={[
@@ -757,6 +761,7 @@ export function ModelSettings() {
                       ]}
                       onChange={async (value) => {
                         const providerId = parseInt(value);
+                        const currentThinkingMode = config?.thinking_mode ?? false;
                         if (providerId) {
                           let providerModels = models[providerId];
                           if (!providerModels) {
@@ -764,18 +769,18 @@ export function ModelSettings() {
                           }
                           const activeModels = providerModels?.filter((m) => m.is_active);
                           if (activeModels && activeModels.length > 0) {
-                            await setSceneModel(scene, providerId, activeModels[0].model_id);
+                            await setSceneModel(scene, providerId, activeModels[0].model_id, currentThinkingMode);
                           } else if (providerModels && providerModels.length > 0) {
-                            await setSceneModel(scene, providerId, providerModels[0].model_id);
+                            await setSceneModel(scene, providerId, providerModels[0].model_id, currentThinkingMode);
                           } else {
-                            await setSceneModel(scene, providerId, '');
+                            await setSceneModel(scene, providerId, '', currentThinkingMode);
                           }
                         } else {
-                          await setSceneModel(scene, 0, '');
+                          await setSceneModel(scene, 0, '', currentThinkingMode);
                         }
                       }}
                       placeholder="选择提供商"
-                      className="w-36"
+                      className="w-28"
                     />
 
                     <CustomSelect
@@ -800,8 +805,23 @@ export function ModelSettings() {
                       }}
                       disabled={!config?.provider_id}
                       placeholder="选择模型"
-                      className="w-40"
+                      className="w-32"
                     />
+
+                    {/* Thinking Mode Toggle */}
+                    <button
+                      onClick={() => setSceneThinkingMode(scene, !config?.thinking_mode)}
+                      disabled={!config?.provider_id}
+                      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs border transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${
+                        config?.thinking_mode
+                          ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                          : 'bg-white/5 text-white/40 border-white/10 hover:bg-white/10'
+                      }`}
+                      title={config?.thinking_mode ? '思考模式已开启' : '思考模式已关闭'}
+                    >
+                      <Brain size={14} />
+                      <span>思考</span>
+                    </button>
                   </div>
                 </div>
               );

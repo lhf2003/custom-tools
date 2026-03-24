@@ -296,8 +296,7 @@ export function LauncherView() {
 
   return (
     <div
-      className="w-full h-full flex flex-col rounded-lg overflow-hidden outline-none"
-      style={{ backgroundColor: THEME.BG_PRIMARY }}
+      className="w-full h-full flex flex-col rounded-lg overflow-hidden outline-none bg-transparent"
       onKeyDown={handleKeyDown}
       tabIndex={0}
     >

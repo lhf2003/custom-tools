@@ -398,7 +398,7 @@ impl LlmProviderDb {
     pub fn get_scene_configs(&self, conn: &Connection) -> Result<Vec<SceneConfig>, String> {
         let mut stmt = conn
             .prepare(
-                "SELECT id, scene, provider_id, model_id, updated_at
+                "SELECT id, scene, provider_id, model_id, thinking_mode, updated_at
                  FROM llm_scene_configs ORDER BY scene",
             )
             .map_err(|e| format!("准备查询失败: {}", e))?;
@@ -411,7 +411,8 @@ impl LlmProviderDb {
                     scene: scene_str.parse().unwrap_or_default(),
                     provider_id: row.get(2)?,
                     model_id: row.get(3)?,
-                    updated_at: row.get(4)?,
+                    thinking_mode: row.get(4)?,
+                    updated_at: row.get(5)?,
                 })
             })
             .map_err(|e| format!("查询场景配置失败: {}", e))?
@@ -427,18 +428,21 @@ impl LlmProviderDb {
         scene: Scene,
         provider_id: i64,
         model_id: &str,
+        thinking_mode: bool,
     ) -> Result<SceneConfig, String> {
         let scene_str = scene.to_string();
         let now = chrono::Local::now().to_rfc3339();
+        let thinking_mode_val = if thinking_mode { "1" } else { "0" };
 
         conn.execute(
-            "INSERT INTO llm_scene_configs (scene, provider_id, model_id, updated_at)
-             VALUES (?1, ?2, ?3, ?4)
+            "INSERT INTO llm_scene_configs (scene, provider_id, model_id, thinking_mode, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT(scene) DO UPDATE SET
                 provider_id = excluded.provider_id,
                 model_id = excluded.model_id,
+                thinking_mode = excluded.thinking_mode,
                 updated_at = excluded.updated_at",
-            [&scene_str, &provider_id.to_string(), model_id, &now],
+            [&scene_str, &provider_id.to_string(), model_id, thinking_mode_val, &now],
         )
         .map_err(|e| format!("设置场景模型失败: {}", e))?;
 
@@ -449,8 +453,19 @@ impl LlmProviderDb {
             scene,
             provider_id,
             model_id: model_id.to_string(),
+            thinking_mode,
             updated_at: now,
         })
+    }
+
+    pub fn get_scene_thinking_mode(&self, conn: &Connection, scene: Scene) -> Result<bool, String> {
+        let scene_str = scene.to_string();
+        let thinking_mode: bool = conn.query_row(
+            "SELECT thinking_mode FROM llm_scene_configs WHERE scene = ?1",
+            [&scene_str],
+            |row| row.get(0),
+        ).unwrap_or(false);
+        Ok(thinking_mode)
     }
 
     pub fn get_scene_model(&self, conn: &Connection, scene: Scene) -> Result<Option<(Provider, Model)>, String> {

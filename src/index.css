@@ -6,6 +6,73 @@
 @import '@uiw/react-md-editor/markdown-editor.css';
 @import '@uiw/react-markdown-preview/markdown.css';
 
+/* ============================================
+   Window Effect Fallback Styles
+   当 OS 级窗口效果（Mica/Acrylic/Blur）不可用时，
+   这些 CSS 样式提供视觉上的兜底方案
+   ============================================ */
+
+/* 兜底样式：纯 CSS 毛玻璃效果
+   适用于：所有 Windows 版本，当 OS 级效果失败时 */
+.css-glass-fallback {
+  background: rgba(24, 24, 27, 0.95) !important;
+  background: linear-gradient(
+    135deg,
+    rgba(39, 39, 42, 0.98) 0%,
+    rgba(24, 24, 27, 0.95) 100%
+  ) !important;
+}
+
+/* 主动画层 - 用于 OS 效果正常时 */
+.os-effect-active .glass-container {
+  background: transparent !important;
+}
+
+/* 兜底模式 - 用于 OS 效果失败时 */
+.css-fallback-active .glass-container {
+  background: rgba(24, 24, 27, 0.95) !important;
+  backdrop-filter: none !important;
+}
+
+/* Mica 效果专用样式 - Windows 11 */
+.mica-active {
+  --window-bg: transparent;
+  --panel-bg: rgba(255, 255, 255, 0.03);
+  --panel-border: rgba(255, 255, 255, 0.06);
+}
+
+/* Acrylic 效果专用样式 - Windows 10 */
+.acrylic-active {
+  --window-bg: transparent;
+  --panel-bg: rgba(39, 39, 42, 0.6);
+  --panel-border: rgba(255, 255, 255, 0.08);
+}
+
+/* Blur 效果专用样式 */
+.blur-active {
+  --window-bg: transparent;
+  --panel-bg: rgba(39, 39, 42, 0.7);
+  --panel-border: rgba(255, 255, 255, 0.05);
+}
+
+/* CSS 兜底专用样式 */
+.no-effect-active {
+  --window-bg: rgba(24, 24, 27, 0.95);
+  --panel-bg: rgba(39, 39, 42, 0.95);
+  --panel-border: rgba(82, 82, 91, 0.3);
+}
+
+/* 应用 CSS 变量 */
+.glass-panel-adaptive {
+  background: var(--panel-bg, rgba(39, 39, 42, 0.7));
+  border: 1px solid var(--panel-border, rgba(255, 255, 255, 0.05));
+  border-radius: 12px;
+}
+
+/* ============================================
+   End Window Effect Fallback Styles
+   ============================================ */
+
 /* Custom Zinc Theme Utilities */
 @layer utilities {
   /* Glass panel - used for search bar and cards */

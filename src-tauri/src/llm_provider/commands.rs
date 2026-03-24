@@ -184,7 +184,7 @@ pub async fn set_scene_model(
 ) -> Result<SceneConfig, String> {
     let conn = Connection::open(&db.0).map_err(|e| format!("打开数据库失败: {}", e))?;
     let db_ops = LlmProviderDb;
-    db_ops.set_scene_model(&conn, req.scene, req.provider_id, &req.model_id)
+    db_ops.set_scene_model(&conn, req.scene, req.provider_id, &req.model_id, req.thinking_mode)
 }
 
 #[tauri::command]

@@ -249,10 +249,17 @@ impl Database {
                 scene TEXT NOT NULL UNIQUE CHECK (scene IN ('chat', 'qa', 'translate')),
                 provider_id INTEGER REFERENCES llm_providers(id),
                 model_id TEXT,
+                thinking_mode BOOLEAN DEFAULT 0,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )",
             [],
         )?;
+
+        // Migration: add thinking_mode column if not exists (for existing tables)
+        let _ = self.conn.execute(
+            "ALTER TABLE llm_scene_configs ADD COLUMN thinking_mode BOOLEAN DEFAULT 0",
+            [],
+        );
 
         // Insert default scene configs if not exists (provider_id and model_id are NULL initially)
         let default_scenes = ["chat", "qa", "translate"];
