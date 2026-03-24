@@ -75,13 +75,6 @@
 
 /* Custom Zinc Theme Utilities */
 @layer utilities {
-  /* Glass panel - used for search bar and cards */
-  .glass-panel {
-    background: rgba(39, 39, 42, 0.7);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-  }
-
   /* Search bar shadow */
   .search-shadow {
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.05);

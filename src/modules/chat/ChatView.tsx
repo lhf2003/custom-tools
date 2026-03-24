@@ -397,7 +397,7 @@ export function ChatView() {
 
   return (
     <div
-      className="w-full h-full flex flex-col select-none bg-transparent"
+      className="w-full h-full flex flex-col select-none"
       data-tauri-drag-region
     >
       {/* ── Input area (single-row) ──────────────────────────────── */}

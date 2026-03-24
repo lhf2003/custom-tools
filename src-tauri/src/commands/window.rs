@@ -1,5 +1,24 @@
 use tauri::Manager;
 
+/// 获取当前窗口效果类型（供前端主动查询）
+#[tauri::command]
+pub fn get_window_effect() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        match crate::get_windows_version() {
+            Some((major, minor, build)) => {
+                let effect = crate::WindowEffect::from_windows_version(major, minor, build);
+                effect.name().to_string()
+            }
+            None => "Unknown".to_string(),
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        "Unknown".to_string()
+    }
+}
+
 /// Position window at top of screen with padding (centered horizontally)
 fn position_window_at_top(window: &tauri::WebviewWindow) -> Result<(), String> {
     // First center the window horizontally using built-in center

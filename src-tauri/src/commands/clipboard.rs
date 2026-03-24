@@ -188,7 +188,7 @@ pub fn copy_to_clipboard(
         .map_err(|e| e.to_string())?;
 
     // Signal the clipboard watcher to skip the next event (our own write)
-    suppress_flag.0.store(true, Ordering::Relaxed);
+    suppress_flag.suppress();
 
     match content_type.as_str() {
         "text" => {
@@ -210,17 +210,17 @@ pub fn copy_to_clipboard(
             {
                 log::warn!("Image clipboard copy not implemented for non-Windows platforms");
                 // Writing didn't happen, clear the flag
-                suppress_flag.0.store(false, Ordering::Relaxed);
+                suppress_flag.clear();
             }
         }
         "file" => {
             // TODO: Implement file list clipboard write
             log::info!("File list copy not yet implemented");
             // Writing didn't happen, clear the flag
-            suppress_flag.0.store(false, Ordering::Relaxed);
+            suppress_flag.clear();
         }
         _ => {
-            suppress_flag.0.store(false, Ordering::Relaxed);
+            suppress_flag.clear();
         }
     }
 

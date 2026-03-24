@@ -15,6 +15,18 @@ use crate::db::DatabaseState;
 /// Set to `true` before an internal clipboard write; the event processor clears it.
 pub struct ClipboardSuppressFlag(pub Arc<AtomicBool>);
 
+impl ClipboardSuppressFlag {
+    /// Store `true` to suppress the next clipboard event.
+    pub fn suppress(&self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+
+    /// Store `false` to clear suppression.
+    pub fn clear(&self) {
+        self.0.store(false, Ordering::Relaxed);
+    }
+}
+
 /// Clipboard content types
 #[derive(Debug, Clone)]
 pub enum ClipboardContent {

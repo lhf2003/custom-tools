@@ -249,12 +249,12 @@ function App() {
     loadSettings();
   }, [loadSettings]);
 
-  // 监听窗口效果变化事件
+  // 主动查询窗口效果状态（修复时序问题）
   useEffect(() => {
-    const setupEffectListener = async () => {
-      const unlisten = await listen<string>('window-effect-changed', (event) => {
-        const effect = event.payload;
-        console.log('Window effect changed:', effect);
+    const fetchWindowEffect = async () => {
+      try {
+        const effect = await invoke<string>('get_window_effect');
+        console.log('Window effect fetched:', effect);
         setWindowEffect(effect);
 
         // 根据效果类型决定是否使用 CSS 兜底
@@ -285,16 +285,14 @@ function App() {
             document.body.classList.add('no-effect-active');
             break;
         }
-      });
-
-      return unlisten;
+      } catch (e) {
+        console.error('Failed to fetch window effect:', e);
+        setUseCssFallback(true);
+        document.body.classList.add('no-effect-active');
+      }
     };
 
-    const unlistenPromise = setupEffectListener();
-
-    return () => {
-      unlistenPromise.then((fn) => fn()).catch(console.error);
-    };
+    fetchWindowEffect();
   }, []);
 
   // Check for unread changelogs on mount (after auto-update)
@@ -388,10 +386,16 @@ function App() {
   const isHome = activeView === 'launcher' || activeView === 'chat';
   const currentConfig = isHome ? null : viewConfigs[activeView as Exclude<ViewMode, 'launcher' | 'chat'>];
 
-  // 根据窗口效果状态决定背景色
+  // 根据窗口效果状态决定背景色 - 使用 CSS 毛玻璃效果
   const mainBackgroundStyle = useCssFallback
-    ? { backgroundColor: THEME.BG_PRIMARY }
-    : { backgroundColor: 'transparent' };
+    ? {
+        backgroundColor: THEME.BG_PRIMARY,
+        backdropFilter: 'blur(20px) saturate(180%)',
+        WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+      }
+    : {
+        backgroundColor: 'transparent',
+      };
 
   return (
     <div

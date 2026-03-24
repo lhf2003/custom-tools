@@ -1,5 +1,4 @@
 use tauri::Manager;
-use tauri::Emitter;
 use tauri_plugin_autostart::ManagerExt;
 use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
 use std::time::Duration;
@@ -261,22 +260,6 @@ pub fn run() {
                     }
                 }
 
-                // 如果所有 OS 级效果都失败，前端会使用 CSS 兜底样式
-                // 通知前端当前的效果状态
-                #[cfg(target_os = "windows")]
-                {
-                    let effect_name = match get_windows_version() {
-                        Some((major, _, build)) => {
-                            let effect = WindowEffect::from_windows_version(major, 0, build);
-                            effect.name().to_string()
-                        }
-                        None => "Unknown".to_string(),
-                    };
-
-                    // 发送事件到前端，让前端知道当前的窗口效果类型
-                    let _ = window.emit("window-effect-changed", effect_name);
-                }
-
                 // Apply rounded window corners at compositor level (Windows 11+)
                 // This clips the Acrylic background to match the visual rounded corners,
                 // preventing the gray rectangular fill in the four corners.
@@ -402,6 +385,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            // Window commands
+            commands::window::get_window_effect,
             commands::window::show_window,
             commands::window::hide_window,
             commands::window::toggle_window,
