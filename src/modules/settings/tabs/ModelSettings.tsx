@@ -309,7 +309,7 @@ export function ModelSettings() {
       const configsToLoad = Object.values(sceneConfigs).filter(
         (config): config is SceneConfig =>
           config !== null &&
-          config.provider_id &&
+          !!config.provider_id &&
           !models[config.provider_id] // Only load if not already loaded
       );
       for (const config of configsToLoad) {
