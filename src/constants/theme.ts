@@ -7,12 +7,12 @@
  * single source of truth and makes future theme changes straightforward.
  */
 export const THEME = {
-  /** Primary background used by every main view container - 使用半透明颜色支持毛玻璃效果 */
-  BG_PRIMARY: 'rgba(51, 51, 51, 0.75)',
-  /** Secondary background used by sidebars, cards, and modals - 半透明 */
-  BG_SECONDARY: 'rgba(42, 42, 42, 0.75)',
-  /** Tertiary background used by panels, category sidebars, and detail panes - 半透明 */
-  BG_TERTIARY: 'rgba(45, 45, 45, 0.75)',
+  /** Primary background used by every main view container */
+  BG_PRIMARY: '#333333',
+  /** Secondary background used by sidebars, cards, and modals */
+  BG_SECONDARY: '#2a2a2a',
+  /** Tertiary background used by panels, category sidebars, and detail panes */
+  BG_TERTIARY: '#2d2d2d',
   /** Default background for secondary/ghost action buttons */
   BTN_BG: '#3a3a3a',
   /** Hover background for secondary/ghost action buttons */

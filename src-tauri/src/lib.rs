@@ -234,30 +234,11 @@ pub fn run() {
                     log::warn!("Failed to set always_on_top: {}", e);
                 }
 
-                // Apply OS-level window effects with version detection and fallback
+                // Apply OS-level Acrylic blur effect (Windows 10 Fall Creators Update+)
+                // 不传颜色参数，由前端 CSS 完全控制背景色
                 #[cfg(target_os = "windows")]
-                {
-                    // 获取 Windows 版本
-                    let win_version = get_windows_version();
-                    let effect = match win_version {
-                        Some((major, minor, build)) => {
-                            log::info!(
-                                "Detected Windows version: {}.{}.{}",
-                                major, minor, build
-                            );
-                            WindowEffect::from_windows_version(major, minor, build)
-                        }
-                        None => {
-                            log::warn!("Failed to detect Windows version, using safe fallback");
-                            WindowEffect::Blur
-                        }
-                    };
-
-                    log::info!("Applying window effect: {}", effect.name());
-
-                    if let Err(e) = apply_window_effect(&window, effect) {
-                        log::warn!("Failed to apply any window effect: {}", e);
-                    }
+                if let Err(e) = window_vibrancy::apply_acrylic(&window, None) {
+                    log::warn!("Failed to apply acrylic vibrancy: {}", e);
                 }
 
                 // Apply rounded window corners at compositor level (Windows 11+)

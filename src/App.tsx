@@ -30,7 +30,6 @@ import { UpdateNotification } from '@/components/UpdateNotification';
 import { ChangelogDialog } from '@/components/ChangelogDialog';
 import type { VersionCheckResult } from '@/components/ChangelogDialog';
 import type { ViewMode, MenuItem } from '@/types';
-import { THEME } from '@/constants/theme';
 
 // Map backend module id to frontend ViewMode — static, no runtime dependencies
 const MODULE_VIEW_MAP: Record<string, ViewMode> = {
@@ -46,10 +45,6 @@ function App() {
   const { always_on_top, toggleAlwaysOnTop, loadSettings } = useSettingsStore();
   const [showChangelog, setShowChangelog] = useState(false);
   const [changelogData, setChangelogData] = useState<VersionCheckResult | null>(null);
-  // 窗口效果状态：Mica/Acrylic/Blur/None/Unknown
-  const [windowEffect, setWindowEffect] = useState<string>('Unknown');
-  // 是否使用 CSS 兜底
-  const [useCssFallback, setUseCssFallback] = useState(false);
 
   // Stable callback for toggle always on top
   const handleToggleAlwaysOnTop = useCallback(async () => {
@@ -249,52 +244,6 @@ function App() {
     loadSettings();
   }, [loadSettings]);
 
-  // 主动查询窗口效果状态（修复时序问题）
-  useEffect(() => {
-    const fetchWindowEffect = async () => {
-      try {
-        const effect = await invoke<string>('get_window_effect');
-        console.log('Window effect fetched:', effect);
-        setWindowEffect(effect);
-
-        // 根据效果类型决定是否使用 CSS 兜底
-        // None/Unknown 表示 OS 级效果未生效，需要 CSS 兜底
-        setUseCssFallback(effect === 'None' || effect === 'Unknown');
-
-        // 添加 CSS 类到 body，供全局样式使用
-        document.body.classList.remove(
-          'mica-active',
-          'acrylic-active',
-          'blur-active',
-          'no-effect-active'
-        );
-
-        switch (effect) {
-          case 'Mica':
-            document.body.classList.add('mica-active');
-            break;
-          case 'Acrylic':
-            document.body.classList.add('acrylic-active');
-            break;
-          case 'Blur':
-            document.body.classList.add('blur-active');
-            break;
-          case 'None':
-          case 'Unknown':
-          default:
-            document.body.classList.add('no-effect-active');
-            break;
-        }
-      } catch (e) {
-        console.error('Failed to fetch window effect:', e);
-        setUseCssFallback(true);
-        document.body.classList.add('no-effect-active');
-      }
-    };
-
-    fetchWindowEffect();
-  }, []);
-
   // Check for unread changelogs on mount (after auto-update)
   useEffect(() => {
     const checkChangelogs = async () => {
@@ -386,27 +335,14 @@ function App() {
   const isHome = activeView === 'launcher' || activeView === 'chat';
   const currentConfig = isHome ? null : viewConfigs[activeView as Exclude<ViewMode, 'launcher' | 'chat'>];
 
-  // 根据窗口效果状态决定背景色 - 使用 CSS 毛玻璃效果
-  const mainBackgroundStyle = useCssFallback
-    ? {
-        backgroundColor: THEME.BG_PRIMARY,
-        backdropFilter: 'blur(20px) saturate(180%)',
-        WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-      }
-    : {
-        backgroundColor: 'transparent',
-      };
-
   return (
     <div
-      className={`w-full h-full flex flex-col relative select-none selection:bg-blue-500/30 rounded-lg overflow-hidden ${
-        useCssFallback ? 'css-fallback-active' : 'os-effect-active'
-      }`}
+      className="w-full h-full flex flex-col relative select-none selection:bg-blue-500/30 rounded-lg overflow-hidden bg-transparent"
       data-tauri-drag-region
     >
       {isHome ? (
         // Launcher view - no navigation bar
-        <main className="flex-1 overflow-hidden" style={mainBackgroundStyle}>{renderView()}</main>
+        <main className="flex-1 overflow-hidden">{renderView()}</main>
       ) : (
         // Other views - with navigation bar
         <>
@@ -419,7 +355,7 @@ function App() {
               onBack={handleBack}
             />
           </div>
-          <main className="flex-1 overflow-hidden isolate" style={mainBackgroundStyle}>{renderView()}</main>
+          <main className="flex-1 overflow-hidden isolate">{renderView()}</main>
         </>
       )}
 
