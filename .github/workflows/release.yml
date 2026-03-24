@@ -43,10 +43,6 @@ jobs:
 
           Write-Host "Version updated successfully to $version"
 
-      # Tag message 约定格式（第一行为类型 feat/fix/refactor，后续 "- " 开头为条目）：
-      # feat
-      # - 新增功能描述
-      # - 另一项改动
       - name: Sync version and changelog to UI
         shell: pwsh
         run: |
@@ -54,20 +50,24 @@ jobs:
           $version = $tag -replace '^v', ''
           $today = Get-Date -Format 'yyyy-MM-dd'
 
-          # 读取 tag message，跳过空行
-          $msgLines = (git tag -l --format='%(contents)' $tag) -split "`n" |
-            ForEach-Object { $_.Trim() } |
-            Where-Object { $_ -ne '' }
+          # 读取完整 tag message（保留原始格式，只去掉签名部分）
+          $fullMsg = git tag -l --format='%(contents)' $tag
+          # 去掉可能的 GPG 签名部分
+          $fullMsg = $fullMsg -replace '(?s)\n-----BEGIN PGP SIGNATURE-----.*', ''
+          # 按行分割，过滤空行
+          $lines = $fullMsg -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
 
-          # 解析类型（第一行）和条目（- 开头）
+          # 提取类型（第一行如果是 feat/fix/refactor 等）
           $tagType = 'feat'
           $items = [System.Collections.Generic.List[string]]::new()
-          for ($i = 0; $i -lt $msgLines.Count; $i++) {
-            $line = $msgLines[$i]
-            if ($i -eq 0 -and $line -in @('feat', 'fix', 'refactor')) {
+
+          for ($i = 0; $i -lt $lines.Count; $i++) {
+            $line = $lines[$i]
+            if ($i -eq 0 -and $line -match '^(feat|fix|refactor|docs|chore|perf|test|ci|build)$') {
               $tagType = $line
-            } elseif ($line -match '^[-*]\s+(.+)') {
-              $items.Add($Matches[1])
+            } else {
+              # 其他所有非空行都作为 changelog 条目
+              $items.Add($line)
             }
           }
 
@@ -93,8 +93,13 @@ jobs:
         id: tag_message
         shell: pwsh
         run: |
+          # 直接获取完整 tag message，保留原始格式
           $msg = git tag -l --format='%(contents)' "${{ github.ref_name }}"
-          if (-not $msg) { $msg = "## 更新内容`n- 版本 ${{ github.ref_name }}" }
+          # 去掉可能的 GPG 签名部分
+          $msg = $msg -replace '(?s)\n-----BEGIN PGP SIGNATURE-----.*', ''
+          if (-not $msg.Trim()) {
+            $msg = "## 更新内容`n- 版本 ${{ github.ref_name }}"
+          }
           # GitHub Actions multiline output
           $delimiter = "EOF_$(Get-Random)"
           "body<<$delimiter" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
