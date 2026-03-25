@@ -338,7 +338,6 @@ function App() {
   return (
     <div
       className="w-full h-full flex flex-col relative select-none selection:bg-blue-500/30 rounded-lg overflow-hidden bg-transparent"
-      data-tauri-drag-region
     >
       {isHome ? (
         // Launcher view - no navigation bar
