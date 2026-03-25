@@ -24,7 +24,7 @@ export function TopNavigationBar({
           data-tauri-drag-region
       >
         {/* Left: Back button - no-drag 确保按钮可点击 */}
-        <div className="flex items-stretch self-stretch" style={{ appRegion: 'no-drag' }}>
+        <div className="flex items-stretch self-stretch" style={{ 'app-region': 'no-drag' } as React.CSSProperties}>
           <button
               onClick={onBack}
               className="flex items-center justify-center w-10 self-stretch text-zinc-300 hover:text-white hover:bg-zinc-700/50 transition-all duration-200 cursor-pointer"
@@ -43,7 +43,7 @@ export function TopNavigationBar({
         </div>
 
         {/* Right: Action menu - no-drag 确保菜单可点击 */}
-        <div className="flex items-center gap-1" style={{ appRegion: 'no-drag' }}>
+        <div className="flex items-center gap-1" style={{ 'app-region': 'no-drag' } as React.CSSProperties}>
           <ActionMenu items={menuItems} />
         </div>
       </header>
