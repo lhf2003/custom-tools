@@ -154,6 +154,23 @@
   box-sizing: border-box;
 }
 
+/* ============================================
+   Tauri Window Drag Region
+   使 data-tauri-drag-region 属性生效
+   ============================================ */
+*[data-tauri-drag-region] {
+  app-region: drag;
+}
+
+/* 确保拖拽区域内的交互元素可以正常工作 */
+*[data-tauri-drag-region] button,
+*[data-tauri-drag-region] input,
+*[data-tauri-drag-region] textarea,
+*[data-tauri-drag-region] select,
+*[data-tauri-drag-region] a {
+  app-region: no-drag;
+}
+
 html, body, #root {
   width: 100%;
   height: 100%;

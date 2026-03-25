@@ -21,9 +21,10 @@ export function TopNavigationBar({
   return (
       <header
           className="h-12 bg-zinc-800/50 border-b border-white/15 flex items-center pl-0 pr-4 shrink-0 relative select-none"
+          data-tauri-drag-region
       >
-        {/* Left: Back button */}
-        <div className="flex items-stretch relative z-10 self-stretch">
+        {/* Left: Back button - no-drag 确保按钮可点击 */}
+        <div className="flex items-stretch self-stretch" style={{ appRegion: 'no-drag' }}>
           <button
               onClick={onBack}
               className="flex items-center justify-center w-10 self-stretch text-zinc-300 hover:text-white hover:bg-zinc-700/50 transition-all duration-200 cursor-pointer"
@@ -33,20 +34,16 @@ export function TopNavigationBar({
           </button>
         </div>
 
-        {/* Center: Drag region - 使用 data-tauri-drag-region="true" 启用系统级拖拽 */}
-        <div
-            className="flex-1 h-full cursor-grab active:cursor-grabbing"
-            data-tauri-drag-region="true"
-        />
+        {/* Center: Flexible spacer for drag region */}
+        <div className="flex-1 h-full" />
 
         {/* Title: absolutely centered across entire header, non-interactive */}
-        {/* 由于它是绝对定位且 pointer-events-none，它不会阻挡下方的拖拽区域 */}
         <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
           <h1 className="text-sm font-semibold text-zinc-200">{title}</h1>
         </div>
 
-        {/* Right: Action menu */}
-        <div className="flex items-center gap-1 relative z-10">
+        {/* Right: Action menu - no-drag 确保菜单可点击 */}
+        <div className="flex items-center gap-1" style={{ appRegion: 'no-drag' }}>
           <ActionMenu items={menuItems} />
         </div>
       </header>
