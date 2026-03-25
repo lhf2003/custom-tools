@@ -3,6 +3,57 @@ use tauri_plugin_autostart::ManagerExt;
 use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
 use std::time::Duration;
 
+/// 获取当前鼠标位置（Windows API）
+#[cfg(target_os = "windows")]
+pub fn get_cursor_pos() -> Option<(i32, i32)> {
+    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+    use windows::Win32::Foundation::POINT;
+
+    unsafe {
+        let mut point = POINT { x: 0, y: 0 };
+        if GetCursorPos(&mut point).is_ok() {
+            Some((point.x, point.y))
+        } else {
+            None
+        }
+    }
+}
+
+/// 获取当前鼠标位置（非 Windows 平台返回 None）
+#[cfg(not(target_os = "windows"))]
+pub fn get_cursor_pos() -> Option<(i32, i32)> {
+    None
+}
+
+/// 根据鼠标位置找到对应的显示器
+#[cfg(target_os = "windows")]
+pub fn get_monitor_at_cursor(app_handle: &tauri::AppHandle) -> Option<tauri::Monitor> {
+    let cursor_pos = get_cursor_pos()?;
+    let monitors = app_handle.available_monitors().ok()?;
+
+    for monitor in monitors {
+        let pos = monitor.position();
+        let size = monitor.size();
+
+        // 检查鼠标是否在此显示器范围内
+        let in_x_range = cursor_pos.0 >= pos.x && cursor_pos.0 < pos.x + size.width as i32;
+        let in_y_range = cursor_pos.1 >= pos.y && cursor_pos.1 < pos.y + size.height as i32;
+
+        if in_x_range && in_y_range {
+            return Some(monitor);
+        }
+    }
+
+    // 如果没找到，返回主显示器
+    app_handle.primary_monitor().ok().flatten()
+}
+
+/// 非 Windows 平台：直接返回主显示器
+#[cfg(not(target_os = "windows"))]
+pub fn get_monitor_at_cursor(app_handle: &tauri::AppHandle) -> Option<tauri::Monitor> {
+    app_handle.primary_monitor().ok().flatten()
+}
+
 /// Windows 窗口效果类型
 #[cfg(target_os = "windows")]
 #[derive(Debug, Clone, Copy)]
@@ -583,7 +634,7 @@ pub(crate) fn toggle_main_window(app_handle: &tauri::AppHandle) {
             }
             Ok(false) => {
                 // Capture the previous focused window for auto-paste functionality
-                #[cfg(windows)]
+                #[cfg(target_os = "windows")]
                 capture_prev_window_hwnd(app_handle);
 
                 // Ignore blur events briefly to prevent immediate re-hide
@@ -591,19 +642,28 @@ pub(crate) fn toggle_main_window(app_handle: &tauri::AppHandle) {
                     focus_state.set_ignore_blur_for(Duration::from_millis(300));
                 }
 
-                // Position window at top of screen (centered horizontally)
+                // 智能检测：在鼠标所在的显示器显示窗口
                 const TOP_PADDING: i32 = 100;
-                let _ = window.center();
-                if let Ok(pos) = window.outer_position() {
-                    let monitor = window.current_monitor()
-                        .ok()
-                        .flatten()
-                        .or_else(|| window.primary_monitor().ok().flatten());
-                    if let Some(m) = monitor {
-                        let y = m.position().y + TOP_PADDING;
-                        let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: pos.x, y }));
-                    }
+                const WINDOW_WIDTH: i32 = 800;
+
+                // 获取鼠标所在的显示器
+                let target_monitor = get_monitor_at_cursor(app_handle);
+
+                if let Some(monitor) = target_monitor {
+                    let monitor_pos = monitor.position();
+                    let monitor_size = monitor.size();
+                    let scale_factor = monitor.scale_factor();
+
+                    // 修复：将逻辑像素宽度转换为物理像素
+                    let window_width_physical = (WINDOW_WIDTH as f64 * scale_factor) as i32;
+
+                    // 计算窗口居中位置（水平居中，顶部偏移）
+                    let x = monitor_pos.x + (monitor_size.width as i32 - window_width_physical) / 2;
+                    let y = monitor_pos.y + TOP_PADDING;
+
+                    let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
                 }
+
                 let _ = window.show();
                 let _ = window.set_focus();
             }

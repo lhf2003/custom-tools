@@ -19,33 +19,34 @@ pub fn get_window_effect() -> String {
     }
 }
 
-/// Position window at top of screen with padding (centered horizontally)
+/// Position window at top of screen with padding on the monitor with cursor
 fn position_window_at_top(window: &tauri::WebviewWindow) -> Result<(), String> {
-    // First center the window horizontally using built-in center
-    window.center().map_err(|e| e.to_string())?;
+    const TOP_PADDING: i32 = 100;
+    const WINDOW_WIDTH: i32 = 800;
 
-    // Get current position after centering
-    let current_pos = window.outer_position().map_err(|e| e.to_string())?;
+    // 获取鼠标所在的显示器
+    let app_handle = window.app_handle();
+    let target_monitor = crate::get_monitor_at_cursor(app_handle);
 
-    // Get the monitor to calculate top padding
-    let monitor = window
-        .current_monitor()
-        .map_err(|e| e.to_string())?
-        .or(window.primary_monitor().map_err(|e| e.to_string())?)
-        .ok_or("No monitor found")?;
+    if let Some(monitor) = target_monitor {
+        let monitor_pos = monitor.position();
+        let monitor_size = monitor.size();
+        let scale_factor = monitor.scale_factor();
 
-    const TOP_PADDING: i32 = 100; // Distance from top of screen
+        // 修复：将逻辑像素宽度转换为物理像素
+        let window_width_physical = (WINDOW_WIDTH as f64 * scale_factor) as i32;
 
-    // Calculate Y position (from top with padding)
-    let y = monitor.position().y + TOP_PADDING;
+        // 计算窗口居中位置（水平居中，顶部偏移）
+        let x = monitor_pos.x + (monitor_size.width as i32 - window_width_physical) / 2;
+        let y = monitor_pos.y + TOP_PADDING;
 
-    // Set position: keep centered X from center(), adjust Y to top
-    window
-        .set_position(tauri::Position::Physical(tauri::PhysicalPosition {
-            x: current_pos.x,
-            y,
-        }))
-        .map_err(|e| e.to_string())?;
+        window
+            .set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }))
+            .map_err(|e| e.to_string())?;
+    } else {
+        // 回退到默认居中
+        window.center().map_err(|e| e.to_string())?;
+    }
 
     Ok(())
 }
