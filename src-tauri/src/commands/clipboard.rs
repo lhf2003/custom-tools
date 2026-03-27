@@ -2,7 +2,6 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use tauri::{Manager, State};
 use sha2::{Digest, Sha256};
-use std::sync::atomic::Ordering;
 
 use crate::clipboard::ClipboardSuppressFlag;
 use crate::db::DatabaseState;
@@ -224,11 +223,52 @@ pub fn copy_to_clipboard(
         }
     }
 
-    // Update usage count and last used time
+    // Update usage count, last used time, AND created_at to move item to top
     let _ = conn.execute(
-        "UPDATE clipboard_history SET usage_count = COALESCE(usage_count, 0) + 1, last_used_at = CURRENT_TIMESTAMP WHERE id = ?1",
+        "UPDATE clipboard_history SET usage_count = COALESCE(usage_count, 0) + 1, last_used_at = CURRENT_TIMESTAMP, created_at = CURRENT_TIMESTAMP WHERE id = ?1",
         params![id],
     );
+
+    Ok(())
+}
+
+/// Copy partial text to clipboard and save as new history entry
+#[tauri::command]
+pub fn copy_text_to_clipboard(
+    db_state: State<DatabaseState>,
+    app_handle: tauri::AppHandle,
+    suppress_flag: State<ClipboardSuppressFlag>,
+    text: String,
+) -> Result<(), String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+
+    // Signal the clipboard watcher to skip the next event (our own write)
+    suppress_flag.suppress();
+
+    // Write text to clipboard
+    app_handle
+        .clipboard()
+        .write_text(text.clone())
+        .map_err(|e| e.to_string())?;
+
+    // Save the partial text as a new clipboard history entry
+    let conn = Connection::open(&db_state.0).map_err(|e| e.to_string())?;
+
+    // Calculate hash for reference (not for deduplication in partial copy)
+    let mut hasher = Sha256::new();
+    hasher.update(text.as_bytes());
+    let hash = format!("{:x}", hasher.finalize());
+
+    // Simple INSERT - partial copies always create new entries
+    conn.execute(
+        "INSERT INTO clipboard_history
+         (content, content_type, content_hash, source_app, is_favorite, usage_count, created_at)
+         VALUES (?1, 'text', ?2, 'PartialCopy', 0, 1, CURRENT_TIMESTAMP)",
+        params![text, hash],
+    ).map_err(|e| e.to_string())?;
+
+    log::info!("Partial text copied to clipboard ({} chars): {}", text.len(),
+        if text.len() > 50 { &text[..50] } else { &text });
 
     Ok(())
 }

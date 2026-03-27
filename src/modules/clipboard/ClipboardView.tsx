@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Search,
   Trash2,
@@ -166,10 +166,24 @@ export function ClipboardView() {
   const handleCopyToClipboard = async (id: number) => {
     try {
       await invoke('copy_to_clipboard', { id });
+      // 刷新列表以显示更新后的排序
+      fetchClipboardHistory();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.error('Failed to copy to clipboard:', err);
       setError(`复制失败: ${message}`);
+    }
+  };
+
+  const handleCopyPartialText = async (text: string) => {
+    try {
+      await invoke('copy_text_to_clipboard', { text });
+      // 刷新列表以显示更新后的排序（新条目会出现在顶部）
+      fetchClipboardHistory();
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('Failed to copy partial text:', err);
+      setError(`复制选中内容失败: ${message}`);
     }
   };
 
@@ -304,6 +318,7 @@ export function ClipboardView() {
                         onToggleFavorite={() => handleToggleFavorite(item.id)}
                         onDelete={() => handleDelete(item.id)}
                         onCopy={() => handleCopyToClipboard(item.id)}
+                        onCopyPartial={handleCopyPartialText}
                         onPreview={() => handlePreviewImage(item)}
                         onSelect={() => setSelectedId(item.id)}
                       />
@@ -357,6 +372,7 @@ interface ClipboardItemProps {
   onToggleFavorite: () => void;
   onDelete: () => void;
   onCopy: () => void;
+  onCopyPartial: (text: string) => void;
   onPreview: () => void;
   onSelect: () => void;
 }
@@ -419,12 +435,20 @@ function ClipboardItem({
   onToggleFavorite,
   onDelete,
   onCopy,
+  onCopyPartial,
   onPreview,
   onSelect,
 }: ClipboardItemProps) {
   const [clickTimer, setClickTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [thumbnail, setThumbnail] = useState<string | null>(null);
+  const [selectionToolbar, setSelectionToolbar] = useState<{ visible: boolean; x: number; y: number; text: string }>({
+    visible: false,
+    x: 0,
+    y: 0,
+    text: '',
+  });
+  const textRef = useRef<HTMLParagraphElement>(null);
 
   // Cleanup pending click timer on unmount to prevent memory leaks
   useEffect(() => {
@@ -434,6 +458,59 @@ function ClipboardItem({
       }
     };
   }, [clickTimer]);
+
+  // Handle text selection
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed || !textRef.current) {
+        setSelectionToolbar(prev => ({ ...prev, visible: false }));
+        return;
+      }
+
+      // Check if selection is within our text element
+      const range = selection.getRangeAt(0);
+      if (!textRef.current.contains(range.commonAncestorContainer)) {
+        setSelectionToolbar(prev => ({ ...prev, visible: false }));
+        return;
+      }
+
+      const selectedText = selection.toString().trim();
+      if (selectedText.length === 0) {
+        setSelectionToolbar(prev => ({ ...prev, visible: false }));
+        return;
+      }
+
+      // Calculate toolbar position
+      const rect = range.getBoundingClientRect();
+      const containerRect = textRef.current.getBoundingClientRect();
+
+      // Position above the selection, centered
+      const x = rect.left + rect.width / 2 - 40; // 40 is half of toolbar width (~80px)
+      const y = rect.top - 45; // 45px above the selection
+
+      setSelectionToolbar({
+        visible: true,
+        x: x - containerRect.left + textRef.current.offsetLeft,
+        y: y - containerRect.top + textRef.current.offsetTop,
+        text: selectedText,
+      });
+    };
+
+    document.addEventListener('selectionchange', handleSelectionChange);
+    return () => document.removeEventListener('selectionchange', handleSelectionChange);
+  }, []);
+
+  // Hide toolbar on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (textRef.current && !textRef.current.contains(e.target as Node)) {
+        setSelectionToolbar(prev => ({ ...prev, visible: false }));
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Load image thumbnail for image type or image files, with LRU cache
   useEffect(() => {
@@ -526,6 +603,13 @@ function ClipboardItem({
 
   // Handle click: single click for selection and preview/copy
   const handleClick = () => {
+    // Check if user has selected text - if so, don't trigger copy
+    const selection = window.getSelection();
+    if (selection && selection.toString().trim().length > 0) {
+      // User is selecting text, don't interfere
+      return;
+    }
+
     // Always select on click
     onSelect();
 
@@ -601,9 +685,46 @@ function ClipboardItem({
                 )}
               </div>
             ) : (
-              <p className={`text-zinc-200 text-sm break-all ${isExpanded ? '' : 'line-clamp-2'}`}>
-                {isExpanded ? item.content : truncateContent(item.content, MAX_PREVIEW_CHARS)}
-              </p>
+              <div className="relative">
+                <p
+                  ref={textRef}
+                  className={`text-zinc-200 text-sm break-all select-text ${isExpanded ? '' : 'line-clamp-2'}`}
+                  style={{ userSelect: 'text' }}
+                >
+                  {isExpanded ? item.content : truncateContent(item.content, MAX_PREVIEW_CHARS)}
+                </p>
+                {/* Selection Toolbar */}
+                {selectionToolbar.visible && (
+                  <div
+                    className="absolute z-20 flex items-center gap-1 px-2 py-1.5 bg-zinc-800 rounded-lg shadow-lg border border-zinc-600/50 animate-in fade-in zoom-in-95 duration-150"
+                    style={{
+                      left: `${Math.max(0, Math.min(selectionToolbar.x, 200))}px`,
+                      top: `${selectionToolbar.y}px`,
+                      transform: 'translateX(-50%)',
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    onMouseDown={(e) => {
+                      e.preventDefault(); // Prevent clearing text selection
+                      e.stopPropagation();
+                    }}
+                  >
+                    <span className="text-zinc-400 text-xs whitespace-nowrap mr-1">
+                      {selectionToolbar.text.length} 字符
+                    </span>
+                    <button
+                      onClick={() => {
+                        onCopyPartial(selectionToolbar.text);
+                        setSelectionToolbar(prev => ({ ...prev, visible: false }));
+                        window.getSelection()?.removeAllRanges();
+                      }}
+                      className="flex items-center gap-1 px-2 py-1 bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 text-xs rounded transition-colors cursor-pointer"
+                    >
+                      <Copy size={12} />
+                      复制选中
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
           </div>
 

@@ -429,6 +429,7 @@ pub fn run() {
             commands::clipboard::delete_clipboard_item,
             commands::clipboard::clear_clipboard_history,
             commands::clipboard::copy_to_clipboard,
+            commands::clipboard::copy_text_to_clipboard,
             commands::clipboard::paste_to_clipboard_item,
             commands::clipboard::get_clipboard_image_base64,
             commands::clipboard::handle_pasted_file,
