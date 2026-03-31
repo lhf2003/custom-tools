@@ -439,7 +439,6 @@ function ClipboardItem({
   onPreview,
   onSelect,
 }: ClipboardItemProps) {
-  const [clickTimer, setClickTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [thumbnail, setThumbnail] = useState<string | null>(null);
   const [selectionToolbar, setSelectionToolbar] = useState<{ visible: boolean; x: number; y: number; text: string }>({
@@ -449,15 +448,6 @@ function ClipboardItem({
     text: '',
   });
   const textRef = useRef<HTMLParagraphElement>(null);
-
-  // Cleanup pending click timer on unmount to prevent memory leaks
-  useEffect(() => {
-    return () => {
-      if (clickTimer !== null) {
-        clearTimeout(clickTimer);
-      }
-    };
-  }, [clickTimer]);
 
   // Handle text selection
   useEffect(() => {
@@ -601,42 +591,21 @@ function ClipboardItem({
   const isImage = item.content_type === 'image' ||
     (item.content_type === 'file' && isImageFile(item.content));
 
-  // Handle click: single click for selection and preview/copy
-  const handleClick = () => {
-    // Check if user has selected text - if so, don't trigger copy
+  // Handle click: only select the item
+  const handleClick = (e: React.MouseEvent) => {
+    // Check if user has selected text - if so, don't interfere
     const selection = window.getSelection();
     if (selection && selection.toString().trim().length > 0) {
       // User is selecting text, don't interfere
       return;
     }
 
-    // Always select on click
+    // Just select on click, don't copy
     onSelect();
-
-    if (clickTimer) {
-      clearTimeout(clickTimer);
-      setClickTimer(null);
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      if (isImage) {
-        onPreview();
-      } else {
-        onCopy();
-      }
-      setClickTimer(null);
-    }, 200);
-
-    setClickTimer(timer);
   };
 
   // Handle double click: copy to clipboard and auto-paste to previous window
   const handleDoubleClick = async () => {
-    if (clickTimer) {
-      clearTimeout(clickTimer);
-      setClickTimer(null);
-    }
     try {
       // Use paste_to_clipboard_item which handles:
       // 1. Copy to clipboard
