@@ -240,7 +240,7 @@ export function ClipboardView() {
   return (
     <div className="w-full h-full flex" style={{ backgroundColor: THEME.BG_PRIMARY }}>
       {/* Left Sidebar - Tabs */}
-      <aside className="w-16 border-r border-zinc-600/30 flex flex-col items-center py-4 gap-1">
+      <aside className="w-16 border-r border-app-border flex flex-col items-center py-4 gap-1">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           return (
@@ -249,8 +249,8 @@ export function ClipboardView() {
               onClick={() => setActiveTab(tab.id)}
               className={`w-12 h-12 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all duration-200 cursor-pointer ${
                 activeTab === tab.id
-                  ? 'bg-zinc-600/50 text-zinc-100'
-                  : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700/30'
+                  ? 'bg-app-bg-pressed/50 text-app-text-primary'
+                  : 'text-app-text-disabled hover:text-app-text-secondary hover:bg-app-bg-elevated/30'
               }`}
               title={tab.label}
             >
@@ -264,19 +264,19 @@ export function ClipboardView() {
       {/* Main Content */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header with Search */}
-        <div className="w-full flex items-center px-4 py-3 border-b border-zinc-700/50">
-          <Search className="w-5 h-5 text-zinc-400 mr-3 flex-shrink-0" />
+        <div className="w-full flex items-center px-4 py-3 border-b border-app-border-subtle">
+          <Search className="w-5 h-5 text-app-text-tertiary mr-3 flex-shrink-0" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="搜索剪贴板历史..."
-            className="flex-1 bg-transparent text-lg text-zinc-200 placeholder-zinc-500 outline-none"
+            className="flex-1 bg-transparent text-lg text-app-text-primary placeholder-app-text-placeholder outline-none"
           />
           {searchQuery && (
             <button
               onClick={() => setSearchQuery('')}
-              className="ml-3 w-8 h-8 rounded-lg hover:bg-white/10 flex items-center justify-center text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
+              className="ml-3 w-8 h-8 rounded-lg hover:bg-white/10 flex items-center justify-center text-app-text-tertiary hover:text-app-text-primary transition-colors cursor-pointer"
             >
               <X size={16} />
             </button>
@@ -286,16 +286,16 @@ export function ClipboardView() {
         {/* Clipboard List */}
         <div className="flex-1 overflow-y-auto px-4 pb-4 pt-2">
           {isLoading ? (
-            <div className="flex flex-col items-center justify-center h-full text-zinc-500">
+            <div className="flex flex-col items-center justify-center h-full text-app-text-disabled">
               <Loader2 size={32} className="animate-spin mb-3" />
               <span className="text-sm">加载中...</span>
             </div>
           ) : error ? (
-            <div className="flex flex-col items-center justify-center h-full text-zinc-500">
-              <p className="text-red-400 mb-2">{error}</p>
+            <div className="flex flex-col items-center justify-center h-full text-app-text-disabled">
+              <p className="text-app-status-error mb-2">{error}</p>
               <button
                 onClick={fetchClipboardHistory}
-                className="px-4 py-2 rounded-lg bg-zinc-700/50 hover:bg-zinc-600/50 text-sm text-zinc-200 transition-colors cursor-pointer"
+                className="px-4 py-2 rounded-lg bg-app-bg-pressed/50 hover:bg-app-bg-elevated/50 text-sm text-app-text-primary transition-colors cursor-pointer"
               >
                 重试
               </button>
@@ -306,7 +306,7 @@ export function ClipboardView() {
             <div className="space-y-4">
               {Object.entries(groupedItems).map(([date, dateItems]) => (
                 <div key={date}>
-                  <h3 className="text-zinc-500 text-[11px] font-medium mb-1.5 px-1 -mt-2 pt-2 pb-0.5 sticky -top-2 tracking-wide z-10" style={{ backgroundColor: THEME.BG_PRIMARY }}>
+                  <h3 className="text-app-text-disabled text-[11px] font-medium mb-1.5 px-1 -mt-2 pt-2 pb-0.5 sticky -top-2 tracking-wide z-10" style={{ backgroundColor: THEME.BG_PRIMARY }}>
                     {date}
                   </h3>
                   <div className="space-y-2">
@@ -355,12 +355,12 @@ function EmptyState({ activeTab }: { activeTab: TabType }) {
   const { icon: Icon, title, desc } = messages[activeTab];
 
   return (
-    <div className="flex flex-col items-center justify-center h-full text-zinc-500 py-20">
-      <div className="w-16 h-16 rounded-2xl bg-zinc-700/30 flex items-center justify-center mb-4">
+    <div className="flex flex-col items-center justify-center h-full text-app-text-disabled py-20">
+      <div className="w-16 h-16 rounded-2xl bg-app-bg-elevated/30 flex items-center justify-center mb-4">
         <Icon size={32} className="opacity-50" />
       </div>
-      <p className="text-zinc-300 font-medium">{title}</p>
-      <p className="text-sm mt-1 text-zinc-500">{desc}</p>
+      <p className="text-app-text-secondary font-medium">{title}</p>
+      <p className="text-sm mt-1 text-app-text-disabled">{desc}</p>
     </div>
   );
 }
@@ -625,8 +625,8 @@ function ClipboardItem({
     <div
       className={`rounded-lg p-3 transition-all duration-200 cursor-pointer group ${
         isSelected
-          ? 'bg-blue-500/20 hover:bg-blue-500/25'
-          : 'bg-zinc-700/30 hover:bg-zinc-700/50'
+          ? 'bg-app-brand-primary/20 hover:bg-app-brand-primary/25'
+          : 'bg-app-bg-elevated/30 hover:bg-app-bg-elevated/50'
       }`}
       onClick={handleClick}
       onDoubleClick={handleDoubleClick}
@@ -641,15 +641,15 @@ function ClipboardItem({
                   <img
                     src={thumbnail}
                     alt="剪贴板图片"
-                    className="h-16 w-auto max-w-[120px] rounded-md object-cover border border-zinc-600/50"
+                    className="h-16 w-auto max-w-[120px] rounded-md object-cover border border-app-border"
                     onClick={(e) => {
                       e.stopPropagation();
                       onPreview();
                     }}
                   />
                 ) : (
-                  <div className="h-16 w-20 rounded-md bg-zinc-700/50 flex items-center justify-center">
-                    <Loader2 size={16} className="animate-spin text-zinc-500" />
+                  <div className="h-16 w-20 rounded-md bg-app-bg-elevated/50 flex items-center justify-center">
+                    <Loader2 size={16} className="animate-spin text-app-text-disabled" />
                   </div>
                 )}
               </div>
@@ -657,7 +657,7 @@ function ClipboardItem({
               <div className="relative">
                 <p
                   ref={textRef}
-                  className={`text-zinc-200 text-sm break-all select-text ${isExpanded ? '' : 'line-clamp-2'}`}
+                  className={`text-app-text-primary text-sm break-all select-text ${isExpanded ? '' : 'line-clamp-2'}`}
                   style={{ userSelect: 'text' }}
                 >
                   {isExpanded ? item.content : truncateContent(item.content, MAX_PREVIEW_CHARS)}
@@ -665,7 +665,7 @@ function ClipboardItem({
                 {/* Selection Toolbar */}
                 {selectionToolbar.visible && (
                   <div
-                    className="absolute z-20 flex items-center gap-1 px-2 py-1.5 bg-zinc-800 rounded-lg shadow-lg border border-zinc-600/50 animate-in fade-in zoom-in-95 duration-150"
+                    className="absolute z-20 flex items-center gap-1 px-2 py-1.5 bg-app-bg-primary rounded-lg shadow-lg border border-app-border animate-in fade-in zoom-in-95 duration-150"
                     style={{
                       left: `${Math.max(0, Math.min(selectionToolbar.x, 200))}px`,
                       top: `${selectionToolbar.y}px`,
@@ -677,7 +677,7 @@ function ClipboardItem({
                       e.stopPropagation();
                     }}
                   >
-                    <span className="text-zinc-400 text-xs whitespace-nowrap mr-1">
+                    <span className="text-app-text-tertiary text-xs whitespace-nowrap mr-1">
                       {selectionToolbar.text.length} 字符
                     </span>
                     <button
@@ -686,7 +686,7 @@ function ClipboardItem({
                         setSelectionToolbar(prev => ({ ...prev, visible: false }));
                         window.getSelection()?.removeAllRanges();
                       }}
-                      className="flex items-center gap-1 px-2 py-1 bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 text-xs rounded transition-colors cursor-pointer"
+                      className="flex items-center gap-1 px-2 py-1 bg-app-brand-primary/20 hover:bg-app-brand-primary/30 text-app-brand-primary text-xs rounded transition-colors cursor-pointer"
                     >
                       <Copy size={12} />
                       复制选中
@@ -698,11 +698,11 @@ function ClipboardItem({
           </div>
 
           <div className="flex items-center gap-2 mt-1.5">
-            <span className={`text-[10px] px-1.5 py-0.5 rounded ${config.bgColor} text-zinc-400`}>
+            <span className={`text-[10px] px-1.5 py-0.5 rounded ${config.bgColor} text-app-text-tertiary`}>
               {config.label}
             </span>
-            <span className="text-zinc-600 text-xs">•</span>
-            <span className="text-zinc-500 text-xs">{formatTime(item.created_at)}</span>
+            <span className="text-app-bg-pressed text-xs">•</span>
+            <span className="text-app-text-disabled text-xs">{formatTime(item.created_at)}</span>
           </div>
         </div>
 
@@ -737,7 +737,7 @@ function ClipboardItem({
               title="删除"
             />
           </div>
-          <span className="text-zinc-500 text-xs">
+          <span className="text-app-text-disabled text-xs">
             {item.content_type === 'text' ? `${item.content.length} 字符` : ''}
           </span>
         </div>
@@ -751,7 +751,7 @@ function ClipboardItem({
               e.stopPropagation();
               setIsExpanded(!isExpanded);
             }}
-            className="p-1 rounded-md text-zinc-500 hover:text-zinc-300 hover:bg-zinc-600/50 transition-colors cursor-pointer"
+            className="p-1 rounded-md text-app-text-disabled hover:text-app-text-secondary hover:bg-app-bg-pressed/50 transition-colors cursor-pointer"
             title={isExpanded ? '收起' : '展开'}
           >
             {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
@@ -776,7 +776,7 @@ function ActionButton({
   icon: Icon,
   onClick,
   active,
-  activeColor = 'text-zinc-200',
+  activeColor = 'text-app-text-primary',
   fill,
   title,
 }: ActionButtonProps) {
@@ -787,7 +787,7 @@ function ActionButton({
       className={`p-1.5 rounded-md transition-all duration-200 cursor-pointer ${
         active
           ? activeColor
-          : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-600/50'
+          : 'text-app-text-disabled hover:text-app-text-secondary hover:bg-app-bg-pressed/50'
       }`}
     >
       <Icon size={15} fill={fill ? 'currentColor' : 'none'} />

@@ -20,14 +20,14 @@ export function TopNavigationBar({
                                  }: TopNavigationBarProps) {
   return (
       <header
-          className="h-12 bg-zinc-800/50 border-b border-white/15 flex items-center pl-0 pr-4 shrink-0 relative select-none"
+          className="h-12 bg-app-bg-primary/50 border-b border-app-border flex items-center pl-0 pr-4 shrink-0 relative select-none"
           data-tauri-drag-region
       >
         {/* Left: Back button - no-drag 确保按钮可点击 */}
         <div className="flex items-stretch self-stretch" style={{ 'app-region': 'no-drag' } as React.CSSProperties}>
           <button
               onClick={onBack}
-              className="flex items-center justify-center w-10 self-stretch text-zinc-300 hover:text-white hover:bg-zinc-700/50 transition-all duration-200 cursor-pointer"
+              className="flex items-center justify-center w-10 self-stretch text-app-text-secondary hover:text-app-text-primary hover:bg-app-bg-elevated/50 transition-all duration-200 cursor-pointer"
               title="返回主页 (Esc)"
           >
             <ArrowLeft size={16} />
@@ -39,7 +39,7 @@ export function TopNavigationBar({
 
         {/* Title: absolutely centered across entire header, non-interactive */}
         <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
-          <h1 className="text-sm font-semibold text-zinc-200">{title}</h1>
+          <h1 className="text-sm font-semibold text-app-text-primary">{title}</h1>
         </div>
 
         {/* Right: Action menu - no-drag 确保菜单可点击 */}

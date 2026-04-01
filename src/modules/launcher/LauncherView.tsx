@@ -302,23 +302,23 @@ export function LauncherView() {
     >
       {/* Search Bar */}
       <div className="w-full flex items-center px-4 py-3">
-        <Search className="w-5 h-5 text-zinc-400 mr-3 flex-shrink-0" />
+        <Search className="w-5 h-5 text-app-text-tertiary mr-3 flex-shrink-0" />
         <input
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           onPaste={handlePaste}
           placeholder="搜索应用和指令 / 粘贴文件或图片..."
-          className="flex-1 bg-transparent text-lg text-zinc-200 placeholder-zinc-500 outline-none"
+          className="flex-1 bg-transparent text-lg text-app-text-primary placeholder-app-text-placeholder outline-none"
           autoFocus
         />
 
         {/* Profile Button */}
         <button
           onClick={() => setActiveView('settings')}
-          className="ml-3 w-9 h-9 rounded-full bg-zinc-600 flex items-center justify-center overflow-hidden hover:bg-zinc-500 transition-all group flex-shrink-0"
+          className="ml-3 w-9 h-9 rounded-full bg-app-bg-elevated flex items-center justify-center overflow-hidden hover:bg-app-bg-pressed transition-all group flex-shrink-0"
         >
-          <User className="w-4 h-4 text-zinc-300 group-hover:text-white transition-colors" />
+          <User className="w-4 h-4 text-app-text-secondary group-hover:text-app-text-primary transition-colors" />
         </button>
       </div>
 
@@ -340,10 +340,10 @@ export function LauncherView() {
           <section className="h-full flex flex-col">
             {/* Section Header */}
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold text-zinc-400">最近使用</h2>
+              <h2 className="text-sm font-semibold text-app-text-tertiary">最近使用</h2>
               <button
                 onClick={() => setIsExpanded(!isExpanded)}
-                className="text-xs text-zinc-500 cursor-pointer hover:text-zinc-300 transition-colors"
+                className="text-xs text-app-text-disabled cursor-pointer hover:text-app-text-secondary transition-colors"
               >
                 {isExpanded ? '收缩' : `展开 (${recentItems.length})`}
               </button>
@@ -415,9 +415,9 @@ function ItemCard({
           className={`flex flex-col items-center group py-2 rounded-lg transition-all ${isSelected ? 'bg-white/10' : ''}`}
         >
           <div className={`w-8 h-8 rounded-lg ${tool.color} flex items-center justify-center mb-1.5 group-hover:scale-105 transition-transform ${selectedClass}`}>
-            <Icon className="w-4 h-4 text-white" />
+            <Icon className="w-4 h-4 text-app-text-primary" />
           </div>
-          <span className={`text-xs w-full text-center group-hover:text-white transition-colors leading-tight ${isSelected ? 'text-blue-400 font-medium' : 'text-zinc-300'}`}>
+          <span className={`text-xs w-full text-center group-hover:text-app-text-primary transition-colors leading-tight ${isSelected ? 'text-app-brand-primary font-medium' : 'text-app-text-secondary'}`}>
             {item.name}
           </span>
         </button>
@@ -440,7 +440,7 @@ function ItemCard({
             draggable={false}
           />
         </div>
-        <span className={`text-xs w-full text-center group-hover:text-zinc-200 transition-colors leading-tight ${isSelected ? 'text-white font-medium' : 'text-zinc-400'}`}>
+        <span className={`text-xs w-full text-center group-hover:text-app-text-primary transition-colors leading-tight ${isSelected ? 'text-app-text-primary font-medium' : 'text-app-text-tertiary'}`}>
           {item.name}
         </span>
       </button>
@@ -479,9 +479,9 @@ function ItemCard({
       className={`flex flex-col items-center group py-2 rounded-lg transition-all ${isSelected ? 'bg-white/10' : ''}`}
     >
       <div className={`w-8 h-8 rounded-lg ${color} flex items-center justify-center mb-1.5 group-hover:scale-105 transition-transform ${selectedClass}`}>
-        <span className="text-white text-xs font-bold">{initial}</span>
+        <span className="text-app-text-primary text-xs font-bold">{initial}</span>
       </div>
-      <span className={`text-xs w-full text-center group-hover:text-zinc-200 transition-colors leading-tight ${isSelected ? 'text-white font-medium' : 'text-zinc-400'}`}>
+      <span className={`text-xs w-full text-center group-hover:text-app-text-primary transition-colors leading-tight ${isSelected ? 'text-app-text-primary font-medium' : 'text-app-text-tertiary'}`}>
         {item.name}
       </span>
     </button>
@@ -528,7 +528,7 @@ function SearchResults({
 
   if (isLoading) {
     return (
-      <div className="flex flex-col items-center justify-center py-12 text-zinc-400">
+      <div className="flex flex-col items-center justify-center py-12 text-app-text-tertiary">
         <RefreshCw className="w-8 h-8 animate-spin mb-4" />
         <p>正在索引程序...</p>
       </div>
@@ -537,7 +537,7 @@ function SearchResults({
 
   if (allResults.length === 0) {
     return (
-      <div className="text-zinc-400 text-center py-12">
+      <div className="text-app-text-tertiary text-center py-12">
         <p>搜索 &quot;{query}&quot;</p>
         <p className="text-sm mt-2 opacity-60">未找到匹配的程序</p>
       </div>
@@ -550,13 +550,13 @@ function SearchResults({
   return (
     <section className="h-full flex flex-col">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-sm font-semibold text-zinc-400">
+        <h2 className="text-sm font-semibold text-app-text-tertiary">
           搜索结果 ({allResults.length})
         </h2>
         {showExpandButton && (
           <button
             onClick={onToggleExpand}
-            className="text-xs text-zinc-500 cursor-pointer hover:text-zinc-300 transition-colors"
+            className="text-xs text-app-text-disabled cursor-pointer hover:text-app-text-secondary transition-colors"
           >
             {isExpanded ? '收缩' : `展开 (${allResults.length})`}
           </button>

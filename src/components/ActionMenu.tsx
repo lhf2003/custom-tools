@@ -57,8 +57,8 @@ export function ActionMenu({ items }: ActionMenuProps) {
         onClick={() => setIsOpen(!isOpen)}
         className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-200 ${
           isOpen
-            ? 'bg-zinc-600 text-white'
-            : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50'
+            ? 'bg-app-bg-pressed text-app-text-primary'
+            : 'text-app-text-tertiary hover:text-app-text-primary hover:bg-app-bg-elevated/50'
         }`}
         title="更多操作"
       >
@@ -68,14 +68,14 @@ export function ActionMenu({ items }: ActionMenuProps) {
       {isOpen && (
         <div
           ref={menuRef}
-          className="absolute right-0 top-full mt-2 min-w-[200px] bg-zinc-800/80 border border-white/10 rounded-xl shadow-2xl z-10 py-1.5 animate-in fade-in slide-in-from-top-1 duration-150"
+          className="absolute right-0 top-full mt-2 min-w-[200px] bg-app-bg-primary/80 border border-app-border rounded-xl shadow-2xl z-10 py-1.5 animate-in fade-in slide-in-from-top-1 duration-150"
           style={{ WebkitBackdropFilter: 'blur(20px)', backdropFilter: 'blur(20px)' }}>
           {groupedItems.map((item, index) => {
             if (item === 'separator') {
               return (
                 <div
                   key={`sep-${index}`}
-                  className="my-1.5 border-t border-zinc-700/50"
+                  className="my-1.5 border-t border-app-border-subtle"
                 />
               );
             }
@@ -88,10 +88,10 @@ export function ActionMenu({ items }: ActionMenuProps) {
                 disabled={item.disabled}
                 className={`w-full px-3 py-2 flex items-center justify-between text-sm transition-colors ${
                   item.disabled
-                    ? 'text-zinc-600 cursor-not-allowed'
+                    ? 'text-app-text-disabled cursor-not-allowed'
                     : item.danger
-                    ? 'text-red-400 hover:bg-red-500/10'
-                    : 'text-zinc-300 hover:bg-zinc-700/50'
+                    ? 'text-app-status-error hover:bg-app-status-error/10'
+                    : 'text-app-text-secondary hover:bg-app-bg-elevated/50'
                 }`}
               >
                 <div className="flex items-center gap-2.5">
@@ -99,7 +99,7 @@ export function ActionMenu({ items }: ActionMenuProps) {
                   <span>{item.label}</span>
                 </div>
                 {item.shortcut && (
-                  <kbd className="text-xs text-zinc-500 font-mono">
+                  <kbd className="text-xs text-app-text-disabled font-mono">
                     {item.shortcut}
                   </kbd>
                 )}

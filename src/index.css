@@ -7,6 +7,66 @@
 @import '@uiw/react-markdown-preview/markdown.css';
 
 /* ============================================
+   CSS Custom Properties (Design Tokens)
+   与 tailwind.config.js 和 THEME 常量保持同步
+   ============================================ */
+:root {
+  /* 背景色 */
+  --app-bg-primary: #27272a;
+  --app-bg-secondary: #2a2a2a;
+  --app-bg-tertiary: #2d2d2d;
+  --app-bg-elevated: #3f3f46;
+  --app-bg-pressed: #52525b;
+  --app-bg-hover: rgba(82, 82, 91, 0.5);
+  --app-bg-active: rgba(82, 82, 91, 0.5);
+
+  /* 文字色 */
+  --app-text-primary: #f4f4f5;
+  --app-text-secondary: #d4d4d8;
+  --app-text-tertiary: #a1a1aa;
+  --app-text-disabled: #71717a;
+  --app-text-placeholder: #71717a;
+
+  /* 边框色 */
+  --app-border-default: rgba(82, 82, 91, 0.3);
+  --app-border-emphasis: rgba(82, 82, 91, 0.5);
+  --app-border-subtle: rgba(63, 63, 70, 0.5);
+
+  /* 品牌色 */
+  --app-brand-primary: #6366f1;
+  --app-brand-secondary: #a855f7;
+  --app-brand-selected: #3b82f6;
+
+  /* 状态色 */
+  --app-status-success: #22c55e;
+  --app-status-warning: #f59e0b;
+  --app-status-error: #ef4444;
+  --app-status-info: #3b82f6;
+
+  /* 透明度变体 */
+  --app-alpha-white-5: rgba(255, 255, 255, 0.05);
+  --app-alpha-white-10: rgba(255, 255, 255, 0.10);
+  --app-alpha-white-15: rgba(255, 255, 255, 0.15);
+  --app-alpha-white-25: rgba(255, 255, 255, 0.25);
+  --app-alpha-white-50: rgba(255, 255, 255, 0.50);
+
+  /* 阴影 */
+  --app-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.2);
+  --app-shadow-md: 0 4px 24px rgba(0, 0, 0, 0.2);
+  --app-shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.3);
+  --app-shadow-xl: 0 25px 60px rgba(0, 0, 0, 0.6);
+
+  /* Scrollbar */
+  --scrollbar-thumb: var(--app-bg-elevated);
+  --scrollbar-thumb-hover: var(--app-bg-pressed);
+
+  /* Window Effect Variables */
+  --window-bg: transparent;
+  --panel-bg: rgba(39, 39, 42, 0.7);
+  --panel-border: rgba(255, 255, 255, 0.05);
+}
+
+/* ============================================
    Window Effect Fallback Styles
    当 OS 级窗口效果（Mica/Acrylic/Blur）不可用时，
    这些 CSS 样式提供视觉上的兜底方案
@@ -37,7 +97,7 @@
 /* Mica 效果专用样式 - Windows 11 */
 .mica-active {
   --window-bg: transparent;
-  --panel-bg: rgba(255, 255, 255, 0.03);
+  --panel-bg: var(--app-alpha-white-5);
   --panel-border: rgba(255, 255, 255, 0.06);
 }
 
@@ -58,8 +118,8 @@
 /* CSS 兜底专用样式 */
 .no-effect-active {
   --window-bg: rgba(24, 24, 27, 0.95);
-  --panel-bg: rgba(39, 39, 42, 0.95);
-  --panel-border: rgba(82, 82, 91, 0.3);
+  --panel-bg: var(--app-bg-primary);
+  --panel-border: var(--app-border-default);
 }
 
 /* 应用 CSS 变量 */
@@ -77,23 +137,23 @@
 @layer utilities {
   /* Search bar shadow */
   .search-shadow {
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.05);
+    box-shadow: var(--app-shadow-lg), 0 0 0 1px var(--app-alpha-white-5);
   }
 
   /* Card shadow for elevated elements */
   .card-shadow {
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(255, 255, 255, 0.05);
+    box-shadow: var(--app-shadow-md), 0 0 0 1px var(--app-alpha-white-5);
   }
 
   /* Legacy glass utilities (keep for backward compatibility) */
   .glass {
     @apply bg-white/15 backdrop-blur-2xl border border-white/25 rounded-2xl;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    box-shadow: var(--app-shadow-lg);
   }
 
   .glass-dark {
     @apply bg-zinc-950/90 backdrop-blur-3xl border border-white/10 rounded-2xl;
-    box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    box-shadow: var(--app-shadow-xl), inset 0 1px 0 var(--app-alpha-white-5);
   }
 
   .glass-light {
@@ -185,7 +245,7 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background: transparent !important;
-  color: #f4f4f5;
+  color: var(--app-text-primary);
 }
 
 /* Scrollbar Styles - Zinc Theme */
@@ -199,12 +259,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #3f3f46;
+  background: var(--scrollbar-thumb);
   border-radius: 10px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #52525b;
+  background: var(--scrollbar-thumb-hover);
 }
 
 /* Selection Styles */
@@ -220,14 +280,14 @@ input:focus {
 
 /* MDEditor Dark Theme Override */
 [data-color-mode="dark"] .w-md-editor {
-  background-color: #2a2a2a !important;
-  color: #d4d4d8 !important;
+  background-color: var(--app-bg-secondary) !important;
+  color: var(--app-text-secondary) !important;
 }
 
 [data-color-mode="dark"] .w-md-editor-text-pre,
 [data-color-mode="dark"] .w-md-editor-text-input {
-  background-color: #2a2a2a !important;
-  color: #d4d4d8 !important;
+  background-color: var(--app-bg-secondary) !important;
+  color: var(--app-text-secondary) !important;
   font-size: 14px !important;
   line-height: 1.6 !important;
 }
@@ -239,16 +299,16 @@ input:focus {
 
 [data-color-mode="dark"] .w-md-editor-toolbar {
   background-color: #333333 !important;
-  border-bottom: 1px solid rgba(82, 82, 91, 0.3) !important;
+  border-bottom: 1px solid var(--app-border-default) !important;
 }
 
 [data-color-mode="dark"] .w-md-editor-toolbar button {
-  color: #a1a1aa !important;
+  color: var(--app-text-tertiary) !important;
 }
 
 [data-color-mode="dark"] .w-md-editor-toolbar button:hover {
-  color: #f4f4f5 !important;
-  background-color: rgba(82, 82, 91, 0.5) !important;
+  color: var(--app-text-primary) !important;
+  background-color: var(--app-bg-hover) !important;
 }
 
 [data-color-mode="dark"] .w-md-editor-toolbar button[data-active="true"] {
@@ -257,17 +317,17 @@ input:focus {
 }
 
 [data-color-mode="dark"] .w-md-editor-toolbar-divider {
-  background-color: rgba(82, 82, 91, 0.5) !important;
+  background-color: var(--app-border-emphasis) !important;
 }
 
 [data-color-mode="dark"] .w-md-editor-preview {
-  background-color: #2a2a2a !important;
-  border-left: 1px solid rgba(82, 82, 91, 0.3) !important;
+  background-color: var(--app-bg-secondary) !important;
+  border-left: 1px solid var(--app-border-default) !important;
 }
 
 [data-color-mode="dark"] .wmde-markdown {
-  background-color: #2a2a2a !important;
-  color: #d4d4d8 !important;
+  background-color: var(--app-bg-secondary) !important;
+  color: var(--app-text-secondary) !important;
 }
 
 [data-color-mode="dark"] .wmde-markdown h1,
@@ -276,13 +336,13 @@ input:focus {
 [data-color-mode="dark"] .wmde-markdown h4,
 [data-color-mode="dark"] .wmde-markdown h5,
 [data-color-mode="dark"] .wmde-markdown h6 {
-  color: #f4f4f5 !important;
-  border-bottom-color: rgba(82, 82, 91, 0.5) !important;
+  color: var(--app-text-primary) !important;
+  border-bottom-color: var(--app-border-emphasis) !important;
 }
 
 [data-color-mode="dark"] .wmde-markdown code {
-  background-color: rgba(82, 82, 91, 0.4) !important;
-  color: #f4f4f5 !important;
+  background-color: var(--app-bg-hover) !important;
+  color: var(--app-text-primary) !important;
 }
 
 [data-color-mode="dark"] .wmde-markdown pre {
@@ -290,8 +350,8 @@ input:focus {
 }
 
 [data-color-mode="dark"] .wmde-markdown blockquote {
-  border-left-color: #3b82f6 !important;
-  color: #a1a1aa !important;
+  border-left-color: var(--app-brand-selected) !important;
+  color: var(--app-text-tertiary) !important;
 }
 
 [data-color-mode="dark"] .wmde-markdown a {
@@ -299,12 +359,12 @@ input:focus {
 }
 
 [data-color-mode="dark"] .wmde-markdown hr {
-  background-color: rgba(82, 82, 91, 0.5) !important;
+  background-color: var(--app-border-emphasis) !important;
 }
 
 [data-color-mode="dark"] .wmde-markdown table th,
 [data-color-mode="dark"] .wmde-markdown table td {
-  border-color: rgba(82, 82, 91, 0.5) !important;
+  border-color: var(--app-border-emphasis) !important;
 }
 
 [data-color-mode="dark"] .wmde-markdown table tr:nth-child(2n) {
@@ -313,7 +373,7 @@ input:focus {
 
 [data-color-mode="dark"] .wmde-markdown ul > li::marker,
 [data-color-mode="dark"] .wmde-markdown ol > li::marker {
-  color: #a1a1aa !important;
+  color: var(--app-text-tertiary) !important;
 }
 
 /* MDEditor scrollbar */
@@ -330,17 +390,17 @@ input:focus {
 
 .w-md-editor-text-pre::-webkit-scrollbar-thumb,
 .w-md-editor-preview::-webkit-scrollbar-thumb {
-  background: #3f3f46 !important;
+  background: var(--scrollbar-thumb) !important;
   border-radius: 10px !important;
 }
 
 .w-md-editor-text-pre::-webkit-scrollbar-thumb:hover,
 .w-md-editor-preview::-webkit-scrollbar-thumb:hover {
-  background: #52525b !important;
+  background: var(--scrollbar-thumb-hover) !important;
 }
 
 /* Hide default scrollbars in editor container */
 .w-md-editor {
   scrollbar-width: thin;
-  scrollbar-color: #3f3f46 transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
