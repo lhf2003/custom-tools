@@ -464,8 +464,8 @@ impl SearchIndex {
                     let freq_bonus = usage_map
                         .get(app.path.as_str())
                         .map(|u| calculate_frequency_score(u, now))
-                        .unwrap_or(0.0) * 0.3;
-                    (base_score * 0.7 + freq_bonus, app.clone())
+                        .unwrap_or(0.0) * 0.5; // 50% frequency weight
+                    (base_score * 0.5 + freq_bonus, app.clone()) // 50% match weight
                 })
             })
             .collect();
