@@ -3,6 +3,46 @@ import { invoke } from '@tauri-apps/api/core';
 import type { NoteItemData, NoteContentData } from '../types';
 import { AUTO_SAVE_DELAY } from '../constants';
 
+const LS_SELECTED_NOTE = 'markdown:lastSelectedNote';
+const LS_EXPANDED_FOLDERS = 'markdown:lastExpandedFolders';
+
+function loadSelectedNote(): string | null {
+  try {
+    return localStorage.getItem(LS_SELECTED_NOTE);
+  } catch {
+    return null;
+  }
+}
+
+function saveSelectedNote(path: string | null) {
+  try {
+    if (path) {
+      localStorage.setItem(LS_SELECTED_NOTE, path);
+    } else {
+      localStorage.removeItem(LS_SELECTED_NOTE);
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function loadExpandedFolders(): Set<string> {
+  try {
+    const raw = localStorage.getItem(LS_EXPANDED_FOLDERS);
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveExpandedFolders(folders: Set<string>) {
+  try {
+    localStorage.setItem(LS_EXPANDED_FOLDERS, JSON.stringify(Array.from(folders)));
+  } catch {
+    // ignore
+  }
+}
+
 // Build a flattened path-to-items map for O(1) lookups
 function buildPathIndex(items: NoteItemData[]): Map<string, NoteItemData[]> {
   const index = new Map<string, NoteItemData[]>();
@@ -22,15 +62,28 @@ function buildPathIndex(items: NoteItemData[]): Map<string, NoteItemData[]> {
 
 export function useNotes() {
   const [notes, setNotes] = useState<NoteItemData[]>([]);
-  const [selectedNote, setSelectedNote] = useState<string | null>(null);
+  const [selectedNote, setSelectedNoteState] = useState<string | null>(loadSelectedNote);
   const [noteContent, setNoteContent] = useState<NoteContentData | null>(null);
   const [editorContent, setEditorContent] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const [expandedFolders, setExpandedFoldersState] = useState<Set<string>>(loadExpandedFolders);
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingSaveContent = useRef<string | null>(null);
+
+  const setSelectedNote = useCallback((path: string | null) => {
+    setSelectedNoteState(path);
+    saveSelectedNote(path);
+  }, []);
+
+  const setExpandedFolders = useCallback((updater: Set<string> | ((prev: Set<string>) => Set<string>)) => {
+    setExpandedFoldersState((prev) => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      saveExpandedFolders(next);
+      return next;
+    });
+  }, []);
 
   // Load note tree
   const loadNoteTree = useCallback(async () => {
