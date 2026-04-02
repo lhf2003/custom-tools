@@ -18,9 +18,11 @@
 export const WINDOW_SIZE = {
   LAUNCHER: {
     /** Height when the launcher grid is collapsed (default). */
-    collapsed: 200,
+    collapsed: 210,
     /** Height when the launcher grid is expanded to show all recent apps. */
-    expanded: 820,
+    expanded: 600,
+    /** Default width for the launcher view (matches resize_window backend default). */
+    width: 800,
   },
   /** Unified dimensions for all tool views - consistent visual experience */
   CLIPBOARD: {
@@ -51,6 +53,8 @@ export const WINDOW_SIZE = {
     /** Height when only the input box is visible. */
     collapsed: 62,
     /** Height when a response is displayed below the input. */
-    expanded: 820,
+    expanded: 600,
+    /** Default width for the chat view. */
+    width: 800,
   },
 } as const;

@@ -60,7 +60,7 @@ export function LauncherView() {
   // Set window height based on expanded state
   useEffect(() => {
     const height = isExpanded ? WINDOW_SIZE.LAUNCHER.expanded : WINDOW_SIZE.LAUNCHER.collapsed;
-    debouncedResize(height);
+    debouncedResize(height, WINDOW_SIZE.LAUNCHER.width);
   }, [isExpanded]);
 
   const loadRecentItems = useCallback(async () => {
@@ -350,7 +350,7 @@ export function LauncherView() {
             </div>
 
             {/* App Grid */}
-            <div className="grid grid-cols-9 gap-2 overflow-y-auto overflow-x-hidden">
+            <div className="grid grid-cols-9 gap-2 overflow-y-scroll overflow-x-hidden">
               {displayedItems.map((item, index) => (
                 <ItemCard
                   key={item.path}
@@ -562,7 +562,7 @@ function SearchResults({
           </button>
         )}
       </div>
-      <div className="grid grid-cols-9 gap-2 overflow-y-auto overflow-x-hidden">
+      <div className="grid grid-cols-9 gap-2 overflow-y-scroll overflow-x-hidden">
         {allResults.slice(0, displayCount).map((item, index) => (
           <ItemCard
             key={item.path}

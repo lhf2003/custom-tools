@@ -110,7 +110,7 @@ export function ChatView() {
 
   // ── Mount: resize window + focus + restore session ─────────────────
   useEffect(() => {
-    debouncedResize(WINDOW_SIZE.CHAT.collapsed);
+    debouncedResize(WINDOW_SIZE.CHAT.collapsed, WINDOW_SIZE.CHAT.width);
     textareaRef.current?.focus();
 
     const restoreSession = async () => {
@@ -145,7 +145,7 @@ export function ChatView() {
   // ── Expand window when first response arrives ─────────────────────
   useEffect(() => {
     if (hasResponse) {
-      debouncedResize(WINDOW_SIZE.CHAT.expanded);
+      debouncedResize(WINDOW_SIZE.CHAT.expanded, WINDOW_SIZE.CHAT.width);
     }
   }, [hasResponse]);
 
@@ -351,7 +351,7 @@ export function ChatView() {
     setHasResponse(false);
     setError(null);
     setIsLoading(false);
-    debouncedResize(WINDOW_SIZE.CHAT.collapsed);
+    debouncedResize(WINDOW_SIZE.CHAT.collapsed, WINDOW_SIZE.CHAT.width);
 
     try {
       const id = await invoke<number>('create_chat_session', { mode });
