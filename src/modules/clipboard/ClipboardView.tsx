@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, forwardRef } from 'react';
 import {
   Search,
   Trash2,
@@ -44,7 +44,7 @@ export function ClipboardView() {
   // Resize window when view mounts — use immediateResize to cancel any
   // pending debounce left by LauncherView and apply the correct size at once.
   useEffect(() => {
-    immediateResize(WINDOW_SIZE.CLIPBOARD.height);
+    immediateResize(WINDOW_SIZE.CLIPBOARD.height, WINDOW_SIZE.CLIPBOARD.width);
   }, []);
 
   const [activeTab, setActiveTab] = useState<TabType>('all');
@@ -54,6 +54,8 @@ export function ClipboardView() {
   const [error, setError] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const itemRefs = useRef<Map<number, HTMLDivElement>>(new Map());
 
   const tabs = useMemo(
     () => [
@@ -237,6 +239,41 @@ export function ClipboardView() {
     return groups;
   }, [items]);
 
+  // Keyboard navigation for clipboard list
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (items.length === 0) return;
+
+      // Get flat list of item IDs in display order
+      const flatIds = Object.values(groupedItems).flat().map(item => item.id);
+      if (flatIds.length === 0) return;
+
+      const currentIndex = selectedId ? flatIds.indexOf(selectedId) : -1;
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        const nextIndex = currentIndex < flatIds.length - 1 ? currentIndex + 1 : 0;
+        const nextId = flatIds[nextIndex];
+        setSelectedId(nextId);
+        // Scroll item into view
+        itemRefs.current.get(nextId)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        const prevIndex = currentIndex > 0 ? currentIndex - 1 : flatIds.length - 1;
+        const prevId = flatIds[prevIndex];
+        setSelectedId(prevId);
+        // Scroll item into view
+        itemRefs.current.get(prevId)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      } else if (e.key === 'Enter' && selectedId) {
+        e.preventDefault();
+        handleCopyToClipboard(selectedId);
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [items, groupedItems, selectedId, handleCopyToClipboard]);
+
   return (
     <div className="w-full h-full flex" style={{ backgroundColor: THEME.BG_PRIMARY }}>
       {/* Left Sidebar - Tabs */}
@@ -313,6 +350,13 @@ export function ClipboardView() {
                     {dateItems.map((item) => (
                       <ClipboardItem
                         key={item.id}
+                        ref={(el) => {
+                          if (el) {
+                            itemRefs.current.set(item.id, el);
+                          } else {
+                            itemRefs.current.delete(item.id);
+                          }
+                        }}
                         item={item}
                         isSelected={selectedId === item.id}
                         onToggleFavorite={() => handleToggleFavorite(item.id)}
@@ -429,16 +473,19 @@ function getTypeConfig(type: string, content?: string) {
 }
 
 // Clipboard Item Component
-function ClipboardItem({
-  item,
-  isSelected,
-  onToggleFavorite,
-  onDelete,
-  onCopy,
-  onCopyPartial,
-  onPreview,
-  onSelect,
-}: ClipboardItemProps) {
+const ClipboardItem = forwardRef<HTMLDivElement, ClipboardItemProps>(function ClipboardItem(
+  {
+    item,
+    isSelected,
+    onToggleFavorite,
+    onDelete,
+    onCopy,
+    onCopyPartial,
+    onPreview,
+    onSelect,
+  },
+  ref
+) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [thumbnail, setThumbnail] = useState<string | null>(null);
   const [selectionToolbar, setSelectionToolbar] = useState<{ visible: boolean; x: number; y: number; text: string }>({
@@ -623,6 +670,7 @@ function ClipboardItem({
   // List View
   return (
     <div
+      ref={ref}
       className={`rounded-lg p-3 transition-all duration-200 cursor-pointer group ${
         isSelected
           ? 'bg-app-brand-primary/20 hover:bg-app-brand-primary/25'
@@ -760,7 +808,7 @@ function ClipboardItem({
       )}
     </div>
   );
-}
+});
 
 // Action Button Component
 interface ActionButtonProps {

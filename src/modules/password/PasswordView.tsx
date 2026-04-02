@@ -3,7 +3,7 @@ import { Search, Plus, Copy, Eye, EyeOff, Lock, Trash2, X, Globe, Shield, Layout
 import { invoke } from '@tauri-apps/api/core';
 import { WINDOW_SIZE } from '../../constants/window';
 import { THEME } from '../../constants/theme';
-import { debouncedResize } from '../../utils/tauri';
+import { immediateResize } from '@/utils/tauri';
 
 interface PasswordCategory {
   id: number;
@@ -36,7 +36,7 @@ interface CreateEntryRequest {
 export function PasswordView() {
   // Resize window when view mounts
   useEffect(() => {
-    debouncedResize(WINDOW_SIZE.PASSWORD.height, WINDOW_SIZE.PASSWORD.width);
+    immediateResize(WINDOW_SIZE.PASSWORD.height, WINDOW_SIZE.PASSWORD.width);
   }, []);
 
   const [isUnlocked, setIsUnlocked] = useState(false);

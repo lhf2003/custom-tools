@@ -7,12 +7,12 @@ import { useNotes } from './hooks/useNotes';
 import { Modal, EmptyState, SortableNoteTree, ErrorBoundary } from './components';
 import { THEME } from '@/constants/theme';
 import { WINDOW_SIZE } from '@/constants/window';
-import { debouncedResize } from '@/utils/tauri';
+import { immediateResize } from '@/utils/tauri';
 
 export function MarkdownView() {
   // Resize window when view mounts
   useEffect(() => {
-    debouncedResize(WINDOW_SIZE.MARKDOWN.height);
+    immediateResize(WINDOW_SIZE.MARKDOWN.height, WINDOW_SIZE.MARKDOWN.width);
   }, []);
 
   const {

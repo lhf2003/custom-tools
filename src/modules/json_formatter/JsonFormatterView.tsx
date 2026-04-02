@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { WINDOW_SIZE } from '../../constants/window';
-import { debouncedResize } from '../../utils/tauri';
+import { immediateResize } from '../../utils/tauri';
 import { JsonTreeView } from './JsonTreeView';
 import { renderJsonToCanvas } from './jsonCanvas';
 import { JsonExportPreviewModal } from './JsonExportPreviewModal';
@@ -51,7 +51,7 @@ export function JsonFormatterView() {
 
   // Resize window to fit content
   useEffect(() => {
-    debouncedResize(WINDOW_SIZE.JSON_FORMATTER.height);
+    immediateResize(WINDOW_SIZE.JSON_FORMATTER.height, WINDOW_SIZE.JSON_FORMATTER.width);
   }, []);
 
   const formattedText = parsedJson !== null

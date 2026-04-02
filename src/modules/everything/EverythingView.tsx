@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Search, FileText, Folder, HardDrive, ExternalLink, ChevronDown, RefreshCw, Power } from 'lucide-react';
-import { safeInvoke, debouncedResize } from '../../utils/tauri';
+import { safeInvoke, immediateResize } from '@/utils/tauri';
 import { THEME } from '../../constants/theme';
 import { WINDOW_SIZE } from '../../constants/window';
 
@@ -189,7 +189,7 @@ export function EverythingView() {
 
   // Resize window when view mounts
   useEffect(() => {
-    debouncedResize(WINDOW_SIZE.EVERYTHING.height);
+    immediateResize(WINDOW_SIZE.EVERYTHING.height, WINDOW_SIZE.EVERYTHING.width);
   }, []);
 
   // Focus input on mount

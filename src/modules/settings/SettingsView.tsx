@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Command, Settings, Palette, Keyboard, Search, Bot, BookOpen, History, Info } from 'lucide-react';
-import { debouncedResize } from '@/utils/tauri';
+import { immediateResize } from '@/utils/tauri';
 import { THEME } from '@/constants/theme';
 import { WINDOW_SIZE } from '@/constants/window';
 import { GeneralSettings } from './tabs/GeneralSettings';
@@ -40,7 +40,7 @@ export function SettingsView() {
   const [activeTab, setActiveTab] = useState<TabId>('shortcuts');
 
   useEffect(() => {
-    debouncedResize(WINDOW_SIZE.SETTINGS.height);
+    immediateResize(WINDOW_SIZE.SETTINGS.height, WINDOW_SIZE.SETTINGS.width);
   }, []);
 
   return (
