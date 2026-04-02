@@ -53,7 +53,7 @@ export function ShortcutsSettings() {
           <p className="text-sm">加载中...</p>
         </div>
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-3">
           {shortcuts.map((shortcut) => (
             <ShortcutItem
               key={shortcut.id}
