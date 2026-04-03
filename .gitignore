@@ -22,3 +22,12 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Playwright MCP temporary files
+.playwright-mcp/
+
+# Debug screenshots
+markdown-*.png
+mdeditor-*.png
+*-debug.png
+*-check.png
