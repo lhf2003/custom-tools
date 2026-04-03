@@ -53,6 +53,7 @@
         "https://github.com/lhf2003/custom-tools/releases/latest/download/latest.json"
       ]
     },
-    "process": {}
+    "process": {},
+    "opener": {}
   }
 }

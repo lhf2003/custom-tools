@@ -21,8 +21,9 @@ import {
   arrayMove,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { GripVertical, ChevronRight, ChevronDown, Plus, Edit3, Trash2, Folder, FileText } from 'lucide-react';
+import { GripVertical, ChevronRight, ChevronDown, Folder, FileText } from 'lucide-react';
 import type { NoteItemData } from '../types';
+import { ContextMenu, MenuIcons, type MenuItem } from './ContextMenu';
 
 interface TreeItemProps {
   item: NoteItemData;
@@ -33,6 +34,7 @@ interface TreeItemProps {
   onCreate: (parent: string) => void;
   onRename: (item: NoteItemData) => void;
   onDelete: (item: NoteItemData) => void;
+  onRevealInExplorer: (item: NoteItemData) => void;
   level: number;
 }
 
@@ -45,8 +47,10 @@ function SortableTreeItem({
   onCreate,
   onRename,
   onDelete,
+  onRevealInExplorer,
   level,
-}: TreeItemProps) {
+  onContextMenu,
+}: TreeItemProps & { onContextMenu: (e: React.MouseEvent, item: NoteItemData) => void }) {
   const {
     attributes,
     listeners,
@@ -74,21 +78,41 @@ function SortableTreeItem({
   return (
     <div ref={setNodeRef} style={style}>
       <div
-        className={`group flex items-center gap-1 py-0.5 rounded text-sm transition-all duration-200 ${
-          isSelected
-            ? 'bg-zinc-600/50 text-zinc-100'
-            : 'text-zinc-400 hover:bg-zinc-700/30 hover:text-zinc-200'
-        }`}
-        style={{ paddingLeft: `${level * 12}px` }}
+        className="group flex items-center gap-1 py-0.5 rounded text-sm transition-all duration-200"
+        style={{
+          paddingLeft: `${level * 12}px`,
+          backgroundColor: isSelected ? 'rgba(82, 82, 91, 0.5)' : 'transparent',
+          color: isSelected ? '#f4f4f5' : '#a1a1aa',
+        }}
+        onContextMenu={(e) => onContextMenu(e, item)}
+        onMouseEnter={(e) => {
+          if (!isSelected) {
+            e.currentTarget.style.backgroundColor = 'rgba(63, 63, 70, 0.3)';
+            e.currentTarget.style.color = '#e4e4e7';
+          }
+        }}
+        onMouseLeave={(e) => {
+          if (!isSelected) {
+            e.currentTarget.style.backgroundColor = 'transparent';
+            e.currentTarget.style.color = '#a1a1aa';
+          }
+        }}
       >
         {/* Drag Handle */}
         <button
           {...attributes}
           {...listeners}
-          className="text-zinc-600 cursor-grab active:cursor-grabbing py-0.5 px-0.5 rounded hover:bg-zinc-600/30 inline-flex items-center touch-none"
+          className="cursor-grab active:cursor-grabbing py-0.5 px-0.5 rounded inline-flex items-center touch-none"
+          style={{ color: '#52525b' }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = 'rgba(82, 82, 91, 0.3)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = 'transparent';
+          }}
           title="拖拽移动"
         >
-          <GripVertical size={12} />
+          <GripVertical size={14} />
         </button>
 
         {/* Content Area */}
@@ -97,49 +121,13 @@ function SortableTreeItem({
           className="flex items-center gap-0.5 flex-1 min-w-0 cursor-pointer"
         >
           {item.is_folder ? (
-            <span className="text-zinc-500 w-4 shrink-0">
-              {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            <span className="w-4 shrink-0" style={{ color: '#71717a' }}>
+              {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
             </span>
           ) : (
             <span className="w-4 shrink-0" />
           )}
           <span className="truncate">{item.is_folder ? item.name : item.name.replace(/\.md$/, '')}</span>
-        </div>
-
-        {/* Actions */}
-        <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0 transition-opacity duration-200">
-          {item.is_folder && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onCreate(item.path);
-              }}
-              className="p-0.5 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-600/50 transition-colors cursor-pointer"
-              title="新建笔记"
-            >
-              <Plus size={12} />
-            </button>
-          )}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onRename(item);
-            }}
-            className="p-0.5 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-600/50 transition-colors cursor-pointer"
-            title="重命名"
-          >
-            <Edit3 size={12} />
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete(item);
-            }}
-            className="p-0.5 rounded text-zinc-500 hover:text-red-400 hover:bg-zinc-600/50 transition-colors cursor-pointer"
-            title="删除"
-          >
-            <Trash2 size={12} />
-          </button>
         </div>
       </div>
 
@@ -165,6 +153,7 @@ interface SortableNoteTreeProps {
   onDelete: (item: NoteItemData) => void;
   onMove: (sourcePath: string, targetFolder: string) => Promise<void>;
   onReorder: (parentPath: string, itemNames: string[]) => Promise<void>;
+  onRevealInExplorer?: (item: NoteItemData) => void;
 }
 
 export function SortableNoteTree({
@@ -178,8 +167,94 @@ export function SortableNoteTree({
   onDelete,
   onMove,
   onReorder,
+  onRevealInExplorer,
 }: SortableNoteTreeProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<{
+    visible: boolean;
+    position: { x: number; y: number };
+    targetItem: NoteItemData | null;
+  }>({
+    visible: false,
+    position: { x: 0, y: 0 },
+    targetItem: null,
+  });
+
+  // Handle item right-click
+  const handleItemContextMenu = useCallback(
+    (e: React.MouseEvent, item: NoteItemData) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setContextMenu({
+        visible: true,
+        position: { x: e.clientX, y: e.clientY },
+        targetItem: item,
+      });
+    },
+    []
+  );
+
+  // Close context menu
+  const closeContextMenu = useCallback(() => {
+    setContextMenu((prev) => ({ ...prev, visible: false }));
+  }, []);
+
+  // Build context menu items for a tree item
+  const getItemContextMenuItems = useCallback(
+    (item: NoteItemData): MenuItem[] => {
+      const items: MenuItem[] = [];
+
+      // Add "New Note" for folders
+      if (item.is_folder) {
+        items.push({
+          id: 'new-note',
+          label: '新建笔记',
+          icon: MenuIcons.newNote,
+          onClick: () => onCreate(item.path),
+        });
+        items.push({
+          id: 'new-folder',
+          label: '新建文件夹',
+          icon: MenuIcons.newFolder,
+          onClick: () => onCreate(item.path),
+        });
+        items.push({
+          id: 'separator-1',
+          label: '',
+          separator: true,
+          onClick: () => {},
+        });
+      }
+
+      items.push({
+        id: 'rename',
+        label: '重命名',
+        icon: MenuIcons.rename,
+        onClick: () => onRename(item),
+      });
+
+      items.push({
+        id: 'delete',
+        label: '删除',
+        icon: MenuIcons.delete,
+        danger: true,
+        onClick: () => onDelete(item),
+      });
+
+      if (onRevealInExplorer) {
+        items.push({
+          id: 'reveal',
+          label: '打开文件所在位置',
+          icon: MenuIcons.openLocation,
+          onClick: () => onRevealInExplorer(item),
+        });
+      }
+
+      return items;
+    },
+    [onCreate, onRename, onDelete, onRevealInExplorer]
+  );
 
   // Flatten tree for sortable context
   const flattenTree = useCallback((
@@ -379,7 +454,9 @@ export function SortableNoteTree({
               onCreate={onCreate}
               onRename={onRename}
               onDelete={onDelete}
+              onRevealInExplorer={onRevealInExplorer || (() => {})}
               level={level}
+              onContextMenu={handleItemContextMenu}
             />
           ))}
         </div>
@@ -387,17 +464,29 @@ export function SortableNoteTree({
 
       <DragOverlay dropAnimation={dropAnimation}>
         {activeItem ? (
-          <div className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-sm bg-zinc-600/80 text-zinc-100 shadow-lg">
-            <span className="text-zinc-400">
-              <GripVertical size={12} />
+          <div
+            className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-sm shadow-lg"
+            style={{ backgroundColor: 'rgba(82, 82, 91, 0.8)', color: '#f4f4f5' }}
+          >
+            <span style={{ color: '#a1a1aa' }}>
+              <GripVertical size={14} />
             </span>
-            <span className="text-zinc-400">
-              {activeItem.is_folder ? <Folder size={14} /> : <FileText size={14} />}
+            <span style={{ color: '#a1a1aa' }}>
+              {activeItem.is_folder ? <Folder size={16} /> : <FileText size={16} />}
             </span>
             <span>{activeItem.name}</span>
           </div>
         ) : null}
       </DragOverlay>
+
+      {/* Item Context Menu */}
+      {contextMenu.visible && contextMenu.targetItem && (
+        <ContextMenu
+          items={getItemContextMenuItems(contextMenu.targetItem)}
+          position={contextMenu.position}
+          onClose={closeContextMenu}
+        />
+      )}
     </DndContext>
   );
 }

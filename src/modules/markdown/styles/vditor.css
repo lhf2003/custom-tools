@@ -1,0 +1,154 @@
+/* Vditor Dark Theme Customization */
+
+.vditor-container {
+  --vditor-toolbar-height: 40px;
+}
+
+.vditor-container .vditor {
+  height: 100%;
+  border: none;
+  background: transparent;
+}
+
+.vditor-container .vditor-toolbar {
+  background: rgba(63, 63, 70, 0.4);
+  border-bottom: 1px solid rgba(82, 82, 91, 0.3);
+  padding: 4px 8px;
+}
+
+.vditor-container .vditor-toolbar__item {
+  color: rgb(161, 161, 170);
+  border-radius: 6px;
+  margin: 0 2px;
+}
+
+.vditor-container .vditor-toolbar__item:hover {
+  background: rgba(82, 82, 91, 0.5);
+  color: rgb(228, 228, 231);
+}
+
+.vditor-container .vditor-toolbar__item--active {
+  background: rgba(59, 130, 246, 0.2);
+  color: rgb(147, 197, 253);
+}
+
+.vditor-container .vditor-content {
+  background: transparent;
+}
+
+.vditor-container .vditor-ir {
+  background: transparent;
+  color: rgb(228, 228, 231);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.vditor-container .vditor-ir__node--expand {
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.vditor-container .vditor-ir__node[data-type="code-block"] {
+  background: rgba(39, 39, 42, 0.8);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.vditor-container .vditor-ir__preview {
+  color: rgb(161, 161, 170);
+}
+
+.vditor-container .vditor-reset {
+  color: rgb(228, 228, 231);
+}
+
+.vditor-container .vditor-reset h1,
+.vditor-container .vditor-reset h2,
+.vditor-container .vditor-reset h3,
+.vditor-container .vditor-reset h4,
+.vditor-container .vditor-reset h5,
+.vditor-container .vditor-reset h6 {
+  color: rgb(244, 244, 245);
+  border-bottom-color: rgba(82, 82, 91, 0.5);
+}
+
+.vditor-container .vditor-reset blockquote {
+  border-left-color: rgb(59, 130, 246);
+  background: rgba(59, 130, 246, 0.1);
+  color: rgb(161, 161, 170);
+}
+
+.vditor-container .vditor-reset code {
+  background: rgba(39, 39, 42, 0.8);
+  color: rgb(251, 113, 133);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.vditor-container .vditor-reset pre {
+  background: rgba(39, 39, 42, 0.8);
+  border-radius: 8px;
+}
+
+.vditor-container .vditor-reset pre code {
+  background: transparent;
+  color: rgb(228, 228, 231);
+}
+
+.vditor-container .vditor-reset table {
+  border-color: rgba(82, 82, 91, 0.5);
+}
+
+.vditor-container .vditor-reset table th,
+.vditor-container .vditor-reset table td {
+  border-color: rgba(82, 82, 91, 0.5);
+}
+
+.vditor-container .vditor-reset table thead {
+  background: rgba(63, 63, 70, 0.5);
+}
+
+.vditor-container .vditor-reset table tr:nth-child(2n) {
+  background: rgba(63, 63, 70, 0.3);
+}
+
+.vditor-container .vditor-reset hr {
+  border-color: rgba(82, 82, 91, 0.5);
+}
+
+.vditor-container .vditor-reset a {
+  color: rgb(147, 197, 253);
+}
+
+.vditor-container .vditor-reset ul,
+.vditor-container .vditor-reset ol {
+  padding-left: 1.5em;
+}
+
+/* Placeholder */
+.vditor-container .vditor-ir__placeholder {
+  color: rgb(113, 113, 122);
+}
+
+/* Hide scrollbar for cleaner look */
+.vditor-container .vditor-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.vditor-container .vditor-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.vditor-container .vditor-content::-webkit-scrollbar-thumb {
+  background: rgba(82, 82, 91, 0.5);
+  border-radius: 4px;
+}
+
+.vditor-container .vditor-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(82, 82, 91, 0.7);
+}
+
+/* Toolbar divider */
+.vditor-container .vditor-toolbar__divider {
+  background-color: rgba(82, 82, 91, 0.5);
+  margin: 0 8px;
+}

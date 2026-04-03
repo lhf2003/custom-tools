@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { FileText, Plus, Folder, Loader2, Search } from 'lucide-react';
+import { FileText, Plus, Folder, Loader2, Search, PanelLeft } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
-import MDEditor from '@uiw/react-md-editor';
+import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import type { NoteItemData, NoteContentData, CreateNoteRequest } from './types';
 import { useNotes } from './hooks/useNotes';
-import { Modal, EmptyState, SortableNoteTree, ErrorBoundary } from './components';
+import { Modal, EmptyState, SortableNoteTree, ErrorBoundary, VditorEditor, ContextMenu, MenuIcons } from './components';
+import type { MenuItem } from './components/ContextMenu';
 import { THEME } from '@/constants/theme';
 import { WINDOW_SIZE } from '@/constants/window';
 import { immediateResize } from '@/utils/tauri';
@@ -163,6 +164,20 @@ export function MarkdownView() {
     };
   }, [openCreateModal]);
 
+  // Sidebar collapse state
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+
+  // Empty area context menu state
+  const [emptyAreaMenu, setEmptyAreaMenu] = useState<{
+    visible: boolean;
+    position: { x: number; y: number };
+    parentPath: string;
+  }>({
+    visible: false,
+    position: { x: 0, y: 0 },
+    parentPath: '',
+  });
+
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -218,49 +233,165 @@ export function MarkdownView() {
     setShowRenameModal(true);
   };
 
+  // Handle reveal item in explorer
+  const handleRevealInExplorer = useCallback(async (item: NoteItemData) => {
+    try {
+      // Get notes directory and construct absolute path
+      const notesDir = await invoke<string>('get_notes_directory');
+      // Convert forward slashes to backslashes for Windows and join paths
+      const relativePath = item.path.replace(/\//g, '\\');
+      const fullPath = `${notesDir}\\${relativePath}`;
+      await revealItemInDir(fullPath);
+    } catch (err) {
+      console.error('Failed to reveal item:', err);
+      setError(err instanceof Error ? err.message : '打开文件位置失败');
+    }
+  }, [setError]);
+
+  // Handle empty area context menu
+  const handleEmptyAreaContextMenu = useCallback(
+    (e: React.MouseEvent, parentPath: string = '') => {
+      e.preventDefault();
+      e.stopPropagation();
+      setEmptyAreaMenu({
+        visible: true,
+        position: { x: e.clientX, y: e.clientY },
+        parentPath,
+      });
+    },
+    []
+  );
+
+  // Close empty area context menu
+  const closeEmptyAreaMenu = useCallback(() => {
+    setEmptyAreaMenu((prev) => ({ ...prev, visible: false }));
+  }, []);
+
+  // Get empty area context menu items
+  const getEmptyAreaMenuItems = useCallback(
+    (parentPath: string): MenuItem[] => [
+      {
+        id: 'new-note',
+        label: '新建笔记',
+        icon: MenuIcons.newNote,
+        onClick: () => openCreateModal('file', parentPath),
+      },
+      {
+        id: 'new-folder',
+        label: '新建文件夹',
+        icon: MenuIcons.newFolder,
+        onClick: () => openCreateModal('folder', parentPath),
+      },
+    ],
+    [openCreateModal]
+  );
+
   return (
     <div className="w-full h-full flex" style={{ backgroundColor: THEME.BG_PRIMARY }}>
       {/* File Tree Sidebar */}
-      <aside className="w-48 border-r border-zinc-600/30 flex flex-col">
-        <div className="flex items-center gap-1 px-2 py-2 border-b border-zinc-600/30">
-          <div className="flex-1 flex items-center gap-1.5 bg-zinc-700/40 rounded-lg px-2 py-1.5 min-w-0">
-            <Search size={12} className="text-zinc-500 shrink-0" />
+      <aside
+        className="flex flex-col transition-all duration-300"
+        style={{
+          width: isSidebarCollapsed ? '40px' : '192px',
+          borderRight: `1px solid ${THEME.BORDER_DEFAULT}`,
+        }}
+      >
+        {/* Collapse Toggle Button */}
+        <div
+          className="flex items-center justify-between px-2 py-2"
+          style={{ borderBottom: `1px solid ${THEME.BORDER_DEFAULT}` }}
+        >
+          {!isSidebarCollapsed && <span className="text-[10px] font-medium" style={{ color: THEME.TEXT_TERTIARY }}>笔记</span>}
+          <button
+            onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+            className="p-1 rounded transition-all duration-200 cursor-pointer"
+            style={{ color: THEME.TEXT_DISABLED }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = THEME.TEXT_PRIMARY;
+              e.currentTarget.style.backgroundColor = 'rgba(63, 63, 70, 0.5)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = THEME.TEXT_DISABLED;
+              e.currentTarget.style.backgroundColor = 'transparent';
+            }}
+            title={isSidebarCollapsed ? '展开边栏' : '折叠边栏'}
+          >
+            <PanelLeft size={14} className={isSidebarCollapsed ? 'rotate-180' : ''} />
+          </button>
+        </div>
+
+        {/* Sidebar Content - Hidden when collapsed */}
+        {!isSidebarCollapsed && (
+          <>
+            {/* Search and toolbar */}
+            <div
+              className="flex items-center gap-1 px-2 py-2"
+              style={{ borderBottom: `1px solid ${THEME.BORDER_DEFAULT}` }}
+            >
+          <div
+            className="flex-1 flex items-center gap-1.5 rounded-lg px-2 py-1.5 min-w-0"
+            style={{ backgroundColor: 'rgba(63, 63, 70, 0.4)' }}
+          >
+            <Search size={12} className="shrink-0" style={{ color: THEME.TEXT_DISABLED }} />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="搜索笔记..."
-              className="bg-transparent text-xs text-zinc-300 placeholder:text-zinc-500 outline-none flex-1 min-w-0"
+              className="bg-transparent text-[12px] outline-none flex-1 min-w-0"
+              style={{ color: THEME.TEXT_SECONDARY }}
             />
           </div>
           <button
             onClick={() => openCreateModal('file')}
-            className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700/50 transition-all duration-200 cursor-pointer shrink-0"
+            className="p-1.5 rounded-lg transition-all duration-200 cursor-pointer shrink-0"
+            style={{ color: THEME.TEXT_DISABLED }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = THEME.TEXT_PRIMARY;
+              e.currentTarget.style.backgroundColor = 'rgba(63, 63, 70, 0.5)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = THEME.TEXT_DISABLED;
+              e.currentTarget.style.backgroundColor = 'transparent';
+            }}
             title="新建笔记"
           >
             <Plus size={14} />
           </button>
           <button
             onClick={() => openCreateModal('folder')}
-            className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700/50 transition-all duration-200 cursor-pointer shrink-0"
+            className="p-1.5 rounded-lg transition-all duration-200 cursor-pointer shrink-0"
+            style={{ color: THEME.TEXT_DISABLED }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = THEME.TEXT_PRIMARY;
+              e.currentTarget.style.backgroundColor = 'rgba(63, 63, 70, 0.5)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = THEME.TEXT_DISABLED;
+              e.currentTarget.style.backgroundColor = 'transparent';
+            }}
             title="新建文件夹"
           >
             <Folder size={14} />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-2">
+        <div
+          className="flex-1 overflow-y-auto p-2"
+          onContextMenu={(e) => handleEmptyAreaContextMenu(e, '')}
+        >
           {isLoading ? (
-            <div className="flex items-center justify-center h-full text-zinc-500">
+            <div className="flex items-center justify-center h-full" style={{ color: THEME.TEXT_DISABLED }}>
               <Loader2 size={20} className="animate-spin mr-2" />
-              <span className="text-sm">加载中...</span>
+              <span className="text-xs">加载中...</span>
             </div>
           ) : error ? (
-            <div className="flex flex-col items-center justify-center h-full text-zinc-500 p-4 text-center">
-              <p className="text-red-400 text-sm mb-2">{error}</p>
+            <div className="flex flex-col items-center justify-center h-full p-4 text-center" style={{ color: THEME.TEXT_DISABLED }}>
+              <p className="text-sm mb-2" style={{ color: THEME.ERROR }}>{error}</p>
               <button
                 onClick={loadNoteTree}
-                className="text-sm text-blue-400 hover:text-blue-300 transition-colors cursor-pointer"
+                className="text-sm transition-colors cursor-pointer"
+                style={{ color: THEME.INFO }}
               >
                 重试
               </button>
@@ -268,7 +399,7 @@ export function MarkdownView() {
           ) : searchQuery.trim() ? (
             searchResults.length === 0 ? (
               <div className="flex items-center justify-center h-full">
-                <p className="text-xs text-zinc-500">无匹配结果</p>
+                <p className="text-sm" style={{ color: THEME.TEXT_DISABLED }}>无匹配结果</p>
               </div>
             ) : (
               <div className="space-y-0.5">
@@ -276,11 +407,23 @@ export function MarkdownView() {
                   <button
                     key={item.path}
                     onClick={() => setSelectedNote(item.path)}
-                    className={`w-full text-left px-2 py-1.5 rounded-md text-xs truncate transition-colors cursor-pointer ${
-                      selectedNote === item.path
-                        ? 'bg-blue-500/20 text-blue-300'
-                        : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/40'
-                    }`}
+                    className="w-full text-left px-2 py-1.5 rounded-md text-sm truncate transition-colors cursor-pointer"
+                    style={{
+                      color: selectedNote === item.path ? '#93c5fd' : THEME.TEXT_TERTIARY,
+                      backgroundColor: selectedNote === item.path ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (selectedNote !== item.path) {
+                        e.currentTarget.style.color = THEME.TEXT_PRIMARY;
+                        e.currentTarget.style.backgroundColor = 'rgba(63, 63, 70, 0.4)';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (selectedNote !== item.path) {
+                        e.currentTarget.style.color = THEME.TEXT_TERTIARY;
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                      }
+                    }}
                   >
                     {item.name.replace(/\.md$/, '')}
                   </button>
@@ -288,12 +431,15 @@ export function MarkdownView() {
               </div>
             )
           ) : notes.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-zinc-500 p-4 text-center">
-              <div className="w-12 h-12 rounded-xl bg-zinc-700/30 flex items-center justify-center mb-3">
+            <div className="flex flex-col items-center justify-center h-full p-4 text-center" style={{ color: THEME.TEXT_DISABLED }}>
+              <div
+                className="w-12 h-12 rounded-xl flex items-center justify-center mb-3"
+                style={{ backgroundColor: 'rgba(63, 63, 70, 0.3)' }}
+              >
                 <FileText size={24} className="opacity-50" />
               </div>
-              <p className="text-sm text-zinc-300">暂无笔记</p>
-              <p className="text-xs mt-1 text-zinc-500">点击 + 创建新笔记</p>
+              <p className="text-xs" style={{ color: THEME.TEXT_SECONDARY }}>暂无笔记</p>
+              <p className="text-[10px] mt-1" style={{ color: THEME.TEXT_DISABLED }}>点击 + 创建新笔记</p>
             </div>
           ) : (
             <ErrorBoundary>
@@ -308,10 +454,13 @@ export function MarkdownView() {
                 onDelete={handleDelete}
                 onMove={handleMove}
                 onReorder={handleReorder}
+                onRevealInExplorer={handleRevealInExplorer}
               />
             </ErrorBoundary>
           )}
         </div>
+            </>
+          )}
       </aside>
 
       {/* Editor Area */}
@@ -319,38 +468,37 @@ export function MarkdownView() {
         {selectedNote && noteContent ? (
           <>
             {/* Title Bar */}
-            <div className="px-6 py-3 border-b border-zinc-600/30 flex items-center justify-between">
+            <div
+              className="px-6 py-3 flex items-center justify-between"
+              style={{ borderBottom: `1px solid ${THEME.BORDER_DEFAULT}` }}
+            >
               <input
                 type="text"
                 value={editingTitle}
                 onChange={(e) => setEditingTitle(e.target.value)}
                 onBlur={handleTitleRename}
                 onKeyDown={(e) => e.key === 'Enter' && handleTitleRename()}
-                className="bg-transparent text-lg font-semibold text-zinc-200 outline-none flex-1"
+                className="bg-transparent text-lg font-semibold outline-none flex-1"
+                style={{ color: THEME.TEXT_PRIMARY }}
                 placeholder="笔记标题"
               />
               <div className="flex items-center gap-2">
                 {isSaving && (
-                  <span className="text-zinc-500 text-xs flex items-center gap-1">
+                  <span className="text-xs flex items-center gap-1" style={{ color: THEME.TEXT_DISABLED }}>
                     <Loader2 size={12} className="animate-spin" />
                     保存中...
                   </span>
                 )}
-                <span className="text-zinc-500 text-xs">{editorContent.length} 字符</span>
+                <span className="text-xs" style={{ color: THEME.TEXT_DISABLED }}>{editorContent.length} 字符</span>
               </div>
             </div>
 
             {/* WYSIWYG Markdown Editor */}
-            <div className="flex-1 overflow-hidden" data-color-mode="dark">
-              <MDEditor
+            <div className="flex-1 overflow-hidden vditor-container">
+              <VditorEditor
                 value={editorContent}
-                onChange={(value) => setEditorContent(value || '')}
-                height="100%"
-                preview="edit"
-                hideToolbar={false}
-                textareaProps={{
-                  placeholder: '开始写作...',
-                }}
+                onChange={setEditorContent}
+                placeholder="开始写作..."
               />
             </div>
           </>
@@ -362,7 +510,7 @@ export function MarkdownView() {
       {/* Create Modal */}
       {showCreateModal && (
         <Modal onClose={() => setShowCreateModal(false)}>
-          <h3 className="text-zinc-200 font-medium mb-4">
+          <h3 className="font-medium mb-4" style={{ color: THEME.TEXT_PRIMARY }}>
             新建 {createType === 'file' ? '笔记' : '文件夹'}
           </h3>
           <input
@@ -370,20 +518,44 @@ export function MarkdownView() {
             value={createPath}
             onChange={(e) => setCreatePath(e.target.value)}
             placeholder={createType === 'file' ? '笔记名称.md' : '文件夹名称'}
-            className="w-full bg-zinc-700/50 border border-zinc-600/50 rounded-lg px-4 py-2 text-zinc-200 placeholder:text-zinc-500 outline-none focus:border-blue-500/50 transition-colors"
+            className="w-full rounded-lg px-4 py-2 outline-none transition-colors"
+            style={{
+              backgroundColor: 'rgba(63, 63, 70, 0.5)',
+              border: `1px solid ${THEME.BORDER_EMPHASIS}`,
+              color: THEME.TEXT_PRIMARY,
+            }}
             autoFocus
             onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
           />
           <div className="flex justify-end gap-2 mt-4">
             <button
               onClick={() => setShowCreateModal(false)}
-              className="px-4 py-2 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50 transition-all duration-200 cursor-pointer"
+              className="px-4 py-2 rounded-lg transition-all duration-200 cursor-pointer"
+              style={{ color: THEME.TEXT_TERTIARY }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = THEME.TEXT_PRIMARY;
+                e.currentTarget.style.backgroundColor = 'rgba(63, 63, 70, 0.5)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = THEME.TEXT_TERTIARY;
+                e.currentTarget.style.backgroundColor = 'transparent';
+              }}
             >
               取消
             </button>
             <button
               onClick={handleCreate}
-              className="px-4 py-2 rounded-lg bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 transition-all duration-200 cursor-pointer"
+              className="px-4 py-2 rounded-lg transition-all duration-200 cursor-pointer"
+              style={{
+                backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                color: '#60a5fa',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = 'rgba(59, 130, 246, 0.3)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'rgba(59, 130, 246, 0.2)';
+              }}
             >
               创建
             </button>
@@ -394,30 +566,63 @@ export function MarkdownView() {
       {/* Rename Modal */}
       {showRenameModal && renameItem && (
         <Modal onClose={() => setShowRenameModal(false)}>
-          <h3 className="text-zinc-200 font-medium mb-4">重命名</h3>
+          <h3 className="font-medium mb-4" style={{ color: THEME.TEXT_PRIMARY }}>重命名</h3>
           <input
             type="text"
             value={renameValue}
             onChange={(e) => setRenameValue(e.target.value)}
-            className="w-full bg-zinc-700/50 border border-zinc-600/50 rounded-lg px-4 py-2 text-zinc-200 placeholder:text-zinc-500 outline-none focus:border-blue-500/50 transition-colors"
+            className="w-full rounded-lg px-4 py-2 outline-none transition-colors"
+            style={{
+              backgroundColor: 'rgba(63, 63, 70, 0.5)',
+              border: `1px solid ${THEME.BORDER_EMPHASIS}`,
+              color: THEME.TEXT_PRIMARY,
+            }}
             autoFocus
             onKeyDown={(e) => e.key === 'Enter' && handleRename()}
           />
           <div className="flex justify-end gap-2 mt-4">
             <button
               onClick={() => setShowRenameModal(false)}
-              className="px-4 py-2 rounded-lg text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/50 transition-all duration-200 cursor-pointer"
+              className="px-4 py-2 rounded-lg transition-all duration-200 cursor-pointer"
+              style={{ color: THEME.TEXT_TERTIARY }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = THEME.TEXT_PRIMARY;
+                e.currentTarget.style.backgroundColor = 'rgba(63, 63, 70, 0.5)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = THEME.TEXT_TERTIARY;
+                e.currentTarget.style.backgroundColor = 'transparent';
+              }}
             >
               取消
             </button>
             <button
               onClick={handleRename}
-              className="px-4 py-2 rounded-lg bg-blue-500/20 text-blue-400 hover:bg-blue-500/30 transition-all duration-200 cursor-pointer"
+              className="px-4 py-2 rounded-lg transition-all duration-200 cursor-pointer"
+              style={{
+                backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                color: '#60a5fa',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = 'rgba(59, 130, 246, 0.3)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = 'rgba(59, 130, 246, 0.2)';
+              }}
             >
               重命名
             </button>
           </div>
         </Modal>
+      )}
+
+      {/* Empty Area Context Menu */}
+      {emptyAreaMenu.visible && (
+        <ContextMenu
+          items={getEmptyAreaMenuItems(emptyAreaMenu.parentPath)}
+          position={emptyAreaMenu.position}
+          onClose={closeEmptyAreaMenu}
+        />
       )}
     </div>
   );

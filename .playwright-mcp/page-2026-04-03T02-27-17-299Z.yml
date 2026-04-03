@@ -1,0 +1,26 @@
+- generic [ref=e3]:
+  - banner [ref=e61]:
+    - button "返回主页 (Esc)" [ref=e63] [cursor=pointer]:
+      - img [ref=e64]
+    - generic:
+      - heading "Markdown 笔记" [level=1]
+    - button "更多操作" [ref=e69] [cursor=pointer]:
+      - img [ref=e70]
+  - main [ref=e74]:
+    - generic [ref=e75]:
+      - complementary [ref=e76]:
+        - generic [ref=e77]:
+          - generic [ref=e78]:
+            - img [ref=e79]
+            - textbox "搜索笔记..." [ref=e82]
+          - button "新建笔记" [ref=e83] [cursor=pointer]:
+            - img [ref=e84]
+          - button "新建文件夹" [ref=e85] [cursor=pointer]:
+            - img [ref=e86]
+        - generic [ref=e89]:
+          - paragraph [ref=e90]: Cannot read properties of undefined (reading 'invoke')
+          - button "重试" [ref=e91] [cursor=pointer]
+      - generic [ref=e94]:
+        - img [ref=e96]
+        - paragraph [ref=e99]: 选择一个笔记或创建新笔记
+        - paragraph [ref=e100]: 支持 Markdown 格式

@@ -26,6 +26,7 @@
     "process:default",
     "process:allow-restart",
     "dialog:allow-save",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "opener:allow-reveal-item-in-dir"
   ]
 }
