@@ -36,6 +36,7 @@ interface ClipboardQuery {
   is_favorite?: boolean;
   search?: string;
   limit?: number;
+  offset?: number;
 }
 
 type TabType = 'all' | 'text' | 'image' | 'file' | 'favorite';
@@ -51,11 +52,22 @@ export function ClipboardView() {
   const [searchQuery, setSearchQuery] = useState('');
   const [items, setItems] = useState<ClipboardItemData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [hasMore, setHasMore] = useState(true);
+  const [offset, setOffset] = useState(0);
+  const offsetRef = useRef(offset);
   const listRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+
+  const PAGE_SIZE = 100;
+
+  // Keep offsetRef in sync with offset state
+  useEffect(() => {
+    offsetRef.current = offset;
+  }, [offset]);
 
   const tabs = useMemo(
     () => [
@@ -68,13 +80,22 @@ export function ClipboardView() {
     []
   );
 
-  const fetchClipboardHistory = useCallback(async () => {
+  const fetchClipboardHistory = useCallback(async (loadMore = false) => {
     try {
-      setIsLoading(true);
+      if (loadMore) {
+        setIsLoadingMore(true);
+      } else {
+        setIsLoading(true);
+        setOffset(0);
+      }
       setError(null);
 
+      // Use ref to get latest offset value
+      const currentOffset = loadMore ? offsetRef.current : 0;
+
       const query: ClipboardQuery = {
-        limit: 100,
+        limit: PAGE_SIZE,
+        offset: currentOffset,
       };
 
       if (activeTab !== 'all' && activeTab !== 'favorite') {
@@ -93,9 +114,9 @@ export function ClipboardView() {
 
       // For image tab, also include image files (type='file' but path is image)
       if (activeTab === 'image') {
-        // We need to fetch file type items and filter for images
         const fileQuery: ClipboardQuery = {
-          limit: 100,
+          limit: PAGE_SIZE,
+          offset: currentOffset,
           content_type: 'file',
         };
         if (searchQuery.trim()) {
@@ -103,24 +124,33 @@ export function ClipboardView() {
         }
         const fileResult = await invoke<ClipboardItemData[]>('get_clipboard_history', { query: fileQuery });
         const imageFiles = fileResult.filter(item => isImageFile(item.content));
-        // Merge and sort by created_at
         result = [...result, ...imageFiles].sort((a, b) =>
           new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        );
+        ).slice(0, PAGE_SIZE);
       }
 
-      setItems(result);
+      if (loadMore) {
+        setItems(prev => [...prev, ...result]);
+        setOffset(prev => prev + PAGE_SIZE);
+      } else {
+        setItems(result);
+        setOffset(PAGE_SIZE);
+      }
+
+      // If we got less than PAGE_SIZE items, there are no more
+      setHasMore(result.length === PAGE_SIZE);
     } catch (err) {
       setError(err instanceof Error ? err.message : '获取剪贴板历史失败');
       console.error('Failed to fetch clipboard history:', err);
     } finally {
       setIsLoading(false);
+      setIsLoadingMore(false);
     }
-  }, [activeTab, searchQuery]);
+  }, [activeTab, searchQuery]); // Remove offset from dependencies
 
   useEffect(() => {
-    fetchClipboardHistory();
-  }, [fetchClipboardHistory]);
+    fetchClipboardHistory(false);
+  }, [activeTab, searchQuery]);
 
   // Listen for clipboard updates from backend
   useEffect(() => {
@@ -129,7 +159,8 @@ export function ClipboardView() {
     const setupListener = async () => {
       unlisten = await listen('clipboard-updated', () => {
         console.log('Clipboard updated event received, refreshing...');
-        fetchClipboardHistory();
+        // Reset to first page when new item arrives
+        fetchClipboardHistory(false);
       });
     };
 
@@ -145,7 +176,7 @@ export function ClipboardView() {
   const handleToggleFavorite = async (id: number) => {
     try {
       await invoke('toggle_clipboard_favorite', { id });
-      fetchClipboardHistory();
+      fetchClipboardHistory(false);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.error('Failed to toggle favorite:', err);
@@ -157,7 +188,7 @@ export function ClipboardView() {
     try {
       await invoke('delete_clipboard_item', { id });
       imageCache.remove(id);
-      fetchClipboardHistory();
+      fetchClipboardHistory(false);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.error('Failed to delete clipboard item:', err);
@@ -169,7 +200,7 @@ export function ClipboardView() {
     try {
       await invoke('copy_to_clipboard', { id });
       // 刷新列表以显示更新后的排序
-      fetchClipboardHistory();
+      fetchClipboardHistory(false);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.error('Failed to copy to clipboard:', err);
@@ -181,7 +212,7 @@ export function ClipboardView() {
     try {
       await invoke('copy_text_to_clipboard', { text });
       // 刷新列表以显示更新后的排序（新条目会出现在顶部）
-      fetchClipboardHistory();
+      fetchClipboardHistory(false);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.error('Failed to copy partial text:', err);
@@ -274,6 +305,33 @@ export function ClipboardView() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [items, groupedItems, selectedId, handleCopyToClipboard]);
 
+  // Infinite scroll - auto load more when scrolling near bottom
+  useEffect(() => {
+    const listElement = listRef.current;
+    if (!listElement) return;
+
+    let ticking = false;
+
+    const handleScroll = () => {
+      if (!ticking) {
+        window.requestAnimationFrame(() => {
+          if (!isLoadingMore && hasMore) {
+            const { scrollTop, scrollHeight, clientHeight } = listElement;
+            // Load more when within 50px of bottom
+            if (scrollHeight - scrollTop - clientHeight < 10) {
+              fetchClipboardHistory(true);
+            }
+          }
+          ticking = false;
+        });
+        ticking = true;
+      }
+    };
+
+    listElement.addEventListener('scroll', handleScroll, { passive: true });
+    return () => listElement.removeEventListener('scroll', handleScroll);
+  }, [isLoadingMore, hasMore, fetchClipboardHistory]);
+
   return (
     <div className="w-full h-full flex" style={{ backgroundColor: THEME.BG_PRIMARY }}>
       {/* Left Sidebar - Tabs */}
@@ -321,7 +379,7 @@ export function ClipboardView() {
         </div>
 
         {/* Clipboard List */}
-        <div className="flex-1 overflow-y-auto px-4 pb-4 pt-2">
+        <div ref={listRef} className="flex-1 overflow-y-auto px-4 pb-4 pt-2">
           {isLoading ? (
             <div className="flex flex-col items-center justify-center h-full text-app-text-disabled">
               <Loader2 size={32} className="animate-spin mb-3" />
@@ -331,7 +389,7 @@ export function ClipboardView() {
             <div className="flex flex-col items-center justify-center h-full text-app-text-disabled">
               <p className="text-app-status-error mb-2">{error}</p>
               <button
-                onClick={fetchClipboardHistory}
+                onClick={() => fetchClipboardHistory(false)}
                 className="px-4 py-2 rounded-lg bg-app-bg-pressed/50 hover:bg-app-bg-elevated/50 text-sm text-app-text-primary transition-colors cursor-pointer"
               >
                 重试
@@ -370,6 +428,20 @@ export function ClipboardView() {
                   </div>
                 </div>
               ))}
+
+              {/* Load More Hint */}
+              {hasMore && (
+                <div className="text-center py-3 text-app-text-disabled text-xs">
+                  {isLoadingMore ? (
+                    <span className="flex items-center justify-center gap-1">
+                      <Loader2 size={12} className="animate-spin" />
+                      加载中...
+                    </span>
+                  ) : (
+                    <span>下滑查看更多</span>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>

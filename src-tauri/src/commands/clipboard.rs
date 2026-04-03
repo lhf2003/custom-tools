@@ -31,6 +31,7 @@ pub struct ClipboardQuery {
     pub is_favorite: Option<bool>,
     pub search: Option<String>,
     pub limit: Option<i64>,
+    pub offset: Option<i64>,
 }
 
 /// Get clipboard history
@@ -44,36 +45,43 @@ pub fn get_clipboard_history(
     // Build query with optional filters
     let search_pattern = query.search.as_ref().map(|s| format!("%{}%", s));
     let limit = query.limit.unwrap_or(50);
+    let offset = query.offset.unwrap_or(0);
 
     let mut sql = String::from(
         "SELECT id, content, content_type, source_app, is_favorite, created_at
          FROM clipboard_history WHERE 1=1",
     );
 
+    let mut param_index = 1;
+    let mut params_vec: Vec<&dyn rusqlite::ToSql> = Vec::new();
+
     if query.content_type.is_some() {
-        sql.push_str(" AND content_type = ?1");
+        sql.push_str(&format!(" AND content_type = ?{}", param_index));
+        params_vec.push(&query.content_type);
+        param_index += 1;
     }
 
     if query.is_favorite.is_some() {
-        sql.push_str(" AND is_favorite = ?2");
+        sql.push_str(&format!(" AND is_favorite = ?{}", param_index));
+        params_vec.push(&query.is_favorite);
+        param_index += 1;
     }
 
     if search_pattern.is_some() {
-        sql.push_str(" AND content LIKE ?3");
+        sql.push_str(&format!(" AND content LIKE ?{}", param_index));
+        params_vec.push(&search_pattern);
+        param_index += 1;
     }
 
-    sql.push_str(" ORDER BY created_at DESC LIMIT ?4");
+    sql.push_str(&format!(" ORDER BY created_at DESC LIMIT ?{} OFFSET ?{}", param_index, param_index + 1));
+    params_vec.push(&limit);
+    params_vec.push(&offset);
 
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
 
     let items = stmt
         .query_map(
-            params![
-                query.content_type,
-                query.is_favorite.map(|b| b as i32),
-                search_pattern,
-                limit
-            ],
+            params_vec.as_slice(),
             |row| {
                 Ok(ClipboardItem {
                     id: row.get(0)?,
