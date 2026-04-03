@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { FileText, Plus, Folder, Loader2, Search, PanelLeft } from 'lucide-react';
+import { FileText, Plus, Folder, Loader2, Search, Maximize2, Minimize2 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import type { NoteItemData, NoteContentData, CreateNoteRequest } from './types';
@@ -164,8 +164,8 @@ export function MarkdownView() {
     };
   }, [openCreateModal]);
 
-  // Sidebar collapse state
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  // Editor fullscreen state - hides sidebar when true
+  const [isEditorFullscreen, setIsEditorFullscreen] = useState(false);
 
   // Empty area context menu state
   const [emptyAreaMenu, setEmptyAreaMenu] = useState<{
@@ -289,41 +289,15 @@ export function MarkdownView() {
   return (
     <div className="w-full h-full flex" style={{ backgroundColor: THEME.BG_PRIMARY }}>
       {/* File Tree Sidebar */}
-      <aside
-        className="flex flex-col transition-all duration-300"
-        style={{
-          width: isSidebarCollapsed ? '40px' : '192px',
-          borderRight: `1px solid ${THEME.BORDER_DEFAULT}`,
-        }}
-      >
-        {/* Collapse Toggle Button */}
-        <div
-          className="flex items-center justify-between px-2 py-2"
-          style={{ borderBottom: `1px solid ${THEME.BORDER_DEFAULT}` }}
+      {!isEditorFullscreen && (
+        <aside
+          className="flex flex-col transition-all duration-300"
+          style={{
+            width: '192px',
+            borderRight: `1px solid ${THEME.BORDER_DEFAULT}`,
+          }}
         >
-          {!isSidebarCollapsed && <span className="text-[10px] font-medium" style={{ color: THEME.TEXT_TERTIARY }}>笔记</span>}
-          <button
-            onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-            className="p-1 rounded transition-all duration-200 cursor-pointer"
-            style={{ color: THEME.TEXT_DISABLED }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.color = THEME.TEXT_PRIMARY;
-              e.currentTarget.style.backgroundColor = 'rgba(63, 63, 70, 0.5)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.color = THEME.TEXT_DISABLED;
-              e.currentTarget.style.backgroundColor = 'transparent';
-            }}
-            title={isSidebarCollapsed ? '展开边栏' : '折叠边栏'}
-          >
-            <PanelLeft size={14} className={isSidebarCollapsed ? 'rotate-180' : ''} />
-          </button>
-        </div>
-
-        {/* Sidebar Content - Hidden when collapsed */}
-        {!isSidebarCollapsed && (
-          <>
-            {/* Search and toolbar */}
+          {/* Search and toolbar */}
             <div
               className="flex items-center gap-1 px-2 py-2"
               style={{ borderBottom: `1px solid ${THEME.BORDER_DEFAULT}` }}
@@ -459,9 +433,8 @@ export function MarkdownView() {
             </ErrorBoundary>
           )}
         </div>
-            </>
-          )}
       </aside>
+      )}
 
       {/* Editor Area */}
       <div className="flex-1 flex flex-col min-w-0">
@@ -490,6 +463,22 @@ export function MarkdownView() {
                   </span>
                 )}
                 <span className="text-xs" style={{ color: THEME.TEXT_DISABLED }}>{editorContent.length} 字符</span>
+                <button
+                  onClick={() => setIsEditorFullscreen(!isEditorFullscreen)}
+                  className="p-1.5 rounded-lg transition-all duration-200 cursor-pointer"
+                  style={{ color: THEME.TEXT_DISABLED }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.color = THEME.TEXT_PRIMARY;
+                    e.currentTarget.style.backgroundColor = 'rgba(63, 63, 70, 0.5)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.color = THEME.TEXT_DISABLED;
+                    e.currentTarget.style.backgroundColor = 'transparent';
+                  }}
+                  title={isEditorFullscreen ? '退出全屏' : '全屏编辑'}
+                >
+                  {isEditorFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                </button>
               </div>
             </div>
 
