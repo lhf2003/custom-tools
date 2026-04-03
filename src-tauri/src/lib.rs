@@ -1,5 +1,6 @@
-use tauri::Manager;
+use tauri::{Manager, Emitter};
 use tauri_plugin_autostart::ManagerExt;
+use tauri_plugin_updater::UpdaterExt;
 use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
 use std::time::Duration;
 
@@ -414,6 +415,20 @@ pub fn run() {
                 }
             });
 
+            // Auto check for updates on startup (if enabled) - using system notification
+            {
+                let app_handle = app.handle().clone();
+                let settings_for_update = settings.clone();
+                tauri::async_runtime::spawn(async move {
+                    // Delay to avoid impacting startup performance
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+
+                    if settings_for_update.auto_update {
+                        check_update_on_startup(app_handle).await;
+                    }
+                });
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -627,6 +642,44 @@ pub(crate) fn capture_prev_window_hwnd(app_handle: &tauri::AppHandle) {
     }
 }
 
+pub(crate) fn show_main_window(app_handle: &tauri::AppHandle) {
+    if let Some(window) = app_handle.get_webview_window("main") {
+        // Capture the previous focused window for auto-paste functionality
+        #[cfg(target_os = "windows")]
+        capture_prev_window_hwnd(app_handle);
+
+        // Ignore blur events briefly to prevent immediate re-hide
+        if let Some(focus_state) = app_handle.try_state::<WindowFocusState>() {
+            focus_state.set_ignore_blur_for(Duration::from_millis(300));
+        }
+
+        // 智能检测：在鼠标所在的显示器显示窗口
+        const TOP_PADDING: i32 = 100;
+        const WINDOW_WIDTH: i32 = 800;
+
+        // 获取鼠标所在的显示器
+        let target_monitor = get_monitor_at_cursor(app_handle);
+
+        if let Some(monitor) = target_monitor {
+            let monitor_pos = monitor.position();
+            let monitor_size = monitor.size();
+            let scale_factor = monitor.scale_factor();
+
+            // 修复：将逻辑像素宽度转换为物理像素
+            let window_width_physical = (WINDOW_WIDTH as f64 * scale_factor) as i32;
+
+            // 计算窗口居中位置（水平居中，顶部偏移）
+            let x = monitor_pos.x + (monitor_size.width as i32 - window_width_physical) / 2;
+            let y = monitor_pos.y + TOP_PADDING;
+
+            let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
+        }
+
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
 pub(crate) fn toggle_main_window(app_handle: &tauri::AppHandle) {
     if let Some(window) = app_handle.get_webview_window("main") {
         match window.is_visible() {
@@ -634,54 +687,197 @@ pub(crate) fn toggle_main_window(app_handle: &tauri::AppHandle) {
                 let _ = window.hide();
             }
             Ok(false) => {
-                // Capture the previous focused window for auto-paste functionality
-                #[cfg(target_os = "windows")]
-                capture_prev_window_hwnd(app_handle);
-
-                // Ignore blur events briefly to prevent immediate re-hide
-                if let Some(focus_state) = app_handle.try_state::<WindowFocusState>() {
-                    focus_state.set_ignore_blur_for(Duration::from_millis(300));
-                }
-
-                // 智能检测：在鼠标所在的显示器显示窗口
-                const TOP_PADDING: i32 = 100;
-                const WINDOW_WIDTH: i32 = 800;
-
-                // 获取鼠标所在的显示器
-                let target_monitor = get_monitor_at_cursor(app_handle);
-
-                if let Some(monitor) = target_monitor {
-                    let monitor_pos = monitor.position();
-                    let monitor_size = monitor.size();
-                    let scale_factor = monitor.scale_factor();
-
-                    // 修复：将逻辑像素宽度转换为物理像素
-                    let window_width_physical = (WINDOW_WIDTH as f64 * scale_factor) as i32;
-
-                    // 计算窗口居中位置（水平居中，顶部偏移）
-                    let x = monitor_pos.x + (monitor_size.width as i32 - window_width_physical) / 2;
-                    let y = monitor_pos.y + TOP_PADDING;
-
-                    let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
-                }
-
-                let _ = window.show();
-                let _ = window.set_focus();
+                show_main_window(app_handle);
             }
             Err(e) => log::error!("Failed to check window visibility: {}", e),
         }
     }
 }
 
+/// Send system notification with app icon
+#[cfg(target_os = "windows")]
+fn send_notification_with_icon(
+    app_handle: &tauri::AppHandle,
+    title: &str,
+    body: &str,
+) {
+    use tauri_plugin_notification::NotificationExt;
+
+    // Try multiple possible icon locations
+    let icon_paths = [
+        // Production build paths
+        app_handle.path().resource_dir().ok().map(|d| d.join("icons\\icon.ico")),
+        app_handle.path().resource_dir().ok().map(|d| d.join("icons\\128x128.png")),
+        // Development paths (from src-tauri directory)
+        Some(std::path::PathBuf::from("icons\\icon.ico")),
+        Some(std::path::PathBuf::from("icons\\128x128.png")),
+        Some(std::path::PathBuf::from("src-tauri\\icons\\icon.ico")),
+        Some(std::path::PathBuf::from("src-tauri\\icons\\128x128.png")),
+    ];
+
+    let mut builder = app_handle.notification().builder();
+    builder = builder.title(title).body(body);
+
+    // Try to find and use the first existing icon
+    for icon_path in icon_paths.iter().flatten() {
+        if icon_path.exists() {
+            if let Some(path_str) = icon_path.to_str() {
+                log::debug!("Using notification icon: {}", path_str);
+                builder = builder.icon(path_str);
+                break;
+            }
+        }
+    }
+
+    if let Err(e) = builder.show() {
+        log::warn!("Failed to show notification: {}", e);
+    }
+}
+
+/// Send system notification (non-Windows fallback)
+#[cfg(not(target_os = "windows"))]
+fn send_notification_with_icon(
+    app_handle: &tauri::AppHandle,
+    title: &str,
+    body: &str,
+) {
+    use tauri_plugin_notification::NotificationExt;
+    let _ = app_handle
+        .notification()
+        .builder()
+        .title(title)
+        .body(body)
+        .show();
+}
+
+/// Check for updates from tray menu and show system notification
+async fn check_update_from_tray(app_handle: tauri::AppHandle) {
+    let app_version = app_handle.package_info().version.clone();
+
+    let updater = match app_handle.updater() {
+        Ok(u) => u,
+        Err(e) => {
+            log::error!("Failed to get updater: {}", e);
+            send_notification_with_icon(&app_handle, "检查更新失败", "无法获取更新服务");
+            return;
+        }
+    };
+
+    match updater.check().await {
+        Ok(Some(update)) => {
+            log::info!("Update available: {} (current: {})", update.version, app_version);
+
+            // Cache the update for later install
+            if let Some(state) = app_handle.try_state::<commands::updater::PendingUpdate>() {
+                if let Ok(mut guard) = state.0.lock() {
+                    *guard = Some(update.clone());
+                }
+            }
+
+            // Show main window so user can see the update UI
+            toggle_main_window(&app_handle);
+
+            // Emit event to frontend to show update UI
+            let update_info = commands::updater::UpdateInfo {
+                version: update.version.clone(),
+                date: update.date.as_ref().map(|d| d.to_string()),
+                body: update.body.clone(),
+            };
+            if let Err(e) = app_handle.emit("update-available", update_info) {
+                log::warn!("Failed to emit update-available event: {}", e);
+            }
+
+            // Also show system notification
+            let body = update.body.as_deref().unwrap_or("点击通知以安装更新");
+            send_notification_with_icon(
+                &app_handle,
+                &format!("发现新版本: {}", update.version),
+                body
+            );
+        }
+        Ok(None) => {
+            log::info!("No update available (current: {})", app_version);
+            send_notification_with_icon(
+                &app_handle,
+                "已是最新版本",
+                &format!("当前版本: {}", app_version)
+            );
+        }
+        Err(e) => {
+            log::error!("Update check failed: {}", e);
+            send_notification_with_icon(
+                &app_handle,
+                "检查更新失败",
+                "网络连接错误或更新服务器不可用"
+            );
+        }
+    }
+}
+
+/// Check for updates on startup and show system notification
+async fn check_update_on_startup(app_handle: tauri::AppHandle) {
+    let app_version = app_handle.package_info().version.clone();
+
+    let updater = match app_handle.updater() {
+        Ok(u) => u,
+        Err(e) => {
+            log::error!("Failed to get updater on startup: {}", e);
+            return;
+        }
+    };
+
+    match updater.check().await {
+        Ok(Some(update)) => {
+            log::info!("Update available on startup: {} (current: {})", update.version, app_version);
+
+            // Cache the update for later install
+            if let Some(state) = app_handle.try_state::<commands::updater::PendingUpdate>() {
+                if let Ok(mut guard) = state.0.lock() {
+                    *guard = Some(update.clone());
+                }
+            }
+
+            // Show main window so user can see the update UI
+            toggle_main_window(&app_handle);
+
+            // Emit event to frontend to show update UI
+            let update_info = commands::updater::UpdateInfo {
+                version: update.version.clone(),
+                date: update.date.as_ref().map(|d| d.to_string()),
+                body: update.body.clone(),
+            };
+            if let Err(e) = app_handle.emit("update-available", update_info) {
+                log::warn!("Failed to emit update-available event: {}", e);
+            }
+
+            // Also show system notification
+            let body = update.body.as_deref().unwrap_or("点击通知以查看更新详情");
+            send_notification_with_icon(
+                &app_handle,
+                &format!("发现新版本: {}", update.version),
+                body
+            );
+        }
+        Ok(None) => {
+            log::info!("No update available on startup (current: {})", app_version);
+        }
+        Err(e) => {
+            log::warn!("Update check failed on startup: {}", e);
+        }
+    }
+}
+
 fn setup_system_tray(app_handle: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    use tauri::menu::{Menu, MenuItem};
+    use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 
     // Create menu items
-    let show_item = MenuItem::with_id(app_handle, "show", "显示", true, None::<&str>)?;
+    let settings_item = MenuItem::with_id(app_handle, "settings", "设置", true, None::<&str>)?;
+    let check_update_item = MenuItem::with_id(app_handle, "check_update", "检查更新", true, None::<&str>)?;
+    let separator = PredefinedMenuItem::separator(app_handle)?;
     let quit_item = MenuItem::with_id(app_handle, "quit", "退出", true, None::<&str>)?;
 
     // Create menu
-    let menu = Menu::with_items(app_handle, &[&show_item, &quit_item])?;
+    let menu = Menu::with_items(app_handle, &[&settings_item, &separator, &check_update_item, &separator, &quit_item])?;
 
     // Build tray icon
     let _tray = tauri::tray::TrayIconBuilder::new()
@@ -689,8 +885,17 @@ fn setup_system_tray(app_handle: &tauri::AppHandle) -> Result<(), Box<dyn std::e
         .menu(&menu)
         .on_menu_event(|app, event| {
             match event.id.as_ref() {
-                "show" => {
-                    toggle_main_window(app);
+                "settings" => {
+                    show_main_window(app);
+                    if let Err(e) = app.emit("shortcut:open_module", "settings") {
+                        log::warn!("Failed to emit open settings event: {}", e);
+                    }
+                }
+                "check_update" => {
+                    let app_handle = app.clone();
+                    tauri::async_runtime::spawn(async move {
+                        check_update_from_tray(app_handle).await;
+                    });
                 }
                 "quit" => {
                     app.exit(0);
