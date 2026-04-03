@@ -1,31 +1,37 @@
 import { useEffect, useState } from 'react';
-import { useSettingsStore } from '@/stores/settingsStore';
+import { listen } from '@tauri-apps/api/event';
 import { useUpdater } from '@/hooks/useUpdater';
 import { Download, X, RefreshCw } from 'lucide-react';
+import type { UpdateInfo } from '@/hooks/useUpdater';
 
 export function UpdateNotification() {
-  const { auto_update } = useSettingsStore();
-  const { updateInfo, isChecking, isDownloading, downloadProgress, checkForUpdate, downloadAndInstall, hasUpdate } = useUpdater();
+  const { updateInfo, isDownloading, downloadProgress, setUpdateInfo, downloadAndInstall } = useUpdater();
   const [showNotification, setShowNotification] = useState(false);
   const [dismissed, setDismissed] = useState(false);
 
-  // Auto-check on mount if enabled
+  // Listen for update-available event from backend
   useEffect(() => {
-    if (auto_update && !dismissed) {
-      // Delay check to avoid impacting startup performance
-      const timer = setTimeout(() => {
-        checkForUpdate();
-      }, 5000);
-      return () => clearTimeout(timer);
-    }
-  }, [auto_update, checkForUpdate, dismissed]);
+    const unlisten = listen('update-available', (event) => {
+      const info = event.payload as UpdateInfo;
+      setUpdateInfo(info);
+      if (!dismissed) {
+        setShowNotification(true);
+      }
+    });
+
+    return () => {
+      unlisten.then((fn) => fn()).catch((err: unknown) => {
+        console.error('Failed to cleanup update listener:', err);
+      });
+    };
+  }, [dismissed, setUpdateInfo]);
 
   // Show notification when update is found
   useEffect(() => {
-    if (hasUpdate && !dismissed && !isChecking) {
+    if (updateInfo && !dismissed && !isDownloading) {
       setShowNotification(true);
     }
-  }, [hasUpdate, dismissed, isChecking]);
+  }, [updateInfo, dismissed, isDownloading]);
 
   const handleDismiss = () => {
     setShowNotification(false);

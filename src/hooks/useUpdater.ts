@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import { Channel } from '@tauri-apps/api/core';
 
 // Safe invoke for browser mode
@@ -26,7 +26,7 @@ export interface DownloadProgress {
 }
 
 export function useUpdater() {
-  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [updateInfo, setUpdateInfoState] = useState<UpdateInfo | null>(null);
   const [isChecking, setIsChecking] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
@@ -38,7 +38,7 @@ export function useUpdater() {
     setError(null);
     try {
       const result = await safeInvoke('check_for_update') as UpdateInfo | null;
-      setUpdateInfo(result);
+      setUpdateInfoState(result);
       return result;
     } catch (err) {
       const msg = err instanceof Error ? err.message : '检查更新失败';
@@ -108,6 +108,12 @@ export function useUpdater() {
     }
   }, [updateInfo]);
 
+  // Set update info (used by event listener)
+  const setUpdateInfo = useCallback((info: UpdateInfo | null) => {
+    setUpdateInfoState(info);
+    setError(null);
+  }, []);
+
   // Auto-check on mount if enabled (handled by caller)
   return {
     updateInfo,
@@ -117,6 +123,7 @@ export function useUpdater() {
     error,
     checkForUpdate,
     downloadAndInstall,
+    setUpdateInfo,
     hasUpdate: !!updateInfo,
   };
 }
