@@ -1,137 +1,452 @@
-/* Vditor Dark Theme Customization */
+/* Vditor 自定义主题 - 与项目 THEME 统一 */
 
+/* ============================================
+   主题 CSS 变量（映射自 src/constants/theme.ts）
+   ============================================ */
 .vditor-container {
+  --vditor-bg-primary: #27272a;
+  --vditor-bg-secondary: rgba(63, 63, 70, 0.4);
+  --vditor-bg-tertiary: #2d2d2d;
+  --vditor-bg-elevated: #3f3f46;
+  --vditor-bg-hover: rgba(82, 82, 91, 0.5);
+  --vditor-bg-active: rgba(59, 130, 246, 0.15);
+
+  --vditor-text-primary: #f4f4f5;
+  --vditor-text-secondary: #d4d4d8;
+  --vditor-text-tertiary: #a1a1aa;
+  --vditor-text-disabled: #71717a;
+
+  --vditor-border-default: rgba(82, 82, 91, 0.3);
+  --vditor-border-emphasis: rgba(82, 82, 91, 0.5);
+
+  --vditor-accent-blue: #3b82f6;
+  --vditor-accent-blue-light: #93c5fd;
+  --vditor-accent-purple: #c084fc;
+  --vditor-accent-green: #4ade80;
+  --vditor-accent-cyan: #22d3ee;
+  --vditor-accent-amber: #fbbf24;
+  --vditor-accent-orange: #fdba74;
+  --vditor-accent-pink: #f472b6;
+  --vditor-accent-red: #f87171;
+
+  /* 代码高亮专属色 */
+  --hljs-bg: var(--vditor-bg-tertiary);
+  --hljs-comment: var(--vditor-text-disabled);
+  --hljs-keyword: var(--vditor-accent-purple);
+  --hljs-string: var(--vditor-accent-green);
+  --hljs-number: var(--vditor-accent-amber);
+  --hljs-function: var(--vditor-accent-blue-light);
+  --hljs-type: var(--vditor-accent-cyan);
+  --hljs-variable: var(--vditor-accent-pink);
+  --hljs-attr: var(--vditor-accent-orange);
+  --hljs-tag: var(--vditor-accent-red);
+  --hljs-punctuation: var(--vditor-text-tertiary);
+  --hljs-operator: var(--vditor-text-secondary);
+  --hljs-literal: var(--vditor-accent-amber);
+
   --vditor-toolbar-height: 40px;
 }
 
+/* ============================================
+   编辑器根容器
+   ============================================ */
 .vditor-container .vditor {
   height: 100%;
+  width: 100%;
   border: none;
   background: transparent;
 }
 
+/* ============================================
+   工具栏
+   ============================================ */
 .vditor-container .vditor-toolbar {
-  background: rgba(63, 63, 70, 0.4);
-  border-bottom: 1px solid rgba(82, 82, 91, 0.3);
-  padding: 4px 8px;
+  background: var(--vditor-bg-secondary);
+  border-bottom: 1px solid var(--vditor-border-default);
+  padding: 4px 12px;
 }
 
 .vditor-container .vditor-toolbar__item {
-  color: rgb(161, 161, 170);
+  color: var(--vditor-text-tertiary);
   border-radius: 6px;
   margin: 0 2px;
+  transition: all 0.2s ease;
 }
 
 .vditor-container .vditor-toolbar__item:hover {
-  background: rgba(82, 82, 91, 0.5);
-  color: rgb(228, 228, 231);
+  background: var(--vditor-bg-hover);
+  color: var(--vditor-text-primary);
 }
 
 .vditor-container .vditor-toolbar__item--active {
-  background: rgba(59, 130, 246, 0.2);
-  color: rgb(147, 197, 253);
+  background: var(--vditor-bg-active);
+  color: var(--vditor-accent-blue-light);
 }
 
+.vditor-container .vditor-toolbar__divider {
+  background-color: var(--vditor-border-emphasis);
+  margin: 0 8px;
+}
+
+/* ============================================
+   编辑内容区
+   ============================================ */
 .vditor-container .vditor-content {
   background: transparent;
+  width: 100%;
 }
 
 .vditor-container .vditor-ir {
   background: transparent;
-  color: rgb(228, 228, 231);
-  font-size: 14px;
-  line-height: 1.7;
+  color: var(--vditor-text-primary);
+  font-size: 15px;
+  line-height: 1.75;
+  padding: 16px 0;
 }
 
 .vditor-container .vditor-ir__node--expand {
-  background: rgba(59, 130, 246, 0.1);
-}
-
-.vditor-container .vditor-ir__node[data-type="code-block"] {
-  background: rgba(39, 39, 42, 0.8);
-  border-radius: 8px;
-  padding: 12px;
+  background: transparent;
 }
 
 .vditor-container .vditor-ir__preview {
-  color: rgb(161, 161, 170);
+  color: var(--vditor-text-tertiary);
+}
+
+.vditor-container .vditor-ir__marker {
+  color: var(--vditor-text-disabled);
+}
+
+.vditor-container .vditor-ir__node--expand .vditor-ir__marker {
+  color: var(--vditor-text-tertiary);
+}
+
+.vditor-container .vditor-ir pre.vditor-reset {
+  background-color: var(--vditor-bg-primary) !important;
+  padding: 16px 24px;
+  box-sizing: border-box;
+  min-height: 100%;
 }
 
 .vditor-container .vditor-reset {
-  color: rgb(228, 228, 231);
+  color: var(--vditor-text-primary);
 }
 
+/* ============================================
+   标题
+   ============================================ */
 .vditor-container .vditor-reset h1,
 .vditor-container .vditor-reset h2,
 .vditor-container .vditor-reset h3,
 .vditor-container .vditor-reset h4,
 .vditor-container .vditor-reset h5,
 .vditor-container .vditor-reset h6 {
-  color: rgb(244, 244, 245);
-  border-bottom-color: rgba(82, 82, 91, 0.5);
+  color: var(--vditor-text-primary);
+  font-weight: 600;
+  margin-top: 24px;
+  margin-bottom: 12px;
 }
 
-.vditor-container .vditor-reset blockquote {
-  border-left-color: rgb(59, 130, 246);
-  background: rgba(59, 130, 246, 0.1);
-  color: rgb(161, 161, 170);
+.vditor-container .vditor-reset h1 {
+  font-size: 26px;
+  border-bottom: 1px solid var(--vditor-border-default);
+  padding-bottom: 8px;
 }
 
-.vditor-container .vditor-reset code {
-  background: rgba(39, 39, 42, 0.8);
-  color: rgb(251, 113, 133);
-  padding: 2px 6px;
-  border-radius: 4px;
+.vditor-container .vditor-reset h2 {
+  font-size: 22px;
+  border-bottom: 1px solid var(--vditor-border-default);
+  padding-bottom: 6px;
 }
 
-.vditor-container .vditor-reset pre {
-  background: rgba(39, 39, 42, 0.8);
-  border-radius: 8px;
+.vditor-container .vditor-reset h3 {
+  font-size: 18px;
 }
 
-.vditor-container .vditor-reset pre code {
-  background: transparent;
-  color: rgb(228, 228, 231);
+.vditor-container .vditor-reset h4 {
+  font-size: 16px;
 }
 
-.vditor-container .vditor-reset table {
-  border-color: rgba(82, 82, 91, 0.5);
-}
-
-.vditor-container .vditor-reset table th,
-.vditor-container .vditor-reset table td {
-  border-color: rgba(82, 82, 91, 0.5);
-}
-
-.vditor-container .vditor-reset table thead {
-  background: rgba(63, 63, 70, 0.5);
-}
-
-.vditor-container .vditor-reset table tr:nth-child(2n) {
-  background: rgba(63, 63, 70, 0.3);
-}
-
-.vditor-container .vditor-reset hr {
-  border-color: rgba(82, 82, 91, 0.5);
-}
-
-.vditor-container .vditor-reset a {
-  color: rgb(147, 197, 253);
+/* ============================================
+   段落与列表
+   ============================================ */
+.vditor-container .vditor-reset p {
+  margin-bottom: 14px;
+  color: var(--vditor-text-secondary);
 }
 
 .vditor-container .vditor-reset ul,
 .vditor-container .vditor-reset ol {
-  padding-left: 1.5em;
+  padding-left: 1.6em;
+  margin-bottom: 14px;
 }
 
-/* Placeholder */
+.vditor-container .vditor-reset li {
+  margin-bottom: 6px;
+}
+
+.vditor-container .vditor-reset li > p {
+  margin-bottom: 4px;
+}
+
+/* ============================================
+   引用块
+   ============================================ */
+.vditor-container .vditor-reset blockquote {
+  border-left: 3px solid var(--vditor-accent-blue);
+  background: var(--vditor-bg-active);
+  color: var(--vditor-text-tertiary);
+  border-radius: 0 8px 8px 0;
+  padding: 10px 16px;
+  margin: 14px 0;
+}
+
+.vditor-container .vditor-reset blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+/* ============================================
+   行内代码
+   ============================================ */
+.vditor-container .vditor-reset code:not(pre code) {
+  background: rgba(63, 63, 70, 0.6);
+  color: var(--vditor-accent-pink);
+  padding: 2px 6px;
+  border-radius: 5px;
+  font-size: 0.88em;
+  font-family: 'Fira Code', 'JetBrains Mono', 'SF Mono', Consolas, Monaco, monospace;
+}
+
+/* ============================================
+   代码块（编辑态）
+   ============================================ */
+.vditor-container .vditor-ir__node[data-type="code-block"] {
+  background: var(--vditor-bg-primary);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin: 14px 0;
+  border: 1px solid var(--vditor-border-default);
+}
+
+/* 编辑态下内部 pre 透明化，避免嵌套边框形成"补丁" */
+.vditor-container .vditor-ir__node[data-type="code-block"] pre.vditor-reset {
+  background: transparent;
+  border: none;
+  margin: 0;
+  padding: 0;
+  border-radius: 0;
+}
+
+.vditor-container .vditor-ir__node[data-type="code-block"] .vditor-ir__marker {
+  color: var(--vditor-text-disabled);
+  opacity: 0.8;
+}
+
+/* 代码块展开编辑时隐藏下方重复的 preview 层 */
+.vditor-container .vditor-ir__node--expand[data-type="code-block"] .vditor-ir__preview {
+  display: none;
+}
+
+/* 非编辑态隐藏 fence 占位空格 */
+.vditor-container .vditor-ir__node:not(.vditor-ir__node--expand)[data-type="code-block"]:before,
+.vditor-container .vditor-ir__node:not(.vditor-ir__node--expand)[data-type="code-block"]:after {
+  content: none;
+}
+
+/* 编辑态 fence 标记淡化显示，避免像补丁 */
+.vditor-container .vditor-ir__node--expand[data-type="code-block"]:before,
+.vditor-container .vditor-ir__node--expand[data-type="code-block"]:after {
+  display: inline;
+  color: var(--vditor-text-disabled);
+  font-size: 12px;
+  font-family: 'Fira Code', 'JetBrains Mono', 'SF Mono', Consolas, Monaco, monospace;
+  line-height: 1.4;
+  opacity: 0.6;
+}
+
+/* 编辑态语言标签精致显示，与 ``` 保持同行 */
+.vditor-container .vditor-ir__node--expand[data-type="code-block"] .vditor-ir__marker--info {
+  display: inline;
+  color: var(--vditor-accent-cyan);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 1px 6px;
+  background: rgba(63, 63, 70, 0.4);
+  border-radius: 4px;
+  margin-left: 6px;
+  vertical-align: middle;
+  font-family: 'Fira Code', 'JetBrains Mono', 'SF Mono', Consolas, Monaco, monospace;
+}
+
+/* ============================================
+   代码块（预览态 / pre）
+   ============================================ */
+.vditor-container pre.vditor-reset {
+  position: relative;
+  background: var(--hljs-bg);
+  border-radius: 10px;
+  padding: 16px;
+  margin: 14px 0;
+  border: 1px solid var(--vditor-border-default);
+  overflow-x: auto;
+}
+
+.vditor-container pre.vditor-reset code {
+  background: transparent;
+  color: var(--vditor-text-primary);
+  font-size: 13.5px;
+  line-height: 1.6;
+  font-family: 'Fira Code', 'JetBrains Mono', 'SF Mono', Consolas, Monaco, monospace;
+}
+
+/* 代码块复制按钮 - UX 优化版 */
+.vditor-container .vditor-copy {
+  display: block !important;
+  opacity: 0;
+  visibility: hidden;
+  background: transparent;
+  z-index: 10;
+  transform: translateY(-2px);
+  transition: opacity 0.2s ease, visibility 0.2s ease, transform 0.2s ease;
+  pointer-events: none;
+}
+
+.vditor-container pre.vditor-reset:hover .vditor-copy,
+.vditor-container .vditor-ir__node[data-type="code-block"]:hover .vditor-copy,
+.vditor-container .vditor-copy:hover {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.vditor-container .vditor-copy span {
+  cursor: pointer;
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 36px;
+  height: 36px;
+  background: rgba(63, 63, 70, 0.85);
+  color: var(--vditor-text-secondary);
+  border: 1px solid var(--vditor-border-default);
+  border-radius: 8px;
+  padding: 0;
+  font-size: 12px;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+}
+
+.vditor-container .vditor-copy span:hover {
+  background: var(--vditor-bg-hover);
+  color: var(--vditor-text-primary);
+  border-color: var(--vditor-border-emphasis);
+  transform: scale(1.06);
+}
+
+.vditor-container .vditor-copy span:active {
+  transform: scale(0.96);
+}
+
+/* focus-visible ring for keyboard accessibility */
+.vditor-container .vditor-copy span:focus-visible {
+  outline: 2px solid var(--vditor-accent-blue);
+  outline-offset: 2px;
+}
+
+/* 统一 SVG 图标尺寸 */
+.vditor-container .vditor-copy svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+/* ============================================
+   表格
+   ============================================ */
+.vditor-container .vditor-reset table {
+  border-color: var(--vditor-border-emphasis);
+  margin: 14px 0;
+  border-collapse: separate;
+  border-spacing: 0;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.vditor-container .vditor-reset table th,
+.vditor-container .vditor-reset table td {
+  border-color: var(--vditor-border-default);
+  padding: 8px 12px;
+}
+
+.vditor-container .vditor-reset table thead {
+  background: var(--vditor-bg-secondary);
+  color: var(--vditor-text-primary);
+  font-weight: 500;
+}
+
+.vditor-container .vditor-reset table tbody tr {
+  background: transparent;
+}
+
+.vditor-container .vditor-reset table tbody tr:nth-child(2n) {
+  background: rgba(63, 63, 70, 0.25);
+}
+
+.vditor-container .vditor-reset table tbody tr:hover {
+  background: rgba(63, 63, 70, 0.4);
+}
+
+/* ============================================
+   链接与分隔线
+   ============================================ */
+.vditor-container .vditor-reset a {
+  color: var(--vditor-accent-blue-light);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.2s ease;
+}
+
+.vditor-container .vditor-reset a:hover {
+  border-bottom-color: var(--vditor-accent-blue-light);
+}
+
+.vditor-container .vditor-reset hr {
+  border: none;
+  border-top: 1px solid var(--vditor-border-emphasis);
+  margin: 20px 0;
+}
+
+/* ============================================
+   图片
+   ============================================ */
+.vditor-container .vditor-reset img {
+  border-radius: 8px;
+  max-width: 100%;
+}
+
+/* ============================================
+   任务列表
+   ============================================ */
+.vditor-container .vditor-reset .vditor-task {
+  color: var(--vditor-text-secondary);
+}
+
+/* ============================================
+   占位符
+   ============================================ */
 .vditor-container .vditor-ir__placeholder {
-  color: rgb(113, 113, 122);
+  color: var(--vditor-text-disabled);
 }
 
-/* Hide scrollbar for cleaner look */
+/* ============================================
+   滚动条
+   ============================================ */
 .vditor-container .vditor-content::-webkit-scrollbar {
   width: 8px;
+  height: 8px;
 }
 
 .vditor-container .vditor-content::-webkit-scrollbar-track {
@@ -144,11 +459,130 @@
 }
 
 .vditor-container .vditor-content::-webkit-scrollbar-thumb:hover {
-  background: rgba(82, 82, 91, 0.7);
+  background: rgba(82, 82, 91, 0.8);
 }
 
-/* Toolbar divider */
-.vditor-container .vditor-toolbar__divider {
-  background-color: rgba(82, 82, 91, 0.5);
-  margin: 0 8px;
+/* 代码块内部滚动条 */
+.vditor-container .vditor-reset pre::-webkit-scrollbar {
+  height: 6px;
+}
+
+.vditor-container .vditor-reset pre::-webkit-scrollbar-thumb {
+  background: rgba(82, 82, 91, 0.5);
+  border-radius: 3px;
+}
+
+/* ============================================
+   代码语法高亮 - 覆盖 hljs 默认主题
+   ============================================ */
+
+/* 基础背景与文字 */
+.vditor-container .hljs {
+  background: var(--hljs-bg);
+  color: var(--vditor-text-primary);
+}
+
+/* 注释、文档注释、引用 */
+.vditor-container .hljs-comment,
+.vditor-container .hljs-quote,
+.vditor-container .hljs-doctag {
+  color: var(--hljs-comment);
+  font-style: italic;
+}
+
+/* 关键字：if / return / function / const / import */
+.vditor-container .hljs-keyword,
+.vditor-container .hljs-selector-tag,
+.vditor-container .hljs-literal,
+.vditor-container .hljs-section,
+.vditor-container .hljs-meta-keyword,
+.vditor-container .hljs-tag .hljs-name,
+.vditor-container .hljs-name {
+  color: var(--hljs-keyword);
+}
+
+/* 字符串 */
+.vditor-container .hljs-string,
+.vditor-container .hljs-regexp,
+.vditor-container .hljs-template-tag,
+.vditor-container .hljs-template-variable,
+.vditor-container .hljs-addition,
+.vditor-container .hljs-attribute {
+  color: var(--hljs-string);
+}
+
+/* 数字、布尔值 */
+.vditor-container .hljs-number,
+.vditor-container .hljs-bullet,
+.vditor-container .hljs-variable.constant_,
+.vditor-container .hljs-literal {
+  color: var(--hljs-number);
+}
+
+/* 函数、方法调用 */
+.vditor-container .hljs-function,
+.vditor-container .hljs-title.function_,
+.vditor-container .hljs-built_in,
+.vditor-container .hljs-selector-id,
+.vditor-container .hljs-selector-class,
+.vditor-container .hljs-selector-attr,
+.vditor-container .hljs-selector-pseudo {
+  color: var(--hljs-function);
+}
+
+/* 类型、类名 */
+.vditor-container .hljs-class,
+.vditor-container .hljs-title.class_,
+.vditor-container .hljs-type,
+.vditor-container .hljs-attr,
+.vditor-container .hljs-params {
+  color: var(--hljs-type);
+}
+
+/* 变量、参数 */
+.vditor-container .hljs-variable,
+.vditor-container .hljs-property,
+.vditor-container .hljs-deletion,
+.vditor-container .hljs-symbol,
+.vditor-container .hljs-subst,
+.vditor-container .hljs-tag .hljs-attr {
+  color: var(--hljs-variable);
+}
+
+/* HTML/XML 标签 */
+.vditor-container .hljs-tag,
+.vditor-container .hljs-tag .hljs-name,
+.vditor-container .hljs-tag .hljs-title {
+  color: var(--hljs-tag);
+}
+
+/* 标点与操作符 */
+.vditor-container .hljs-punctuation,
+.vditor-container .hljs-operator,
+.vditor-container .hljs-params,
+.vditor-container .hljs-meta {
+  color: var(--hljs-punctuation);
+}
+
+/* 链接 */
+.vditor-container .hljs-link {
+  color: var(--vditor-accent-blue-light);
+  text-decoration: underline;
+}
+
+/* 强调 */
+.vditor-container .hljs-emphasis {
+  font-style: italic;
+}
+
+.vditor-container .hljs-strong {
+  font-weight: 600;
+  color: var(--vditor-text-primary);
+}
+
+/* ============================================
+   全屏模式适配
+   ============================================ */
+.vditor-container .vditor-fullscreen {
+  background: var(--vditor-bg-primary);
 }

@@ -18,8 +18,6 @@ export function VditorEditor({ value, onChange, placeholder = '开始写作...' 
   useEffect(() => {
     if (!containerRef.current || vditorRef.current) return;
 
-    console.log('[Vditor] Starting initialization...');
-
     try {
       const vditor = new Vditor(containerRef.current, {
         mode: 'ir',
@@ -39,10 +37,20 @@ export function VditorEditor({ value, onChange, placeholder = '开始写作...' 
           'link', 'table', '|',
           'undo', 'redo'
         ],
+        preview: {
+          theme: {
+            current: 'dark',
+            path: '/node_modules/vditor/dist/css/content-theme',
+          },
+          hljs: {
+            enable: true,
+            lineNumber: false,
+            style: 'github-dark',
+          },
+        },
         after: () => {
-          console.log('[Vditor] Initialized successfully');
           vditorRef.current = vditor;
-          // 同步当前 value 到编辑器
+          vditor.setTheme('dark', 'dark', 'github-dark');
           if (value) {
             vditor.setValue(value);
           }
