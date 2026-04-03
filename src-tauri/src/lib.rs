@@ -255,14 +255,48 @@ pub fn run() {
                 app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
             }
 
-            // Initialize logging in debug mode
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
+            // Initialize logging
+            let log_level = if cfg!(debug_assertions) {
+                log::LevelFilter::Debug
+            } else {
+                log::LevelFilter::Info
+            };
+
+            let logs_dir = app.path().app_data_dir().unwrap().join("logs");
+            std::fs::create_dir_all(&logs_dir).ok();
+
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .targets([
+                        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Folder {
+                            path: logs_dir.clone(),
+                            file_name: None,
+                        }),
+                        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
+                    ])
+                    .level(log_level)
+                    .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepAll)
+                    .max_file_size(1_000_000)
+                    .format(|out, message, record| {
+                        out.finish(format_args!(
+                            "[{}] [{}] [{}] {}",
+                            chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
+                            record.level(),
+                            record.target(),
+                            message
+                        ))
+                    })
+                    .build(),
+            )?;
+
+            // Clean up logs older than 30 days in background
+            let logs_dir_for_cleanup = logs_dir.clone();
+            std::thread::spawn(move || {
+                if let Err(e) = cleanup_old_logs(&logs_dir_for_cleanup, 30) {
+                    eprintln!("Failed to cleanup old logs: {}", e);
+                }
+            });
 
             // Initialize database
             db::init(app.handle())?;
@@ -866,6 +900,27 @@ async fn check_update_on_startup(app_handle: tauri::AppHandle) {
             log::warn!("Update check failed on startup: {}", e);
         }
     }
+}
+
+/// Remove log files older than the specified number of days.
+fn cleanup_old_logs(logs_dir: &std::path::Path, days: u64) -> Result<(), Box<dyn std::error::Error>> {
+    let retention = std::time::Duration::from_secs(days * 24 * 60 * 60);
+    let now = std::time::SystemTime::now();
+
+    for entry in std::fs::read_dir(logs_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("log") {
+            continue;
+        }
+        let modified = entry.metadata()?.modified()?;
+        if now.duration_since(modified)? > retention {
+            if let Err(e) = std::fs::remove_file(&path) {
+                eprintln!("Failed to remove old log file {:?}: {}", path, e);
+            }
+        }
+    }
+    Ok(())
 }
 
 fn setup_system_tray(app_handle: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
