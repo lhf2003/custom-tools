@@ -29,7 +29,7 @@ export function VditorEditor({ value, onChange, placeholder = '开始写作...' 
         lang: 'zh_CN',
         cache: { enable: false },
         outline: { enable: false, position: 'left' },
-        cdn: '/node_modules/vditor',
+        cdn: '/vditor',
         toolbar: [
           'headings', 'bold', 'italic', 'strike', '|',
           'list', 'ordered-list', 'check', '|',

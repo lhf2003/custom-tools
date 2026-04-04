@@ -10,6 +10,9 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+
+# Allow Vditor assets in public directory
+!public/vditor/dist/
 *.local
 
 # Editor directories and files
