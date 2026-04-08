@@ -1,0 +1,26 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+/* 防止文本选择 */
+.no-select {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* 十字光标 */
+.cursor-crosshair {
+  cursor: crosshair;
+}

@@ -1,10 +1,12 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { FileText, Plus, Folder, Loader2, Search, Maximize2, Minimize2 } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { FileText, Plus, Folder, Loader2, Search, Maximize2, Minimize2, Download, Image as ImageIcon } from 'lucide-react';
+import { save } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import type { NoteItemData, NoteContentData, CreateNoteRequest } from './types';
 import { useNotes } from './hooks/useNotes';
 import { Modal, EmptyState, SortableNoteTree, ErrorBoundary, VditorEditor, ContextMenu, MenuIcons } from './components';
+import { exportNoteAsImage } from './utils/export';
 import type { MenuItem } from './components/ContextMenu';
 import { THEME } from '@/constants/theme';
 import { WINDOW_SIZE } from '@/constants/window';
@@ -167,6 +169,11 @@ export function MarkdownView() {
   // Editor fullscreen state - hides sidebar when true
   const [isEditorFullscreen, setIsEditorFullscreen] = useState(false);
 
+  // Export state
+  const [isExporting, setIsExporting] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
+
   // Empty area context menu state
   const [emptyAreaMenu, setEmptyAreaMenu] = useState<{
     visible: boolean;
@@ -261,6 +268,81 @@ export function MarkdownView() {
     },
     []
   );
+
+  // Close export menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(event.target as Node)) {
+        setShowExportMenu(false);
+      }
+    };
+
+    if (showExportMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showExportMenu]);
+
+  // Handle export as PNG
+  const handleExportPNG = async () => {
+    console.log('[MarkdownView] Export PNG clicked');
+    console.log('[MarkdownView] selectedNote:', selectedNote);
+    console.log('[MarkdownView] noteContent:', noteContent?.name);
+    console.log('[MarkdownView] editorContent length:', editorContent?.length || 0);
+
+    if (!selectedNote || !noteContent) {
+      console.log('[MarkdownView] Missing selectedNote or noteContent, returning');
+      return;
+    }
+
+    setIsExporting(true);
+    setShowExportMenu(false);
+
+    try {
+      // 导出为图片 - 直接传入 markdown 内容
+      console.log('[MarkdownView] Calling exportNoteAsImage...');
+      const blob = await exportNoteAsImage(editorContent, noteContent.name);
+      console.log('[MarkdownView] exportNoteAsImage returned, blob size:', blob?.size || 0);
+
+      // 选择保存位置
+      const defaultFileName = noteContent.name.replace(/\.md$/, '.png');
+      const filePath = await save({
+        defaultPath: defaultFileName,
+        filters: [
+          { name: 'PNG 图片', extensions: ['png'] },
+        ],
+      });
+
+      if (filePath) {
+        // 将 Blob 转换为 base64
+        const base64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64data = reader.result as string;
+            // 移除 data:image/png;base64, 前缀
+            resolve(base64data.split(',')[1]);
+          };
+          reader.readAsDataURL(blob);
+        });
+
+        await invoke('save_image_to_path', {
+          base64Data: base64,
+          path: filePath,
+        });
+
+        setError('导出成功');
+        setTimeout(() => setError(null), 2000);
+
+        // 打开文件资源管理器显示保存的图片
+        await revealItemInDir(filePath);
+      }
+    } catch (err) {
+      console.error('Export failed:', err);
+      setError(err instanceof Error ? err.message : '导出失败');
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   // Close empty area context menu
   const closeEmptyAreaMenu = useCallback(() => {
@@ -462,7 +544,59 @@ export function MarkdownView() {
                     保存中...
                   </span>
                 )}
+                {isExporting && (
+                  <span className="text-xs flex items-center gap-1" style={{ color: THEME.TEXT_DISABLED }}>
+                    <Loader2 size={12} className="animate-spin" />
+                    导出中...
+                  </span>
+                )}
                 <span className="text-xs" style={{ color: THEME.TEXT_DISABLED }}>{editorContent.length} 字符</span>
+                {/* Export Button */}
+                <div className="relative" ref={exportMenuRef}>
+                  <button
+                    onClick={() => setShowExportMenu(!showExportMenu)}
+                    disabled={isExporting}
+                    className="p-1.5 rounded-lg transition-all duration-200 cursor-pointer"
+                    style={{ color: THEME.TEXT_DISABLED }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.color = THEME.TEXT_PRIMARY;
+                      e.currentTarget.style.backgroundColor = 'rgba(63, 63, 70, 0.5)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.color = THEME.TEXT_DISABLED;
+                      e.currentTarget.style.backgroundColor = 'transparent';
+                    }}
+                    title="导出笔记"
+                  >
+                    <Download size={14} />
+                  </button>
+                  {showExportMenu && (
+                    <div
+                      className="absolute right-0 top-full mt-1 py-1 rounded-lg shadow-lg z-50 min-w-[120px]"
+                      style={{
+                        backgroundColor: THEME.BG_SECONDARY,
+                        border: `1px solid ${THEME.BORDER_DEFAULT}`,
+                      }}
+                    >
+                      <button
+                        onClick={handleExportPNG}
+                        className="w-full px-3 py-2 text-left text-xs flex items-center gap-2 transition-colors"
+                        style={{ color: THEME.TEXT_SECONDARY }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.backgroundColor = 'rgba(63, 63, 70, 0.5)';
+                          e.currentTarget.style.color = THEME.TEXT_PRIMARY;
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.backgroundColor = 'transparent';
+                          e.currentTarget.style.color = THEME.TEXT_SECONDARY;
+                        }}
+                      >
+                        <ImageIcon size={12} />
+                        导出为 PNG
+                      </button>
+                    </div>
+                  )}
+                </div>
                 <button
                   onClick={() => setIsEditorFullscreen(!isEditorFullscreen)}
                   className="p-1.5 rounded-lg transition-all duration-200 cursor-pointer"

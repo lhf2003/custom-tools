@@ -226,6 +226,7 @@ pub mod llm;
 pub mod llm_provider;
 pub mod notes;
 pub mod password;
+pub mod screenshot;
 pub mod search;
 pub mod settings;
 
@@ -480,6 +481,7 @@ pub fn run() {
             commands::clipboard::clear_clipboard_history,
             commands::clipboard::copy_to_clipboard,
             commands::clipboard::copy_text_to_clipboard,
+            commands::clipboard::copy_file_to_clipboard,
             commands::clipboard::paste_to_clipboard_item,
             commands::clipboard::get_clipboard_image_base64,
             commands::clipboard::handle_pasted_file,
@@ -570,6 +572,17 @@ pub fn run() {
             llm_provider::commands::get_scene_configs,
             llm_provider::commands::set_scene_model,
             llm_provider::commands::get_scene_model,
+            // Screenshot commands
+            screenshot::capture_full_screen,
+            screenshot::get_capturable_windows,
+            screenshot::capture_window,
+            screenshot::capture_region,
+            screenshot::screenshot_to_base64,
+            screenshot::ocr_screenshot,
+            // WeChat-style screenshot overlay commands
+            screenshot::get_all_windows,
+            screenshot::get_window_at_point,
+            screenshot::close_screenshot_overlay,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
