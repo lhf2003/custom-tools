@@ -63,14 +63,22 @@
 .vditor-container .vditor-toolbar {
   background: var(--vditor-bg-secondary);
   border-bottom: 1px solid var(--vditor-border-default);
-  padding: 4px 12px;
+  padding: 4px 8px;
+  display: flex;
+  align-items: center;
 }
 
 .vditor-container .vditor-toolbar__item {
   color: var(--vditor-text-tertiary);
-  border-radius: 6px;
-  margin: 0 2px;
-  transition: all 0.2s ease;
+  border-radius: 5px;
+  margin: 0 1px;
+  transition: all 0.15s ease;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
 .vditor-container .vditor-toolbar__item:hover {
@@ -85,7 +93,32 @@
 
 .vditor-container .vditor-toolbar__divider {
   background-color: var(--vditor-border-emphasis);
-  margin: 0 8px;
+  margin: 0 6px;
+  width: 1px;
+  height: 18px;
+}
+
+/* ============================================
+   工具栏按钮提示 - 使用全局 Tooltip 样式
+   ============================================ */
+.vditor-container .vditor-toolbar__tip {
+  background: var(--tooltip-bg, #3f3f46);
+  color: var(--tooltip-text, #d4d4d8);
+  border: 1px solid var(--tooltip-border, rgba(82, 82, 91, 0.3));
+  border-radius: var(--tooltip-radius, 5px);
+  padding: var(--tooltip-padding, 4px 8px);
+  font-size: var(--tooltip-font-size, 12px);
+  box-shadow: var(--app-shadow-tooltip, 0 4px 12px rgba(0, 0, 0, 0.2));
+  backdrop-filter: var(--tooltip-backdrop, blur(8px));
+  -webkit-backdrop-filter: var(--tooltip-backdrop, blur(8px));
+}
+
+.vditor-container .vditor-toolbar__tip--s::after {
+  border-top-color: var(--tooltip-bg, #3f3f46);
+}
+
+.vditor-container .vditor-toolbar__tip--n::after {
+  border-bottom-color: var(--tooltip-bg, #3f3f46);
 }
 
 /* ============================================
@@ -178,6 +211,14 @@
 .vditor-container .vditor-reset ol {
   padding-left: 1.6em;
   margin-bottom: 14px;
+}
+
+.vditor-container .vditor-reset ul {
+  list-style-type: disc;
+}
+
+.vditor-container .vditor-reset ol {
+  list-style-type: decimal;
 }
 
 .vditor-container .vditor-reset li {
@@ -385,6 +426,12 @@
   background: var(--vditor-bg-secondary);
   color: var(--vditor-text-primary);
   font-weight: 500;
+}
+
+.vditor-container .vditor-reset table thead th {
+  background: var(--vditor-bg-secondary);
+  color: var(--vditor-text-primary);
+  border-bottom: 1px solid var(--vditor-border-emphasis);
 }
 
 .vditor-container .vditor-reset table tbody tr {

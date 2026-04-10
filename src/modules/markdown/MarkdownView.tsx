@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { FileText, Plus, Folder, Loader2, Search, Maximize2, Minimize2, Download, Image as ImageIcon } from 'lucide-react';
+import { Tooltip } from '@/components/Tooltip';
 import { save } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
@@ -527,92 +528,107 @@ export function MarkdownView() {
               className="px-6 py-3 flex items-center justify-between"
               style={{ borderBottom: `1px solid ${THEME.BORDER_DEFAULT}` }}
             >
-              <input
-                type="text"
-                value={editingTitle}
-                onChange={(e) => setEditingTitle(e.target.value)}
-                onBlur={handleTitleRename}
-                onKeyDown={(e) => e.key === 'Enter' && handleTitleRename()}
-                className="bg-transparent text-lg font-semibold outline-none flex-1"
-                style={{ color: THEME.TEXT_PRIMARY }}
-                placeholder="笔记标题"
-              />
-              <div className="flex items-center gap-2">
-                {isSaving && (
-                  <span className="text-xs flex items-center gap-1" style={{ color: THEME.TEXT_DISABLED }}>
-                    <Loader2 size={12} className="animate-spin" />
-                    保存中...
+              <div className="flex-1 flex items-center gap-2 min-w-0">
+                <input
+                  type="text"
+                  value={editingTitle}
+                  onChange={(e) => setEditingTitle(e.target.value)}
+                  onBlur={handleTitleRename}
+                  onKeyDown={(e) => e.key === 'Enter' && handleTitleRename()}
+                  className="bg-transparent text-[15px] font-medium outline-none flex-1 min-w-0 transition-colors"
+                  style={{ color: THEME.TEXT_PRIMARY }}
+                  placeholder="笔记标题"
+                />
+              </div>
+              <div className="flex items-center gap-1">
+                {/* Status indicators */}
+                <div className="flex items-center gap-3 mr-2">
+                  {isSaving && (
+                    <span className="text-xs flex items-center gap-1" style={{ color: THEME.TEXT_DISABLED }}>
+                      <Loader2 size={12} className="animate-spin" />
+                      保存中...
+                    </span>
+                  )}
+                  {isExporting && (
+                    <span className="text-xs flex items-center gap-1" style={{ color: THEME.TEXT_DISABLED }}>
+                      <Loader2 size={12} className="animate-spin" />
+                      导出中...
+                    </span>
+                  )}
+                  <span className="text-xs tabular-nums" style={{ color: THEME.TEXT_DISABLED }}>
+                    {editorContent.length.toLocaleString()} 字符
                   </span>
-                )}
-                {isExporting && (
-                  <span className="text-xs flex items-center gap-1" style={{ color: THEME.TEXT_DISABLED }}>
-                    <Loader2 size={12} className="animate-spin" />
-                    导出中...
-                  </span>
-                )}
-                <span className="text-xs" style={{ color: THEME.TEXT_DISABLED }}>{editorContent.length} 字符</span>
-                {/* Export Button */}
-                <div className="relative" ref={exportMenuRef}>
-                  <button
-                    onClick={() => setShowExportMenu(!showExportMenu)}
-                    disabled={isExporting}
-                    className="p-1.5 rounded-lg transition-all duration-200 cursor-pointer"
-                    style={{ color: THEME.TEXT_DISABLED }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.color = THEME.TEXT_PRIMARY;
-                      e.currentTarget.style.backgroundColor = 'rgba(63, 63, 70, 0.5)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.color = THEME.TEXT_DISABLED;
-                      e.currentTarget.style.backgroundColor = 'transparent';
-                    }}
-                    title="导出笔记"
-                  >
-                    <Download size={14} />
-                  </button>
-                  {showExportMenu && (
-                    <div
-                      className="absolute right-0 top-full mt-1 py-1 rounded-lg shadow-lg z-50 min-w-[120px]"
-                      style={{
-                        backgroundColor: THEME.BG_SECONDARY,
-                        border: `1px solid ${THEME.BORDER_DEFAULT}`,
-                      }}
-                    >
+                </div>
+
+                {/* Toolbar buttons */}
+                <div className="flex items-center gap-0.5">
+                  {/* Export Button */}
+                  <div className="relative" ref={exportMenuRef}>
+                    <Tooltip content="导出笔记" placement="bottom">
                       <button
-                        onClick={handleExportPNG}
-                        className="w-full px-3 py-2 text-left text-xs flex items-center gap-2 transition-colors"
-                        style={{ color: THEME.TEXT_SECONDARY }}
+                        onClick={() => setShowExportMenu(!showExportMenu)}
+                        disabled={isExporting}
+                        className="w-7 h-7 rounded-md flex items-center justify-center transition-all duration-200 cursor-pointer"
+                        style={{ color: THEME.TEXT_DISABLED }}
                         onMouseEnter={(e) => {
-                          e.currentTarget.style.backgroundColor = 'rgba(63, 63, 70, 0.5)';
                           e.currentTarget.style.color = THEME.TEXT_PRIMARY;
+                          e.currentTarget.style.backgroundColor = 'rgba(63, 63, 70, 0.5)';
                         }}
                         onMouseLeave={(e) => {
+                          e.currentTarget.style.color = THEME.TEXT_DISABLED;
                           e.currentTarget.style.backgroundColor = 'transparent';
-                          e.currentTarget.style.color = THEME.TEXT_SECONDARY;
                         }}
                       >
-                        <ImageIcon size={12} />
-                        导出为 PNG
+                        <Download size={14} />
                       </button>
-                    </div>
-                  )}
+                    </Tooltip>
+                    {showExportMenu && (
+                      <div
+                        className="absolute right-0 top-full mt-1 py-1 rounded-lg shadow-lg z-50 min-w-[120px]"
+                        style={{
+                          backgroundColor: THEME.BG_SECONDARY,
+                          border: `1px solid ${THEME.BORDER_DEFAULT}`,
+                        }}
+                      >
+                        <button
+                          onClick={handleExportPNG}
+                          className="w-full px-3 py-2 text-left text-xs flex items-center gap-2 transition-colors"
+                          style={{ color: THEME.TEXT_SECONDARY }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.backgroundColor = 'rgba(63, 63, 70, 0.5)';
+                            e.currentTarget.style.color = THEME.TEXT_PRIMARY;
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.backgroundColor = 'transparent';
+                            e.currentTarget.style.color = THEME.TEXT_SECONDARY;
+                          }}
+                        >
+                          <ImageIcon size={12} />
+                          导出为 PNG
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Fullscreen Button */}
+                  <Tooltip content={isEditorFullscreen ? '退出全屏' : '全屏编辑'} placement="bottom">
+                    <button
+                      onClick={() => setIsEditorFullscreen(!isEditorFullscreen)}
+                      className="w-7 h-7 rounded-md flex items-center justify-center transition-all duration-200 cursor-pointer"
+                      style={{ color: THEME.TEXT_DISABLED }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.color = THEME.TEXT_PRIMARY;
+                        e.currentTarget.style.backgroundColor = 'rgba(63, 63, 70, 0.5)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.color = THEME.TEXT_DISABLED;
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                      }}
+                    >
+                      {isEditorFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                    </button>
+                  </Tooltip>
                 </div>
-                <button
-                  onClick={() => setIsEditorFullscreen(!isEditorFullscreen)}
-                  className="p-1.5 rounded-lg transition-all duration-200 cursor-pointer"
-                  style={{ color: THEME.TEXT_DISABLED }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.color = THEME.TEXT_PRIMARY;
-                    e.currentTarget.style.backgroundColor = 'rgba(63, 63, 70, 0.5)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.color = THEME.TEXT_DISABLED;
-                    e.currentTarget.style.backgroundColor = 'transparent';
-                  }}
-                  title={isEditorFullscreen ? '退出全屏' : '全屏编辑'}
-                >
-                  {isEditorFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-                </button>
               </div>
             </div>
 
