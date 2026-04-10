@@ -25,9 +25,11 @@ import { SettingsView } from '@/modules/settings/SettingsView';
 import { EverythingView } from '@/modules/everything/EverythingView';
 import { JsonFormatterView } from '@/modules/json_formatter';
 import { ChatView } from '@/modules/chat/ChatView';
+import ScreenshotModule from '@/modules/screenshot';
 import { TopNavigationBar } from '@/components/TopNavigationBar';
 import { UpdateNotification } from '@/components/UpdateNotification';
 import { ChangelogDialog } from '@/components/ChangelogDialog';
+import { ToastContainer } from '@/components/Toast';
 import type { VersionCheckResult } from '@/components/ChangelogDialog';
 import type { ViewMode, MenuItem } from '@/types';
 
@@ -38,6 +40,7 @@ const MODULE_VIEW_MAP: Record<string, ViewMode> = {
   passwords: 'password',
   settings: 'settings',
   everything: 'everything',
+  screenshot: 'screenshot',
 };
 
 function App() {
@@ -235,6 +238,10 @@ function App() {
         title: 'AI 对话',
         menuItems: [...commonMenuItems],
       },
+      screenshot: {
+        title: '截图工具',
+        menuItems: [...commonMenuItems],
+      },
     };
     return configs;
   }, [always_on_top, commonMenuItems, handleToggleAlwaysOnTop, setActiveView]);
@@ -327,6 +334,8 @@ function App() {
         return <JsonFormatterView />;
       case 'chat':
         return <ChatView />;
+      case 'screenshot':
+        return <ScreenshotModule />;
       default:
         return <LauncherView />;
     }
@@ -367,6 +376,9 @@ function App() {
         onClose={() => setShowChangelog(false)}
         initialData={changelogData}
       />
+
+      {/* Toast Notifications */}
+      <ToastContainer />
     </div>
   );
 }
