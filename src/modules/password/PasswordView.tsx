@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Search, Plus, Copy, Eye, EyeOff, Lock, Trash2, X, Globe, Shield, LayoutGrid, MoreHorizontal, ExternalLink } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
+import { Tooltip } from '@/components/Tooltip';
 import { WINDOW_SIZE } from '../../constants/window';
 import { THEME } from '../../constants/theme';
 import { immediateResize } from '@/utils/tauri';
@@ -300,13 +301,14 @@ export function PasswordView() {
           {/* Header with Search */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-600/30">
             <h3 className="text-zinc-400 text-sm font-medium">密码管理</h3>
-            <button
-              onClick={() => setShowCreateModal(true)}
-              className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700/50 transition-all duration-200 cursor-pointer"
-              title="新增密码"
-            >
-              <Plus size={16} />
-            </button>
+            <Tooltip content="新增密码" placement="bottom">
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="p-1.5 rounded-lg text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700/50 transition-all duration-200 cursor-pointer"
+              >
+                <Plus size={16} />
+              </button>
+            </Tooltip>
           </div>
 
           {/* Search Bar */}
@@ -559,20 +561,22 @@ function PasswordDetail({
 
           {/* Actions */}
           <div className="flex items-center gap-2">
-            <button
-              onClick={onEdit}
-              className="p-2.5 rounded-xl bg-zinc-700/30 text-zinc-400 hover:bg-zinc-700/50 hover:text-zinc-200 transition-all duration-200 cursor-pointer"
-              title="编辑"
-            >
-              <MoreHorizontal size={18} />
-            </button>
-            <button
-              onClick={onDelete}
-              className="p-2.5 rounded-xl bg-zinc-700/30 text-zinc-400 hover:bg-red-500/20 hover:text-red-400 transition-all duration-200 cursor-pointer"
-              title="删除"
-            >
-              <Trash2 size={18} />
-            </button>
+            <Tooltip content="编辑" placement="bottom">
+              <button
+                onClick={onEdit}
+                className="p-2.5 rounded-xl bg-zinc-700/30 text-zinc-400 hover:bg-zinc-700/50 hover:text-zinc-200 transition-all duration-200 cursor-pointer"
+              >
+                <MoreHorizontal size={18} />
+              </button>
+            </Tooltip>
+            <Tooltip content="删除" placement="bottom">
+              <button
+                onClick={onDelete}
+                className="p-2.5 rounded-xl bg-zinc-700/30 text-zinc-400 hover:bg-red-500/20 hover:text-red-400 transition-all duration-200 cursor-pointer"
+              >
+                <Trash2 size={18} />
+              </button>
+            </Tooltip>
           </div>
         </div>
       </div>
@@ -589,13 +593,14 @@ function PasswordDetail({
               </div>
               <code className="flex-1 text-zinc-200 text-sm">{entry.username || '-'}</code>
               {entry.username && (
-                <button
-                  onClick={onCopyUsername}
-                  className="p-2 rounded-lg bg-zinc-700/30 text-zinc-400 hover:bg-zinc-700/50 hover:text-zinc-200 transition-all duration-200 cursor-pointer"
-                  title="复制用户名"
-                >
-                  <Copy size={16} />
-                </button>
+                <Tooltip content="复制用户名" placement="top">
+                  <button
+                    onClick={onCopyUsername}
+                    className="p-2 rounded-lg bg-zinc-700/30 text-zinc-400 hover:bg-zinc-700/50 hover:text-zinc-200 transition-all duration-200 cursor-pointer"
+                  >
+                    <Copy size={16} />
+                  </button>
+                </Tooltip>
               )}
             </div>
           </div>
@@ -610,21 +615,23 @@ function PasswordDetail({
               <code className="flex-1 text-zinc-200 text-sm font-mono">
                 {showPassword ? decryptedPassword || '••••••••' : '••••••••••••••••'}
               </code>
-              <button
-                onClick={onTogglePassword}
-                className="p-2 rounded-lg bg-zinc-700/30 text-zinc-400 hover:bg-zinc-700/50 hover:text-zinc-200 transition-all duration-200 cursor-pointer"
-                title={showPassword ? '隐藏密码' : '显示密码'}
-              >
-                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-              </button>
-              {showPassword && decryptedPassword && (
+              <Tooltip content={showPassword ? '隐藏密码' : '显示密码'} placement="top">
                 <button
-                  onClick={onCopyPassword}
+                  onClick={onTogglePassword}
                   className="p-2 rounded-lg bg-zinc-700/30 text-zinc-400 hover:bg-zinc-700/50 hover:text-zinc-200 transition-all duration-200 cursor-pointer"
-                  title="复制密码"
                 >
-                  <Copy size={16} />
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
+              </Tooltip>
+              {showPassword && decryptedPassword && (
+                <Tooltip content="复制密码" placement="top">
+                  <button
+                    onClick={onCopyPassword}
+                    className="p-2 rounded-lg bg-zinc-700/30 text-zinc-400 hover:bg-zinc-700/50 hover:text-zinc-200 transition-all duration-200 cursor-pointer"
+                  >
+                    <Copy size={16} />
+                  </button>
+                </Tooltip>
               )}
             </div>
           </div>
@@ -638,13 +645,14 @@ function PasswordDetail({
                   <Globe size={18} className="text-zinc-400" />
                 </div>
                 <code className="flex-1 text-zinc-200 text-sm truncate">{entry.url}</code>
-                <button
-                  onClick={onCopyUrl}
-                  className="p-2 rounded-lg bg-zinc-700/30 text-zinc-400 hover:bg-zinc-700/50 hover:text-zinc-200 transition-all duration-200 cursor-pointer"
-                  title="复制网址"
-                >
-                  <Copy size={16} />
-                </button>
+                <Tooltip content="复制网址" placement="top">
+                  <button
+                    onClick={onCopyUrl}
+                    className="p-2 rounded-lg bg-zinc-700/30 text-zinc-400 hover:bg-zinc-700/50 hover:text-zinc-200 transition-all duration-200 cursor-pointer"
+                  >
+                    <Copy size={16} />
+                  </button>
+                </Tooltip>
               </div>
             </div>
           )}

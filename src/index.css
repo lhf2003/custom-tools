@@ -55,6 +55,16 @@
   --app-shadow-md: 0 4px 24px rgba(0, 0, 0, 0.2);
   --app-shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.3);
   --app-shadow-xl: 0 25px 60px rgba(0, 0, 0, 0.6);
+  --app-shadow-tooltip: 0 4px 12px rgba(0, 0, 0, 0.2);
+
+  /* Tooltip 样式变量 */
+  --tooltip-bg: #3f3f46;
+  --tooltip-text: #d4d4d8;
+  --tooltip-border: rgba(82, 82, 91, 0.3);
+  --tooltip-radius: 5px;
+  --tooltip-padding: 4px 8px;
+  --tooltip-font-size: 12px;
+  --tooltip-backdrop: blur(8px);
 
   /* Scrollbar */
   --scrollbar-thumb: var(--app-bg-elevated);
@@ -206,6 +216,61 @@
     opacity: 1;
     pointer-events: auto;
     transform: scale(1);
+  }
+
+  /* ============================================
+     Global Tooltip Styles
+     全局统一的悬浮提示样式
+     ============================================ */
+  .tooltip-base {
+    background: var(--tooltip-bg);
+    color: var(--tooltip-text);
+    border: 1px solid var(--tooltip-border);
+    border-radius: var(--tooltip-radius);
+    padding: var(--tooltip-padding);
+    font-size: var(--tooltip-font-size);
+    box-shadow: var(--app-shadow-tooltip);
+    backdrop-filter: var(--tooltip-backdrop);
+    -webkit-backdrop-filter: var(--tooltip-backdrop);
+    white-space: nowrap;
+    z-index: 50;
+    pointer-events: none;
+  }
+
+  /* Tooltip arrow base */
+  .tooltip-arrow {
+    position: absolute;
+    width: 0;
+    height: 0;
+    border: 4px solid transparent;
+  }
+
+  .tooltip-arrow-top {
+    bottom: -8px;
+    left: 50%;
+    transform: translateX(-50%);
+    border-top-color: var(--tooltip-bg);
+  }
+
+  .tooltip-arrow-bottom {
+    top: -8px;
+    left: 50%;
+    transform: translateX(-50%);
+    border-bottom-color: var(--tooltip-bg);
+  }
+
+  .tooltip-arrow-left {
+    right: -8px;
+    top: 50%;
+    transform: translateY(-50%);
+    border-left-color: var(--tooltip-bg);
+  }
+
+  .tooltip-arrow-right {
+    left: -8px;
+    top: 50%;
+    transform: translateY(-50%);
+    border-right-color: var(--tooltip-bg);
   }
 }
 

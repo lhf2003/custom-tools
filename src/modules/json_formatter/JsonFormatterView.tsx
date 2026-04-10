@@ -3,6 +3,7 @@ import {
   Copy, Download, Check, AlignLeft, GitBranch,
   AlertCircle, ChevronsDownUp, ChevronsUpDown,
 } from 'lucide-react';
+import { Tooltip } from '@/components/Tooltip';
 import { useAppStore } from '@/stores/appStore';
 import { WINDOW_SIZE } from '../../constants/window';
 import { immediateResize } from '../../utils/tauri';
@@ -143,24 +144,26 @@ export function JsonFormatterView() {
         {displayMode === 'tree' && parsedJson !== null && (
           <>
             <div className="w-px h-4 bg-zinc-700" />
-            <button
-              onClick={handleExpandAll}
-              className="flex items-center gap-1 px-2 py-1 rounded text-xs text-zinc-400
-                         hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
-              title="展开全部"
-            >
-              <ChevronsUpDown className="w-3 h-3" />
-              展开全部
-            </button>
-            <button
-              onClick={handleCollapseAll}
-              className="flex items-center gap-1 px-2 py-1 rounded text-xs text-zinc-400
-                         hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
-              title="折叠全部"
-            >
-              <ChevronsDownUp className="w-3 h-3" />
-              折叠全部
-            </button>
+            <Tooltip content="展开全部" placement="bottom">
+              <button
+                onClick={handleExpandAll}
+                className="flex items-center gap-1 px-2 py-1 rounded text-xs text-zinc-400
+                           hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+              >
+                <ChevronsUpDown className="w-3 h-3" />
+                展开全部
+              </button>
+            </Tooltip>
+            <Tooltip content="折叠全部" placement="bottom">
+              <button
+                onClick={handleCollapseAll}
+                className="flex items-center gap-1 px-2 py-1 rounded text-xs text-zinc-400
+                           hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+              >
+                <ChevronsDownUp className="w-3 h-3" />
+                折叠全部
+              </button>
+            </Tooltip>
           </>
         )}
 

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { useToastStore } from '@/stores/toastStore';
+import { Tooltip } from '@/components/Tooltip';
 import {
   Check,
   Copy,
@@ -116,7 +117,20 @@ export default function ScreenshotOverlay() {
 
         // 获取所有窗口
         const windowList = await invoke<WindowBounds[]>('get_all_windows');
-        console.log('[ScreenshotOverlay] Got windows:', windowList.length);
+        console.log('[ScreenshotOverlay] Got windows:', windowList.length, windowList.slice(0, 3)); // 只打印前3个避免刷屏
+
+        // 检查窗口坐标范围
+        if (windowList.length > 0) {
+          const firstWindow = windowList[0];
+          console.log('[ScreenshotOverlay] First window coords:', {
+            x: firstWindow.x,
+            y: firstWindow.y,
+            w: firstWindow.width,
+            h: firstWindow.height,
+            title: firstWindow.title,
+          });
+        }
+
         setWindows(windowList);
       } catch (err) {
         console.error('[ScreenshotOverlay] Failed to init overlay:', err);
@@ -213,7 +227,10 @@ export default function ScreenshotOverlay() {
       // Enter 键确认截图
       if (e.key === 'Enter' && state.selectedRegion && !state.isOcrProcessing) {
         e.preventDefault();
-        captureSelection();
+        e.stopPropagation();
+        console.log('[ScreenshotOverlay] Enter pressed, calling captureSelection');
+        // 使用 setTimeout 避免在事件处理中直接调用异步函数可能的问题
+        setTimeout(() => captureSelection(), 0);
         return;
       }
 
@@ -237,10 +254,17 @@ export default function ScreenshotOverlay() {
     document.addEventListener('keydown', handleKeyDown, true);
     console.log('[ScreenshotOverlay] Keyboard listeners attached');
 
+    // 添加全局点击调试
+    const handleClick = (e: MouseEvent) => {
+      console.log('[ScreenshotOverlay] Global click at:', e.clientX, e.clientY, 'selectedRegion:', selectedRegion);
+    };
+    window.addEventListener('click', handleClick);
+
     return () => {
       console.log('[ScreenshotOverlay] Removing keyboard listeners');
       window.removeEventListener('keydown', handleKeyDown, true);
       document.removeEventListener('keydown', handleKeyDown, true);
+      window.removeEventListener('click', handleClick);
     };
   }, [closeOverlay]);
 
@@ -418,14 +442,23 @@ export default function ScreenshotOverlay() {
     const pointX = e.clientX;
     const pointY = e.clientY;
 
-    const window = windows.find((w) =>
-      pointX >= w.x &&
-      pointX < w.x + w.width &&
-      pointY >= w.y &&
-      pointY < w.y + w.height
-    );
+    // 调试日志：每100ms输出一次，避免刷屏
+    if (Math.random() < 0.05) {
+      console.log('[ScreenshotOverlay] Mouse move:', { pointX, pointY, windowsCount: windows.length });
+    }
 
-    setHoveredWindow(window || null);
+    const window = windows.find((w) => {
+      const hit = pointX >= w.x && pointX < w.x + w.width && pointY >= w.y && pointY < w.y + w.height;
+      if (hit) {
+        console.log('[ScreenshotOverlay] Window hit:', w.title, { x: w.x, y: w.y, w: w.width, h: w.height });
+      }
+      return hit;
+    });
+
+    if (window !== hoveredWindow) {
+      console.log('[ScreenshotOverlay] Hovered window changed:', window?.title || 'none');
+      setHoveredWindow(window || null);
+    }
   }, [windows, selectedRegion, isDragging, dragStart, editMode, isDrawing, currentElement]);
 
   // 鼠标按下：开始拖拽或绘制
@@ -539,9 +572,21 @@ export default function ScreenshotOverlay() {
 
   // 执行截图
   const captureSelection = async () => {
-    if (!selectedRegion) return;
+    console.log('[ScreenshotOverlay] captureSelection called, selectedRegion:', selectedRegion);
+
+    if (!selectedRegion) {
+      console.log('[ScreenshotOverlay] No selected region, aborting capture');
+      return;
+    }
 
     try {
+      console.log('[ScreenshotOverlay] Calling capture_region with:', {
+        x: selectedRegion.x,
+        y: selectedRegion.y,
+        width: selectedRegion.width,
+        height: selectedRegion.height,
+      });
+
       const result = await invoke<{
         filename: string;
         filepath: string;
@@ -554,8 +599,12 @@ export default function ScreenshotOverlay() {
         height: selectedRegion.height,
       });
 
+      console.log('[ScreenshotOverlay] capture_region result:', result);
+
       // 复制到剪贴板
+      console.log('[ScreenshotOverlay] Copying to clipboard:', result.filepath);
       await invoke('copy_file_to_clipboard', { filepath: result.filepath });
+      console.log('[ScreenshotOverlay] Clipboard copy successful');
 
       // 显示成功提示
       addToast({
@@ -568,7 +617,7 @@ export default function ScreenshotOverlay() {
       // 关闭遮罩
       await closeOverlay();
     } catch (error) {
-      console.error('Failed to capture screenshot:', error);
+      console.error('[ScreenshotOverlay] Failed to capture screenshot:', error);
       addToast({
         type: 'error',
         title: '截图失败',
@@ -663,40 +712,98 @@ export default function ScreenshotOverlay() {
 
   // 计算工具栏位置
   const getToolbarPosition = () => {
-    console.log('[ScreenshotOverlay] Calculating toolbar position, selectedRegion:', selectedRegion);
-    if (!selectedRegion) return null;
+    if (!selectedRegion) {
+      console.log('[ScreenshotOverlay] getToolbarPosition: no selectedRegion');
+      return null;
+    }
+
+    // 截图遮罩窗口是全屏模式，直接使用选区的屏幕坐标作为视口坐标
+    // 因为全屏窗口的视口就是整个屏幕
+    const viewportX = selectedRegion.x;
+    const viewportY = selectedRegion.y;
 
     const toolbarWidth = 320; // 估算工具栏宽度
     const toolbarHeight = 60; // 估算工具栏高度
     const padding = 16;
 
-    let left = selectedRegion.x + selectedRegion.width / 2;
-    let top = selectedRegion.y + selectedRegion.height + padding;
+    // 工具栏水平居中于选区
+    let left = viewportX + selectedRegion.width / 2;
+    let top = viewportY + selectedRegion.height + padding;
+
+    // 获取实际屏幕尺寸（考虑缩放因子）
+    const screenWidth = window.innerWidth;
+    const screenHeight = window.innerHeight;
+
+    console.log('[ScreenshotOverlay] getToolbarPosition: viewportX=', viewportX, 'viewportY=', viewportY, 'screenW=', screenWidth, 'screenH=', screenHeight);
 
     // 如果工具栏会超出屏幕底部，显示在选区上方
-    if (top + toolbarHeight > window.innerHeight) {
-      top = selectedRegion.y - toolbarHeight - padding;
+    if (top + toolbarHeight > screenHeight) {
+      top = viewportY - toolbarHeight - padding;
     }
 
-    // 确保水平居中不超出屏幕
+    // 确保水平居中不超出屏幕边界
     const minLeft = toolbarWidth / 2 + padding;
-    const maxLeft = window.innerWidth - toolbarWidth / 2 - padding;
+    const maxLeft = screenWidth - toolbarWidth / 2 - padding;
     left = Math.max(minLeft, Math.min(left, maxLeft));
 
-    return { left, top };
+    // 确保工具栏不会超出屏幕顶部或底部
+    top = Math.max(padding, Math.min(top, screenHeight - toolbarHeight - padding));
+
+    const result = { left, top };
+    console.log('[ScreenshotOverlay] getToolbarPosition: result=', result);
+    return result;
   };
 
   const toolbarPos = getToolbarPosition();
 
   // 工具栏按钮
   const toolbarButtons = [
-    { id: 'save', icon: Check, label: '保存', shortcut: 'Enter', onClick: captureSelection, primary: true },
-    { id: 'copy', icon: Copy, label: '复制', shortcut: 'Ctrl+C', onClick: copyToClipboard },
+    {
+      id: 'save',
+      icon: Check,
+      label: '保存',
+      shortcut: 'Enter',
+      onClick: () => {
+        console.log('[ScreenshotOverlay] Save button clicked, selectedRegion:', selectedRegion);
+        captureSelection();
+      },
+      primary: true
+    },
+    {
+      id: 'copy',
+      icon: Copy,
+      label: '复制',
+      shortcut: 'Ctrl+C',
+      onClick: () => {
+        console.log('[ScreenshotOverlay] Copy button clicked');
+        copyToClipboard();
+      }
+    },
     { id: 'rect', icon: Square, label: '矩形', shortcut: '', onClick: () => setEditMode(editMode === 'rect' ? 'none' : 'rect'), active: editMode === 'rect' },
     { id: 'arrow', icon: ArrowRight, label: '箭头', shortcut: '', onClick: () => setEditMode(editMode === 'arrow' ? 'none' : 'arrow'), active: editMode === 'arrow' },
     { id: 'text', icon: Type, label: '文字', shortcut: '', onClick: () => setEditMode(editMode === 'text' ? 'none' : 'text'), active: editMode === 'text' },
-    { id: 'ocr', icon: Sparkles, label: 'OCR', shortcut: '', onClick: performOcr, loading: isOcrProcessing },
-    { id: 'cancel', icon: X, label: '取消', shortcut: 'ESC', onClick: () => { setSelectedRegion(null); setDrawElements([]); } },
+    {
+      id: 'ocr',
+      icon: Sparkles,
+      label: 'OCR',
+      shortcut: '',
+      onClick: () => {
+        console.log('[ScreenshotOverlay] OCR button clicked');
+        performOcr();
+      },
+      loading: isOcrProcessing
+    },
+    {
+      id: 'cancel',
+      icon: X,
+      label: '取消',
+      shortcut: 'ESC',
+      onClick: () => {
+        console.log('[ScreenshotOverlay] Cancel button clicked');
+        setSelectedRegion(null);
+        setDrawElements([]);
+      }
+    },
   ];
 
   return (
@@ -745,31 +852,42 @@ export default function ScreenshotOverlay() {
             transform: 'translateX(-50%)',
           }}
         >
-          {toolbarButtons.map((button) => (
-            <button
-              key={button.id}
-              onClick={(e) => {
-                e.stopPropagation();
-                button.onClick();
-              }}
-              disabled={button.loading}
-              className={`relative flex flex-col items-center gap-0.5 px-3 py-1.5 rounded transition-all ${
-                button.primary
-                  ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                  : button.active
-                  ? 'bg-orange-500/30 text-orange-400 border border-orange-500/50'
-                  : 'hover:bg-gray-700 text-gray-300'
-              } disabled:opacity-50 disabled:cursor-not-allowed`}
-              title={`${button.label} ${button.shortcut ? `(${button.shortcut})` : ''}`}
-            >
-              {button.loading ? (
-                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              ) : (
-                <button.icon className="w-4 h-4" />
-              )}
-              <span className="text-[10px]">{button.label}</span>
-            </button>
-          ))}
+          {toolbarButtons.map((button) => {
+            const btnContent = (
+              <button
+                onClick={(e) => {
+                  console.log('[ScreenshotOverlay] Button onClick triggered:', button.id);
+                  e.stopPropagation();
+                  e.preventDefault();
+                  button.onClick();
+                }}
+                onMouseDown={(e) => {
+                  // 阻止鼠标按下事件冒泡，避免触发画布的鼠标事件
+                  e.stopPropagation();
+                }}
+                disabled={button.loading}
+                className={`relative flex flex-col items-center gap-0.5 px-3 py-1.5 rounded transition-all ${
+                  button.primary
+                    ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                    : button.active
+                    ? 'bg-orange-500/30 text-orange-400 border border-orange-500/50'
+                    : 'hover:bg-gray-700 text-gray-300'
+                } disabled:opacity-50 disabled:cursor-not-allowed`}
+              >
+                {button.loading ? (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <button.icon className="w-4 h-4" />
+                )}
+                <span className="text-[10px]">{button.label}</span>
+              </button>
+            );
+            return (
+              <Tooltip key={button.id} content={`${button.label} ${button.shortcut ? `(${button.shortcut})` : ''}`} placement="top">
+                {btnContent}
+              </Tooltip>
+            );
+          })}
         </div>
       )}
 

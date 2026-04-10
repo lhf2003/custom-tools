@@ -19,6 +19,7 @@ import {
   Languages,
   Brain,
 } from 'lucide-react';
+import { Tooltip } from '@/components/Tooltip';
 import { useLlmProviderStore, type Provider, type ProviderType, type Model, type Scene, type SceneConfig } from '@/stores/llmProviderStore';
 
 // Custom Select Component
@@ -528,37 +529,40 @@ export function ModelSettings() {
 
                     {/* Actions */}
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleStartEdit(provider);
-                        }}
-                        className="p-1.5 rounded-lg text-white/40 hover:text-white/70 hover:bg-white/10 transition-colors cursor-pointer"
-                        title="编辑"
-                      >
-                        <Settings size={14} />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleTestConnection(provider.id);
-                        }}
-                        disabled={testingProvider === provider.id}
-                        className="p-1.5 rounded-lg text-white/40 hover:text-green-400 hover:bg-green-500/10 transition-colors cursor-pointer disabled:opacity-50"
-                        title="测试连接"
-                      >
-                        <TestTube size={14} className={testingProvider === provider.id ? 'animate-pulse' : ''} />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteProvider(provider.id);
-                        }}
-                        className="p-1.5 rounded-lg text-white/40 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
-                        title="删除"
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                      <Tooltip content="编辑" placement="top">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleStartEdit(provider);
+                          }}
+                          className="p-1.5 rounded-lg text-white/40 hover:text-white/70 hover:bg-white/10 transition-colors cursor-pointer"
+                        >
+                          <Settings size={14} />
+                        </button>
+                      </Tooltip>
+                      <Tooltip content="测试连接" placement="top">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleTestConnection(provider.id);
+                          }}
+                          disabled={testingProvider === provider.id}
+                          className="p-1.5 rounded-lg text-white/40 hover:text-green-400 hover:bg-green-500/10 transition-colors cursor-pointer disabled:opacity-50"
+                        >
+                          <TestTube size={14} className={testingProvider === provider.id ? 'animate-pulse' : ''} />
+                        </button>
+                      </Tooltip>
+                      <Tooltip content="删除" placement="top">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteProvider(provider.id);
+                          }}
+                          className="p-1.5 rounded-lg text-white/40 hover:text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </Tooltip>
                     </div>
                   </div>
 
@@ -823,19 +827,20 @@ export function ModelSettings() {
                     />
 
                     {/* Thinking Mode Toggle */}
-                    <button
-                      onClick={() => setSceneThinkingMode(scene, !config?.thinking_mode)}
-                      disabled={!config?.provider_id}
-                      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs border transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${
-                        config?.thinking_mode
-                          ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                          : 'bg-white/5 text-white/40 border-white/10 hover:bg-white/10'
-                      }`}
-                      title={config?.thinking_mode ? '思考模式已开启' : '思考模式已关闭'}
-                    >
-                      <Brain size={14} />
-                      <span>思考</span>
-                    </button>
+                    <Tooltip content={config?.thinking_mode ? '思考模式已开启' : '思考模式已关闭'} placement="top">
+                      <button
+                        onClick={() => setSceneThinkingMode(scene, !config?.thinking_mode)}
+                        disabled={!config?.provider_id}
+                        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs border transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${
+                          config?.thinking_mode
+                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                            : 'bg-white/5 text-white/40 border-white/10 hover:bg-white/10'
+                        }`}
+                      >
+                        <Brain size={14} />
+                        <span>思考</span>
+                      </button>
+                    </Tooltip>
                   </div>
                 </div>
               );

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Keyboard, RotateCcw, AlertCircle } from 'lucide-react';
+import { Tooltip } from '@/components/Tooltip';
 import { useSettingsStore, type ShortcutConfig } from '@/stores/settingsStore';
 import { KeyRecorder } from '../components/KeyRecorder';
 
@@ -38,13 +39,15 @@ export function ShortcutsSettings() {
             <p className="text-white/40 text-xs">自定义您的快捷操作</p>
           </div>
         </div>
-        <button
-          onClick={handleResetAll}
-          className="px-4 py-2 rounded-lg bg-white/5 text-white/60 text-sm hover:bg-white/10 hover:text-white transition-all duration-200 flex items-center gap-2 cursor-pointer border border-white/10"
-        >
-          <RotateCcw size={14} />
-          恢复默认
-        </button>
+        <Tooltip content="恢复默认" placement="bottom">
+          <button
+            onClick={handleResetAll}
+            className="px-4 py-2 rounded-lg bg-white/5 text-white/60 text-sm hover:bg-white/10 hover:text-white transition-all duration-200 flex items-center gap-2 cursor-pointer border border-white/10"
+          >
+            <RotateCcw size={14} />
+            恢复默认
+          </button>
+        </Tooltip>
       </div>
 
       {shortcutsLoading ? (
@@ -175,13 +178,14 @@ function ShortcutItem({
           {effectiveKeys}
         </kbd>
         {isCustom && (
-          <button
-            onClick={handleReset}
-            className="p-2 rounded-lg text-white/30 hover:text-amber-400 hover:bg-amber-400/10 transition-all cursor-pointer"
-            title="恢复默认"
-          >
-            <RotateCcw size={14} />
-          </button>
+          <Tooltip content="恢复默认" placement="top">
+            <button
+              onClick={handleReset}
+              className="p-2 rounded-lg text-white/30 hover:text-amber-400 hover:bg-amber-400/10 transition-all cursor-pointer"
+            >
+              <RotateCcw size={14} />
+            </button>
+          </Tooltip>
         )}
       </div>
     </div>

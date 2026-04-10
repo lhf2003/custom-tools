@@ -22,6 +22,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { GripVertical, ChevronRight, ChevronDown, Folder, FileText } from 'lucide-react';
+import { Tooltip } from '@/components/Tooltip';
 import type { NoteItemData } from '../types';
 import { ContextMenu, MenuIcons, type MenuItem } from './ContextMenu';
 
@@ -99,21 +100,22 @@ function SortableTreeItem({
         }}
       >
         {/* Drag Handle */}
-        <button
-          {...attributes}
-          {...listeners}
-          className="cursor-grab active:cursor-grabbing py-0.5 px-0.5 rounded inline-flex items-center touch-none"
-          style={{ color: '#52525b' }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = 'rgba(82, 82, 91, 0.3)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = 'transparent';
-          }}
-          title="拖拽移动"
-        >
-          <GripVertical size={14} />
-        </button>
+        <Tooltip content="拖拽移动" placement="right">
+          <button
+            {...attributes}
+            {...listeners}
+            className="cursor-grab active:cursor-grabbing py-0.5 px-0.5 rounded inline-flex items-center touch-none"
+            style={{ color: '#52525b' }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = 'rgba(82, 82, 91, 0.3)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent';
+            }}
+          >
+            <GripVertical size={14} />
+          </button>
+        </Tooltip>
 
         {/* Content Area */}
         <div

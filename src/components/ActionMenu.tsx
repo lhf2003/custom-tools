@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { MoreHorizontal } from 'lucide-react';
+import { Tooltip } from './Tooltip';
 import type { MenuItem } from '@/types';
 
 interface ActionMenuProps {
@@ -52,18 +53,19 @@ export function ActionMenu({ items }: ActionMenuProps) {
 
   return (
     <div className="relative z-50">
-      <button
-        ref={buttonRef}
-        onClick={() => setIsOpen(!isOpen)}
-        className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-200 ${
-          isOpen
-            ? 'bg-app-bg-pressed text-app-text-primary'
-            : 'text-app-text-tertiary hover:text-app-text-primary hover:bg-app-bg-elevated/50'
-        }`}
-        title="更多操作"
-      >
-        <MoreHorizontal size={18} />
-      </button>
+      <Tooltip content="更多操作" placement="bottom">
+        <button
+          ref={buttonRef}
+          onClick={() => setIsOpen(!isOpen)}
+          className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-200 ${
+            isOpen
+              ? 'bg-app-bg-pressed text-app-text-primary'
+              : 'text-app-text-tertiary hover:text-app-text-primary hover:bg-app-bg-elevated/50'
+          }`}
+        >
+          <MoreHorizontal size={18} />
+        </button>
+      </Tooltip>
 
       {isOpen && (
         <div

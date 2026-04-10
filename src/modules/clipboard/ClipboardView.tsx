@@ -17,6 +17,7 @@ import {
 import { invoke } from '@tauri-apps/api/core';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { Tooltip } from '@/components/Tooltip';
 import { THEME } from '../../constants/theme';
 import { WINDOW_SIZE } from '../../constants/window';
 import { immediateResize } from '../../utils/tauri';
@@ -339,19 +340,19 @@ export function ClipboardView() {
         {tabs.map((tab) => {
           const Icon = tab.icon;
           return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`w-12 h-12 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all duration-200 cursor-pointer ${
-                activeTab === tab.id
-                  ? 'bg-app-bg-pressed/50 text-app-text-primary'
-                  : 'text-app-text-disabled hover:text-app-text-secondary hover:bg-app-bg-elevated/30'
-              }`}
-              title={tab.label}
-            >
-              <Icon size={18} />
-              <span className="text-[10px]">{tab.label}</span>
-            </button>
+            <Tooltip key={tab.id} content={tab.label} placement="right">
+              <button
+                onClick={() => setActiveTab(tab.id)}
+                className={`w-12 h-12 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all duration-200 cursor-pointer ${
+                  activeTab === tab.id
+                    ? 'bg-app-bg-pressed/50 text-app-text-primary'
+                    : 'text-app-text-disabled hover:text-app-text-secondary hover:bg-app-bg-elevated/30'
+                }`}
+              >
+                <Icon size={18} />
+                <span className="text-[10px]">{tab.label}</span>
+              </button>
+            </Tooltip>
           );
         })}
       </aside>
@@ -835,7 +836,7 @@ const ClipboardItem = forwardRef<HTMLDivElement, ClipboardItemProps>(function Cl
                 e.stopPropagation();
                 onCopy();
               }}
-              title="复制"
+              tooltip="复制"
             />
             <ActionButton
               icon={Star}
@@ -846,7 +847,7 @@ const ClipboardItem = forwardRef<HTMLDivElement, ClipboardItemProps>(function Cl
                 onToggleFavorite();
               }}
               fill={item.is_favorite}
-              title={item.is_favorite ? '取消收藏' : '收藏'}
+              tooltip={item.is_favorite ? '取消收藏' : '收藏'}
             />
             <ActionButton
               icon={Trash2}
@@ -854,7 +855,7 @@ const ClipboardItem = forwardRef<HTMLDivElement, ClipboardItemProps>(function Cl
                 e.stopPropagation();
                 onDelete();
               }}
-              title="删除"
+              tooltip="删除"
             />
           </div>
           <span className="text-app-text-disabled text-xs">
@@ -866,16 +867,17 @@ const ClipboardItem = forwardRef<HTMLDivElement, ClipboardItemProps>(function Cl
       {/* Expand/Collapse Arrow for long text */}
       {isLongText && (
         <div className="flex justify-center mt-2">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setIsExpanded(!isExpanded);
-            }}
-            className="p-1 rounded-md text-app-text-disabled hover:text-app-text-secondary hover:bg-app-bg-pressed/50 transition-colors cursor-pointer"
-            title={isExpanded ? '收起' : '展开'}
-          >
-            {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-          </button>
+          <Tooltip content={isExpanded ? '收起' : '展开'} placement="bottom">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsExpanded(!isExpanded);
+              }}
+              className="p-1 rounded-md text-app-text-disabled hover:text-app-text-secondary hover:bg-app-bg-pressed/50 transition-colors cursor-pointer"
+            >
+              {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            </button>
+          </Tooltip>
         </div>
       )}
     </div>
@@ -889,7 +891,7 @@ interface ActionButtonProps {
   active?: boolean;
   activeColor?: string;
   fill?: boolean;
-  title?: string;
+  tooltip?: string;
 }
 
 function ActionButton({
@@ -898,12 +900,11 @@ function ActionButton({
   active,
   activeColor = 'text-app-text-primary',
   fill,
-  title,
+  tooltip,
 }: ActionButtonProps) {
-  return (
+  const button = (
     <button
       onClick={onClick}
-      title={title}
       className={`p-1.5 rounded-md transition-all duration-200 cursor-pointer ${
         active
           ? activeColor
@@ -913,6 +914,16 @@ function ActionButton({
       <Icon size={15} fill={fill ? 'currentColor' : 'none'} />
     </button>
   );
+
+  if (tooltip) {
+    return (
+      <Tooltip content={tooltip} placement="top">
+        {button}
+      </Tooltip>
+    );
+  }
+
+  return button;
 }
 
 // Image Preview Modal

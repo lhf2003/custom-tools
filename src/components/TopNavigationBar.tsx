@@ -1,6 +1,7 @@
 // 移除了 @tauri-apps/api/window，因为我们直接交给系统底层处理
 import { ArrowLeft } from 'lucide-react';
 import { ActionMenu } from './ActionMenu';
+import { Tooltip } from './Tooltip';
 import type { MenuItem } from '@/types';
 
 interface TopNavigationBarProps {
@@ -25,13 +26,14 @@ export function TopNavigationBar({
       >
         {/* Left: Back button - no-drag 确保按钮可点击 */}
         <div className="flex items-stretch self-stretch" style={{ 'app-region': 'no-drag' } as React.CSSProperties}>
-          <button
-              onClick={onBack}
-              className="flex items-center justify-center w-10 self-stretch text-app-text-secondary hover:text-app-text-primary hover:bg-app-bg-elevated/50 transition-all duration-200 cursor-pointer"
-              title="返回主页 (Esc)"
-          >
-            <ArrowLeft size={16} />
-          </button>
+          <Tooltip content="返回主页 (Esc)" placement="bottom">
+            <button
+                onClick={onBack}
+                className="flex items-center justify-center w-10 self-stretch text-app-text-secondary hover:text-app-text-primary hover:bg-app-bg-elevated/50 transition-all duration-200 cursor-pointer"
+            >
+              <ArrowLeft size={16} />
+            </button>
+          </Tooltip>
         </div>
 
         {/* Center: Flexible spacer for drag region */}
