@@ -967,7 +967,7 @@ function ImagePreviewModal({ src, onClose }: ImagePreviewModalProps) {
 }
 
 // Utility function
-function truncateContent(content: string, maxLength: number = 200): string {
+function truncateContent(content: string, maxLength: number = 90): string {
   if (content.length <= maxLength) return content;
   return content.slice(0, maxLength) + '...';
 }
