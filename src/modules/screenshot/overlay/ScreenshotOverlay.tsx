@@ -72,6 +72,9 @@ export default function ScreenshotOverlay() {
   const [ocrResult, setOcrResult] = useState<string>('');
   const [showOcrResult, setShowOcrResult] = useState(false);
 
+  // 正中央提示（截图成功/复制成功）
+  const [centerTip, setCenterTip] = useState<{ text: string; icon: 'success' | 'copy' } | null>(null);
+
   const { addToast } = useToastStore();
 
   // 重置状态（窗口复用时调用）
@@ -94,6 +97,7 @@ export default function ScreenshotOverlay() {
     setIsOcrProcessing(false);
     setOcrResult('');
     setShowOcrResult(false);
+    setCenterTip(null);
   }, []);
 
   // 仅隐藏遮罩窗口（不清理背景图，供保存后复用窗口使用）
@@ -614,40 +618,33 @@ export default function ScreenshotOverlay() {
     const bgPath = backgroundPathRef.current;
     const offset = monitorOffset;
 
-    // 立即隐藏遮罩并显示成功提示，提升感知性能
-    hideOverlay();
-    addToast({
-      type: 'success',
-      title: '截图已保存',
-      duration: 3000,
-    });
+    // 先在遮罩窗口正中央显示成功提示，再延迟隐藏窗口
+    setCenterTip({ text: '截图已保存', icon: 'success' });
 
-    try {
-      await invoke<{
-        filename: string;
-        filepath: string;
-        width: number;
-        height: number;
-      }>('save_and_copy_screenshot', {
-        x: region.x,
-        y: region.y,
-        width: region.width,
-        height: region.height,
-        backgroundImagePath: bgPath || undefined,
-        monitorX: offset.x,
-        monitorY: offset.y,
-        cleanupBackground: !!bgPath,
-      });
-    } catch (error) {
-      console.error('[ScreenshotOverlay] Failed to save screenshot:', error);
-      addToast({
-        type: 'error',
-        title: '截图保存失败',
-        message: String(error),
-        duration: 5000,
-      });
-    }
-  }, [addToast, hideOverlay, monitorOffset]);
+    setTimeout(async () => {
+      hideOverlay();
+
+      try {
+        await invoke<{
+          filename: string;
+          filepath: string;
+          width: number;
+          height: number;
+        }>('save_and_copy_screenshot', {
+          x: region.x,
+          y: region.y,
+          width: region.width,
+          height: region.height,
+          backgroundImagePath: bgPath || undefined,
+          monitorX: offset.x,
+          monitorY: offset.y,
+          cleanupBackground: !!bgPath,
+        });
+      } catch (error) {
+        console.error('[ScreenshotOverlay] Failed to save screenshot:', error);
+      }
+    }, 500);
+  }, [hideOverlay, monitorOffset]);
 
   // 复制到剪贴板（使用合并命令，减少 IPC 往返）
   const copyToClipboard = useCallback(async () => {
@@ -657,39 +654,33 @@ export default function ScreenshotOverlay() {
     const bgPath = backgroundPathRef.current;
     const offset = monitorOffset;
 
-    hideOverlay();
-    addToast({
-      type: 'success',
-      title: '已复制到剪贴板',
-      duration: 2000,
-    });
+    // 先在遮罩窗口正中央显示成功提示，再延迟隐藏窗口
+    setCenterTip({ text: '已复制到剪贴板', icon: 'copy' });
 
-    try {
-      await invoke<{
-        filename: string;
-        filepath: string;
-        width: number;
-        height: number;
-      }>('save_and_copy_screenshot', {
-        x: region.x,
-        y: region.y,
-        width: region.width,
-        height: region.height,
-        backgroundImagePath: bgPath || undefined,
-        monitorX: offset.x,
-        monitorY: offset.y,
-        cleanupBackground: !!bgPath,
-      });
-    } catch (error) {
-      console.error('Failed to copy screenshot:', error);
-      addToast({
-        type: 'error',
-        title: '复制失败',
-        message: String(error),
-        duration: 5000,
-      });
-    }
-  }, [addToast, hideOverlay, monitorOffset]);
+    setTimeout(async () => {
+      hideOverlay();
+
+      try {
+        await invoke<{
+          filename: string;
+          filepath: string;
+          width: number;
+          height: number;
+        }>('save_and_copy_screenshot', {
+          x: region.x,
+          y: region.y,
+          width: region.width,
+          height: region.height,
+          backgroundImagePath: bgPath || undefined,
+          monitorX: offset.x,
+          monitorY: offset.y,
+          cleanupBackground: !!bgPath,
+        });
+      } catch (error) {
+        console.error('Failed to copy screenshot:', error);
+      }
+    }, 500);
+  }, [hideOverlay, monitorOffset]);
 
   // OCR 识别（使用 stateRef 避免 stale closure）
   const performOcr = useCallback(async () => {
@@ -971,6 +962,20 @@ export default function ScreenshotOverlay() {
       {!selectedRegion && editMode === 'none' && (
         <div className="absolute bottom-8 left-1/2 -translate-x-1/2 text-white/70 text-sm pointer-events-none">
           点击窗口截图，或拖拽选择区域，按 ESC 退出
+        </div>
+      )}
+
+      {/* 正中央成功提示 */}
+      {centerTip && (
+        <div className="fixed inset-0 flex items-center justify-center pointer-events-none z-50">
+          <div className="flex flex-col items-center gap-3 px-8 py-5 bg-gray-900/90 backdrop-blur rounded-2xl shadow-2xl border border-gray-700 animate-in zoom-in fade-in duration-200">
+            {centerTip.icon === 'success' ? (
+              <Check className="w-10 h-10 text-green-400" />
+            ) : (
+              <Copy className="w-10 h-10 text-blue-400" />
+            )}
+            <span className="text-white text-lg font-medium">{centerTip.text}</span>
+          </div>
         </div>
       )}
     </div>
