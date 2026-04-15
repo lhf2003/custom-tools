@@ -1,7 +1,7 @@
 {
   "name": "flowhub",
   "private": true,
-  "version": "0.1.6",
+  "version": "0.3.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -34,10 +34,14 @@
     "@uiw/react-md-editor": "^4.0.11",
     "date-fns": "^3.0.0",
     "fuse.js": "^7.0.0",
+    "html-to-image": "^1.11.13",
+    "html2canvas": "^1.4.1",
+    "konva": "^9.2.0",
     "lucide-react": "^0.300.0",
     "marked": "^17.0.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-konva": "^18.2.10",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "vditor": "^3.11.2",

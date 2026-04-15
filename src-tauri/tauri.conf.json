@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "FlowHub",
-  "version": "0.1.6",
+  "version": "0.3.3",
   "identifier": "com.flowhub.app",
   "build": {
     "frontendDist": "../dist",
@@ -27,6 +27,21 @@
         "alwaysOnTop": false,
         "skipTaskbar": true,
         "shadow": false
+      },
+      {
+        "label": "screenshot-overlay",
+        "title": "截图工具",
+        "url": "/screenshot-overlay.html",
+        "width": 800,
+        "height": 600,
+        "visible": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "shadow": false,
+        "focus": true,
+        "resizable": false
       }
     ],
     "withGlobalTauri": true,

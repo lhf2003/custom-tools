@@ -57,18 +57,12 @@ jobs:
           # 按行分割，过滤空行
           $lines = $fullMsg -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
 
-          # 提取类型（第一行如果是 feat/fix/refactor 等）
+          # 所有非空行都作为 changelog 条目
           $tagType = 'feat'
           $items = [System.Collections.Generic.List[string]]::new()
 
-          for ($i = 0; $i -lt $lines.Count; $i++) {
-            $line = $lines[$i]
-            if ($i -eq 0 -and $line -match '^(feat|fix|refactor|docs|chore|perf|test|ci|build)$') {
-              $tagType = $line
-            } else {
-              # 其他所有非空行都作为 changelog 条目
-              $items.Add($line)
-            }
+          foreach ($line in $lines) {
+            $items.Add($line)
           }
 
           # 1. 更新 AboutSettings.tsx 版本号

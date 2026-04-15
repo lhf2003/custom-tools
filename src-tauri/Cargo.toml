@@ -1,6 +1,6 @@
 [package]
 name = "flowhub"
-version = "0.1.6"
+version = "0.3.3"
 description = "A Windows productivity launcher with fuzzy search, clipboard, password manager, notes, and AI chat"
 authors = ["custom"]
 license = "MIT"
@@ -39,11 +39,14 @@ rand = "0.8"
 base64 = "0.22"
 nucleo = "0.5"
 image = { version = "0.25", default-features = false, features = ["png", "bmp"] }
+tauri-plugin-screenshots = "2.0"
+xcap = "0.9"
 lru = "0.12"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 notify = { version = "6.1", default-features = false, features = ["macos_kqueue"] }
 chrono = "0.4"
 open = "5.0"
+uuid = { version = "1.7", features = ["v4", "serde"] }
 window-vibrancy = "0.7.1"
 reqwest = { version = "0.12", features = ["json", "stream"] }
 futures-util = "0.3"
