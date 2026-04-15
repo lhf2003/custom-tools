@@ -965,16 +965,16 @@ export default function ScreenshotOverlay() {
         </div>
       )}
 
-      {/* 正中央成功提示 */}
+      {/* 正中央成功提示（微信风格） */}
       {centerTip && (
         <div className="fixed inset-0 flex items-center justify-center pointer-events-none z-50">
-          <div className="flex flex-col items-center gap-3 px-8 py-5 bg-gray-900/90 backdrop-blur rounded-2xl shadow-2xl border border-gray-700 animate-in zoom-in fade-in duration-200">
+          <div className="flex flex-col items-center gap-2 px-10 py-6 bg-[#2b2b2b]/95 rounded-2xl animate-in zoom-in fade-in duration-200">
             {centerTip.icon === 'success' ? (
-              <Check className="w-10 h-10 text-green-400" />
+              <Check strokeWidth={1.5} className="w-12 h-12 text-white/90" />
             ) : (
-              <Copy className="w-10 h-10 text-blue-400" />
+              <Check strokeWidth={1.5} className="w-12 h-12 text-white/90" />
             )}
-            <span className="text-white text-lg font-medium">{centerTip.text}</span>
+            <span className="text-white/90 text-base font-normal tracking-wide">{centerTip.text}</span>
           </div>
         </div>
       )}
