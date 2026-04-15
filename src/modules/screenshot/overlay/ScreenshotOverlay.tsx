@@ -59,6 +59,7 @@ export default function ScreenshotOverlay() {
   const [monitorOffset, setMonitorOffset] = useState({ x: 0, y: 0 });
   const [backgroundImage, setBackgroundImage] = useState<HTMLImageElement | null>(null);
   const backgroundPathRef = useRef('');
+  const dragStartHoveredWindowRef = useRef<WindowBounds | null>(null);
 
   // 编辑状态
   const [editMode, setEditMode] = useState<EditMode>('none');
@@ -85,6 +86,7 @@ export default function ScreenshotOverlay() {
     setMonitorOffset({ x: 0, y: 0 });
     setBackgroundImage(null);
     backgroundPathRef.current = '';
+    dragStartHoveredWindowRef.current = null;
     setEditMode('none');
     setDrawElements([]);
     setIsDrawing(false);
@@ -513,25 +515,11 @@ export default function ScreenshotOverlay() {
       return;
     }
 
-    if (hoveredWindow) {
-      // 点击窗口：直接选中该窗口
-      setSelectedRegion({
-        x: hoveredWindow.x,
-        y: hoveredWindow.y,
-        width: hoveredWindow.width,
-        height: hoveredWindow.height,
-        source: {
-          type: 'window',
-          windowId: hoveredWindow.id,
-          title: hoveredWindow.title,
-        },
-      });
-    } else {
-      // 空白处：开始拖拽选区
-      setIsDragging(true);
-      setDragStart({ x: absX, y: absY });
-      setDragCurrent({ x: absX, y: absY });
-    }
+    // 统一进入拖拽状态，鼠标抬起时根据移动距离判断是单击选窗口还是拖拽选区
+    setIsDragging(true);
+    setDragStart({ x: absX, y: absY });
+    setDragCurrent({ x: absX, y: absY });
+    dragStartHoveredWindowRef.current = hoveredWindow;
   }, [hoveredWindow, selectedRegion, editMode, monitorOffset, scaleFactor]);
 
   // 监听 selectedRegion 变化
@@ -575,8 +563,22 @@ export default function ScreenshotOverlay() {
 
       console.log('[ScreenshotOverlay] Drag ended, size:', width, 'x', height);
 
-      // 最小选区尺寸过滤
-      if (width > 10 && height > 10) {
+      if (width < 5 && height < 5 && dragStartHoveredWindowRef.current) {
+        // 移动距离很小，视为单击选中窗口
+        const hw = dragStartHoveredWindowRef.current;
+        setSelectedRegion({
+          x: hw.x,
+          y: hw.y,
+          width: hw.width,
+          height: hw.height,
+          source: {
+            type: 'window',
+            windowId: hw.id,
+            title: hw.title,
+          },
+        });
+      } else if (width > 10 && height > 10) {
+        // 视为拖拽自定义区域
         const newSelection = {
           x: Math.min(dragStart.x, dragCurrent.x),
           y: Math.min(dragStart.y, dragCurrent.y),
@@ -590,6 +592,7 @@ export default function ScreenshotOverlay() {
       setIsDragging(false);
       setDragStart(null);
       setDragCurrent(null);
+      dragStartHoveredWindowRef.current = null;
 
       // 选区完成后恢复焦点，确保键盘事件正常响应
       document.documentElement.focus();
