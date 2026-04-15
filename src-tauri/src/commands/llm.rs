@@ -89,6 +89,7 @@ pub async fn test_llm_connection(
     let messages = vec![ChatMessage {
         role: "user".to_string(),
         content: "Hello! Please reply with 'Connection successful!' only.".to_string(),
+        images: None,
     }];
 
     // 旧版设置：从 base_url 推断 provider_type

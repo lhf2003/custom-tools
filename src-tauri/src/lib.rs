@@ -388,6 +388,31 @@ pub fn run() {
             // Setup window event handlers (after settings initialized)
             setup_window_handlers(app.handle());
 
+            // 预创建截图遮罩窗口（隐藏），减少快捷键触发时的启动延迟
+            {
+                let screenshot_overlay = tauri::WebviewWindowBuilder::new(
+                    app,
+                    "screenshot-overlay",
+                    tauri::WebviewUrl::App("/screenshot-overlay.html".into()),
+                )
+                .title("截图工具")
+                .decorations(false)
+                .transparent(true)
+                .always_on_top(true)
+                .skip_taskbar(true)
+                .shadow(false)
+                .focused(false)
+                .resizable(false)
+                .visible(false)
+                .build();
+
+                if let Err(e) = screenshot_overlay {
+                    log::warn!("Failed to pre-create screenshot overlay window: {}", e);
+                } else {
+                    log::info!("Screenshot overlay window pre-created successfully");
+                }
+            }
+
             // Initialize previous focused window state for auto-paste
             app.manage(PreviousFocusedWindow::new());
 
@@ -577,12 +602,15 @@ pub fn run() {
             screenshot::get_capturable_windows,
             screenshot::capture_window,
             screenshot::capture_region,
+            screenshot::save_and_copy_screenshot,
             screenshot::screenshot_to_base64,
             screenshot::ocr_screenshot,
             // WeChat-style screenshot overlay commands
             screenshot::get_all_windows,
             screenshot::get_window_at_point,
             screenshot::close_screenshot_overlay,
+            screenshot::cleanup_overlay_background,
+            settings::shortcuts::open_screenshot_overlay,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

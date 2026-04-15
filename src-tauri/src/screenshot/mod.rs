@@ -89,3 +89,48 @@ pub fn crop_image(
 
     Ok(cropped)
 }
+
+/// 捕获鼠标所在显示器的背景图并保存到临时文件
+pub fn capture_monitor_background_at_cursor(
+    app_handle: &tauri::AppHandle,
+) -> Result<String, String> {
+    let monitors = xcap::Monitor::all()
+        .map_err(|e| format!("Failed to get monitors: {}", e))?;
+
+    let cursor_pos = crate::get_cursor_pos()
+        .ok_or("Failed to get cursor position")?;
+
+    let target_monitor = monitors
+        .iter()
+        .find(|m| {
+            let mx = m.x().unwrap_or(0);
+            let my = m.y().unwrap_or(0);
+            let mw = m.width().unwrap_or(0) as i32;
+            let mh = m.height().unwrap_or(0) as i32;
+            cursor_pos.0 >= mx && cursor_pos.0 < mx + mw
+                && cursor_pos.1 >= my && cursor_pos.1 < my + mh
+        })
+        .or_else(|| monitors.first())
+        .cloned()
+        .ok_or("No monitor available")?;
+
+    let image = target_monitor
+        .capture_image()
+        .map_err(|e| format!("Failed to capture monitor image: {}", e))?;
+
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?;
+
+    let temp_dir = app_data_dir.join("temp");
+    std::fs::create_dir_all(&temp_dir)
+        .map_err(|e| format!("Failed to create temp dir: {}", e))?;
+
+    let temp_path = temp_dir.join("overlay-bg.png");
+    image::DynamicImage::ImageRgba8(image)
+        .save(&temp_path)
+        .map_err(|e| format!("Failed to save background image: {}", e))?;
+
+    Ok(temp_path.to_string_lossy().to_string())
+}

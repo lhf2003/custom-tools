@@ -140,58 +140,64 @@ pub async fn capture_window(
 }
 
 /// 区域截图
+/// 若提供了 background_image_path，则优先从该临时背景图中裁剪，避免重新调用 xcap 捕获
 #[tauri::command]
 pub async fn capture_region(
     x: i32,
     y: i32,
     width: u32,
     height: u32,
+    background_image_path: Option<String>,
+    monitor_x: Option<i32>,
+    monitor_y: Option<i32>,
     app_handle: tauri::AppHandle,
 ) -> Result<ScreenshotResult, String> {
-    log::info!("Capturing region at ({}, {}) {}x{}", x, y, width, height);
+    log::info!("[capture_region] Starting with params: x={}, y={}, width={}, height={}", x, y, width, height);
 
     let screenshot_dir = get_screenshot_dir(&app_handle)?;
     let filename = generate_screenshot_filename(&ScreenshotMode::Region);
     let filepath = screenshot_dir.join(&filename);
 
-    // 获取包含该区域的显示器
-    let monitors = xcap::Monitor::all().map_err(|e| format!("Failed to get monitors: {}", e))?;
+    let cropped_image = if let Some(bg_path) = background_image_path {
+        log::info!("[capture_region] Using provided background image: {}", bg_path);
+        let bg_path_buf = std::path::PathBuf::from(&bg_path);
+        if bg_path_buf.exists() {
+            match image::open(&bg_path_buf) {
+                Ok(img) => {
+                    let base_x = monitor_x.unwrap_or(0);
+                    let base_y = monitor_y.unwrap_or(0);
+                    let relative_x = (x - base_x).max(0) as u32;
+                    let relative_y = (y - base_y).max(0) as u32;
+                    let img_width = img.width();
+                    let img_height = img.height();
+                    let crop_width = width.min(img_width.saturating_sub(relative_x));
+                    let crop_height = height.min(img_height.saturating_sub(relative_y));
+                    if crop_width > 0 && crop_height > 0 {
+                        image::DynamicImage::ImageRgba8(img.into_rgba8().view(relative_x, relative_y, crop_width, crop_height).to_image())
+                    } else {
+                        log::warn!("[capture_region] Invalid crop dimensions from background image, falling back to xcap");
+                        capture_monitor_and_crop(x, y, width, height).await?
+                    }
+                }
+                Err(e) => {
+                    log::warn!("[capture_region] Failed to open background image: {}, falling back to xcap", e);
+                    capture_monitor_and_crop(x, y, width, height).await?
+                }
+            }
+        } else {
+            log::warn!("[capture_region] Background image does not exist, falling back to xcap");
+            capture_monitor_and_crop(x, y, width, height).await?
+        }
+    } else {
+        capture_monitor_and_crop(x, y, width, height).await?
+    };
 
-    // 找到包含该区域的显示器
-    let target_monitor = monitors
-        .iter()
-        .find(|m| {
-            let mx = m.x().unwrap_or(0);
-            let my = m.y().unwrap_or(0);
-            let mw = m.width().unwrap_or(0) as i32;
-            let mh = m.height().unwrap_or(0) as i32;
-
-            x >= mx && x < mx + mw && y >= my && y < my + mh
-        })
-        .or_else(|| monitors.first())
-        .ok_or("No monitor available")?;
-
-    // 捕获整个显示器
-    let full_image = target_monitor
-        .capture_image()
-        .map_err(|e| format!("Failed to capture screen: {}", e))?;
-
-    // 计算相对于显示器坐标的偏移
-    let monitor_x = target_monitor.x().unwrap_or(0);
-    let monitor_y = target_monitor.y().unwrap_or(0);
-    let relative_x = (x - monitor_x) as u32;
-    let relative_y = (y - monitor_y) as u32;
-
-    // 裁剪出指定区域
-    let cropped = full_image.view(relative_x, relative_y, width, height);
-
-    // 将 SubImage 转换为 DynamicImage 并保存
-    let cropped_image = image::DynamicImage::ImageRgba8(cropped.to_image());
+    log::info!("[capture_region] Saving image to {:?}...", filepath);
     cropped_image
         .save(&filepath)
         .map_err(|e| format!("Failed to save screenshot: {}", e))?;
 
-    log::info!("Region screenshot saved: {}", filepath.display());
+    log::info!("[capture_region] Success! Saved: {:?}", filepath);
 
     Ok(ScreenshotResult {
         filename,
@@ -200,6 +206,95 @@ pub async fn capture_region(
         width,
         height,
     })
+}
+
+/// 使用 xcap 捕获包含目标区域的显示器，并裁剪出指定区域
+async fn capture_monitor_and_crop(
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+) -> Result<image::DynamicImage, String> {
+    let monitors = xcap::Monitor::all().map_err(|e| format!("Failed to get monitors: {}", e))?;
+
+    let target_monitor = monitors
+        .iter()
+        .find(|m| {
+            let mx = m.x().unwrap_or(0);
+            let my = m.y().unwrap_or(0);
+            let mw = m.width().unwrap_or(0) as i32;
+            let mh = m.height().unwrap_or(0) as i32;
+            x >= mx && x < mx + mw && y >= my && y < my + mh
+        })
+        .or_else(|| monitors.first())
+        .ok_or("No monitor available")?;
+
+    let monitor_x = target_monitor.x().unwrap_or(0);
+    let monitor_y = target_monitor.y().unwrap_or(0);
+    let relative_x = (x - monitor_x) as u32;
+    let relative_y = (y - monitor_y) as u32;
+
+    let full_image = target_monitor
+        .capture_image()
+        .map_err(|e| format!("Failed to capture screen: {}", e))?;
+
+    let cropped = full_image.view(relative_x, relative_y, width, height);
+    Ok(image::DynamicImage::ImageRgba8(cropped.to_image()))
+}
+
+/// 保存截图并复制到剪贴板（合并命令，减少 IPC 往返）
+#[tauri::command]
+pub async fn save_and_copy_screenshot(
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    background_image_path: Option<String>,
+    monitor_x: Option<i32>,
+    monitor_y: Option<i32>,
+    cleanup_background: Option<bool>,
+    app_handle: tauri::AppHandle,
+) -> Result<ScreenshotResult, String> {
+    let bg_path = background_image_path.clone();
+    let should_cleanup = cleanup_background.unwrap_or(false);
+
+    let result = capture_region(
+        x, y, width, height,
+        background_image_path,
+        monitor_x, monitor_y,
+        app_handle.clone()
+    ).await?;
+
+    let filepath = result.filepath.clone();
+
+    // 复制到剪贴板（使用 spawn_blocking 避免阻塞 async runtime）
+    let app_handle_for_clipboard = app_handle.clone();
+    let copy_result = tokio::task::spawn_blocking(move || {
+        crate::commands::clipboard::copy_file_to_clipboard(app_handle_for_clipboard, filepath)
+    }).await;
+
+    if let Err(e) = copy_result {
+        log::error!("[save_and_copy_screenshot] Clipboard task panicked: {}", e);
+        return Err("保存成功但复制到剪贴板时发生错误".to_string());
+    }
+
+    if let Err(e) = copy_result.unwrap() {
+        log::error!("[save_and_copy_screenshot] Failed to copy to clipboard: {}", e);
+        return Err(format!("保存成功但复制到剪贴板失败: {}", e));
+    }
+
+    // 清理临时背景图文件
+    if should_cleanup {
+        if let Some(path) = bg_path {
+            if let Err(e) = std::fs::remove_file(&path) {
+                log::warn!("[save_and_copy_screenshot] Failed to remove background file: {}", e);
+            } else {
+                log::info!("[save_and_copy_screenshot] Removed background file: {}", path);
+            }
+        }
+    }
+
+    Ok(result)
 }
 
 /// 图片转 base64
@@ -297,20 +392,34 @@ pub async fn get_window_at_point(x: i32, y: i32) -> Result<Option<WindowBounds>,
     Ok(window)
 }
 
-/// 关闭截图遮罩窗口
+/// 关闭截图遮罩窗口（复用窗口：hide 而非 close）
 #[tauri::command]
 pub async fn close_screenshot_overlay(app_handle: tauri::AppHandle) -> Result<(), String> {
-    log::info!("Closing screenshot overlay window");
+    log::info!("Hiding screenshot overlay window");
 
     if let Some(window) = app_handle.get_webview_window("screenshot-overlay") {
         window
-            .close()
-            .map_err(|e| format!("Failed to close overlay window: {}", e))?;
-        log::info!("Screenshot overlay window closed successfully");
+            .hide()
+            .map_err(|e| format!("Failed to hide overlay window: {}", e))?;
+        log::info!("Screenshot overlay window hidden successfully");
     } else {
         log::warn!("Screenshot overlay window not found");
     }
 
+    Ok(())
+}
+
+/// 清理截图遮罩层的临时背景图文件
+#[tauri::command]
+pub async fn cleanup_overlay_background(filepath: String) -> Result<(), String> {
+    let path = std::path::PathBuf::from(&filepath);
+    if path.exists() {
+        if let Err(e) = std::fs::remove_file(&path) {
+            log::warn!("Failed to remove overlay background file: {}", e);
+        } else {
+            log::info!("Removed overlay background file: {}", filepath);
+        }
+    }
     Ok(())
 }
 

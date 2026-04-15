@@ -18,4 +18,12 @@ export default defineConfig({
   server: {
     port: 1420,
   },
+  build: {
+    rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, 'index.html'),
+        'screenshot-overlay': path.resolve(__dirname, 'screenshot-overlay.html'),
+      },
+    },
+  },
 })

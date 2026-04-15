@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { listen } from '@tauri-apps/api/event';
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { useToastStore } from '@/stores/toastStore';
 import { Tooltip } from '@/components/Tooltip';
 import {
@@ -55,6 +56,9 @@ export default function ScreenshotOverlay() {
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
   const [dragCurrent, setDragCurrent] = useState<{ x: number; y: number } | null>(null);
   const [scaleFactor, setScaleFactor] = useState(1);
+  const [monitorOffset, setMonitorOffset] = useState({ x: 0, y: 0 });
+  const [backgroundImage, setBackgroundImage] = useState<HTMLImageElement | null>(null);
+  const backgroundPathRef = useRef('');
 
   // 编辑状态
   const [editMode, setEditMode] = useState<EditMode>('none');
@@ -69,96 +73,103 @@ export default function ScreenshotOverlay() {
 
   const { addToast } = useToastStore();
 
-  // 关闭遮罩窗口
-  const closeOverlay = useCallback(async () => {
-    console.log('[ScreenshotOverlay] Attempting to close overlay...');
-    try {
-      const overlayWindow = await WebviewWindow.getByLabel('screenshot-overlay');
-      console.log('[ScreenshotOverlay] Got overlay window:', overlayWindow);
+  // 重置状态（窗口复用时调用）
+  const resetState = useCallback(() => {
+    setWindows([]);
+    setHoveredWindow(null);
+    setSelectedRegion(null);
+    setIsDragging(false);
+    setDragStart(null);
+    setDragCurrent(null);
+    setScaleFactor(1);
+    setMonitorOffset({ x: 0, y: 0 });
+    setBackgroundImage(null);
+    backgroundPathRef.current = '';
+    setEditMode('none');
+    setDrawElements([]);
+    setIsDrawing(false);
+    setCurrentElement(null);
+    setIsOcrProcessing(false);
+    setOcrResult('');
+    setShowOcrResult(false);
+  }, []);
 
-      if (overlayWindow) {
-        await overlayWindow.close();
-        console.log('[ScreenshotOverlay] Overlay closed successfully');
-      } else {
-        console.error('[ScreenshotOverlay] Overlay window not found by label');
-        // 备选方案：通过 invoke 命令关闭
-        try {
-          await invoke('close_screenshot_overlay');
-          console.log('[ScreenshotOverlay] Overlay closed via invoke command');
-        } catch (invokeErr) {
-          console.error('[ScreenshotOverlay] Invoke close also failed:', invokeErr);
-        }
-      }
+  // 仅隐藏遮罩窗口（不清理背景图，供保存后复用窗口使用）
+  const hideOverlay = useCallback(async () => {
+    try {
+      await getCurrentWebviewWindow().hide();
     } catch (err) {
-      console.error('[ScreenshotOverlay] Failed to close overlay:', err);
-      // 备选方案
-      try {
-        await invoke('close_screenshot_overlay');
-        console.log('[ScreenshotOverlay] Overlay closed via fallback invoke');
-      } catch (fallbackErr) {
-        console.error('[ScreenshotOverlay] Fallback close also failed:', fallbackErr);
-      }
+      console.error('[ScreenshotOverlay] Failed to hide overlay:', err);
+      await invoke('close_screenshot_overlay').catch(() => {});
     }
   }, []);
 
-  // 初始化：获取所有窗口和屏幕信息
-  useEffect(() => {
-    console.log('[ScreenshotOverlay] Initializing overlay...');
-    const init = async () => {
-      try {
-        // 获取 DPI 缩放因子
-        const overlayWindow = await WebviewWindow.getByLabel('screenshot-overlay');
-        console.log('[ScreenshotOverlay] Got window for scale factor:', overlayWindow);
-        if (overlayWindow) {
-          const sf = await overlayWindow.scaleFactor();
-          setScaleFactor(sf);
-          console.log('[ScreenshotOverlay] Scale factor:', sf);
-        }
-
-        // 获取所有窗口
-        const windowList = await invoke<WindowBounds[]>('get_all_windows');
-        console.log('[ScreenshotOverlay] Got windows:', windowList.length, windowList.slice(0, 3)); // 只打印前3个避免刷屏
-
-        // 检查窗口坐标范围
-        if (windowList.length > 0) {
-          const firstWindow = windowList[0];
-          console.log('[ScreenshotOverlay] First window coords:', {
-            x: firstWindow.x,
-            y: firstWindow.y,
-            w: firstWindow.width,
-            h: firstWindow.height,
-            title: firstWindow.title,
-          });
-        }
-
-        setWindows(windowList);
-      } catch (err) {
-        console.error('[ScreenshotOverlay] Failed to init overlay:', err);
+  // 关闭遮罩窗口（复用窗口：hide 而非 close，并清理背景图）
+  const closeOverlay = useCallback(async () => {
+    const path = backgroundPathRef.current;
+    try {
+      if (path) {
+        await invoke('cleanup_overlay_background', { filepath: path });
+        backgroundPathRef.current = '';
       }
-    };
+    } catch (cleanupErr) {
+      console.warn('[ScreenshotOverlay] Failed to cleanup background:', cleanupErr);
+    }
 
-    init();
+    await hideOverlay();
+  }, [hideOverlay]);
 
-    // 确保窗口获得焦点 - 增加重试机制
+  // 初始化：监听显示器信息和背景图事件，窗口复用时自动重置状态
+  useEffect(() => {
+    // 确保窗口获得焦点
     const focusOverlay = () => {
-      console.log('[ScreenshotOverlay] Focusing overlay window...');
-      window.focus();
+      document.documentElement.focus();
       document.body.focus();
       containerRef.current?.focus();
     };
 
-    // 立即尝试
-    focusOverlay();
+    // 监听显示器信息事件（窗口首次显示和复用时都会触发）
+    const unlistenMonitor = listen<{
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      scaleFactor: number;
+      backgroundImagePath: string;
+    }>('screenshot-overlay-monitor', (event) => {
+      resetState();
+      focusOverlay();
+      const info = event.payload;
+      setMonitorOffset({ x: info.x, y: info.y });
+      setScaleFactor(info.scaleFactor);
+      // 背景图通过 screenshot-overlay-background 事件异步下发
 
-    // 多次延迟尝试确保获得焦点
-    const timeouts = [50, 150, 300].map(delay =>
-      setTimeout(focusOverlay, delay)
-    );
+      // 并行获取窗口列表
+      invoke<WindowBounds[]>('get_all_windows')
+        .then(setWindows)
+        .catch((err) => console.error('[ScreenshotOverlay] Failed to get windows:', err));
+    });
+
+    // 监听背景图捕获完成事件
+    const unlistenBackground = listen<string>('screenshot-overlay-background', (event) => {
+      const path = event.payload;
+      if (path) {
+        backgroundPathRef.current = path;
+        const img = new Image();
+        img.onload = () => setBackgroundImage(img);
+        img.src = `file://${path.replace(/\\/g, '/')}`;
+      }
+    });
+
+    focusOverlay();
+    const timeouts = [50, 100, 200, 400].map((delay) => setTimeout(focusOverlay, delay));
 
     return () => {
       timeouts.forEach(clearTimeout);
+      unlistenMonitor.then((f) => f()).catch(() => {});
+      unlistenBackground.then((f) => f()).catch(() => {});
     };
-  }, []);
+  }, [resetState]);
 
   // ESC 键处理 - 使用 ref 来避免依赖项问题
   const stateRef = useRef({
@@ -254,17 +265,11 @@ export default function ScreenshotOverlay() {
     document.addEventListener('keydown', handleKeyDown, true);
     console.log('[ScreenshotOverlay] Keyboard listeners attached');
 
-    // 添加全局点击调试
-    const handleClick = (e: MouseEvent) => {
-      console.log('[ScreenshotOverlay] Global click at:', e.clientX, e.clientY, 'selectedRegion:', selectedRegion);
-    };
-    window.addEventListener('click', handleClick);
 
     return () => {
       console.log('[ScreenshotOverlay] Removing keyboard listeners');
       window.removeEventListener('keydown', handleKeyDown, true);
       document.removeEventListener('keydown', handleKeyDown, true);
-      window.removeEventListener('click', handleClick);
     };
   }, [closeOverlay]);
 
@@ -276,13 +281,16 @@ export default function ScreenshotOverlay() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // 设置 canvas 尺寸为屏幕尺寸
-    canvas.width = window.screen.width * scaleFactor;
-    canvas.height = window.screen.height * scaleFactor;
+    // 设置 canvas 尺寸为当前窗口尺寸（即单个显示器尺寸）
+    canvas.width = window.innerWidth * scaleFactor;
+    canvas.height = window.innerHeight * scaleFactor;
     ctx.scale(scaleFactor, scaleFactor);
 
-    // 清空画布
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // 清空画布（使用逻辑坐标）
+    ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+
+    const offsetX = monitorOffset.x;
+    const offsetY = monitorOffset.y;
 
     // 如果有选区或拖拽中，绘制遮罩
     const highlightRegion = selectedRegion || (isDragging && dragStart && dragCurrent
@@ -294,15 +302,36 @@ export default function ScreenshotOverlay() {
         }
       : hoveredWindow);
 
-    if (highlightRegion) {
-      // 绘制半透明遮罩（全屏）
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-      ctx.fillRect(0, 0, window.screen.width, window.screen.height);
+    // 绘制屏幕底图（冻结画面）
+    if (backgroundImage) {
+      ctx.drawImage(backgroundImage, 0, 0, window.innerWidth, window.innerHeight);
+    }
 
-      // 镂空选中区域
-      ctx.globalCompositeOperation = 'destination-out';
-      ctx.fillRect(highlightRegion.x, highlightRegion.y, highlightRegion.width, highlightRegion.height);
-      ctx.globalCompositeOperation = 'source-over';
+    // 全屏半透明遮罩
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
+
+    if (highlightRegion) {
+      // Canvas 使用逻辑坐标，将物理坐标转换为逻辑坐标
+      const drawX = (highlightRegion.x - offsetX) / scaleFactor;
+      const drawY = (highlightRegion.y - offsetY) / scaleFactor;
+      const drawW = highlightRegion.width / scaleFactor;
+      const drawH = highlightRegion.height / scaleFactor;
+
+      // 在选区位置重新绘制清晰的背景图（覆盖遮罩层，实现高亮效果）
+      if (backgroundImage) {
+        ctx.drawImage(
+          backgroundImage,
+          highlightRegion.x - offsetX, // 物理源 x
+          highlightRegion.y - offsetY, // 物理源 y
+          highlightRegion.width,       // 物理源宽
+          highlightRegion.height,      // 物理源高
+          drawX,                       // 逻辑目标 x
+          drawY,                       // 逻辑目标 y
+          drawW,                       // 逻辑目标宽
+          drawH                        // 逻辑目标高
+        );
+      }
 
       // 绘制边框
       if (selectedRegion || isDragging) {
@@ -311,7 +340,7 @@ export default function ScreenshotOverlay() {
         ctx.strokeStyle = '#00D26A'; // 绿色：悬停
       }
       ctx.lineWidth = 2;
-      ctx.strokeRect(highlightRegion.x, highlightRegion.y, highlightRegion.width, highlightRegion.height);
+      ctx.strokeRect(drawX, drawY, drawW, drawH);
 
       // 绘制尺寸提示
       if (isDragging || selectedRegion) {
@@ -321,8 +350,8 @@ export default function ScreenshotOverlay() {
 
         ctx.fillStyle = '#0099FF';
         ctx.fillRect(
-          highlightRegion.x + highlightRegion.width / 2 - textWidth / 2 - 4,
-          highlightRegion.y - 24,
+          drawX + drawW / 2 - textWidth / 2 - 4,
+          drawY - 24,
           textWidth + 8,
           20
         );
@@ -332,26 +361,29 @@ export default function ScreenshotOverlay() {
         ctx.textBaseline = 'middle';
         ctx.fillText(
           sizeText,
-          highlightRegion.x + highlightRegion.width / 2,
-          highlightRegion.y - 14
+          drawX + drawW / 2,
+          drawY - 14
         );
       }
 
-      // 绘制标注元素
+      // 绘制标注元素（坐标转为相对窗口的逻辑坐标）
       drawElements.forEach((element) => {
         ctx.strokeStyle = '#FF5722';
         ctx.fillStyle = '#FF5722';
         ctx.lineWidth = 2;
 
+        const ex = (element.x - offsetX) / scaleFactor;
+        const ey = (element.y - offsetY) / scaleFactor;
+
         switch (element.type) {
           case 'rect':
             if (element.width && element.height) {
-              ctx.strokeRect(element.x, element.y, element.width, element.height);
+              ctx.strokeRect(ex, ey, element.width / scaleFactor, element.height / scaleFactor);
             }
             break;
           case 'arrow':
             if (element.x2 !== undefined && element.y2 !== undefined) {
-              drawArrow(ctx, element.x, element.y, element.x2, element.y2);
+              drawArrow(ctx, ex, ey, (element.x2 - offsetX) / scaleFactor, (element.y2 - offsetY) / scaleFactor);
             }
             break;
           case 'text':
@@ -360,8 +392,8 @@ export default function ScreenshotOverlay() {
               ctx.fillStyle = '#FFFFFF';
               ctx.strokeStyle = '#000000';
               ctx.lineWidth = 3;
-              ctx.strokeText(element.text, element.x, element.y);
-              ctx.fillText(element.text, element.x, element.y);
+              ctx.strokeText(element.text, ex, ey);
+              ctx.fillText(element.text, ex, ey);
             }
             break;
         }
@@ -373,25 +405,24 @@ export default function ScreenshotOverlay() {
         ctx.fillStyle = '#FF5722';
         ctx.lineWidth = 2;
 
+        const cex = (currentElement.x - offsetX) / scaleFactor;
+        const cey = (currentElement.y - offsetY) / scaleFactor;
+
         switch (currentElement.type) {
           case 'rect':
             if (currentElement.width && currentElement.height) {
-              ctx.strokeRect(currentElement.x, currentElement.y, currentElement.width, currentElement.height);
+              ctx.strokeRect(cex, cey, currentElement.width / scaleFactor, currentElement.height / scaleFactor);
             }
             break;
           case 'arrow':
             if (currentElement.x2 !== undefined && currentElement.y2 !== undefined) {
-              drawArrow(ctx, currentElement.x, currentElement.y, currentElement.x2, currentElement.y2);
+              drawArrow(ctx, cex, cey, (currentElement.x2 - offsetX) / scaleFactor, (currentElement.y2 - offsetY) / scaleFactor);
             }
             break;
         }
       }
-    } else {
-      // 没有悬停窗口时，全屏半透明遮罩
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-      ctx.fillRect(0, 0, window.screen.width, window.screen.height);
     }
-  }, [hoveredWindow, selectedRegion, isDragging, dragStart, dragCurrent, scaleFactor, drawElements, currentElement]);
+  }, [hoveredWindow, selectedRegion, isDragging, dragStart, dragCurrent, scaleFactor, drawElements, currentElement, monitorOffset, backgroundImage]);
 
   // 绘制箭头
   const drawArrow = (ctx: CanvasRenderingContext2D, x1: number, y1: number, x2: number, y2: number) => {
@@ -418,15 +449,19 @@ export default function ScreenshotOverlay() {
 
   // 鼠标移动：检测窗口或绘制
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    // 使用物理像素坐标，确保高 DPI 下截图精准
+    const absX = Math.round(e.clientX * scaleFactor) + monitorOffset.x;
+    const absY = Math.round(e.clientY * scaleFactor) + monitorOffset.y;
+
     if (editMode !== 'none' && isDrawing && currentElement) {
-      // 编辑模式下绘制
+      // 编辑模式下绘制（使用绝对坐标）
       const newElement = { ...currentElement };
       if (editMode === 'rect') {
-        newElement.width = e.clientX - currentElement.x;
-        newElement.height = e.clientY - currentElement.y;
+        newElement.width = absX - currentElement.x;
+        newElement.height = absY - currentElement.y;
       } else if (editMode === 'arrow') {
-        newElement.x2 = e.clientX;
-        newElement.y2 = e.clientY;
+        newElement.x2 = absX;
+        newElement.y2 = absY;
       }
       setCurrentElement(newElement);
       return;
@@ -434,45 +469,37 @@ export default function ScreenshotOverlay() {
 
     if (selectedRegion) return; // 已选中则不再检测
     if (isDragging && dragStart) {
-      setDragCurrent({ x: e.clientX, y: e.clientY });
+      setDragCurrent({ x: absX, y: absY });
       return;
     }
 
-    // 检测鼠标下的窗口
-    const pointX = e.clientX;
-    const pointY = e.clientY;
-
-    // 调试日志：每100ms输出一次，避免刷屏
-    if (Math.random() < 0.05) {
-      console.log('[ScreenshotOverlay] Mouse move:', { pointX, pointY, windowsCount: windows.length });
-    }
-
+    // 检测鼠标下的窗口（使用绝对坐标，物理像素）
     const window = windows.find((w) => {
-      const hit = pointX >= w.x && pointX < w.x + w.width && pointY >= w.y && pointY < w.y + w.height;
-      if (hit) {
-        console.log('[ScreenshotOverlay] Window hit:', w.title, { x: w.x, y: w.y, w: w.width, h: w.height });
-      }
-      return hit;
+      return absX >= w.x && absX < w.x + w.width && absY >= w.y && absY < w.y + w.height;
     });
 
     if (window !== hoveredWindow) {
-      console.log('[ScreenshotOverlay] Hovered window changed:', window?.title || 'none');
       setHoveredWindow(window || null);
     }
-  }, [windows, selectedRegion, isDragging, dragStart, editMode, isDrawing, currentElement]);
+  }, [windows, selectedRegion, isDragging, dragStart, editMode, isDrawing, currentElement, monitorOffset, scaleFactor]);
 
   // 鼠标按下：开始拖拽或绘制
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    console.log('[ScreenshotOverlay] Mouse down:', { editMode, hasSelectedRegion: !!selectedRegion, hasHoveredWindow: !!hoveredWindow });
+    // 只处理左键点击
+    if (e.button !== 0) return;
+
+    // 使用物理像素坐标
+    const absX = Math.round(e.clientX * scaleFactor) + monitorOffset.x;
+    const absY = Math.round(e.clientY * scaleFactor) + monitorOffset.y;
 
     if (editMode !== 'none') {
-      // 编辑模式下开始绘制
+      // 编辑模式下开始绘制（记录绝对坐标）
       setIsDrawing(true);
       setCurrentElement({
         id: Math.random().toString(36).substring(2, 9),
         type: editMode,
-        x: e.clientX,
-        y: e.clientY,
+        x: absX,
+        y: absY,
         width: 0,
         height: 0,
       });
@@ -481,7 +508,6 @@ export default function ScreenshotOverlay() {
 
     if (selectedRegion) {
       // 已选中状态下点击，取消选择
-      console.log('[ScreenshotOverlay] Clicked while has selection, clearing');
       setSelectedRegion(null);
       setDrawElements([]);
       return;
@@ -489,7 +515,6 @@ export default function ScreenshotOverlay() {
 
     if (hoveredWindow) {
       // 点击窗口：直接选中该窗口
-      console.log('[ScreenshotOverlay] Selecting window:', hoveredWindow);
       setSelectedRegion({
         x: hoveredWindow.x,
         y: hoveredWindow.y,
@@ -503,12 +528,11 @@ export default function ScreenshotOverlay() {
       });
     } else {
       // 空白处：开始拖拽选区
-      console.log('[ScreenshotOverlay] Starting drag selection at:', e.clientX, e.clientY);
       setIsDragging(true);
-      setDragStart({ x: e.clientX, y: e.clientY });
-      setDragCurrent({ x: e.clientX, y: e.clientY });
+      setDragStart({ x: absX, y: absY });
+      setDragCurrent({ x: absX, y: absY });
     }
-  }, [hoveredWindow, selectedRegion, editMode]);
+  }, [hoveredWindow, selectedRegion, editMode, monitorOffset, scaleFactor]);
 
   // 监听 selectedRegion 变化
   useEffect(() => {
@@ -517,6 +541,8 @@ export default function ScreenshotOverlay() {
 
   // 鼠标抬起：结束拖拽或绘制
   const handleMouseUp = useCallback(() => {
+    console.log('[ScreenshotOverlay] Mouse up:', { isDragging, hasDragStart: !!dragStart, hasDragCurrent: !!dragCurrent, editMode, isDrawing });
+
     if (editMode !== 'none' && isDrawing && currentElement) {
       // 完成绘制元素
       const element = { ...currentElement };
@@ -558,101 +584,99 @@ export default function ScreenshotOverlay() {
           height,
           source: { type: 'region' as const },
         };
-        console.log('[ScreenshotOverlay] Setting selectedRegion from drag:', newSelection);
         setSelectedRegion(newSelection);
-      } else {
-        console.log('[ScreenshotOverlay] Selection too small, ignoring');
       }
 
       setIsDragging(false);
       setDragStart(null);
       setDragCurrent(null);
+
+      // 选区完成后恢复焦点，确保键盘事件正常响应
+      document.documentElement.focus();
+      document.body.focus();
+      containerRef.current?.focus();
+      setTimeout(() => {
+        document.documentElement.focus();
+        document.body.focus();
+        containerRef.current?.focus();
+      }, 50);
     }
   }, [isDragging, dragStart, dragCurrent, editMode, isDrawing, currentElement]);
 
-  // 执行截图
-  const captureSelection = async () => {
-    console.log('[ScreenshotOverlay] captureSelection called, selectedRegion:', selectedRegion);
+  // 执行截图并复制到剪贴板（使用合并命令，减少 IPC 往返）
+  const captureSelection = useCallback(async () => {
+    const region = stateRef.current.selectedRegion;
+    if (!region) return;
 
-    if (!selectedRegion) {
-      console.log('[ScreenshotOverlay] No selected region, aborting capture');
-      return;
-    }
+    const bgPath = backgroundPathRef.current;
+    const offset = monitorOffset;
+
+    // 立即隐藏遮罩并显示成功提示，提升感知性能
+    hideOverlay();
+    addToast({
+      type: 'success',
+      title: '截图已保存',
+      duration: 3000,
+    });
 
     try {
-      console.log('[ScreenshotOverlay] Calling capture_region with:', {
-        x: selectedRegion.x,
-        y: selectedRegion.y,
-        width: selectedRegion.width,
-        height: selectedRegion.height,
-      });
-
-      const result = await invoke<{
+      await invoke<{
         filename: string;
         filepath: string;
         width: number;
         height: number;
-      }>('capture_region', {
-        x: selectedRegion.x,
-        y: selectedRegion.y,
-        width: selectedRegion.width,
-        height: selectedRegion.height,
+      }>('save_and_copy_screenshot', {
+        x: region.x,
+        y: region.y,
+        width: region.width,
+        height: region.height,
+        backgroundImagePath: bgPath || undefined,
+        monitorX: offset.x,
+        monitorY: offset.y,
+        cleanupBackground: !!bgPath,
       });
-
-      console.log('[ScreenshotOverlay] capture_region result:', result);
-
-      // 复制到剪贴板
-      console.log('[ScreenshotOverlay] Copying to clipboard:', result.filepath);
-      await invoke('copy_file_to_clipboard', { filepath: result.filepath });
-      console.log('[ScreenshotOverlay] Clipboard copy successful');
-
-      // 显示成功提示
-      addToast({
-        type: 'success',
-        title: '截图已保存',
-        message: `${result.filename} (${result.width}x${result.height})`,
-        duration: 3000,
-      });
-
-      // 关闭遮罩
-      await closeOverlay();
     } catch (error) {
-      console.error('[ScreenshotOverlay] Failed to capture screenshot:', error);
+      console.error('[ScreenshotOverlay] Failed to save screenshot:', error);
       addToast({
         type: 'error',
-        title: '截图失败',
+        title: '截图保存失败',
         message: String(error),
         duration: 5000,
       });
     }
-  };
+  }, [addToast, hideOverlay, monitorOffset]);
 
-  // 复制到剪贴板
-  const copyToClipboard = async () => {
-    if (!selectedRegion) return;
+  // 复制到剪贴板（使用合并命令，减少 IPC 往返）
+  const copyToClipboard = useCallback(async () => {
+    const region = stateRef.current.selectedRegion;
+    if (!region) return;
+
+    const bgPath = backgroundPathRef.current;
+    const offset = monitorOffset;
+
+    hideOverlay();
+    addToast({
+      type: 'success',
+      title: '已复制到剪贴板',
+      duration: 2000,
+    });
 
     try {
-      const result = await invoke<{
+      await invoke<{
         filename: string;
         filepath: string;
         width: number;
         height: number;
-      }>('capture_region', {
-        x: selectedRegion.x,
-        y: selectedRegion.y,
-        width: selectedRegion.width,
-        height: selectedRegion.height,
+      }>('save_and_copy_screenshot', {
+        x: region.x,
+        y: region.y,
+        width: region.width,
+        height: region.height,
+        backgroundImagePath: bgPath || undefined,
+        monitorX: offset.x,
+        monitorY: offset.y,
+        cleanupBackground: !!bgPath,
       });
-
-      await invoke('copy_file_to_clipboard', { filepath: result.filepath });
-
-      addToast({
-        type: 'success',
-        title: '已复制到剪贴板',
-        duration: 2000,
-      });
-
-      await closeOverlay();
     } catch (error) {
       console.error('Failed to copy screenshot:', error);
       addToast({
@@ -662,11 +686,12 @@ export default function ScreenshotOverlay() {
         duration: 5000,
       });
     }
-  };
+  }, [addToast, hideOverlay, monitorOffset]);
 
-  // OCR 识别
-  const performOcr = async () => {
-    if (!selectedRegion) return;
+  // OCR 识别（使用 stateRef 避免 stale closure）
+  const performOcr = useCallback(async () => {
+    const region = stateRef.current.selectedRegion;
+    if (!region) return;
 
     setIsOcrProcessing(true);
     try {
@@ -674,10 +699,13 @@ export default function ScreenshotOverlay() {
         filename: string;
         filepath: string;
       }>('capture_region', {
-        x: selectedRegion.x,
-        y: selectedRegion.y,
-        width: selectedRegion.width,
-        height: selectedRegion.height,
+        x: region.x,
+        y: region.y,
+        width: region.width,
+        height: region.height,
+        backgroundImagePath: backgroundPathRef.current || undefined,
+        monitorX: monitorOffset.x,
+        monitorY: monitorOffset.y,
       });
 
       const ocrText = await invoke<string>('ocr_screenshot', {
@@ -708,50 +736,38 @@ export default function ScreenshotOverlay() {
     } finally {
       setIsOcrProcessing(false);
     }
-  };
+  }, [addToast]);
 
-  // 计算工具栏位置
+  // 计算工具栏位置（窗口相对坐标）
   const getToolbarPosition = () => {
-    if (!selectedRegion) {
-      console.log('[ScreenshotOverlay] getToolbarPosition: no selectedRegion');
-      return null;
-    }
+    if (!selectedRegion) return null;
 
-    // 截图遮罩窗口是全屏模式，直接使用选区的屏幕坐标作为视口坐标
-    // 因为全屏窗口的视口就是整个屏幕
-    const viewportX = selectedRegion.x;
-    const viewportY = selectedRegion.y;
+    // 转换为窗口内相对坐标（逻辑像素）
+    const viewportX = (selectedRegion.x - monitorOffset.x) / scaleFactor;
+    const viewportY = (selectedRegion.y - monitorOffset.y) / scaleFactor;
+    const regionWidth = selectedRegion.width / scaleFactor;
+    const regionHeight = selectedRegion.height / scaleFactor;
 
-    const toolbarWidth = 320; // 估算工具栏宽度
-    const toolbarHeight = 60; // 估算工具栏高度
+    const toolbarWidth = 320;
+    const toolbarHeight = 60;
     const padding = 16;
 
-    // 工具栏水平居中于选区
-    let left = viewportX + selectedRegion.width / 2;
-    let top = viewportY + selectedRegion.height + padding;
+    let left = viewportX + regionWidth / 2;
+    let top = viewportY + regionHeight + padding;
 
-    // 获取实际屏幕尺寸（考虑缩放因子）
     const screenWidth = window.innerWidth;
     const screenHeight = window.innerHeight;
 
-    console.log('[ScreenshotOverlay] getToolbarPosition: viewportX=', viewportX, 'viewportY=', viewportY, 'screenW=', screenWidth, 'screenH=', screenHeight);
-
-    // 如果工具栏会超出屏幕底部，显示在选区上方
     if (top + toolbarHeight > screenHeight) {
       top = viewportY - toolbarHeight - padding;
     }
 
-    // 确保水平居中不超出屏幕边界
     const minLeft = toolbarWidth / 2 + padding;
     const maxLeft = screenWidth - toolbarWidth / 2 - padding;
     left = Math.max(minLeft, Math.min(left, maxLeft));
-
-    // 确保工具栏不会超出屏幕顶部或底部
     top = Math.max(padding, Math.min(top, screenHeight - toolbarHeight - padding));
 
-    const result = { left, top };
-    console.log('[ScreenshotOverlay] getToolbarPosition: result=', result);
-    return result;
+    return { left, top };
   };
 
   const toolbarPos = getToolbarPosition();
@@ -833,8 +849,8 @@ export default function ScreenshotOverlay() {
         <div
           className="absolute px-2 py-1 bg-black/80 text-white text-xs rounded pointer-events-none"
           style={{
-            left: hoveredWindow.x + 8,
-            top: hoveredWindow.y + 8,
+            left: (hoveredWindow.x - monitorOffset.x) / scaleFactor + 8,
+            top: (hoveredWindow.y - monitorOffset.y) / scaleFactor + 8,
           }}
         >
           <div className="font-medium">{hoveredWindow.title || '无标题'}</div>
@@ -851,6 +867,7 @@ export default function ScreenshotOverlay() {
             top: toolbarPos.top,
             transform: 'translateX(-50%)',
           }}
+          onMouseDown={(e) => e.stopPropagation()}
         >
           {toolbarButtons.map((button) => {
             const btnContent = (

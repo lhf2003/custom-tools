@@ -17,6 +17,7 @@ const VIEW_MODES: readonly ViewMode[] = [
   'everything',
   'json_formatter',
   'chat',
+  'screenshot',
 ] as const;
 
 function isViewMode(value: string): value is ViewMode {

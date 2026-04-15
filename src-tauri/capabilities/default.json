@@ -3,7 +3,8 @@
   "identifier": "default",
   "description": "enables the default permissions",
   "windows": [
-    "main"
+    "main",
+    "screenshot-overlay"
   ],
   "permissions": [
     "core:default",
@@ -16,7 +17,11 @@
     "core:window:allow-outer-position",
     "core:window:allow-available-monitors",
     "core:window:allow-is-visible",
+    "core:window:allow-scale-factor",
+    "core:window:allow-inner-size",
     "core:tray:default",
+    "core:event:default",
+    "core:event:allow-listen",
     "fs:default",
     "fs:allow-read",
     "updater:default",

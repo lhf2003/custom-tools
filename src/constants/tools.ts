@@ -6,6 +6,7 @@ import {
   Settings,
   Braces,
   MessageCircle,
+  Camera,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -40,6 +41,14 @@ export interface BuiltInTool {
  * entries that carry a `description` field.
  */
 export const BUILT_IN_TOOLS: readonly BuiltInTool[] = [
+  {
+    id: 'screenshot',
+    name: '截图工具',
+    icon: Camera,
+    color: 'bg-pink-600',
+    description:
+      '支持全屏、窗口、区域截图，内置编辑和 OCR 文字识别功能。截图自动保存历史，支持快捷键快速触发。',
+  },
   {
     id: 'chat',
     name: 'AI 聊天',

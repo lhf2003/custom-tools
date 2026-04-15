@@ -1,10 +1,22 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import ScreenshotOverlay from './ScreenshotOverlay';
+import '@/index.css';
 import './overlay.css';
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <ScreenshotOverlay />
-  </React.StrictMode>
-);
+// 调试日志
+console.log('[ScreenshotOverlay] index.tsx loaded');
+
+const rootElement = document.getElementById('root');
+console.log('[ScreenshotOverlay] root element:', rootElement);
+
+if (rootElement) {
+  ReactDOM.createRoot(rootElement).render(
+    <React.StrictMode>
+      <ScreenshotOverlay />
+    </React.StrictMode>,
+  );
+  console.log('[ScreenshotOverlay] React app mounted');
+} else {
+  console.error('[ScreenshotOverlay] root element not found!');
+}

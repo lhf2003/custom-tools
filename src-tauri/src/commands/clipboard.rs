@@ -984,6 +984,50 @@ unsafe fn simulate_paste_to_window(target_hwnd: isize) {
     }
 }
 
+/// Copy file to clipboard (for screenshot files)
+#[tauri::command]
+pub fn copy_file_to_clipboard(
+    app_handle: tauri::AppHandle,
+    filepath: String,
+) -> Result<(), String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+
+    // Read image file
+    let image_data = std::fs::read(&filepath).map_err(|e| e.to_string())?;
+
+    // Get image format from file extension
+    let extension = std::path::Path::new(&filepath)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    // Convert to PNG if needed (for clipboard compatibility)
+    let png_data = if extension == "png" {
+        image_data
+    } else {
+        let img = image::load_from_memory(&image_data).map_err(|e| e.to_string())?;
+        let mut output = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut output), image::ImageFormat::Png)
+            .map_err(|e| e.to_string())?;
+        output
+    };
+
+    // Write to clipboard
+    #[cfg(windows)]
+    {
+        copy_image_to_windows_clipboard(&png_data)?;
+    }
+
+    #[cfg(not(windows))]
+    {
+        log::warn!("Image clipboard copy not implemented for non-Windows platforms");
+    }
+
+    log::info!("File copied to clipboard: {}", filepath);
+    Ok(())
+}
+
 /// Read image file and return as base64 for display
 #[tauri::command]
 pub fn read_image_file_as_base64(path: String) -> Result<String, String> {

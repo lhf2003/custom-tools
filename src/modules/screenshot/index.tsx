@@ -88,7 +88,13 @@ export default function ScreenshotModule() {
           </button>
 
           <button
-            onClick={() => alert('区域截图功能开发中...')}
+            onClick={async () => {
+              try {
+                await invoke('open_screenshot_overlay');
+              } catch (error) {
+                console.error('打开截图遮罩失败:', error);
+              }
+            }}
             disabled={isCapturing}
             className="flex flex-col items-center justify-center p-6 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-400 rounded-xl transition-colors"
           >
