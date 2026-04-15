@@ -18,7 +18,7 @@ export function Tooltip({
   const [isMounted, setIsMounted] = useState(false);
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const triggerRef = useRef<HTMLDivElement>(null);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const calculatePosition = useCallback(() => {
     if (!triggerRef.current) return;

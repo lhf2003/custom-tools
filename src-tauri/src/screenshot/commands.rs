@@ -81,6 +81,11 @@ pub async fn get_capturable_windows() -> Result<Vec<WindowInfo>, String> {
             continue;
         }
 
+        // 跳过截图遮罩窗口自身，避免前端将其识别为可截图目标
+        if title == "截图工具" {
+            continue;
+        }
+
         window_infos.push(WindowInfo {
             id,
             title,
@@ -360,6 +365,11 @@ pub async fn get_all_windows() -> Result<Vec<WindowBounds>, String> {
 
         // 跳过无效窗口（无标题、零尺寸）
         if title.is_empty() || width == 0 || height == 0 {
+            continue;
+        }
+
+        // 跳过截图遮罩窗口自身，避免前端将其误判为悬停目标
+        if title == "截图工具" {
             continue;
         }
 
