@@ -1,8 +1,12 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   Copy, Download, Check, AlignLeft, GitBranch,
   AlertCircle, ChevronsDownUp, ChevronsUpDown,
 } from 'lucide-react';
+import {
+  parse as parseJsonc, format as formatJsonc, applyEdits,
+  printParseErrorCode, type ParseError,
+} from 'jsonc-parser';
 import { Tooltip } from '@/components/Tooltip';
 import { useAppStore } from '@/stores/appStore';
 import { WINDOW_SIZE } from '../../constants/window';
@@ -40,13 +44,20 @@ export function JsonFormatterView() {
       return;
     }
 
-    try {
-      const parsed = JSON.parse(data);
+    // Use jsonc-parser so JSON with comments (JSONC) and trailing commas is accepted
+    const errors: ParseError[] = [];
+    const parsed = parseJsonc(data, errors, { allowTrailingComma: true, disallowComments: false });
+    if (errors.length === 0 && parsed !== undefined) {
       setParsedJson(parsed);
       setParseError(null);
-    } catch (err) {
+    } else if (errors.length === 0) {
+      // e.g. comment-only input: syntactically valid JSONC but no value
       setParsedJson(null);
-      setParseError(err instanceof Error ? err.message : 'JSON 解析失败');
+      setParseError('内容中没有有效的 JSON 数据');
+    } else {
+      const first = errors[0];
+      setParsedJson(null);
+      setParseError(`${printParseErrorCode(first.error)}（偏移 ${first.offset}）`);
     }
   }, [jsonFormatterData]);
 
@@ -55,9 +66,13 @@ export function JsonFormatterView() {
     immediateResize(WINDOW_SIZE.JSON_FORMATTER.height, WINDOW_SIZE.JSON_FORMATTER.width);
   }, []);
 
-  const formattedText = parsedJson !== null
-    ? JSON.stringify(parsedJson, null, 2)
-    : rawText;
+  // Format while preserving comments: jsonc-parser's format() returns edits
+  // applied onto the original text, so comments survive reformatting.
+  const formattedText = useMemo(() => {
+    if (parsedJson === null) return rawText;
+    const edits = formatJsonc(rawText, undefined, { tabSize: 2, insertSpaces: true });
+    return applyEdits(rawText, edits);
+  }, [parsedJson, rawText]);
 
   // ── Toolbar actions ────────────────────────────────────────────────────────
 

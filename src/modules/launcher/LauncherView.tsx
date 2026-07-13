@@ -1,5 +1,6 @@
 import { Search, User, RefreshCw } from 'lucide-react';
 import { useEffect, useState, useCallback } from 'react';
+import { parse as parseJsonc, type ParseError } from 'jsonc-parser';
 import { useAppStore } from '@/stores/appStore';
 import { useSearch } from '@/hooks/useSearch';
 import type { ViewMode } from '@/types';
@@ -126,16 +127,15 @@ export function LauncherView() {
     loadRecentItems();
   }, [loadRecentItems]);
 
-  // Detect if text is valid, non-trivial JSON (object or array)
+  // Detect if text is valid, non-trivial JSON / JSONC (object or array);
+  // jsonc-parser is used so pasted JSON with comments is also recognized,
+  // including documents that begin with a comment before the root value.
   const detectJson = useCallback((text: string): boolean => {
     const trimmed = text.trim();
-    if (!trimmed || (trimmed[0] !== '{' && trimmed[0] !== '[')) return false;
-    try {
-      const parsed = JSON.parse(trimmed);
-      return typeof parsed === 'object' && parsed !== null;
-    } catch {
-      return false;
-    }
+    if (!trimmed) return false;
+    const errors: ParseError[] = [];
+    const parsed = parseJsonc(trimmed, errors, { allowTrailingComma: true, disallowComments: false });
+    return errors.length === 0 && typeof parsed === 'object' && parsed !== null;
   }, []);
 
   // Handle paste event for files and images
