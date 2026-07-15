@@ -23,6 +23,7 @@ export default defineConfig({
       input: {
         main: path.resolve(__dirname, 'index.html'),
         'screenshot-overlay': path.resolve(__dirname, 'screenshot-overlay.html'),
+        'wormhole-bar': path.resolve(__dirname, 'wormhole-bar.html'),
       },
     },
   },

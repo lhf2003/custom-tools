@@ -60,6 +60,10 @@ export async function exportNoteAsImage(
     .vditor-reset pre code { background-color: transparent !important; color: #24292e !important; padding: 0 !important; font-size: 14px !important; line-height: 1.6 !important; }
     .vditor-reset blockquote { border-left: 4px solid #e5e7eb !important; padding-left: 16px !important; color: #6b7280 !important; margin-bottom: 16px !important; }
     .vditor-reset ul, .vditor-reset ol { color: #1f2937 !important; padding-left: 24px !important; margin-bottom: 16px !important; }
+    .vditor-reset ul { list-style-type: disc !important; }
+    .vditor-reset ol { list-style: none !important; counter-reset: list-counter !important; }
+    .vditor-reset ol > li { position: relative !important; counter-increment: list-counter !important; }
+    .vditor-reset ol > li::before { content: counter(list-counter) "." !important; position: absolute !important; right: 100% !important; margin-right: 8px !important; top: 0 !important; width: 20px !important; text-align: right !important; color: #1f2937 !important; font-size: inherit !important; line-height: inherit !important; }
     .vditor-reset li { color: #1f2937 !important; margin-bottom: 4px !important; }
     .vditor-reset table { width: 100% !important; border-collapse: collapse !important; margin-bottom: 16px !important; }
     .vditor-reset th, .vditor-reset td { border: 1px solid #e5e7eb !important; padding: 8px 12px !important; color: #1f2937 !important; }

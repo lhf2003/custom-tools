@@ -143,6 +143,21 @@ impl ClipboardManager {
             ClipboardContent::Image(data) => {
                 let hash = Self::calculate_hash(&data);
 
+                // Check if the same image was already saved recently
+                let exists: bool = conn.query_row(
+                    "SELECT 1 FROM clipboard_history
+                     WHERE content_hash = ?1
+                     AND created_at > datetime('now', '-1 hour')
+                     LIMIT 1",
+                    [&hash],
+                    |_| Ok(true),
+                ).unwrap_or(false);
+
+                if exists {
+                    log::debug!("Duplicate clipboard image ignored");
+                    return Ok(());
+                }
+
                 // Store image reference (actual image stored in file system)
                 let app_dir = dirs::data_dir()
                     .ok_or_else(|| anyhow::anyhow!("Failed to get data dir"))?
@@ -240,7 +255,8 @@ impl ClipboardManager {
                      ORDER BY created_at DESC
                      LIMIT 500
                  )
-                 AND content_type = 'image'",
+                 AND content_type = 'image'
+                 AND is_favorite = 0",
                 &[]
             )?;
 
@@ -250,7 +266,8 @@ impl ClipboardManager {
                      SELECT id FROM clipboard_history
                      ORDER BY created_at DESC
                      LIMIT 500
-                 )",
+                 )
+                 AND is_favorite = 0",
                 [],
             )?;
 

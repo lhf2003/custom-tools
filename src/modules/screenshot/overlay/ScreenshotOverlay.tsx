@@ -3,14 +3,11 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { useToastStore } from '@/stores/toastStore';
-import { Tooltip } from '@/components/Tooltip';
+import { Toolbar } from './Toolbar';
 import {
   Check,
   Copy,
   X,
-  Type,
-  Square,
-  ArrowRight,
   Sparkles,
 } from 'lucide-react';
 
@@ -61,6 +58,24 @@ export default function ScreenshotOverlay() {
   const backgroundPathRef = useRef('');
   const dragStartHoveredWindowRef = useRef<WindowBounds | null>(null);
 
+  // 延迟操作 timeout 引用
+  const pendingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mouseUpTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearPendingTimeout = useCallback(() => {
+    if (pendingTimeoutRef.current) {
+      clearTimeout(pendingTimeoutRef.current);
+      pendingTimeoutRef.current = null;
+    }
+  }, []);
+
+  const clearMouseUpTimeout = useCallback(() => {
+    if (mouseUpTimeoutRef.current) {
+      clearTimeout(mouseUpTimeoutRef.current);
+      mouseUpTimeoutRef.current = null;
+    }
+  }, []);
+
   // 编辑状态
   const [editMode, setEditMode] = useState<EditMode>('none');
   const [drawElements, setDrawElements] = useState<DrawElement[]>([]);
@@ -72,10 +87,42 @@ export default function ScreenshotOverlay() {
   const [ocrResult, setOcrResult] = useState<string>('');
   const [showOcrResult, setShowOcrResult] = useState(false);
 
+  // 文字输入状态
+  const [textInput, setTextInput] = useState<{ id?: string; x: number; y: number; text: string } | null>(null);
+  const textInputRef = useRef<HTMLInputElement>(null);
+  const placingTextRef = useRef(false);
+  const isDraggingTextInputRef = useRef(false);
+  const textDragStartRef = useRef({ mx: 0, my: 0, x: 0, y: 0 });
+
+  // 选区移动/调整大小交互状态
+  type Handle = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
+  type InteractionMode = 'none' | 'moving' | 'resizing';
+  const [interactionMode, setInteractionMode] = useState<InteractionMode>('none');
+  const [activeHandle, setActiveHandle] = useState<Handle | null>(null);
+  const interactionStartRef = useRef<{
+    startX: number;
+    startY: number;
+    originalRegion: Selection;
+  } | null>(null);
+  const [hoverTarget, setHoverTarget] = useState<Handle | 'body' | null>(null);
+
+  useEffect(() => {
+    if (textInput) {
+      textInputRef.current?.focus();
+    }
+  }, [textInput]);
+
   // 正中央提示（截图成功/复制成功）
   const [centerTip, setCenterTip] = useState<{ text: string; icon: 'success' | 'copy' } | null>(null);
 
   const { addToast } = useToastStore();
+
+  // centerTip 自动消失
+  useEffect(() => {
+    if (!centerTip) return;
+    const id = setTimeout(() => setCenterTip(null), 1500);
+    return () => clearTimeout(id);
+  }, [centerTip]);
 
   // 重置状态（窗口复用时调用）
   const resetState = useCallback(() => {
@@ -98,7 +145,14 @@ export default function ScreenshotOverlay() {
     setOcrResult('');
     setShowOcrResult(false);
     setCenterTip(null);
-  }, []);
+    setTextInput(null);
+    setInteractionMode('none');
+    setActiveHandle(null);
+    setHoverTarget(null);
+    interactionStartRef.current = null;
+    clearPendingTimeout();
+    clearMouseUpTimeout();
+  }, [clearPendingTimeout, clearMouseUpTimeout]);
 
   // 仅隐藏遮罩窗口（不清理背景图，供保存后复用窗口使用）
   const hideOverlay = useCallback(async () => {
@@ -112,6 +166,9 @@ export default function ScreenshotOverlay() {
 
   // 关闭遮罩窗口（复用窗口：hide 而非 close，并清理背景图）
   const closeOverlay = useCallback(async () => {
+    clearPendingTimeout();
+    clearMouseUpTimeout();
+
     const path = backgroundPathRef.current;
     try {
       if (path) {
@@ -123,7 +180,7 @@ export default function ScreenshotOverlay() {
     }
 
     await hideOverlay();
-  }, [hideOverlay]);
+  }, [hideOverlay, clearPendingTimeout, clearMouseUpTimeout]);
 
   // 初始化：监听显示器信息和背景图事件，窗口复用时自动重置状态
   useEffect(() => {
@@ -184,44 +241,50 @@ export default function ScreenshotOverlay() {
     editMode,
     showOcrResult,
     isOcrProcessing,
+    textInput,
   });
 
   // 同步 ref 和 state
   useEffect(() => {
-    stateRef.current = { isDragging, selectedRegion, editMode, showOcrResult, isOcrProcessing };
-  }, [isDragging, selectedRegion, editMode, showOcrResult, isOcrProcessing]);
+    stateRef.current = { isDragging, selectedRegion, editMode, showOcrResult, isOcrProcessing, textInput };
+  }, [isDragging, selectedRegion, editMode, showOcrResult, isOcrProcessing, textInput]);
 
   // 键盘事件处理
   useEffect(() => {
-    console.log('[ScreenshotOverlay] Setting up keyboard listeners');
     const handleKeyDown = async (e: KeyboardEvent) => {
       const state = stateRef.current;
-      console.log('[ScreenshotOverlay] Key pressed:', e.key, 'State:', {
-        showOcrResult: state.showOcrResult,
-        editMode: state.editMode,
-        isDragging: state.isDragging,
-        selectedRegion: state.selectedRegion ? 'yes' : 'no',
-      });
 
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
-        console.log('[ScreenshotOverlay] ESC pressed, handling...');
 
         if (state.showOcrResult) {
-          console.log('[ScreenshotOverlay] Closing OCR result');
           setShowOcrResult(false);
           return;
         }
 
-        if (state.editMode !== 'none') {
-          console.log('[ScreenshotOverlay] Exiting edit mode:', state.editMode);
+        if (state.textInput) {
+          setTextInput(null);
           setEditMode('none');
           return;
         }
 
+        if (state.editMode !== 'none') {
+          setEditMode('none');
+          return;
+        }
+
+        if (interactionMode !== 'none') {
+          if (interactionStartRef.current) {
+            setSelectedRegion(interactionStartRef.current.originalRegion);
+          }
+          setInteractionMode('none');
+          setActiveHandle(null);
+          interactionStartRef.current = null;
+          return;
+        }
+
         if (state.isDragging) {
-          console.log('[ScreenshotOverlay] Canceling drag');
           setIsDragging(false);
           setDragStart(null);
           setDragCurrent(null);
@@ -229,14 +292,15 @@ export default function ScreenshotOverlay() {
         }
 
         if (state.selectedRegion) {
-          console.log('[ScreenshotOverlay] Clearing selection');
-          setSelectedRegion(null);
-          setDrawElements([]);
+          if (state.selectedRegion.source.type === 'region') {
+            await closeOverlay();
+          } else {
+            setSelectedRegion(null);
+            setDrawElements([]);
+          }
           return;
         }
 
-        // 没有任何状态时，关闭窗口
-        console.log('[ScreenshotOverlay] Closing overlay window');
         await closeOverlay();
         return;
       }
@@ -245,8 +309,6 @@ export default function ScreenshotOverlay() {
       if (e.key === 'Enter' && state.selectedRegion && !state.isOcrProcessing) {
         e.preventDefault();
         e.stopPropagation();
-        console.log('[ScreenshotOverlay] Enter pressed, calling captureSelection');
-        // 使用 setTimeout 避免在事件处理中直接调用异步函数可能的问题
         setTimeout(() => captureSelection(), 0);
         return;
       }
@@ -269,11 +331,8 @@ export default function ScreenshotOverlay() {
     // 同时绑定到 window 和 document，确保事件被捕获
     window.addEventListener('keydown', handleKeyDown, true);
     document.addEventListener('keydown', handleKeyDown, true);
-    console.log('[ScreenshotOverlay] Keyboard listeners attached');
-
 
     return () => {
-      console.log('[ScreenshotOverlay] Removing keyboard listeners');
       window.removeEventListener('keydown', handleKeyDown, true);
       document.removeEventListener('keydown', handleKeyDown, true);
     };
@@ -313,8 +372,8 @@ export default function ScreenshotOverlay() {
       ctx.drawImage(backgroundImage, 0, 0, window.innerWidth, window.innerHeight);
     }
 
-    // 全屏半透明遮罩
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    // 全屏遮罩（透明，不再暗化未选中区域）
+    ctx.fillStyle = 'rgba(0, 0, 0, 0)';
     ctx.fillRect(0, 0, window.innerWidth, window.innerHeight);
 
     if (highlightRegion) {
@@ -339,12 +398,8 @@ export default function ScreenshotOverlay() {
         );
       }
 
-      // 绘制边框
-      if (selectedRegion || isDragging) {
-        ctx.strokeStyle = '#0099FF'; // 蓝色：已选中
-      } else {
-        ctx.strokeStyle = '#00D26A'; // 绿色：悬停
-      }
+      // 绘制边框（统一颜色）
+      ctx.strokeStyle = '#0099FF';
       ctx.lineWidth = 2;
       ctx.strokeRect(drawX, drawY, drawW, drawH);
 
@@ -370,6 +425,28 @@ export default function ScreenshotOverlay() {
           drawX + drawW / 2,
           drawY - 14
         );
+      }
+
+      // 绘制调整大小手柄
+      if (selectedRegion) {
+        const handleSize = 4; // 逻辑像素（半边长），实际显示 8x8
+        const handlePositions = [
+          { x: drawX, y: drawY },
+          { x: drawX + drawW / 2, y: drawY },
+          { x: drawX + drawW, y: drawY },
+          { x: drawX + drawW, y: drawY + drawH / 2 },
+          { x: drawX + drawW, y: drawY + drawH },
+          { x: drawX + drawW / 2, y: drawY + drawH },
+          { x: drawX, y: drawY + drawH },
+          { x: drawX, y: drawY + drawH / 2 },
+        ];
+        handlePositions.forEach((pos) => {
+          ctx.fillStyle = '#0099FF';
+          ctx.strokeStyle = '#FFFFFF';
+          ctx.lineWidth = 1;
+          ctx.fillRect(pos.x - handleSize, pos.y - handleSize, handleSize * 2, handleSize * 2);
+          ctx.strokeRect(pos.x - handleSize, pos.y - handleSize, handleSize * 2, handleSize * 2);
+        });
       }
 
       // 绘制标注元素（坐标转为相对窗口的逻辑坐标）
@@ -398,6 +475,7 @@ export default function ScreenshotOverlay() {
               ctx.fillStyle = '#FFFFFF';
               ctx.strokeStyle = '#000000';
               ctx.lineWidth = 3;
+              ctx.textBaseline = 'top';
               ctx.strokeText(element.text, ex, ey);
               ctx.fillText(element.text, ex, ey);
             }
@@ -448,6 +526,36 @@ export default function ScreenshotOverlay() {
     ctx.fill();
   };
 
+  // 命中检测：手柄和选区主体
+  const getHoverTarget = useCallback((absX: number, absY: number, region: Selection | null): Handle | 'body' | null => {
+    if (!region) return null;
+    const hitPadding = Math.round(10 * scaleFactor); // 物理像素热区
+    const handleSize = Math.round(6 * scaleFactor);  // 手柄半宽（物理像素）
+
+    const handles: { key: Handle; x: number; y: number }[] = [
+      { key: 'nw', x: region.x, y: region.y },
+      { key: 'n', x: region.x + region.width / 2, y: region.y },
+      { key: 'ne', x: region.x + region.width, y: region.y },
+      { key: 'e', x: region.x + region.width, y: region.y + region.height / 2 },
+      { key: 'se', x: region.x + region.width, y: region.y + region.height },
+      { key: 's', x: region.x + region.width / 2, y: region.y + region.height },
+      { key: 'sw', x: region.x, y: region.y + region.height },
+      { key: 'w', x: region.x, y: region.y + region.height / 2 },
+    ];
+
+    for (const h of handles) {
+      if (Math.abs(absX - h.x) <= handleSize + hitPadding && Math.abs(absY - h.y) <= handleSize + hitPadding) {
+        return h.key;
+      }
+    }
+
+    if (absX >= region.x && absX <= region.x + region.width && absY >= region.y && absY <= region.y + region.height) {
+      return 'body';
+    }
+
+    return null;
+  }, [scaleFactor]);
+
   // 重绘画布
   useEffect(() => {
     drawOverlay();
@@ -455,6 +563,20 @@ export default function ScreenshotOverlay() {
 
   // 鼠标移动：检测窗口或绘制
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    // 优先处理文字输入框拖拽
+    if (isDraggingTextInputRef.current && textInput) {
+      if (e.buttons !== 1) {
+        isDraggingTextInputRef.current = false;
+        return;
+      }
+      e.preventDefault();
+      window.getSelection()?.removeAllRanges();
+      const dx = Math.round((e.clientX - textDragStartRef.current.mx) * scaleFactor);
+      const dy = Math.round((e.clientY - textDragStartRef.current.my) * scaleFactor);
+      setTextInput({ ...textInput, x: textDragStartRef.current.x + dx, y: textDragStartRef.current.y + dy });
+      return;
+    }
+
     // 使用物理像素坐标，确保高 DPI 下截图精准
     const absX = Math.round(e.clientX * scaleFactor) + monitorOffset.x;
     const absY = Math.round(e.clientY * scaleFactor) + monitorOffset.y;
@@ -473,6 +595,128 @@ export default function ScreenshotOverlay() {
       return;
     }
 
+    // 处理选区移动和缩放
+    if (interactionMode !== 'none' && interactionStartRef.current && selectedRegion) {
+      if (e.buttons !== 1) {
+        setInteractionMode('none');
+        setActiveHandle(null);
+        interactionStartRef.current = null;
+        return;
+      }
+      e.preventDefault();
+      window.getSelection()?.removeAllRanges();
+
+      const { startX, startY, originalRegion } = interactionStartRef.current;
+      const dx = absX - startX;
+      const dy = absY - startY;
+
+      if (interactionMode === 'moving') {
+        const newRegion = {
+          ...originalRegion,
+          x: originalRegion.x + dx,
+          y: originalRegion.y + dy,
+        };
+        setSelectedRegion(newRegion);
+        // 同步移动标注元素
+        setDrawElements((prev) =>
+          prev.map((el) => {
+            if (el.type === 'arrow') {
+              return { ...el, x: el.x + dx, y: el.y + dy, x2: (el.x2 ?? el.x) + dx, y2: (el.y2 ?? el.y) + dy };
+            }
+            return { ...el, x: el.x + dx, y: el.y + dy };
+          })
+        );
+        // 同步移动正在输入的文字框
+        if (textInput) {
+          setTextInput({ ...textInput, x: textInput.x + dx, y: textInput.y + dy });
+        }
+      } else if (interactionMode === 'resizing' && activeHandle) {
+        const minSize = Math.round(20 * scaleFactor);
+        let newX = originalRegion.x;
+        let newY = originalRegion.y;
+        let newW = originalRegion.width;
+        let newH = originalRegion.height;
+
+        switch (activeHandle) {
+          case 'e':
+            newW = Math.max(minSize, originalRegion.width + dx);
+            break;
+          case 'w':
+            newW = Math.max(minSize, originalRegion.width - dx);
+            newX = originalRegion.x + (originalRegion.width - newW);
+            break;
+          case 's':
+            newH = Math.max(minSize, originalRegion.height + dy);
+            break;
+          case 'n':
+            newH = Math.max(minSize, originalRegion.height - dy);
+            newY = originalRegion.y + (originalRegion.height - newH);
+            break;
+          case 'se':
+            newW = Math.max(minSize, originalRegion.width + dx);
+            newH = Math.max(minSize, originalRegion.height + dy);
+            break;
+          case 'sw':
+            newW = Math.max(minSize, originalRegion.width - dx);
+            newX = originalRegion.x + (originalRegion.width - newW);
+            newH = Math.max(minSize, originalRegion.height + dy);
+            break;
+          case 'ne':
+            newW = Math.max(minSize, originalRegion.width + dx);
+            newH = Math.max(minSize, originalRegion.height - dy);
+            newY = originalRegion.y + (originalRegion.height - newH);
+            break;
+          case 'nw':
+            newW = Math.max(minSize, originalRegion.width - dx);
+            newX = originalRegion.x + (originalRegion.width - newW);
+            newH = Math.max(minSize, originalRegion.height - dy);
+            newY = originalRegion.y + (originalRegion.height - newH);
+            break;
+        }
+
+        const oldRegion = selectedRegion;
+        const newRegion = { ...originalRegion, x: newX, y: newY, width: newW, height: newH };
+        setSelectedRegion(newRegion);
+
+        // 同步缩放标注元素
+        if (oldRegion.width > 0 && oldRegion.height > 0) {
+          const scaleX = newW / oldRegion.width;
+          const scaleY = newH / oldRegion.height;
+          setDrawElements((prev) =>
+            prev.map((el) => {
+              const relX = el.x - oldRegion.x;
+              const relY = el.y - oldRegion.y;
+              const updated: DrawElement = {
+                ...el,
+                x: newRegion.x + relX * scaleX,
+                y: newRegion.y + relY * scaleY,
+              };
+              if (el.type === 'rect' && el.width && el.height) {
+                updated.width = el.width * scaleX;
+                updated.height = el.height * scaleY;
+              }
+              if (el.type === 'arrow' && el.x2 !== undefined && el.y2 !== undefined) {
+                const relX2 = el.x2 - oldRegion.x;
+                const relY2 = el.y2 - oldRegion.y;
+                updated.x2 = newRegion.x + relX2 * scaleX;
+                updated.y2 = newRegion.y + relY2 * scaleY;
+              }
+              return updated;
+            })
+          );
+        }
+      }
+      return;
+    }
+
+    if (selectedRegion && editMode === 'none') {
+      const target = getHoverTarget(absX, absY, selectedRegion);
+      if (target !== hoverTarget) {
+        setHoverTarget(target);
+      }
+      return;
+    }
+
     if (selectedRegion) return; // 已选中则不再检测
     if (isDragging && dragStart) {
       setDragCurrent({ x: absX, y: absY });
@@ -480,14 +724,14 @@ export default function ScreenshotOverlay() {
     }
 
     // 检测鼠标下的窗口（使用绝对坐标，物理像素）
-    const window = windows.find((w) => {
+    const hitWindow = windows.find((w) => {
       return absX >= w.x && absX < w.x + w.width && absY >= w.y && absY < w.y + w.height;
     });
 
-    if (window !== hoveredWindow) {
-      setHoveredWindow(window || null);
+    if (hitWindow !== hoveredWindow) {
+      setHoveredWindow(hitWindow || null);
     }
-  }, [windows, selectedRegion, isDragging, dragStart, editMode, isDrawing, currentElement, monitorOffset, scaleFactor]);
+  }, [windows, selectedRegion, isDragging, dragStart, editMode, isDrawing, currentElement, monitorOffset, scaleFactor, textInput, interactionMode, activeHandle, hoverTarget, getHoverTarget]);
 
   // 鼠标按下：开始拖拽或绘制
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -499,7 +743,51 @@ export default function ScreenshotOverlay() {
     const absY = Math.round(e.clientY * scaleFactor) + monitorOffset.y;
 
     if (editMode !== 'none') {
-      // 编辑模式下开始绘制（记录绝对坐标）
+      if (editMode === 'text') {
+        // 文字模式：在点击位置显示输入框
+        e.preventDefault();
+        placingTextRef.current = true;
+
+        // 检查是否点击了已有的文字元素（16px 字体估算每字符 9px 宽，高度 20px）
+        const clickedText = drawElements.find((el) => {
+          if (el.type !== 'text' || !el.text) return false;
+          const textWidth = el.text.length * 9;
+          const textHeight = 20;
+          return absX >= el.x && absX <= el.x + textWidth && absY >= el.y && absY <= el.y + textHeight;
+        });
+
+        if (clickedText) {
+          // 移除该元素并进入编辑
+          setDrawElements((prev) => prev.filter((el) => el.id !== clickedText.id));
+          setEditMode('text');
+          setTextInput({ id: clickedText.id, x: clickedText.x, y: clickedText.y, text: clickedText.text || '' });
+          setTimeout(() => {
+            placingTextRef.current = false;
+          }, 0);
+          return;
+        }
+
+        // 先保存当前正在输入的文字，防止旧输入框因未触发 blur 而丢失
+        if (textInput?.text.trim()) {
+          setDrawElements((prev) => [
+            ...prev,
+            {
+              id: textInput.id || Math.random().toString(36).substring(2, 9),
+              type: 'text',
+              x: textInput.x,
+              y: textInput.y,
+              text: textInput.text.trim(),
+            },
+          ]);
+        }
+        setEditMode('text');
+        setTextInput({ x: absX, y: absY, text: '' });
+        setTimeout(() => {
+          placingTextRef.current = false;
+        }, 0);
+        return;
+      }
+      // 其他编辑模式下开始绘制（记录绝对坐标）
       setIsDrawing(true);
       setCurrentElement({
         id: Math.random().toString(36).substring(2, 9),
@@ -512,10 +800,26 @@ export default function ScreenshotOverlay() {
       return;
     }
 
-    if (selectedRegion) {
-      // 已选中状态下点击，取消选择
+    if (selectedRegion && editMode === 'none') {
+      const target = getHoverTarget(absX, absY, selectedRegion);
+      if (target) {
+        interactionStartRef.current = {
+          startX: absX,
+          startY: absY,
+          originalRegion: { ...selectedRegion },
+        };
+        if (target === 'body') {
+          setInteractionMode('moving');
+        } else {
+          setInteractionMode('resizing');
+          setActiveHandle(target);
+        }
+        return;
+      }
+      // 点击选区外部，取消选择
       setSelectedRegion(null);
       setDrawElements([]);
+      setHoverTarget(null);
       return;
     }
 
@@ -524,16 +828,21 @@ export default function ScreenshotOverlay() {
     setDragStart({ x: absX, y: absY });
     setDragCurrent({ x: absX, y: absY });
     dragStartHoveredWindowRef.current = hoveredWindow;
-  }, [hoveredWindow, selectedRegion, editMode, monitorOffset, scaleFactor]);
-
-  // 监听 selectedRegion 变化
-  useEffect(() => {
-    console.log('[ScreenshotOverlay] selectedRegion changed:', selectedRegion);
-  }, [selectedRegion]);
+  }, [hoveredWindow, selectedRegion, editMode, monitorOffset, scaleFactor, textInput, drawElements]);
 
   // 鼠标抬起：结束拖拽或绘制
   const handleMouseUp = useCallback(() => {
-    console.log('[ScreenshotOverlay] Mouse up:', { isDragging, hasDragStart: !!dragStart, hasDragCurrent: !!dragCurrent, editMode, isDrawing });
+    if (isDraggingTextInputRef.current) {
+      isDraggingTextInputRef.current = false;
+      return;
+    }
+
+    if (interactionMode !== 'none') {
+      setInteractionMode('none');
+      setActiveHandle(null);
+      interactionStartRef.current = null;
+      return;
+    }
 
     if (editMode !== 'none' && isDrawing && currentElement) {
       // 完成绘制元素
@@ -564,8 +873,6 @@ export default function ScreenshotOverlay() {
     if (isDragging && dragStart && dragCurrent) {
       const width = Math.abs(dragCurrent.x - dragStart.x);
       const height = Math.abs(dragCurrent.y - dragStart.y);
-
-      console.log('[ScreenshotOverlay] Drag ended, size:', width, 'x', height);
 
       if (width < 5 && height < 5 && dragStartHoveredWindowRef.current) {
         // 移动距离很小，视为单击选中窗口
@@ -602,85 +909,65 @@ export default function ScreenshotOverlay() {
       document.documentElement.focus();
       document.body.focus();
       containerRef.current?.focus();
-      setTimeout(() => {
+      clearMouseUpTimeout();
+      mouseUpTimeoutRef.current = setTimeout(() => {
+        mouseUpTimeoutRef.current = null;
         document.documentElement.focus();
         document.body.focus();
         containerRef.current?.focus();
       }, 50);
     }
-  }, [isDragging, dragStart, dragCurrent, editMode, isDrawing, currentElement]);
+  }, [isDragging, dragStart, dragCurrent, editMode, isDrawing, currentElement, clearMouseUpTimeout]);
+
+  // 执行保存或复制截图的公共逻辑
+  const saveOrCopyScreenshot = useCallback(async (tipText: string, tipIcon: 'success' | 'copy') => {
+    const region = stateRef.current.selectedRegion;
+    if (!region) return;
+
+    const bgPath = backgroundPathRef.current;
+    const offset = monitorOffset;
+
+    setCenterTip({ text: tipText, icon: tipIcon });
+    clearPendingTimeout();
+    pendingTimeoutRef.current = setTimeout(() => {
+      pendingTimeoutRef.current = null;
+      hideOverlay();
+
+      invoke<{
+        filename: string;
+        filepath: string;
+        width: number;
+        height: number;
+      }>('save_and_copy_screenshot', {
+        x: region.x,
+        y: region.y,
+        width: region.width,
+        height: region.height,
+        backgroundImagePath: bgPath || undefined,
+        monitorX: offset.x,
+        monitorY: offset.y,
+        cleanupBackground: !!bgPath,
+      }).catch((error) => {
+        console.error('[ScreenshotOverlay] Failed to save/copy screenshot:', error);
+        addToast({
+          type: 'error',
+          title: tipIcon === 'success' ? '截图保存失败' : '复制失败',
+          message: String(error),
+          duration: 5000,
+        });
+      });
+    }, 500);
+  }, [addToast, hideOverlay, monitorOffset, clearPendingTimeout]);
 
   // 执行截图并复制到剪贴板（使用合并命令，减少 IPC 往返）
   const captureSelection = useCallback(async () => {
-    const region = stateRef.current.selectedRegion;
-    if (!region) return;
-
-    const bgPath = backgroundPathRef.current;
-    const offset = monitorOffset;
-
-    // 先在遮罩窗口正中央显示成功提示，再延迟隐藏窗口
-    setCenterTip({ text: '截图已保存', icon: 'success' });
-
-    setTimeout(async () => {
-      hideOverlay();
-
-      try {
-        await invoke<{
-          filename: string;
-          filepath: string;
-          width: number;
-          height: number;
-        }>('save_and_copy_screenshot', {
-          x: region.x,
-          y: region.y,
-          width: region.width,
-          height: region.height,
-          backgroundImagePath: bgPath || undefined,
-          monitorX: offset.x,
-          monitorY: offset.y,
-          cleanupBackground: !!bgPath,
-        });
-      } catch (error) {
-        console.error('[ScreenshotOverlay] Failed to save screenshot:', error);
-      }
-    }, 500);
-  }, [hideOverlay, monitorOffset]);
+    await saveOrCopyScreenshot('截图已保存', 'success');
+  }, [saveOrCopyScreenshot]);
 
   // 复制到剪贴板（使用合并命令，减少 IPC 往返）
   const copyToClipboard = useCallback(async () => {
-    const region = stateRef.current.selectedRegion;
-    if (!region) return;
-
-    const bgPath = backgroundPathRef.current;
-    const offset = monitorOffset;
-
-    // 先在遮罩窗口正中央显示成功提示，再延迟隐藏窗口
-    setCenterTip({ text: '已复制到剪贴板', icon: 'copy' });
-
-    setTimeout(async () => {
-      hideOverlay();
-
-      try {
-        await invoke<{
-          filename: string;
-          filepath: string;
-          width: number;
-          height: number;
-        }>('save_and_copy_screenshot', {
-          x: region.x,
-          y: region.y,
-          width: region.width,
-          height: region.height,
-          backgroundImagePath: bgPath || undefined,
-          monitorX: offset.x,
-          monitorY: offset.y,
-          cleanupBackground: !!bgPath,
-        });
-      } catch (error) {
-        console.error('Failed to copy screenshot:', error);
-      }
-    }, 500);
-  }, [hideOverlay, monitorOffset]);
+    await saveOrCopyScreenshot('已复制到剪贴板', 'copy');
+  }, [saveOrCopyScreenshot]);
 
   // OCR 识别（使用 stateRef 避免 stale closure）
   const performOcr = useCallback(async () => {
@@ -766,60 +1053,43 @@ export default function ScreenshotOverlay() {
 
   const toolbarPos = getToolbarPosition();
 
-  // 工具栏按钮
-  const toolbarButtons = [
-    {
-      id: 'save',
-      icon: Check,
-      label: '保存',
-      shortcut: 'Enter',
-      onClick: () => {
-        console.log('[ScreenshotOverlay] Save button clicked, selectedRegion:', selectedRegion);
-        captureSelection();
-      },
-      primary: true
-    },
-    {
-      id: 'copy',
-      icon: Copy,
-      label: '复制',
-      shortcut: 'Ctrl+C',
-      onClick: () => {
-        console.log('[ScreenshotOverlay] Copy button clicked');
-        copyToClipboard();
-      }
-    },
-    { id: 'rect', icon: Square, label: '矩形', shortcut: '', onClick: () => setEditMode(editMode === 'rect' ? 'none' : 'rect'), active: editMode === 'rect' },
-    { id: 'arrow', icon: ArrowRight, label: '箭头', shortcut: '', onClick: () => setEditMode(editMode === 'arrow' ? 'none' : 'arrow'), active: editMode === 'arrow' },
-    { id: 'text', icon: Type, label: '文字', shortcut: '', onClick: () => setEditMode(editMode === 'text' ? 'none' : 'text'), active: editMode === 'text' },
-    {
-      id: 'ocr',
-      icon: Sparkles,
-      label: 'OCR',
-      shortcut: '',
-      onClick: () => {
-        console.log('[ScreenshotOverlay] OCR button clicked');
-        performOcr();
-      },
-      loading: isOcrProcessing
-    },
-    {
-      id: 'cancel',
-      icon: X,
-      label: '取消',
-      shortcut: 'ESC',
-      onClick: () => {
-        console.log('[ScreenshotOverlay] Cancel button clicked');
-        setSelectedRegion(null);
-        setDrawElements([]);
-      }
-    },
-  ];
+  const getCursorClass = () => {
+    if (editMode !== 'none') return 'cursor-default';
+    if (interactionMode === 'moving') return 'cursor-move';
+    if (interactionMode === 'resizing' && activeHandle) {
+      const map: Record<Handle, string> = {
+        n: 'cursor-ns-resize',
+        s: 'cursor-ns-resize',
+        e: 'cursor-ew-resize',
+        w: 'cursor-ew-resize',
+        ne: 'cursor-nesw-resize',
+        sw: 'cursor-nesw-resize',
+        nw: 'cursor-nwse-resize',
+        se: 'cursor-nwse-resize',
+      };
+      return map[activeHandle];
+    }
+    if (hoverTarget === 'body') return 'cursor-move';
+    if (hoverTarget) {
+      const map: Record<Handle, string> = {
+        n: 'cursor-ns-resize',
+        s: 'cursor-ns-resize',
+        e: 'cursor-ew-resize',
+        w: 'cursor-ew-resize',
+        ne: 'cursor-nesw-resize',
+        sw: 'cursor-nesw-resize',
+        nw: 'cursor-nwse-resize',
+        se: 'cursor-nwse-resize',
+      };
+      return map[hoverTarget];
+    }
+    return 'cursor-crosshair';
+  };
 
   return (
     <div
       ref={containerRef}
-      className={`fixed inset-0 select-none outline-none ${editMode === 'none' ? 'cursor-crosshair' : 'cursor-default'}`}
+      className={`fixed inset-0 select-none outline-none ${getCursorClass()}`}
       onMouseMove={handleMouseMove}
       onMouseDown={handleMouseDown}
       onMouseUp={handleMouseUp}
@@ -854,52 +1124,19 @@ export default function ScreenshotOverlay() {
 
       {/* 底部工具栏 */}
       {selectedRegion && toolbarPos && (
-        <div
-          className="fixed flex items-center gap-1 px-2 py-1.5 bg-gray-800/95 backdrop-blur rounded-lg shadow-xl border border-gray-700 z-50"
-          style={{
-            left: toolbarPos.left,
-            top: toolbarPos.top,
-            transform: 'translateX(-50%)',
+        <Toolbar
+          position={toolbarPos}
+          editMode={editMode}
+          isOcrProcessing={isOcrProcessing}
+          onSave={captureSelection}
+          onCopy={copyToClipboard}
+          onSetEditMode={setEditMode}
+          onOcr={performOcr}
+          onCancel={() => {
+            setSelectedRegion(null);
+            setDrawElements([]);
           }}
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          {toolbarButtons.map((button) => {
-            const btnContent = (
-              <button
-                onClick={(e) => {
-                  console.log('[ScreenshotOverlay] Button onClick triggered:', button.id);
-                  e.stopPropagation();
-                  e.preventDefault();
-                  button.onClick();
-                }}
-                onMouseDown={(e) => {
-                  // 阻止鼠标按下事件冒泡，避免触发画布的鼠标事件
-                  e.stopPropagation();
-                }}
-                disabled={button.loading}
-                className={`relative flex flex-col items-center gap-0.5 px-3 py-1.5 rounded transition-all ${
-                  button.primary
-                    ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                    : button.active
-                    ? 'bg-orange-500/30 text-orange-400 border border-orange-500/50'
-                    : 'hover:bg-gray-700 text-gray-300'
-                } disabled:opacity-50 disabled:cursor-not-allowed`}
-              >
-                {button.loading ? (
-                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                ) : (
-                  <button.icon className="w-4 h-4" />
-                )}
-                <span className="text-[10px]">{button.label}</span>
-              </button>
-            );
-            return (
-              <Tooltip key={button.id} content={`${button.label} ${button.shortcut ? `(${button.shortcut})` : ''}`} placement="top">
-                {btnContent}
-              </Tooltip>
-            );
-          })}
-        </div>
+        />
       )}
 
       {/* OCR 结果弹窗 */}
@@ -948,6 +1185,76 @@ export default function ScreenshotOverlay() {
         </div>
       )}
 
+      {/* 文字输入框 */}
+      {textInput && (
+        <div
+          className="absolute z-50 flex flex-col items-center group"
+          style={{
+            left: (textInput.x - monitorOffset.x) / scaleFactor,
+            top: (textInput.y - monitorOffset.y) / scaleFactor,
+          }}
+          onMouseDown={(e) => {
+            e.stopPropagation();
+            isDraggingTextInputRef.current = true;
+            textDragStartRef.current = {
+              mx: e.clientX,
+              my: e.clientY,
+              x: textInput.x,
+              y: textInput.y,
+            };
+          }}
+        >
+          {/* 顶部拖拽手柄 */}
+          <div className="w-8 h-1.5 rounded-full bg-gray-400/80 mb-1 opacity-0 group-hover:opacity-100 transition-opacity cursor-move" />
+          <input
+            ref={textInputRef}
+            className="bg-gray-800/90 text-white text-base px-0 py-0 rounded border border-gray-500 outline-none focus:border-blue-500 min-w-[80px] shadow-lg"
+            value={textInput.text}
+            onChange={(e) => setTextInput({ ...textInput, text: e.target.value })}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'Enter') {
+                if (textInput.text.trim()) {
+                  setDrawElements((prev) => [
+                    ...prev,
+                    {
+                      id: textInput.id || Math.random().toString(36).substring(2, 9),
+                      type: 'text',
+                      x: textInput.x,
+                      y: textInput.y,
+                      text: textInput.text.trim(),
+                    },
+                  ]);
+                }
+                setTextInput(null);
+                setEditMode('none');
+              } else if (e.key === 'Escape') {
+                setTextInput(null);
+                setEditMode('none');
+              }
+            }}
+            onBlur={() => {
+              if (textInput.text.trim()) {
+                setDrawElements((prev) => [
+                  ...prev,
+                  {
+                    id: textInput.id || Math.random().toString(36).substring(2, 9),
+                    type: 'text',
+                    x: textInput.x,
+                    y: textInput.y,
+                    text: textInput.text.trim(),
+                  },
+                ]);
+              }
+              if (!placingTextRef.current) {
+                setTextInput(null);
+                setEditMode('none');
+              }
+            }}
+          />
+        </div>
+      )}
+
       {/* 编辑模式提示 */}
       {editMode !== 'none' && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 px-4 py-2 bg-orange-500/90 text-white text-sm rounded-lg shadow-lg z-40">
@@ -967,12 +1274,12 @@ export default function ScreenshotOverlay() {
 
       {/* 正中央成功提示（微信风格） */}
       {centerTip && (
-        <div className="fixed inset-0 flex items-center justify-center pointer-events-none z-50">
+        <div role="status" aria-live="polite" className="fixed inset-0 flex items-center justify-center pointer-events-none z-50">
           <div className="flex flex-col items-center gap-2 px-10 py-6 bg-[#2b2b2b]/95 rounded-2xl animate-in zoom-in fade-in duration-200">
             {centerTip.icon === 'success' ? (
               <Check strokeWidth={1.5} className="w-12 h-12 text-white/90" />
             ) : (
-              <Check strokeWidth={1.5} className="w-12 h-12 text-white/90" />
+              <Copy strokeWidth={1.5} className="w-12 h-12 text-white/90" />
             )}
             <span className="text-white/90 text-base font-normal tracking-wide">{centerTip.text}</span>
           </div>

@@ -20,7 +20,31 @@ body {
   -webkit-user-select: none;
 }
 
-/* 十字光标 */
+/* 光标样式 */
 .cursor-crosshair {
   cursor: crosshair;
+}
+
+.cursor-default {
+  cursor: default;
+}
+
+.cursor-move {
+  cursor: move;
+}
+
+.cursor-ns-resize {
+  cursor: ns-resize;
+}
+
+.cursor-ew-resize {
+  cursor: ew-resize;
+}
+
+.cursor-nesw-resize {
+  cursor: nesw-resize;
+}
+
+.cursor-nwse-resize {
+  cursor: nwse-resize;
 }

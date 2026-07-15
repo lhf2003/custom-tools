@@ -42,6 +42,21 @@
         "shadow": false,
         "focus": true,
         "resizable": false
+      },
+      {
+        "label": "wormhole-bar",
+        "title": "虫洞",
+        "url": "/wormhole-bar.html",
+        "width": 960,
+        "height": 140,
+        "visible": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "shadow": false,
+        "focus": true,
+        "resizable": false
       }
     ],
     "withGlobalTauri": true,

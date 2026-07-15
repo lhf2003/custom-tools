@@ -173,6 +173,7 @@ export function MarkdownView() {
   // Export state
   const [isExporting, setIsExporting] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
 
   // Empty area context menu state
@@ -298,6 +299,7 @@ export function MarkdownView() {
 
     setIsExporting(true);
     setShowExportMenu(false);
+    setExportError(null);
 
     try {
       // 导出为图片 - 直接传入 markdown 内容
@@ -331,15 +333,12 @@ export function MarkdownView() {
           path: filePath,
         });
 
-        setError('导出成功');
-        setTimeout(() => setError(null), 2000);
-
         // 打开文件资源管理器显示保存的图片
         await revealItemInDir(filePath);
       }
     } catch (err) {
       console.error('Export failed:', err);
-      setError(err instanceof Error ? err.message : '导出失败');
+      setExportError(err instanceof Error ? err.message : '导出失败');
     } finally {
       setIsExporting(false);
     }
@@ -553,6 +552,21 @@ export function MarkdownView() {
                     <span className="text-xs flex items-center gap-1" style={{ color: THEME.TEXT_DISABLED }}>
                       <Loader2 size={12} className="animate-spin" />
                       导出中...
+                    </span>
+                  )}
+                  {exportError && (
+                    <span className="text-xs flex items-center gap-1">
+                      <span style={{ color: THEME.ERROR }}>{exportError}</span>
+                      <button
+                        onClick={() => {
+                          setExportError(null);
+                          handleExportPNG();
+                        }}
+                        className="underline cursor-pointer"
+                        style={{ color: THEME.INFO }}
+                      >
+                        重试
+                      </button>
                     </span>
                   )}
                   <span className="text-xs tabular-nums" style={{ color: THEME.TEXT_DISABLED }}>

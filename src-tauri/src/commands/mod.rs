@@ -9,3 +9,4 @@ pub mod settings;
 pub mod system;
 pub mod updater;
 pub mod window;
+pub mod wormhole;

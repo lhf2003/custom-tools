@@ -229,6 +229,7 @@ pub mod password;
 pub mod screenshot;
 pub mod search;
 pub mod settings;
+pub mod wormhole;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -413,6 +414,31 @@ pub fn run() {
                 }
             }
 
+            // 预创建虫洞悬浮条窗口（隐藏），确保窗口在 dev 模式下正确初始化
+            {
+                let wormhole_bar = tauri::WebviewWindowBuilder::new(
+                    app,
+                    "wormhole-bar",
+                    tauri::WebviewUrl::App("/wormhole-bar.html".into()),
+                )
+                .title("虫洞")
+                .decorations(false)
+                .transparent(true)
+                .always_on_top(true)
+                .skip_taskbar(true)
+                .shadow(false)
+                .focused(false)
+                .resizable(false)
+                .visible(false)
+                .build();
+
+                if let Err(e) = wormhole_bar {
+                    log::warn!("Failed to pre-create wormhole bar window: {}", e);
+                } else {
+                    log::info!("Wormhole bar window pre-created successfully");
+                }
+            }
+
             // Initialize previous focused window state for auto-paste
             app.manage(PreviousFocusedWindow::new());
 
@@ -488,6 +514,20 @@ pub fn run() {
                         check_update_on_startup(app_handle).await;
                     }
                 });
+            }
+
+            // Initialize wormhole detector window
+            #[cfg(windows)]
+            {
+                match crate::wormhole::detector_window::DetectorWindow::create(app.handle()) {
+                    Ok(detector) => {
+                        app.manage(detector);
+                        log::info!("Wormhole detector window stored in app state");
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to create wormhole detector window: {}", e);
+                    }
+                }
             }
 
             Ok(())
@@ -611,6 +651,14 @@ pub fn run() {
             screenshot::close_screenshot_overlay,
             screenshot::cleanup_overlay_background,
             settings::shortcuts::open_screenshot_overlay,
+            // Wormhole commands
+            commands::wormhole::show_wormhole_bar,
+            commands::wormhole::hide_wormhole_bar,
+            commands::wormhole::get_wormhole_items,
+            commands::wormhole::add_wormhole_items,
+            commands::wormhole::remove_wormhole_item,
+            commands::wormhole::clear_wormhole_items,
+            commands::wormhole::dispatch_wormhole_action,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

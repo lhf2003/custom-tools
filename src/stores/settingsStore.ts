@@ -14,6 +14,11 @@ export interface AppSettings {
   llm_api_key: string;
   llm_model: string;
   llm_thinking_mode: boolean;
+  wormhole_enabled: boolean;
+  wormhole_max_items: number;
+  wormhole_auto_hide_seconds: number;
+  claude_code_bin_path: string;
+  claude_code_work_dir: string;
 }
 
 export interface ShortcutConfig {
@@ -51,6 +56,13 @@ interface SettingsState extends AppSettings {
   toggleLlmThinkingMode: () => Promise<boolean>;
   testLlmConnection: () => Promise<string>;
 
+  // Wormhole Actions
+  setWormholeEnabled: (enabled: boolean) => Promise<void>;
+  setWormholeMaxItems: (count: number) => Promise<void>;
+  setWormholeAutoHideSeconds: (seconds: number) => Promise<void>;
+  setClaudeCodeBinPath: (path: string) => Promise<void>;
+  setClaudeCodeWorkDir: (dir: string) => Promise<void>;
+
   // Shortcut Actions
   loadShortcuts: () => Promise<void>;
   updateShortcut: (id: string, customKeys: string | null, enabled: boolean) => Promise<void>;
@@ -72,6 +84,11 @@ const defaultSettings: AppSettings = {
   llm_api_key: '',
   llm_model: 'gpt-4o-mini',
   llm_thinking_mode: false,
+  wormhole_enabled: true,
+  wormhole_max_items: 20,
+  wormhole_auto_hide_seconds: 30,
+  claude_code_bin_path: 'claude',
+  claude_code_work_dir: '',
 };
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
@@ -259,6 +276,53 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     } catch (err) {
       console.error('Failed to toggle llm_thinking_mode:', err);
       return get().llm_thinking_mode;
+    }
+  },
+
+  // ==================== Wormhole Settings Actions ====================
+
+  setWormholeEnabled: async (enabled: boolean) => {
+    try {
+      await invoke('set_setting', { key: 'wormhole_enabled', value: enabled.toString() });
+      set({ wormhole_enabled: enabled });
+    } catch (err) {
+      console.error('Failed to set wormhole_enabled:', err);
+    }
+  },
+
+  setWormholeMaxItems: async (count: number) => {
+    try {
+      await invoke('set_setting', { key: 'wormhole_max_items', value: count.toString() });
+      set({ wormhole_max_items: count });
+    } catch (err) {
+      console.error('Failed to set wormhole_max_items:', err);
+    }
+  },
+
+  setWormholeAutoHideSeconds: async (seconds: number) => {
+    try {
+      await invoke('set_setting', { key: 'wormhole_auto_hide_seconds', value: seconds.toString() });
+      set({ wormhole_auto_hide_seconds: seconds });
+    } catch (err) {
+      console.error('Failed to set wormhole_auto_hide_seconds:', err);
+    }
+  },
+
+  setClaudeCodeBinPath: async (path: string) => {
+    try {
+      await invoke('set_setting', { key: 'claude_code_bin_path', value: path });
+      set({ claude_code_bin_path: path });
+    } catch (err) {
+      console.error('Failed to set claude_code_bin_path:', err);
+    }
+  },
+
+  setClaudeCodeWorkDir: async (dir: string) => {
+    try {
+      await invoke('set_setting', { key: 'claude_code_work_dir', value: dir });
+      set({ claude_code_work_dir: dir });
+    } catch (err) {
+      console.error('Failed to set claude_code_work_dir:', err);
     }
   },
 

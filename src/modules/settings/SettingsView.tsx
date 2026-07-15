@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Command, Settings, Palette, Keyboard, Search, Bot, BookOpen, History, Info } from 'lucide-react';
+import { Command, Settings, Palette, Keyboard, Search, Bot, BookOpen, History, Info, Orbit } from 'lucide-react';
 import { immediateResize } from '@/utils/tauri';
 import { THEME } from '@/constants/theme';
 import { WINDOW_SIZE } from '@/constants/window';
@@ -8,6 +8,7 @@ import { ShortcutsSettings } from './tabs/ShortcutsSettings';
 import { AppearanceSettings } from './tabs/AppearanceSettings';
 import { SearchSettings } from './tabs/SearchSettings';
 import { ModelSettings } from './tabs/ModelSettings';
+import { WormholeSettings } from './tabs/WormholeSettings';
 import { ManualSettings } from './tabs/ManualSettings';
 import { ChangelogSettings } from './tabs/ChangelogSettings';
 import { AboutSettings } from './tabs/AboutSettings';
@@ -18,6 +19,7 @@ const SETTING_TABS = [
   { id: 'appearance', name: '外观', icon: Palette },
   { id: 'search', name: '搜索', icon: Search },
   { id: 'model', name: 'AI 模型', icon: Bot },
+  { id: 'wormhole', name: '虫洞', icon: Orbit },
   { id: 'manual', name: '操作手册', icon: BookOpen },
   { id: 'changelog', name: '更新日志', icon: History },
   { id: 'about', name: '关于我们', icon: Info },
@@ -31,6 +33,7 @@ const TAB_CONTENT: Record<TabId, React.ReactNode> = {
   appearance: <AppearanceSettings />,
   search: <SearchSettings />,
   model: <ModelSettings />,
+  wormhole: <WormholeSettings />,
   manual: <ManualSettings />,
   changelog: <ChangelogSettings />,
   about: <AboutSettings />,
