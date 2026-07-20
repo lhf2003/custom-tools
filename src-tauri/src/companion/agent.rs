@@ -13,6 +13,8 @@ use super::suggester;
 const MAX_TURNS: &str = "12";
 /// agent 允许的工具白名单（仅 companion MCP 工具）
 const ALLOWED_TOOLS: &str = "mcp__companion__*";
+/// claude 用户配置中注册的 MCP 服务器名
+const MCP_SERVER_NAME: &str = "companion";
 
 #[derive(Debug, Deserialize)]
 struct ClaudeCliResult {
@@ -36,25 +38,9 @@ pub fn run_daily_report_agent(
     let exe = std::env::current_exe()
         .map_err(|e| format!("获取自身 exe 路径失败: {}", e))?;
 
-    // 生成 MCP 配置文件（内容稳定，每次覆盖写保证路径最新）
-    let mcp_config_path = db_path
-        .parent()
-        .map(|p| p.join("companion-mcp.json"))
-        .ok_or("无法确定 MCP 配置路径")?;
-    let mcp_config = serde_json::json!({
-        "mcpServers": {
-            "companion": {
-                "command": exe.to_string_lossy(),
-                "args": [
-                    "--mcp-server",
-                    "--db-path", db_path.to_string_lossy(),
-                    "--notes-dir", notes_dir.to_string_lossy()
-                ]
-            }
-        }
-    });
-    std::fs::write(&mcp_config_path, serde_json::to_string_pretty(&mcp_config).unwrap())
-        .map_err(|e| format!("写入 MCP 配置失败: {}", e))?;
+    // 确保 companion MCP server 已注册到 claude 用户配置
+    // （--mcp-config 在本版本 CLI 下不生效，用户级注册是唯一可靠通道）
+    ensure_mcp_registered(bin_path, &exe, db_path, notes_dir)?;
 
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let prompt = build_report_prompt(&today);
@@ -64,14 +50,14 @@ pub fn run_daily_report_agent(
     let mut cmd = Command::new(bin_path);
     cmd.arg("-p")
         .arg(&prompt)
-        .arg("--mcp-config")
-        .arg(&mcp_config_path)
         .arg("--allowedTools")
         .arg(ALLOWED_TOOLS)
         .arg("--output-format")
         .arg("json")
         .arg("--max-turns")
         .arg(MAX_TURNS)
+        // 关键：禁用 ToolSearch 延迟加载，否则 MCP 工具在 headless 会话中不可见
+        .env("ENABLE_TOOL_SEARCH", "false")
         .current_dir(work_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -130,6 +116,69 @@ pub fn run_daily_report_agent(
         "日报 agent 完成（{} 轮，${:.4}）: {}",
         turns, cost, summary_preview
     ))
+}
+
+/// 检查 claude 用户配置中是否已有 companion MCP server，没有则注册。
+/// 注册是一次性副作用（写入 ~/.claude.json），之后所有 claude 会话
+/// （包括交互式）都能使用 companion 工具。
+fn ensure_mcp_registered(
+    bin_path: &str,
+    exe: &Path,
+    db_path: &Path,
+    notes_dir: &Path,
+) -> Result<(), String> {
+    // `claude mcp list` 会健康检查所有服务器（包括我们的），顺带验证可用性
+    let list_output = Command::new(bin_path)
+        .args(["mcp", "list"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| format!("执行 claude mcp list 失败: {}", e))?;
+
+    let list_stdout = String::from_utf8_lossy(&list_output.stdout);
+    let exe_str = exe.to_string_lossy().replace('\\', "/");
+    let existing = list_stdout
+        .lines()
+        .find(|l| l.starts_with(&format!("{}:", MCP_SERVER_NAME)));
+
+    match existing {
+        // 已注册且指向当前 exe → 直接用
+        Some(line) if line.contains(&exe_str) => return Ok(()),
+        // 已注册但路径过期（dev/prod 切换）→ 先移除再重新注册
+        Some(_) => {
+            log::info!("companion MCP 注册路径过期，重新注册");
+            let _ = Command::new(bin_path)
+                .args(["mcp", "remove", MCP_SERVER_NAME])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .output();
+        }
+        None => {}
+    }
+
+    log::info!("注册 companion MCP server 到 claude 用户配置");
+    let add_output = Command::new(bin_path)
+        .args(["mcp", "add", MCP_SERVER_NAME, "--scope", "user", "--"])
+        .arg(&exe_str)
+        .arg("--mcp-server")
+        .arg("--db-path")
+        .arg(db_path.to_string_lossy().replace('\\', "/"))
+        .arg("--notes-dir")
+        .arg(notes_dir.to_string_lossy().replace('\\', "/"))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| format!("执行 claude mcp add 失败: {}", e))?;
+
+    if !add_output.status.success() {
+        let stderr = String::from_utf8_lossy(&add_output.stderr);
+        return Err(format!(
+            "注册 MCP server 失败: {}",
+            stderr.chars().take(300).collect::<String>()
+        ));
+    }
+
+    Ok(())
 }
 
 fn build_report_prompt(today: &str) -> String {
