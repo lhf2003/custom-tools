@@ -21,7 +21,9 @@ pub fn set_setting(
     value: String,
 ) -> Result<(), String> {
     let manager = state.0.lock().map_err(|e| e.to_string())?;
-    manager.set_setting(&key, &value).map_err(|e| e.to_string())
+    manager.set_setting(&key, &value).map_err(|e| e.to_string())?;
+
+    Ok(())
 }
 
 /// Toggle always on top

@@ -21,6 +21,10 @@ interface AppState {
   jsonFormatterData: string | null;
   setJsonFormatterData: (data: string | null) => void;
 
+  // Chat prefill (set by companion "AI 分析" suggestion)
+  chatPrefill: string | null;
+  setChatPrefill: (data: string | null) => void;
+
   // Loading states
   isLoading: boolean;
   setLoading: (loading: boolean) => void;
@@ -53,6 +57,10 @@ export const useAppStore = create<AppState>((set) => ({
   // JSON Formatter
   jsonFormatterData: null,
   setJsonFormatterData: (data) => set({ jsonFormatterData: data }),
+
+  // Chat prefill
+  chatPrefill: null,
+  setChatPrefill: (data) => set({ chatPrefill: data }),
 
   // Loading
   isLoading: false,

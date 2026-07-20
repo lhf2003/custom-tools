@@ -25,7 +25,6 @@ import { SettingsView } from '@/modules/settings/SettingsView';
 import { EverythingView } from '@/modules/everything/EverythingView';
 import { JsonFormatterView } from '@/modules/json_formatter';
 import { ChatView } from '@/modules/chat/ChatView';
-import ScreenshotModule from '@/modules/screenshot';
 import { TopNavigationBar } from '@/components/TopNavigationBar';
 import { UpdateNotification } from '@/components/UpdateNotification';
 import { ChangelogDialog } from '@/components/ChangelogDialog';
@@ -40,7 +39,6 @@ const MODULE_VIEW_MAP: Record<string, ViewMode> = {
   passwords: 'password',
   settings: 'settings',
   everything: 'everything',
-  screenshot: 'screenshot',
 };
 
 function App() {
@@ -238,10 +236,6 @@ function App() {
         title: 'AI 对话',
         menuItems: [...commonMenuItems],
       },
-      screenshot: {
-        title: '截图工具',
-        menuItems: [...commonMenuItems],
-      },
     };
     return configs;
   }, [always_on_top, commonMenuItems, handleToggleAlwaysOnTop, setActiveView]);
@@ -310,6 +304,20 @@ function App() {
     };
   }, [setActiveView]);
 
+  // Listen for companion "AI 分析" requests: prefill chat and switch to chat view
+  useEffect(() => {
+    const unlisten = listen<string>('companion:analyze', (event) => {
+      useAppStore.getState().setChatPrefill(event.payload);
+      setActiveView('chat');
+    });
+
+    return () => {
+      unlisten.then((fn) => fn()).catch((err: unknown) => {
+        console.error('Failed to cleanup companion:analyze listener:', err);
+      });
+    };
+  }, [setActiveView]);
+
   // Handle back navigation
   const handleBack = useCallback(() => {
     setActiveView('launcher');
@@ -334,8 +342,6 @@ function App() {
         return <JsonFormatterView />;
       case 'chat':
         return <ChatView />;
-      case 'screenshot':
-        return <ScreenshotModule />;
       default:
         return <LauncherView />;
     }

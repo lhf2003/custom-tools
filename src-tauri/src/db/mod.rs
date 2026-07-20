@@ -255,28 +255,6 @@ impl Database {
             [],
         )?;
 
-        // Wormhole items table - stores dragged items for staging
-        self.conn.execute(
-            "CREATE TABLE IF NOT EXISTS wormhole_items (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                item_type TEXT NOT NULL CHECK (item_type IN ('file', 'text', 'image', 'url')),
-                content TEXT NOT NULL,
-                cache_path TEXT,
-                original_name TEXT,
-                source_app TEXT,
-                file_size INTEGER,
-                text_preview TEXT,
-                sort_order INTEGER DEFAULT 0,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )",
-            [],
-        )?;
-
-        self.conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_wormhole_created ON wormhole_items(created_at DESC)",
-            [],
-        )?;
-
         // Migration: add thinking_mode column if not exists (for existing tables)
         let _ = self.conn.execute(
             "ALTER TABLE llm_scene_configs ADD COLUMN thinking_mode BOOLEAN DEFAULT 0",
@@ -291,6 +269,9 @@ impl Database {
                 [scene],
             )?;
         }
+
+        // Companion tables (activity_log / habit_patterns / suggestions)
+        crate::companion::db::init_tables(&self.conn)?;
 
         Ok(())
     }

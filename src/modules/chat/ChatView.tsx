@@ -84,7 +84,7 @@ const MODE_ORDER: ChatMode[] = ['chat', 'qa', 'translate'];
 // ─────────────────────────────────────────────
 
 export function ChatView() {
-  const { setActiveView } = useAppStore();
+  const { setActiveView, chatPrefill, setChatPrefill } = useAppStore();
   const { sceneConfigs } = useLlmProviderStore();
 
   const [mode, setMode] = useState<ChatMode>('chat');
@@ -102,6 +102,17 @@ export function ChatView() {
   const responseBodyRef = useRef<HTMLDivElement>(null);
   const isCancelledRef = useRef(false);
   const sessionIdRef = useRef<number | null>(null);
+
+  // Consume companion prefill: wrap raw error content into an analysis prompt
+  useEffect(() => {
+    if (chatPrefill) {
+      setInput(`请分析以下错误日志的原因和解决方案：\n\n${chatPrefill}`);
+      setChatPrefill(null);
+      setMode('qa');
+      // 等视图切换渲染完成后聚焦
+      setTimeout(() => textareaRef.current?.focus(), 100);
+    }
+  }, [chatPrefill, setChatPrefill]);
 
   // keep ref in sync with state (used inside event callbacks)
   useEffect(() => {

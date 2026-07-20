@@ -19,11 +19,13 @@ pub struct AppSettings {
     pub llm_api_key: String,
     pub llm_model: String,
     pub llm_thinking_mode: bool,
-    pub wormhole_enabled: bool,
-    pub wormhole_max_items: i32,
-    pub wormhole_auto_hide_seconds: i32,
     pub claude_code_bin_path: String,
     pub claude_code_work_dir: String,
+    pub companion_enabled: bool,
+    pub companion_paused: bool,
+    pub companion_retention_days: i32,
+    pub companion_long_work_minutes: i32,
+    pub companion_agent_enabled: bool,
 }
 
 impl Default for AppSettings {
@@ -41,11 +43,13 @@ impl Default for AppSettings {
             llm_api_key: String::new(),
             llm_model: "gpt-4o-mini".to_string(),
             llm_thinking_mode: false,
-            wormhole_enabled: true,
-            wormhole_max_items: 20,
-            wormhole_auto_hide_seconds: 30,
             claude_code_bin_path: "claude".to_string(),
             claude_code_work_dir: String::new(),
+            companion_enabled: true,
+            companion_paused: false,
+            companion_retention_days: 30,
+            companion_long_work_minutes: 90,
+            companion_agent_enabled: false,
         }
     }
 }
@@ -143,23 +147,33 @@ impl SettingsManager {
                         settings.llm_thinking_mode = v;
                     }
                 }
-                "wormhole_enabled" => {
-                    if let Ok(v) = value.parse::<bool>() {
-                        settings.wormhole_enabled = v;
-                    }
-                }
-                "wormhole_max_items" => {
-                    if let Ok(v) = value.parse::<i32>() {
-                        settings.wormhole_max_items = v.max(1);
-                    }
-                }
-                "wormhole_auto_hide_seconds" => {
-                    if let Ok(v) = value.parse::<i32>() {
-                        settings.wormhole_auto_hide_seconds = v.max(5);
-                    }
-                }
                 "claude_code_bin_path" => settings.claude_code_bin_path = value,
                 "claude_code_work_dir" => settings.claude_code_work_dir = value,
+                "companion_enabled" => {
+                    if let Ok(v) = value.parse::<bool>() {
+                        settings.companion_enabled = v;
+                    }
+                }
+                "companion_paused" => {
+                    if let Ok(v) = value.parse::<bool>() {
+                        settings.companion_paused = v;
+                    }
+                }
+                "companion_retention_days" => {
+                    if let Ok(v) = value.parse::<i32>() {
+                        settings.companion_retention_days = v.max(1);
+                    }
+                }
+                "companion_long_work_minutes" => {
+                    if let Ok(v) = value.parse::<i32>() {
+                        settings.companion_long_work_minutes = v.clamp(15, 480);
+                    }
+                }
+                "companion_agent_enabled" => {
+                    if let Ok(v) = value.parse::<bool>() {
+                        settings.companion_agent_enabled = v;
+                    }
+                }
                 _ => {}
             }
         }
@@ -230,23 +244,33 @@ impl SettingsManager {
                         cache.llm_thinking_mode = v;
                     }
                 }
-                "wormhole_enabled" => {
-                    if let Ok(v) = value.parse::<bool>() {
-                        cache.wormhole_enabled = v;
-                    }
-                }
-                "wormhole_max_items" => {
-                    if let Ok(v) = value.parse::<i32>() {
-                        cache.wormhole_max_items = v.max(1);
-                    }
-                }
-                "wormhole_auto_hide_seconds" => {
-                    if let Ok(v) = value.parse::<i32>() {
-                        cache.wormhole_auto_hide_seconds = v.max(5);
-                    }
-                }
                 "claude_code_bin_path" => cache.claude_code_bin_path = value.to_string(),
                 "claude_code_work_dir" => cache.claude_code_work_dir = value.to_string(),
+                "companion_enabled" => {
+                    if let Ok(v) = value.parse::<bool>() {
+                        cache.companion_enabled = v;
+                    }
+                }
+                "companion_paused" => {
+                    if let Ok(v) = value.parse::<bool>() {
+                        cache.companion_paused = v;
+                    }
+                }
+                "companion_retention_days" => {
+                    if let Ok(v) = value.parse::<i32>() {
+                        cache.companion_retention_days = v.max(1);
+                    }
+                }
+                "companion_long_work_minutes" => {
+                    if let Ok(v) = value.parse::<i32>() {
+                        cache.companion_long_work_minutes = v.clamp(15, 480);
+                    }
+                }
+                "companion_agent_enabled" => {
+                    if let Ok(v) = value.parse::<bool>() {
+                        cache.companion_agent_enabled = v;
+                    }
+                }
                 _ => {}
             }
         }

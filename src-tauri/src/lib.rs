@@ -221,15 +221,14 @@ pub fn get_windows_version() -> Option<(u64, u64, u64)> {
 
 pub mod clipboard;
 pub mod commands;
+pub mod companion;
 pub mod db;
 pub mod llm;
 pub mod llm_provider;
 pub mod notes;
 pub mod password;
-pub mod screenshot;
 pub mod search;
 pub mod settings;
-pub mod wormhole;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -389,56 +388,6 @@ pub fn run() {
             // Setup window event handlers (after settings initialized)
             setup_window_handlers(app.handle());
 
-            // 预创建截图遮罩窗口（隐藏），减少快捷键触发时的启动延迟
-            {
-                let screenshot_overlay = tauri::WebviewWindowBuilder::new(
-                    app,
-                    "screenshot-overlay",
-                    tauri::WebviewUrl::App("/screenshot-overlay.html".into()),
-                )
-                .title("截图工具")
-                .decorations(false)
-                .transparent(true)
-                .always_on_top(true)
-                .skip_taskbar(true)
-                .shadow(false)
-                .focused(false)
-                .resizable(false)
-                .visible(false)
-                .build();
-
-                if let Err(e) = screenshot_overlay {
-                    log::warn!("Failed to pre-create screenshot overlay window: {}", e);
-                } else {
-                    log::info!("Screenshot overlay window pre-created successfully");
-                }
-            }
-
-            // 预创建虫洞悬浮条窗口（隐藏），确保窗口在 dev 模式下正确初始化
-            {
-                let wormhole_bar = tauri::WebviewWindowBuilder::new(
-                    app,
-                    "wormhole-bar",
-                    tauri::WebviewUrl::App("/wormhole-bar.html".into()),
-                )
-                .title("虫洞")
-                .decorations(false)
-                .transparent(true)
-                .always_on_top(true)
-                .skip_taskbar(true)
-                .shadow(false)
-                .focused(false)
-                .resizable(false)
-                .visible(false)
-                .build();
-
-                if let Err(e) = wormhole_bar {
-                    log::warn!("Failed to pre-create wormhole bar window: {}", e);
-                } else {
-                    log::info!("Wormhole bar window pre-created successfully");
-                }
-            }
-
             // Initialize previous focused window state for auto-paste
             app.manage(PreviousFocusedWindow::new());
 
@@ -516,18 +465,46 @@ pub fn run() {
                 });
             }
 
-            // Initialize wormhole detector window
-            #[cfg(windows)]
+            // 预创建陪伴建议 Toast 窗口（隐藏），降低建议弹出时的延迟
             {
-                match crate::wormhole::detector_window::DetectorWindow::create(app.handle()) {
-                    Ok(detector) => {
-                        app.manage(detector);
-                        log::info!("Wormhole detector window stored in app state");
-                    }
-                    Err(e) => {
-                        log::warn!("Failed to create wormhole detector window: {}", e);
-                    }
+                let companion_toast = tauri::WebviewWindowBuilder::new(
+                    app,
+                    "companion-toast",
+                    tauri::WebviewUrl::App("/companion-toast.html".into()),
+                )
+                .title("陪伴建议")
+                .decorations(false)
+                .transparent(true)
+                .always_on_top(true)
+                .skip_taskbar(true)
+                .shadow(false)
+                .focused(false)
+                .resizable(false)
+                .visible(false)
+                .build();
+
+                if let Err(e) = companion_toast {
+                    log::warn!("Failed to pre-create companion toast window: {}", e);
                 }
+            }
+
+            // 启动陪伴模块（窗口活动采集 + 情境建议 + LLM 习惯分析）
+            {
+                let companion_db_path = app
+                    .path()
+                    .app_data_dir()
+                    .unwrap()
+                    .join("custom-tools.db");
+                let flags = companion::CompanionFlags {
+                    enabled: settings.companion_enabled,
+                    paused: settings.companion_paused,
+                    retention_days: settings.companion_retention_days as i64,
+                    long_work_minutes: settings.companion_long_work_minutes as i64,
+                    agent_enabled: settings.companion_agent_enabled,
+                };
+                let companion_state =
+                    companion::start(app.handle(), companion_db_path, flags);
+                app.manage(companion_state);
             }
 
             Ok(())
@@ -637,28 +614,21 @@ pub fn run() {
             llm_provider::commands::get_scene_configs,
             llm_provider::commands::set_scene_model,
             llm_provider::commands::get_scene_model,
-            // Screenshot commands
-            screenshot::capture_full_screen,
-            screenshot::get_capturable_windows,
-            screenshot::capture_window,
-            screenshot::capture_region,
-            screenshot::save_and_copy_screenshot,
-            screenshot::screenshot_to_base64,
-            screenshot::ocr_screenshot,
-            // WeChat-style screenshot overlay commands
-            screenshot::get_all_windows,
-            screenshot::get_window_at_point,
-            screenshot::close_screenshot_overlay,
-            screenshot::cleanup_overlay_background,
-            settings::shortcuts::open_screenshot_overlay,
-            // Wormhole commands
-            commands::wormhole::show_wormhole_bar,
-            commands::wormhole::hide_wormhole_bar,
-            commands::wormhole::get_wormhole_items,
-            commands::wormhole::add_wormhole_items,
-            commands::wormhole::remove_wormhole_item,
-            commands::wormhole::clear_wormhole_items,
-            commands::wormhole::dispatch_wormhole_action,
+            // Companion commands
+            commands::companion::get_companion_suggestions,
+            commands::companion::act_on_companion_suggestion,
+            commands::companion::dismiss_companion_suggestion,
+            commands::companion::get_companion_patterns,
+            commands::companion::set_companion_pattern_status,
+            commands::companion::get_companion_today_summary,
+            commands::companion::clear_companion_activities,
+            commands::companion::analyze_companion_now,
+            commands::companion::run_companion_agent_now,
+            commands::companion::set_companion_enabled,
+            commands::companion::set_companion_paused,
+            commands::companion::set_companion_retention_days,
+            commands::companion::set_companion_long_work_minutes,
+            commands::companion::set_companion_agent_enabled,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

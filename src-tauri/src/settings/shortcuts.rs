@@ -1,34 +1,8 @@
 use rusqlite::{Connection, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
-
-/// 截图遮罩层背景捕获序列号，用于丢弃过期的异步截图结果
-static OVERLAY_BG_SEQ: AtomicU64 = AtomicU64::new(0);
-
-/// 强制让窗口获得键盘焦点（Windows 专用）
-/// 通过模拟一次 Alt 按键让当前线程获得输入资格，再调用 SetForegroundWindow
-#[cfg(target_os = "windows")]
-fn force_window_focus(window: &tauri::WebviewWindow) {
-    use windows::Win32::UI::Input::KeyboardAndMouse::{
-        keybd_event, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, VK_MENU,
-    };
-    use windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow;
-
-    if let Ok(hwnd) = window.hwnd() {
-        unsafe {
-            // 模拟 Alt 键按下+抬起，使当前线程获得最后一次输入资格
-            keybd_event(VK_MENU.0 as u8, 0, KEYEVENTF_EXTENDEDKEY, 0);
-            keybd_event(VK_MENU.0 as u8, 0, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, 0);
-            let _ = SetForegroundWindow(hwnd);
-        }
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-fn force_window_focus(_window: &tauri::WebviewWindow) {}
 
 /// 快捷键配置项
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,7 +39,6 @@ pub enum ShortcutAction {
     OpenPasswords,
     OpenSettings,
     OpenEverything,
-    OpenScreenshot,
 }
 
 impl ShortcutAction {
@@ -77,7 +50,6 @@ impl ShortcutAction {
             ShortcutAction::OpenPasswords => "open_passwords",
             ShortcutAction::OpenSettings => "open_settings",
             ShortcutAction::OpenEverything => "open_everything",
-            ShortcutAction::OpenScreenshot => "open_screenshot",
         }
     }
 
@@ -89,7 +61,6 @@ impl ShortcutAction {
             "open_passwords" => Some(ShortcutAction::OpenPasswords),
             "open_settings" => Some(ShortcutAction::OpenSettings),
             "open_everything" => Some(ShortcutAction::OpenEverything),
-            "open_screenshot" => Some(ShortcutAction::OpenScreenshot),
             _ => None,
         }
     }
@@ -143,14 +114,6 @@ pub fn get_default_shortcuts() -> Vec<ShortcutConfig> {
             name: "打开文件搜索".to_string(),
             description: "快速访问文件搜索（Everything）".to_string(),
             default_keys: "Ctrl+Shift+F".to_string(),
-            custom_keys: None,
-            enabled: true,
-        },
-        ShortcutConfig {
-            id: "open_screenshot".to_string(),
-            name: "打开截图工具".to_string(),
-            description: "快速访问截图工具".to_string(),
-            default_keys: "Ctrl+Shift+X".to_string(),
             custom_keys: None,
             enabled: true,
         },
@@ -242,7 +205,6 @@ impl ShortcutManager {
             "open_clipboard",
             "open_notes",
             "open_everything",
-            "open_screenshot",
             "open_settings",
             "open_passwords",
         ];
@@ -536,12 +498,6 @@ fn handle_shortcut_action(app_handle: &AppHandle, action_id: &str) {
             // 复用 lib.rs 的 toggle_main_window（含 HWND 捕获、防闪烁、窗口定位）
             crate::toggle_main_window(app_handle);
         }
-        "open_screenshot" => {
-            // 打开截图遮罩窗口
-            if let Err(e) = open_screenshot_overlay(app_handle.clone()) {
-                log::error!("Failed to open screenshot overlay: {}", e);
-            }
-        }
         "open_clipboard" | "open_notes" | "open_passwords" | "open_settings" | "open_everything" => {
             // 捕获前台窗口以支持自动粘贴
             #[cfg(windows)]
@@ -567,121 +523,3 @@ fn handle_shortcut_action(app_handle: &AppHandle, action_id: &str) {
     }
 }
 
-/// 截图遮罩窗口对应的显示器信息
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct OverlayMonitorInfo {
-    pub x: i32,
-    pub y: i32,
-    pub width: u32,
-    pub height: u32,
-    pub scale_factor: f64,
-    pub background_image_path: String,
-}
-
-/// 打开截图遮罩窗口（定位到鼠标所在显示器）
-/// 优化：先显示窗口，再异步捕获屏幕背景
-#[tauri::command]
-pub fn open_screenshot_overlay(app_handle: tauri::AppHandle) -> Result<OverlayMonitorInfo, String> {
-    let monitor = crate::get_monitor_at_cursor(&app_handle)
-        .ok_or("Failed to get monitor at cursor")?;
-
-    let pos = monitor.position();
-    let size = monitor.size();
-
-    let monitor_info = OverlayMonitorInfo {
-        x: pos.x,
-        y: pos.y,
-        width: size.width,
-        height: size.height,
-        scale_factor: monitor.scale_factor(),
-        background_image_path: String::new(),
-    };
-
-    if let Some(window) = app_handle.get_webview_window("screenshot-overlay") {
-        let _ = window.set_fullscreen(false);
-        let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
-            x: pos.x,
-            y: pos.y,
-        }));
-        let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
-            width: size.width,
-            height: size.height,
-        }));
-        let _ = window.show();
-        let _ = window.set_focus();
-        force_window_focus(&window);
-        let _ = window.emit("screenshot-overlay-monitor", &monitor_info);
-        log::info!("Screenshot overlay window shown on monitor at ({}, {}) {}x{}", pos.x, pos.y, size.width, size.height);
-    } else {
-        let overlay_window = tauri::WebviewWindowBuilder::new(
-            &app_handle,
-            "screenshot-overlay",
-            tauri::WebviewUrl::App("/screenshot-overlay.html".into()),
-        )
-        .title("截图工具")
-        .decorations(false)
-        .transparent(true)
-        .always_on_top(true)
-        .skip_taskbar(true)
-        .shadow(false)
-        .focused(true)
-        .resizable(false)
-        .build()
-        .map_err(|e| format!("Failed to build overlay window: {}", e))?;
-
-        let _ = overlay_window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
-            x: pos.x,
-            y: pos.y,
-        }));
-        let _ = overlay_window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
-            width: size.width,
-            height: size.height,
-        }));
-        let _ = overlay_window.show();
-        let _ = overlay_window.set_focus();
-        force_window_focus(&overlay_window);
-        let _ = overlay_window.emit("screenshot-overlay-monitor", &monitor_info);
-
-        // 开发模式下打开开发者工具
-        #[cfg(debug_assertions)]
-        {
-            overlay_window.open_devtools();
-            log::info!("Screenshot overlay window created with devtools open");
-        }
-
-        log::info!("Screenshot overlay window created on monitor at ({}, {}) {}x{}", pos.x, pos.y, size.width, size.height);
-    }
-
-    // 异步捕获屏幕背景，避免阻塞窗口显示
-    // 使用序列号丢弃过期的截图结果（用户快速连按快捷键时）
-    let seq = OVERLAY_BG_SEQ.fetch_add(1, Ordering::Relaxed) + 1;
-    let app_handle_clone = app_handle.clone();
-    tauri::async_runtime::spawn(async move {
-        match crate::screenshot::capture_monitor_background_at_cursor(&app_handle_clone) {
-            Ok(path) => {
-                let current_seq = OVERLAY_BG_SEQ.load(Ordering::Relaxed);
-                if seq != current_seq {
-                    log::warn!("Screenshot background capture seq={} is stale (current={}), discarding", seq, current_seq);
-                    // 清理过期的临时文件
-                    let path_buf = std::path::PathBuf::from(&path);
-                    if path_buf.exists() {
-                        if let Err(e) = std::fs::remove_file(&path_buf) {
-                            log::warn!("Failed to remove stale overlay background: {}", e);
-                        }
-                    }
-                    return;
-                }
-                if let Some(window) = app_handle_clone.get_webview_window("screenshot-overlay") {
-                    let _ = window.emit("screenshot-overlay-background", path.clone());
-                    log::info!("Screenshot background captured and emitted: {}", path);
-                }
-            }
-            Err(e) => {
-                log::error!("Failed to capture monitor background: {}", e);
-            }
-        }
-    });
-
-    Ok(monitor_info)
-}

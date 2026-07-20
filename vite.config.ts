@@ -22,8 +22,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: path.resolve(__dirname, 'index.html'),
-        'screenshot-overlay': path.resolve(__dirname, 'screenshot-overlay.html'),
-        'wormhole-bar': path.resolve(__dirname, 'wormhole-bar.html'),
+        'companion-toast': path.resolve(__dirname, 'companion-toast.html'),
       },
     },
   },

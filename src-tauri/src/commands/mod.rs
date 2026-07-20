@@ -1,6 +1,7 @@
 pub mod changelog;
 pub mod chat;
 pub mod clipboard;
+pub mod companion;
 pub mod llm;
 pub mod notes;
 pub mod password;
@@ -9,4 +10,3 @@ pub mod settings;
 pub mod system;
 pub mod updater;
 pub mod window;
-pub mod wormhole;
