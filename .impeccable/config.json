@@ -1,0 +1,17 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "ai-color-palette",
+        "value": "*",
+        "files": [
+          "src/modules/settings/tabs/CompanionSettings.tsx"
+        ],
+        "createdAt": "2026-07-21T10:12:14.191Z",
+        "reason": "Indigo gradient header is the shared vocabulary across all 9 settings tabs; Signal Indigo is the DESIGN.md primary brand color; user-confirmed"
+      }
+    ]
+  }
+}
