@@ -37,3 +37,6 @@ mdeditor-*.png
 
 # CodeGraph index
 .codegraph/
+
+# impeccable live-server runtime state
+.impeccable/live/server.json
