@@ -141,6 +141,84 @@ pub fn delete_clipboard_item(db_state: State<DatabaseState>, id: i64) -> Result<
     Ok(())
 }
 
+/// Clear clipboard history. keep_favorites=true 时仅删除非收藏记录。
+/// 同步清理图片文件，并通知前端刷新。返回删除条数。
+#[tauri::command]
+pub fn clear_clipboard_history(
+    db_state: State<DatabaseState>,
+    app_handle: tauri::AppHandle,
+    keep_favorites: bool,
+) -> Result<usize, String> {
+    use tauri::Emitter;
+
+    let conn = Connection::open(&db_state.0).map_err(|e| e.to_string())?;
+
+    // 先收集待删除的图片路径，删库后同步清理文件
+    let sql_select = if keep_favorites {
+        "SELECT content FROM clipboard_history WHERE content_type = 'image' AND is_favorite = 0"
+    } else {
+        "SELECT content FROM clipboard_history WHERE content_type = 'image'"
+    };
+    let mut stmt = conn.prepare(sql_select).map_err(|e| e.to_string())?;
+    let image_paths: Vec<String> = stmt
+        .query_map([], |row| row.get(0))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    let deleted = if keep_favorites {
+        conn.execute("DELETE FROM clipboard_history WHERE is_favorite = 0", [])
+    } else {
+        conn.execute("DELETE FROM clipboard_history", [])
+    }
+    .map_err(|e| e.to_string())?;
+
+    for path in image_paths {
+        cleanup_image_file("image", &path);
+    }
+
+    let _ = app_handle.emit("clipboard-updated", ());
+
+    Ok(deleted)
+}
+
+/// Export clipboard history to a JSON file. 返回导出条数。
+#[tauri::command]
+pub fn export_clipboard_history(
+    db_state: State<DatabaseState>,
+    path: String,
+) -> Result<usize, String> {
+    let conn = Connection::open(&db_state.0).map_err(|e| e.to_string())?;
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, content, content_type, source_app, is_favorite, created_at
+             FROM clipboard_history ORDER BY created_at DESC",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let items = stmt
+        .query_map([], |row| {
+            Ok(ClipboardItem {
+                id: row.get(0)?,
+                content: row.get(1)?,
+                content_type: row.get(2)?,
+                source_app: row.get(3)?,
+                is_favorite: row.get::<_, i32>(4)? != 0,
+                created_at: row.get(5)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    let count = items.len();
+    let json = serde_json::to_string_pretty(&items).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| e.to_string())?;
+
+    Ok(count)
+}
+
 /// Copy clipboard item back to clipboard
 #[tauri::command]
 pub fn copy_to_clipboard(

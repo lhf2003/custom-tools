@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useCallback, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
+import { save } from '@tauri-apps/plugin-dialog';
 import {
   Trash2,
   Star,
@@ -8,7 +9,6 @@ import {
   Settings,
   FileText,
   Folder,
-  Upload,
   Plus,
   Lock,
   RotateCcw,
@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { useToastStore } from '@/stores/toastStore';
 import { LauncherView } from '@/modules/launcher/LauncherView';
 import { ClipboardView } from '@/modules/clipboard/ClipboardView';
 import { MarkdownView } from '@/modules/markdown/MarkdownView';
@@ -28,6 +29,7 @@ import { ChatView } from '@/modules/chat/ChatView';
 import { TopNavigationBar } from '@/components/TopNavigationBar';
 import { UpdateNotification } from '@/components/UpdateNotification';
 import { ChangelogDialog } from '@/components/ChangelogDialog';
+import { AboutDialog } from '@/components/AboutDialog';
 import { ToastContainer } from '@/components/Toast';
 import type { VersionCheckResult } from '@/components/ChangelogDialog';
 import type { ViewMode, MenuItem } from '@/types';
@@ -44,8 +46,10 @@ const MODULE_VIEW_MAP: Record<string, ViewMode> = {
 function App() {
   const { activeView, setActiveView, toggleWindow } = useAppStore();
   const { always_on_top, toggleAlwaysOnTop, loadSettings } = useSettingsStore();
+  const { addToast } = useToastStore();
   const [showChangelog, setShowChangelog] = useState(false);
   const [changelogData, setChangelogData] = useState<VersionCheckResult | null>(null);
+  const [showAbout, setShowAbout] = useState(false);
 
   // Stable callback for toggle always on top
   const handleToggleAlwaysOnTop = useCallback(async () => {
@@ -55,6 +59,65 @@ function App() {
       console.error('Failed to toggle always on top:', err);
     }
   }, [toggleAlwaysOnTop]);
+
+  // 清空剪贴板历史（keepFavorites=true 时仅删除非收藏记录）
+  const handleClearClipboard = useCallback(async (keepFavorites: boolean) => {
+    const confirmed = confirm(
+      keepFavorites
+        ? '确定要删除所有非收藏的剪贴板记录吗？'
+        : '确定要清空所有剪贴板历史吗？（含收藏）'
+    );
+    if (!confirmed) return;
+    try {
+      const count = await invoke<number>('clear_clipboard_history', { keepFavorites });
+      addToast({
+        type: 'success',
+        title: keepFavorites ? '已删除非收藏记录' : '已清空历史',
+        message: `已删除 ${count} 条记录`,
+      });
+    } catch (err) {
+      addToast({
+        type: 'error',
+        title: '清空失败',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }, [addToast]);
+
+  // 导出剪贴板历史为 JSON 文件
+  const handleExportClipboard = useCallback(async () => {
+    try {
+      const path = await save({
+        defaultPath: 'clipboard-history.json',
+        filters: [{ name: 'JSON', extensions: ['json'] }],
+      });
+      if (!path) return;
+      const count = await invoke<number>('export_clipboard_history', { path });
+      addToast({ type: 'success', title: '导出完成', message: `已导出 ${count} 条记录` });
+    } catch (err) {
+      addToast({
+        type: 'error',
+        title: '导出失败',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }, [addToast]);
+
+  // 恢复所有设置为默认值
+  const handleResetSettings = useCallback(async () => {
+    if (!confirm('确定要恢复所有设置为默认值吗？（包括 LLM 配置）')) return;
+    try {
+      await invoke('reset_settings');
+      await loadSettings();
+      addToast({ type: 'success', title: '已恢复默认设置' });
+    } catch (err) {
+      addToast({
+        type: 'error',
+        title: '恢复默认失败',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }, [addToast, loadSettings]);
 
   // Common menu items shared across all views
   const commonMenuItems = useMemo((): MenuItem[] => [
@@ -87,33 +150,20 @@ function App() {
             label: '清空历史',
             icon: Trash2,
             danger: true,
-            onClick: () => {
-              if (confirm('确定要清空所有剪贴板历史吗？')) {
-                // TODO: Implement clear all
-                console.log('Clear clipboard history');
-              }
-            },
+            onClick: () => handleClearClipboard(false),
           },
           {
             id: 'keep-favorites',
             label: '仅保留收藏',
             icon: Star,
-            onClick: () => {
-              if (confirm('确定要删除所有非收藏的剪贴板记录吗？')) {
-                // TODO: Implement keep favorites only
-                console.log('Keep favorites only');
-              }
-            },
+            onClick: () => handleClearClipboard(true),
           },
           {
             id: 'export',
             label: '导出数据',
             icon: Download,
             separator: true,
-            onClick: () => {
-              // TODO: Implement export
-              console.log('Export clipboard data');
-            },
+            onClick: handleExportClipboard,
           },
           ...commonMenuItems,
         ],
@@ -136,25 +186,6 @@ function App() {
             icon: Folder,
             onClick: () => {
               window.dispatchEvent(new CustomEvent('markdown:new-folder'));
-            },
-          },
-          {
-            id: 'import',
-            label: '导入笔记',
-            icon: Upload,
-            separator: true,
-            onClick: () => {
-              // TODO: Implement import
-              console.log('Import notes');
-            },
-          },
-          {
-            id: 'export-all',
-            label: '导出全部',
-            icon: Download,
-            onClick: () => {
-              // TODO: Implement export
-              console.log('Export all notes');
             },
           },
           ...commonMenuItems,
@@ -199,12 +230,7 @@ function App() {
             label: '恢复默认',
             icon: RotateCcw,
             danger: true,
-            onClick: () => {
-              if (confirm('确定要恢复所有设置为默认值吗？')) {
-                // TODO: Implement reset defaults
-                console.log('Reset to defaults');
-              }
-            },
+            onClick: handleResetSettings,
           },
           {
             id: 'always-on-top',
@@ -217,10 +243,7 @@ function App() {
             id: 'about',
             label: '关于',
             icon: Info,
-            onClick: () => {
-              // TODO: Show about dialog
-              console.log('Show about dialog');
-            },
+            onClick: () => setShowAbout(true),
           },
         ],
       },
@@ -238,7 +261,7 @@ function App() {
       },
     };
     return configs;
-  }, [always_on_top, commonMenuItems, handleToggleAlwaysOnTop, setActiveView]);
+  }, [always_on_top, commonMenuItems, handleToggleAlwaysOnTop, setActiveView, handleClearClipboard, handleExportClipboard, handleResetSettings]);
 
   // Load settings on mount
   useEffect(() => {
@@ -396,6 +419,9 @@ function App() {
         onClose={() => setShowChangelog(false)}
         initialData={changelogData}
       />
+
+      {/* About Dialog */}
+      <AboutDialog isOpen={showAbout} onClose={() => setShowAbout(false)} />
 
       {/* Toast Notifications */}
       <ToastContainer />

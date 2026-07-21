@@ -189,6 +189,18 @@ impl SettingsManager {
         }
     }
 
+    /// 重置所有设置为默认值（清空 settings 表并刷新缓存）
+    pub fn reset_settings(&self) -> Result<()> {
+        let conn = Connection::open(&self.db_path)?;
+        conn.execute("DELETE FROM settings", [])?;
+
+        if let Ok(mut cache) = self.cache.lock() {
+            *cache = AppSettings::default();
+        }
+
+        Ok(())
+    }
+
     pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {
         let conn = Connection::open(&self.db_path)?;
 

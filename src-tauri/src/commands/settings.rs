@@ -28,6 +28,13 @@ pub fn set_setting(
     Ok(())
 }
 
+/// Reset all settings to defaults
+#[tauri::command]
+pub fn reset_settings(state: State<'_, SettingsState>) -> Result<(), String> {
+    let manager = state.0.lock().map_err(|e| e.to_string())?;
+    manager.reset_settings().map_err(|e| e.to_string())
+}
+
 /// Toggle always on top
 #[tauri::command]
 pub fn toggle_always_on_top(
