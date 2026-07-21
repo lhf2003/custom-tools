@@ -607,6 +607,8 @@ pub(crate) fn show_main_window(app_handle: &tauri::AppHandle) {
 
         let _ = window.show();
         let _ = window.set_focus();
+        // 通知前端窗口已唤起（用于重置启动器搜索状态）
+        let _ = app_handle.emit("window:shown", ());
     }
 }
 

@@ -318,6 +318,20 @@ function App() {
     };
   }, [setActiveView]);
 
+  // Reset launcher search state every time the window is shown:
+  // 唤起即全新查询，保证「唤起 → 输入 → 回车」肌肉记忆链路可预测
+  useEffect(() => {
+    const unlisten = listen('window:shown', () => {
+      useAppStore.getState().setSearchQuery('');
+    });
+
+    return () => {
+      unlisten.then((fn) => fn()).catch((err: unknown) => {
+        console.error('Failed to cleanup window:shown listener:', err);
+      });
+    };
+  }, []);
+
   // Handle back navigation
   const handleBack = useCallback(() => {
     setActiveView('launcher');

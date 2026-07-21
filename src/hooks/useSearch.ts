@@ -17,6 +17,7 @@ export interface FileResult {
 export function useSearch() {
   const [apps, setApps] = useState<AppItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
 
   const searchApps = useCallback(async (query: string) => {
     try {
@@ -24,12 +25,15 @@ export function useSearch() {
       if (typeof window !== 'undefined' && (window as unknown as { __TAURI__?: unknown }).__TAURI__) {
         const results = await invoke<AppItem[]>('search_apps', { query });
         setApps(results);
+        setSearchError(null);
       } else {
         setApps([]);
       }
     } catch (err) {
       console.error('Failed to search apps:', err);
       setApps([]);
+      // 暴露错误态：搜索失败不能伪装成"未找到"
+      setSearchError(err instanceof Error ? err.message : String(err));
     }
   }, []);
 
@@ -51,14 +55,16 @@ export function useSearch() {
       await invoke('launch_app', { path, name });
     } catch (err) {
       console.error('Failed to launch app:', err);
+      // 抛回给调用方：启动失败时窗口必须保持可见并提示用户
+      throw err;
     }
   }, []);
 
-  const getRecentApps = useCallback(async (limit: number = 14) => {
+  const getRecentApps = useCallback(async (limit?: number) => {
     try {
       // Check if we're in Tauri environment
       if (typeof window !== 'undefined' && (window as unknown as { __TAURI__?: unknown }).__TAURI__) {
-        const results = await invoke<AppItem[]>('get_recent_apps', { limit });
+        const results = await invoke<AppItem[]>('get_recent_apps', { limit: limit ?? null });
         return results;
       }
       return [];
@@ -88,6 +94,7 @@ export function useSearch() {
   return {
     apps,
     isLoading,
+    searchError,
     searchApps,
     refreshApps,
     launchApp,
