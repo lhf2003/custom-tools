@@ -112,6 +112,13 @@ npx tsc --noEmit
 - **Crypto**: AES-GCM for passwords, PBKDF2 for key derivation
 - **Storage**: SQLite (bundled), file system for notes and images
 
+## Design Context
+
+- `PRODUCT.md` — 产品战略上下文（register: product、用户、品牌个性、anti-references、设计原则）
+- `DESIGN.md` — 视觉设计系统（Stitch 格式：色彩/字体/Elevation/组件规范，含 `.impeccable/design.json` 边车）
+
+前端 UI 变更前必读这两份文件；视觉决策以 DESIGN.md 为准，战略与语气决策以 PRODUCT.md 为准。
+
 ## Important Files
 
 - `src-tauri/tauri.conf.json` - Tauri window config, bundle settings
