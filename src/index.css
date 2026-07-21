@@ -21,7 +21,7 @@
   --app-text-secondary: #d4d4d8;
   --app-text-tertiary: #a1a1aa;
   --app-text-disabled: #71717a;
-  --app-text-placeholder: #71717a;
+  --app-text-placeholder: #8e8e96;  /* 实测 4.6:1 on #27272a，满足 WCAG AA */
 
   /* 边框色 */
   --app-border-default: rgba(82, 82, 91, 0.3);
@@ -30,6 +30,7 @@
 
   /* 品牌色 */
   --app-brand-primary: #6366f1;
+  --app-brand-primary-light: #818cf8;  /* 深色表面上的选中文字，实测 5.0:1 */
   --app-brand-secondary: #a855f7;
   --app-brand-selected: #3b82f6;
 
@@ -151,69 +152,6 @@
     box-shadow: var(--app-shadow-md), 0 0 0 1px var(--app-alpha-white-5);
   }
 
-  /* Legacy glass utilities (keep for backward compatibility) */
-  .glass {
-    @apply bg-white/15 backdrop-blur-2xl border border-white/25 rounded-2xl;
-    box-shadow: var(--app-shadow-lg);
-  }
-
-  .glass-dark {
-    @apply bg-zinc-950/90 backdrop-blur-3xl border border-white/10 rounded-2xl;
-    box-shadow: var(--app-shadow-xl), inset 0 1px 0 var(--app-alpha-white-5);
-  }
-
-  .glass-light {
-    @apply bg-white/80 backdrop-blur-2xl border border-white/60 rounded-2xl;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
-  }
-
-  .glass-button {
-    @apply bg-white/25 hover:bg-white/35 active:bg-white/45
-           transition-all duration-200 rounded-lg
-           border border-white/40;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15);
-  }
-
-  .glass-input {
-    @apply bg-white/15 border border-white/30
-           focus:border-white/50 focus:bg-white/25
-           transition-all duration-200 rounded-xl
-           placeholder:text-white/40;
-    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1);
-  }
-
-  /* Enhanced blur for modals and overlays */
-  .glass-modal {
-    @apply bg-zinc-950/90 backdrop-blur-3xl border border-white/20 rounded-2xl;
-    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.7);
-  }
-
-  /* High contrast text on glass backgrounds */
-  .text-glass-primary {
-    @apply text-white/95;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-  }
-
-  .text-glass-secondary {
-    @apply text-white/75;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-  }
-
-  /* View container for transitions */
-  .view-container {
-    @apply absolute inset-0 flex flex-col;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    transform: scale(0.98);
-  }
-
-  .view-container.active {
-    opacity: 1;
-    pointer-events: auto;
-    transform: scale(1);
-  }
-
   /* ============================================
      Global Tooltip Styles
      全局统一的悬浮提示样式
@@ -321,7 +259,7 @@ body {
 
 ::-webkit-scrollbar-thumb {
   background: var(--scrollbar-thumb);
-  border-radius: 10px;
+  border-radius: 8px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -337,6 +275,15 @@ body {
 /* Input focus reset */
 input:focus {
   outline: none;
+}
+
+/* 键盘焦点可见：按钮类元素使用 Action Blue 焦点环
+   （搜索框为无框设计，焦点由存在本身表达，故仅覆盖按钮/链接） */
+button:focus-visible,
+[role="button"]:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--app-status-info);
+  outline-offset: 1px;
 }
 
 /* MDEditor Dark Theme Override */
@@ -452,7 +399,7 @@ input:focus {
 .w-md-editor-text-pre::-webkit-scrollbar-thumb,
 .w-md-editor-preview::-webkit-scrollbar-thumb {
   background: var(--scrollbar-thumb) !important;
-  border-radius: 10px !important;
+  border-radius: 8px !important;
 }
 
 .w-md-editor-text-pre::-webkit-scrollbar-thumb:hover,

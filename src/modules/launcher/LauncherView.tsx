@@ -1,12 +1,11 @@
-import { Search, User, RefreshCw } from 'lucide-react';
-import { useEffect, useState, useCallback } from 'react';
+import { Search, User } from 'lucide-react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { parse as parseJsonc, type ParseError } from 'jsonc-parser';
 import { useAppStore } from '@/stores/appStore';
 import { useToastStore } from '@/stores/toastStore';
 import { useSearch } from '@/hooks/useSearch';
 import type { ViewMode } from '@/types';
 import { safeInvoke, debouncedResize } from '../../utils/tauri';
-import { THEME } from '../../constants/theme';
 import { WINDOW_SIZE } from '../../constants/window';
 import { BUILT_IN_TOOLS } from '../../constants/tools';
 
@@ -35,11 +34,15 @@ interface AppItemData {
 }
 
 const ITEMS_PER_ROW = 9;
+const SEARCH_COLLAPSED_COUNT = 18;
+// 冷启动填充上限（无任何使用记录时展示索引应用）：取 9 列 × 2 行，
+// 避免一次渲染全部索引应用、触发大量图标提取
+const RECENT_FALLBACK_COUNT = 18;
 
 export function LauncherView() {
   const { searchQuery, setSearchQuery, setActiveView, setJsonFormatterData } = useAppStore();
   const { addToast } = useToastStore();
-  const { apps, isLoading, searchApps, launchApp, getRecentApps, recordAppUsage } = useSearch();
+  const { apps, searchApps, launchApp, getRecentApps, recordAppUsage, searchError } = useSearch();
   const [recentItems, setRecentItems] = useState<AppItemData[]>([]);
   const [isExpanded, setIsExpanded] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -47,10 +50,39 @@ export function LauncherView() {
   // Compute displayed items before using in effects
   const displayedItems = isExpanded ? recentItems : recentItems.slice(0, ITEMS_PER_ROW);
 
+  // All results for the current query (built-in tools first, then apps)
+  const getAllResults = useCallback((): AppItemData[] => {
+    if (!searchQuery) return displayedItems;
+    const filteredTools = BUILT_IN_TOOLS.filter(tool =>
+      tool.name.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+    const toolItems: AppItemData[] = filteredTools.map(tool => ({
+      name: tool.name,
+      path: `builtin://${tool.id}`,
+      isBuiltIn: true,
+      toolId: tool.id,
+    }));
+    return [...toolItems, ...apps];
+  }, [searchQuery, displayedItems, apps]);
+
+  const allResults = getAllResults();
+  // 键盘导航集合与渲染集合必须一致：折叠态只渲染前 N 条，选中不可越界（防盲启动）
+  const navItems = searchQuery && !isExpanded
+    ? allResults.slice(0, SEARCH_COLLAPSED_COUNT)
+    : allResults;
+
   // Reset selection when items change
   useEffect(() => {
     setSelectedIndex(0);
   }, [searchQuery, displayedItems.length]);
+
+  // Clamp selection into the rendered slice (results can shrink asynchronously)
+  useEffect(() => {
+    setSelectedIndex(prev => {
+      const maxIndex = navItems.length - 1;
+      return prev > maxIndex ? Math.max(0, maxIndex) : prev;
+    });
+  }, [navItems.length]);
 
   // Debounce search
   useEffect(() => {
@@ -68,8 +100,8 @@ export function LauncherView() {
 
   const loadRecentItems = useCallback(async () => {
     try {
-      // Get recently used apps from database
-      const recentApps = await getRecentApps(14);
+      // Get recently used apps from database (no cap: expanded view scrolls)
+      const recentApps = await getRecentApps();
 
       let items: AppItemData[] = [];
 
@@ -89,7 +121,7 @@ export function LauncherView() {
       // If no recent apps, fetch from search
       if (items.length === 0) {
         const allApps = await safeInvoke('search_apps', { query: '' }) as { name: string; path: string }[] || [];
-        items = allApps.slice(0, 14).map(app => {
+        items = allApps.slice(0, RECENT_FALLBACK_COUNT).map(app => {
           const isBuiltIn = app.path.startsWith('builtin://');
           return {
             name: app.name,
@@ -217,39 +249,53 @@ export function LauncherView() {
   };
 
   const handleItemClick = async (item: AppItemData) => {
-    // Optimistic update: immediately move clicked item to first position
-    setRecentItems(prev => {
-      const filtered = prev.filter(i => i.path !== item.path);
-      return [item, ...filtered];
-    });
+    // Optimistic update: move item to first position of recent list
+    const promoteToRecent = () => {
+      setRecentItems(prev => [item, ...prev.filter(i => i.path !== item.path)]);
+    };
 
     if (item.isBuiltIn && item.toolId && isViewMode(item.toolId)) {
       // For built-in tools, switch view and record usage
+      promoteToRecent();
       setActiveView(item.toolId);
       // Record usage in background (built-in tools don't go through launch_app)
       recordAppUsage(item.path, item.name).catch(err => {
         console.error('Failed to record built-in tool usage:', err);
       });
-    } else {
-      // For external apps, hide window first then launch
-      try {
-        await safeInvoke('hide_window');
-      } catch (err) {
-        console.error('Failed to hide window:', err);
-      }
+      return;
+    }
+
+    // For external apps: launch first; only hide the window after success,
+    // so a failed launch never leaves the user with a vanished window and no explanation
+    try {
       await launchApp(item.path, item.name);
+    } catch (err) {
+      addToast({
+        type: 'error',
+        title: `启动「${item.name}」失败`,
+        message: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
+
+    promoteToRecent();
+    try {
+      await safeInvoke('hide_window');
+    } catch (err) {
+      console.error('Failed to hide window:', err);
     }
   };
 
   // Handle keyboard navigation
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.shiftKey && e.key === 'Tab') {
+    // Ctrl+J 跳转 AI 聊天（不占用 Tab/Shift+Tab 的焦点导航语义）
+    if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'j') {
       e.preventDefault();
       setActiveView('chat');
       return;
     }
 
-    const items = searchQuery ? getAllResults() : displayedItems;
+    const items = navItems;
     const maxIndex = items.length - 1;
 
     switch (e.key) {
@@ -281,7 +327,7 @@ export function LauncherView() {
                 .then(() => {
                   addToast({
                     type: 'success',
-                    title: '已记下 📌',
+                    title: '已记下',
                     message: content.length > 50 ? `${content.slice(0, 50)}…` : content,
                   });
                   setSearchQuery('');
@@ -293,6 +339,12 @@ export function LauncherView() {
                     message: String(err),
                   });
                 });
+            } else {
+              addToast({
+                type: 'info',
+                title: '记下备忘',
+                message: '输入「记 + 内容」，如：记 明天下午交周报',
+              });
             }
             return;
           }
@@ -302,22 +354,7 @@ export function LauncherView() {
         }
         break;
     }
-  }, [searchQuery, displayedItems, selectedIndex, setActiveView, addToast, setSearchQuery]);
-
-  // Get all results for keyboard navigation during search
-  const getAllResults = () => {
-    if (!searchQuery) return displayedItems;
-    const filteredTools = BUILT_IN_TOOLS.filter(tool =>
-      tool.name.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-    const toolItems: AppItemData[] = filteredTools.map(tool => ({
-      name: tool.name,
-      path: `builtin://${tool.id}`,
-      isBuiltIn: true,
-      toolId: tool.id,
-    }));
-    return [...toolItems, ...apps];
-  };
+  }, [searchQuery, navItems, selectedIndex, setActiveView, addToast, setSearchQuery]);
 
   return (
     <div
@@ -326,7 +363,7 @@ export function LauncherView() {
       tabIndex={0}
     >
       {/* Search Bar */}
-      <div className="w-full flex items-center px-4 py-3">
+      <div className="w-full flex items-center px-4 py-3 search-shadow">
         <Search className="w-5 h-5 text-app-text-tertiary mr-3 flex-shrink-0" />
         <input
           type="text"
@@ -334,6 +371,7 @@ export function LauncherView() {
           onChange={(e) => setSearchQuery(e.target.value)}
           onPaste={handlePaste}
           placeholder="搜索应用和指令 / 粘贴文件或图片..."
+          aria-label="搜索应用和指令"
           className="flex-1 bg-transparent text-lg text-app-text-primary placeholder-app-text-placeholder outline-none"
           autoFocus
         />
@@ -341,6 +379,7 @@ export function LauncherView() {
         {/* Profile Button */}
         <button
           onClick={() => setActiveView('settings')}
+          aria-label="打开设置"
           className="ml-3 w-9 h-9 rounded-full bg-app-bg-elevated flex items-center justify-center overflow-hidden hover:bg-app-bg-pressed transition-all group flex-shrink-0"
         >
           <User className="w-4 h-4 text-app-text-secondary group-hover:text-app-text-primary transition-colors" />
@@ -352,14 +391,13 @@ export function LauncherView() {
         {searchQuery ? (
           <SearchResults
             query={searchQuery}
-            apps={apps}
-            isLoading={isLoading}
-            onLaunch={launchApp}
+            allResults={allResults}
+            visibleResults={navItems}
             isExpanded={isExpanded}
             onToggleExpand={() => setIsExpanded(!isExpanded)}
             selectedIndex={selectedIndex}
-            onSelect={setSelectedIndex}
             onItemClick={handleItemClick}
+            searchError={searchError}
           />
         ) : (
           <section className="h-full flex flex-col">
@@ -368,14 +406,14 @@ export function LauncherView() {
               <h2 className="text-sm font-semibold text-app-text-tertiary">最近使用</h2>
               <button
                 onClick={() => setIsExpanded(!isExpanded)}
-                className="text-xs text-app-text-disabled cursor-pointer hover:text-app-text-secondary transition-colors"
+                className="text-xs text-app-text-tertiary cursor-pointer hover:text-app-text-secondary transition-colors"
               >
                 {isExpanded ? '收缩' : `展开 (${recentItems.length})`}
               </button>
             </div>
 
             {/* App Grid */}
-            <div className="grid grid-cols-9 gap-2 overflow-y-scroll overflow-x-hidden">
+            <div className="grid grid-cols-9 gap-2 overflow-y-auto overflow-x-hidden" role="listbox" aria-label="最近使用">
               {displayedItems.map((item, index) => (
                 <ItemCard
                   key={item.path}
@@ -404,6 +442,14 @@ function ItemCard({
 }) {
   const [iconData, setIconData] = useState<string | null>(null);
   const [isLoadingIcon, setIsLoadingIcon] = useState(false);
+  const cardRef = useRef<HTMLButtonElement>(null);
+
+  // 键盘选中项滚动跟随，保证 Enter 作用的对象始终可见
+  useEffect(() => {
+    if (isSelected) {
+      cardRef.current?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [isSelected]);
 
   // Load icon for external apps
   useEffect(() => {
@@ -426,9 +472,7 @@ function ItemCard({
     loadIcon();
   }, [item.path, item.isBuiltIn, item.name]);
 
-  // Selection styles (removed ring border, kept scale effect)
-  const selectedClass = isSelected ? 'scale-105' : '';
-
+  // 选中态信号统一为白纱底 + 文字变色（list-item-selected 规范），不做缩放
   // For built-in tools, use Lucide icon
   if (item.isBuiltIn) {
     const tool = BUILT_IN_TOOLS.find(t => t.id === item.toolId);
@@ -436,13 +480,19 @@ function ItemCard({
       const Icon = tool.icon;
       return (
         <button
+          ref={cardRef}
           onClick={onClick}
+          role="option"
+          aria-selected={isSelected}
           className={`flex flex-col items-center group py-2 rounded-lg transition-all ${isSelected ? 'bg-white/10' : ''}`}
         >
-          <div className={`w-8 h-8 rounded-lg ${tool.color} flex items-center justify-center mb-1.5 group-hover:scale-105 transition-transform ${selectedClass}`}>
-            <Icon className="w-4 h-4 text-app-text-primary" />
+          <div className="w-8 h-8 rounded-lg bg-app-bg-elevated flex items-center justify-center mb-1.5 group-hover:scale-105 transition-transform">
+            <Icon className="w-4 h-4 text-app-text-secondary" />
           </div>
-          <span className={`text-xs w-full text-center group-hover:text-app-text-primary transition-colors leading-tight ${isSelected ? 'text-app-brand-primary font-medium' : 'text-app-text-secondary'}`}>
+          <span
+            title={item.name}
+            className={`line-clamp-2 text-xs w-full text-center group-hover:text-app-text-primary transition-colors leading-tight ${isSelected ? 'text-app-brand-primary-light font-medium' : 'text-app-text-secondary'}`}
+          >
             {item.name}
           </span>
         </button>
@@ -454,10 +504,13 @@ function ItemCard({
   if (iconData) {
     return (
       <button
+        ref={cardRef}
         onClick={onClick}
+        role="option"
+        aria-selected={isSelected}
         className={`flex flex-col items-center group py-2 rounded-lg transition-all ${isSelected ? 'bg-white/10' : ''}`}
       >
-        <div className={`w-8 h-8 rounded-lg overflow-hidden mb-1.5 group-hover:scale-105 transition-transform ${selectedClass}`}>
+        <div className="w-8 h-8 rounded-lg overflow-hidden mb-1.5 group-hover:scale-105 transition-transform">
           <img
             src={iconData}
             alt={item.name}
@@ -465,48 +518,35 @@ function ItemCard({
             draggable={false}
           />
         </div>
-        <span className={`text-xs w-full text-center group-hover:text-app-text-primary transition-colors leading-tight ${isSelected ? 'text-app-text-primary font-medium' : 'text-app-text-tertiary'}`}>
+        <span
+          title={item.name}
+          className={`line-clamp-2 text-xs w-full text-center group-hover:text-app-text-primary transition-colors leading-tight ${isSelected ? 'text-app-text-primary font-medium' : 'text-app-text-tertiary'}`}
+        >
           {item.name}
         </span>
       </button>
     );
   }
 
-  // For external apps without icon yet, use letter icon
+  // For external apps without icon yet, use a quiet zinc letter tile
+  // （Zinc Monolith：不引入灰阶以外的表面色，与内置工具图标同一纪律）
   const initial = item.name.charAt(0).toUpperCase();
-
-  // Generate consistent color based on name
-  const colors = [
-    'bg-red-500',
-    'bg-orange-500',
-    'bg-amber-500',
-    'bg-yellow-500',
-    'bg-lime-500',
-    'bg-green-500',
-    'bg-emerald-500',
-    'bg-teal-500',
-    'bg-cyan-500',
-    'bg-sky-500',
-    'bg-blue-500',
-    'bg-indigo-500',
-    'bg-violet-500',
-    'bg-purple-500',
-    'bg-fuchsia-500',
-    'bg-pink-500',
-    'bg-rose-500',
-  ];
-  const colorIndex = item.name.length % colors.length;
-  const color = colors[colorIndex];
 
   return (
     <button
+      ref={cardRef}
       onClick={onClick}
+      role="option"
+      aria-selected={isSelected}
       className={`flex flex-col items-center group py-2 rounded-lg transition-all ${isSelected ? 'bg-white/10' : ''}`}
     >
-      <div className={`w-8 h-8 rounded-lg ${color} flex items-center justify-center mb-1.5 group-hover:scale-105 transition-transform ${selectedClass}`}>
-        <span className="text-app-text-primary text-xs font-bold">{initial}</span>
+      <div className="w-8 h-8 rounded-lg bg-app-bg-elevated flex items-center justify-center mb-1.5 group-hover:scale-105 transition-transform">
+        <span className="text-app-text-secondary text-xs font-bold">{initial}</span>
       </div>
-      <span className={`text-xs w-full text-center group-hover:text-app-text-primary transition-colors leading-tight ${isSelected ? 'text-app-text-primary font-medium' : 'text-app-text-tertiary'}`}>
+      <span
+        title={item.name}
+        className={`line-clamp-2 text-xs w-full text-center group-hover:text-app-text-primary transition-colors leading-tight ${isSelected ? 'text-app-text-primary font-medium' : 'text-app-text-tertiary'}`}
+      >
         {item.name}
       </span>
     </button>
@@ -516,51 +556,33 @@ function ItemCard({
 // Search Results Component
 function SearchResults({
   query,
-  apps,
-  isLoading,
-  onLaunch,
+  allResults,
+  visibleResults,
   isExpanded,
   onToggleExpand,
   selectedIndex,
-  onSelect,
   onItemClick,
+  searchError,
 }: {
   query: string;
-  apps: { name: string; path: string }[];
-  isLoading: boolean;
-  onLaunch: (path: string, name: string) => void;
+  allResults: AppItemData[];
+  visibleResults: AppItemData[];
   isExpanded: boolean;
   onToggleExpand: () => void;
   selectedIndex: number;
-  onSelect: (index: number) => void;
   onItemClick: (item: AppItemData) => void;
+  searchError: string | null;
 }) {
-  // Filter built-in tools based on query
-  const filteredTools = BUILT_IN_TOOLS.filter(tool =>
-    tool.name.toLowerCase().includes(query.toLowerCase())
-  );
-
-  // Convert built-in tools to AppItemData format
-  const toolItems: AppItemData[] = filteredTools.map(tool => ({
-    name: tool.name,
-    path: `builtin://${tool.id}`,
-    isBuiltIn: true,
-    toolId: tool.id,
-  }));
-
-  // Merge built-in tools with apps (tools first)
-  const allResults = [...toolItems, ...apps];
-
-  if (isLoading) {
-    return (
-      <div className="flex flex-col items-center justify-center py-12 text-app-text-tertiary">
-        <RefreshCw className="w-8 h-8 animate-spin mb-4" />
-        <p>正在索引程序...</p>
-      </div>
-    );
-  }
-
   if (allResults.length === 0) {
+    // 搜索失败与"未找到"是两种状态，必须分开表达
+    if (searchError) {
+      return (
+        <div className="text-app-text-tertiary text-center py-12">
+          <p>搜索失败</p>
+          <p className="text-sm mt-2 opacity-60">{searchError}，请修改关键词重试</p>
+        </div>
+      );
+    }
     return (
       <div className="text-app-text-tertiary text-center py-12">
         <p>搜索 &quot;{query}&quot;</p>
@@ -569,8 +591,7 @@ function SearchResults({
     );
   }
 
-  const displayCount = isExpanded ? allResults.length : 18;
-  const showExpandButton = allResults.length > 18;
+  const showExpandButton = allResults.length > SEARCH_COLLAPSED_COUNT;
 
   return (
     <section className="h-full flex flex-col">
@@ -581,14 +602,14 @@ function SearchResults({
         {showExpandButton && (
           <button
             onClick={onToggleExpand}
-            className="text-xs text-app-text-disabled cursor-pointer hover:text-app-text-secondary transition-colors"
+            className="text-xs text-app-text-tertiary cursor-pointer hover:text-app-text-secondary transition-colors"
           >
             {isExpanded ? '收缩' : `展开 (${allResults.length})`}
           </button>
         )}
       </div>
-      <div className="grid grid-cols-9 gap-2 overflow-y-scroll overflow-x-hidden">
-        {allResults.slice(0, displayCount).map((item, index) => (
+      <div className="grid grid-cols-9 gap-2 overflow-y-auto overflow-x-hidden" role="listbox" aria-label="搜索结果">
+        {visibleResults.map((item, index) => (
           <ItemCard
             key={item.path}
             item={item}

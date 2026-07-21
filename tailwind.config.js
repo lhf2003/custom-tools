@@ -21,7 +21,7 @@ export default {
           secondary: '#d4d4d8',  // zinc-300
           tertiary: '#a1a1aa',   // zinc-400
           disabled: '#71717a',   // zinc-500
-          placeholder: '#71717a',
+          placeholder: '#8e8e96',
         },
         // 语义化边框色
         'app-border': {
@@ -32,6 +32,7 @@ export default {
         // 品牌色
         'app-brand': {
           primary: '#6366f1',    // indigo-500
+          'primary-light': '#818cf8', // indigo-400，深色表面选中文字
           secondary: '#a855f7',  // purple-500
         },
         // 状态色
