@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { AlertTriangle, Coffee, Rocket, X, Sparkles, Pin, Sunrise, Music } from 'lucide-react';
+import { AlertTriangle, Coffee, Rocket, X, Sparkles, Pin, Sunrise, Music, Zap } from 'lucide-react';
 
 interface Suggestion {
   id: number;
@@ -67,6 +67,12 @@ const TYPE_META: Record<string, TypeMeta> = {
     iconColor: 'text-pink-400',
     iconBg: 'bg-pink-500/15',
     acceptLabel: '打开',
+  },
+  auto_executed: {
+    icon: Zap,
+    iconColor: 'text-emerald-400',
+    iconBg: 'bg-emerald-500/15',
+    acceptLabel: '好的',
   },
 };
 

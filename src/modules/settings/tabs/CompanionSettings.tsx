@@ -43,6 +43,21 @@ interface Suggestion {
   source?: string | null;
 }
 
+interface MemoryFact {
+  id: number;
+  fact: string;
+  category: string;
+  confirmations: number;
+  last_confirmed: number;
+}
+
+const CATEGORY_LABEL: Record<string, string> = {
+  person: '👤 人',
+  project: '📁 项目',
+  preference: '⭐ 偏好',
+  general: '📌 其他',
+};
+
 interface IntentTriggers {
   due?: string | null;
   person?: string | null;
@@ -113,21 +128,24 @@ export function CompanionSettings() {
   const [patterns, setPatterns] = useState<HabitPattern[]>([]);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [intents, setIntents] = useState<Suggestion[]>([]);
+  const [memoryFacts, setMemoryFacts] = useState<MemoryFact[]>([]);
   const [analyzing, setAnalyzing] = useState(false);
   const [agentRunning, setAgentRunning] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
-      const [summary, patternList, suggestionList, intentList] = await Promise.all([
+      const [summary, patternList, suggestionList, intentList, facts] = await Promise.all([
         invoke<[string, number][]>('get_companion_today_summary'),
         invoke<HabitPattern[]>('get_companion_patterns'),
         invoke<Suggestion[]>('get_companion_suggestions', { limit: 20 }),
         invoke<Suggestion[]>('get_companion_intents', { limit: 50 }),
+        invoke<MemoryFact[]>('get_companion_memory_facts'),
       ]);
       setTodaySummary(summary);
       setPatterns(patternList);
       setSuggestions(suggestionList);
       setIntents(intentList);
+      setMemoryFacts(facts);
     } catch (err) {
       console.error('Failed to load companion data:', err);
     }
@@ -216,6 +234,15 @@ export function CompanionSettings() {
       await loadData();
     } catch (err) {
       console.error('Failed to dismiss suggestion:', err);
+    }
+  };
+
+  const handleDeleteFact = async (id: number) => {
+    try {
+      await invoke('delete_companion_memory_fact', { id });
+      await loadData();
+    } catch (err) {
+      console.error('Failed to delete memory fact:', err);
     }
   };
 
@@ -402,6 +429,40 @@ export function CompanionSettings() {
                   </div>
                 );
               })}
+            </div>
+          )}
+        </div>
+
+        {/* 记忆（关于我的事实） */}
+        <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Sparkles size={16} className="text-violet-400" />
+            <span className="text-white text-sm font-medium">它记住的你</span>
+            <span className="text-white/30 text-xs">每日分析自动沉淀，日报会参考</span>
+          </div>
+          {memoryFacts.length === 0 ? (
+            <p className="text-white/30 text-xs">还没有沉淀事实，今晚 21 点分析后可能出现</p>
+          ) : (
+            <div className="space-y-1.5">
+              {memoryFacts.map((f) => (
+                <div
+                  key={f.id}
+                  className="flex items-center gap-2 rounded-lg bg-white/5 px-3 py-2 text-xs"
+                >
+                  <span className="text-white/40 shrink-0 w-16">
+                    {CATEGORY_LABEL[f.category] ?? CATEGORY_LABEL.general}
+                  </span>
+                  <span className="text-white/80 flex-1">{f.fact}</span>
+                  <span className="text-white/30 shrink-0">×{f.confirmations}</span>
+                  <button
+                    onClick={() => handleDeleteFact(f.id)}
+                    className="text-white/30 hover:text-red-400 transition-colors cursor-pointer shrink-0"
+                    title="删除这条记忆"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              ))}
             </div>
           )}
         </div>

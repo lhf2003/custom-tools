@@ -131,6 +131,72 @@ fn default_tolerance() -> u32 {
     45
 }
 
+// ── 毕业制闸门（B3 第二刀）────────────────────────────────────
+
+enum GateAction {
+    /// 继续走请示流程（弹建议卡）
+    Ask,
+    /// 本次跳过（降频中 / 已停用）
+    Skip,
+    /// 已毕业并自动执行完毕
+    Executed,
+}
+
+/// 毕业制：被拒 ≥2 → 停用；被接受 ≥3 → 直接执行+轻告知；被忽略 ≥2 → 隔天降频
+fn graduation_gate(
+    conn: &Connection,
+    app_handle: &AppHandle,
+    pattern: &db::HabitPattern,
+    launchable: &[db::LaunchAppItem],
+    auto_title: &str,
+    now_ts: i64,
+) -> GateAction {
+    let (accepted, dismissed, ignored) =
+        db::pattern_vote_counts(conn, pattern.id, now_ts).unwrap_or((0, 0, 0));
+
+    if dismissed >= 2 {
+        log::info!("pattern #{} 被拒 {} 次，永久停用", pattern.id, dismissed);
+        let _ = db::set_pattern_status(conn, pattern.id, "dismissed");
+        return GateAction::Skip;
+    }
+
+    if accepted >= 3 {
+        for app in launchable {
+            if let Err(e) = crate::search::launch_app(&app.path) {
+                log::warn!("毕业执行启动 {} 失败: {}", app.path, e);
+            }
+            let _ = crate::db::app_usage::record_launch(conn, &app.path, &app.name);
+        }
+        let body = format!(
+            "「{}」你已接受 {} 次，以后直接为你准备。",
+            pattern.description, accepted
+        );
+        if let Ok(sid) = suggester::push_suggestion(
+            conn,
+            app_handle,
+            "auto_executed",
+            auto_title,
+            Some(&body),
+            None,
+        ) {
+            let _ = db::link_suggestion_pattern(conn, sid, pattern.id);
+        }
+        log::info!("pattern #{} 毕业（接受 {} 次），自动执行", pattern.id, accepted);
+        return GateAction::Executed;
+    }
+
+    if ignored >= 2 {
+        let last = db::last_pattern_suggestion_at(conn, pattern.id)
+            .unwrap_or(None)
+            .unwrap_or(0);
+        if now_ts - last < 2 * 86400 {
+            return GateAction::Skip;
+        }
+    }
+
+    GateAction::Ask
+}
+
 /// 当前时间命中某个已确认的应用组合时间窗，且组合内应用今天还没开过 → 建议一键启动
 fn match_work_suite(app_handle: &AppHandle, db_path: &PathBuf, now_ts: i64) -> Result<(), String> {
     let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
@@ -190,6 +256,13 @@ fn match_work_suite(app_handle: &AppHandle, db_path: &PathBuf, now_ts: i64) -> R
         let launchable = resolve_app_paths(&conn, &apps);
         if launchable.is_empty() {
             continue;
+        }
+
+        // 毕业制闸门：被拒停用 / 已毕业直接执行 / 被忽略降频
+        match graduation_gate(&conn, app_handle, &pattern, &launchable, "已为你启动工作模式", now_ts) {
+            GateAction::Skip => continue,
+            GateAction::Executed => break,
+            GateAction::Ask => {}
         }
 
         let payload = db::LaunchAppsPayload {
@@ -257,16 +330,30 @@ fn match_context_routines(
         }
         // 解析启动路径
         let apps = resolve_app_paths(&conn, std::slice::from_ref(&data.app));
-        let Some(app_item) = apps.into_iter().next() else {
+        if apps.is_empty() {
             continue;
-        };
+        }
+
+        // 毕业制闸门
+        let friendly = data.app.trim_end_matches(".exe");
+        match graduation_gate(
+            &conn,
+            app_handle,
+            &pattern,
+            &apps,
+            &format!("已为你打开 {}", friendly),
+            now_ts,
+        ) {
+            GateAction::Skip => continue,
+            GateAction::Executed => break,
+            GateAction::Ask => {}
+        }
 
         let payload = db::LaunchAppsPayload {
             action: "launch_apps".to_string(),
-            apps: vec![app_item],
+            apps,
         };
         let payload_json = serde_json::to_string(&payload).ok();
-        let friendly = data.app.trim_end_matches(".exe");
         let body = if data.description.is_empty() {
             format!("这个时间你通常会打开 {}。", friendly)
         } else {

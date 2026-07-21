@@ -196,6 +196,26 @@ pub fn get_companion_intents(
     db::list_intents(&conn, limit.unwrap_or(100)).map_err(|e| format!("查询备忘失败: {}", e))
 }
 
+// ── 记忆层 ───────────────────────────────────────────────────
+
+/// 列出关于用户的事实记忆（设置页「记忆」区）
+#[tauri::command]
+pub fn get_companion_memory_facts(
+    db_state: State<DatabaseState>,
+) -> Result<Vec<db::MemoryFact>, String> {
+    let conn = open_conn(&db_state)?;
+    db::list_memory_facts(&conn, 50).map_err(|e| format!("查询记忆失败: {}", e))
+}
+
+#[tauri::command]
+pub fn delete_companion_memory_fact(
+    db_state: State<DatabaseState>,
+    id: i64,
+) -> Result<(), String> {
+    let conn = open_conn(&db_state)?;
+    db::delete_memory_fact(&conn, id).map_err(|e| format!("删除记忆失败: {}", e))
+}
+
 // ── 开关（持久化 + 运行时镜像同步）─────────────────────────────
 
 macro_rules! companion_flag_command {

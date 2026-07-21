@@ -449,6 +449,11 @@ pub fn list_memory_facts(conn: &Connection, limit: i64) -> rusqlite::Result<Vec<
     rows.collect()
 }
 
+pub fn delete_memory_fact(conn: &Connection, id: i64) -> rusqlite::Result<()> {
+    conn.execute("DELETE FROM memory_facts WHERE id = ?1", params![id])?;
+    Ok(())
+}
+
 pub fn get_suggestion(conn: &Connection, id: i64) -> rusqlite::Result<Option<Suggestion>> {
     let sql = format!("SELECT {} FROM suggestions WHERE id = ?1", SUGGESTION_COLS);
     conn.query_row(&sql, params![id], map_suggestion).optional()
@@ -497,6 +502,46 @@ pub fn has_pattern_suggestion_since(
         |row| row.get(0),
     )?;
     Ok(count > 0)
+}
+
+/// 毕业制投票统计：(接受数, 拒绝数, 忽略数)
+/// 忽略 = pending 且创建超过 1 天（看过没动手）
+pub fn pattern_vote_counts(
+    conn: &Connection,
+    pattern_id: i64,
+    now: i64,
+) -> rusqlite::Result<(i64, i64, i64)> {
+    // 只统计请示类建议（auto_executed 轻告知不计入投票）
+    let accepted: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM suggestions WHERE pattern_id = ?1 AND status = 'accepted'
+         AND suggestion_type IN ('work_suite', 'context_routine')",
+        params![pattern_id],
+        |r| r.get(0),
+    )?;
+    let dismissed: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM suggestions WHERE pattern_id = ?1 AND status = 'dismissed'
+         AND suggestion_type IN ('work_suite', 'context_routine')",
+        params![pattern_id],
+        |r| r.get(0),
+    )?;
+    let ignored: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM suggestions WHERE pattern_id = ?1 AND status = 'pending' AND created_at < ?2
+         AND suggestion_type IN ('work_suite', 'context_routine')",
+        params![pattern_id, now - 86400],
+        |r| r.get(0),
+    )?;
+    Ok((accepted, dismissed, ignored))
+}
+
+/// 查询某 pattern 最近一次建议时间（降频判断用）
+pub fn last_pattern_suggestion_at(conn: &Connection, pattern_id: i64) -> rusqlite::Result<Option<i64>> {
+    conn.query_row(
+        "SELECT MAX(created_at) FROM suggestions WHERE pattern_id = ?1",
+        params![pattern_id],
+        |r| r.get(0),
+    )
+    .optional()
+    .map(|v| v.flatten())
 }
 
 pub fn list_suggestions(

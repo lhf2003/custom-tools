@@ -451,6 +451,8 @@ pub fn run() {
             commands::companion::run_companion_agent_now,
             commands::companion::create_companion_intent,
             commands::companion::get_companion_intents,
+            commands::companion::get_companion_memory_facts,
+            commands::companion::delete_companion_memory_fact,
             commands::companion::set_companion_enabled,
             commands::companion::set_companion_paused,
             commands::companion::set_companion_retention_days,
