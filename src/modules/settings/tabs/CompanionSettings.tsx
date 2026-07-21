@@ -274,8 +274,8 @@ export function CompanionSettings() {
   return (
     <>
       <div className="flex items-center gap-3 mb-6">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500/30 to-violet-600/20 flex items-center justify-center">
-          <Sparkles size={20} className="text-violet-400" />
+        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-app-brand-primary/30 to-app-brand-primary/20 flex items-center justify-center">
+          <Sparkles size={20} className="text-app-brand-primary-light" />
         </div>
         <div>
           <h2 className="text-white text-lg font-semibold">陪伴</h2>

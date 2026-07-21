@@ -29,8 +29,8 @@ interface TypeMeta {
  *  颜色只承载语义——常规=Indigo、错误=status-error、已毕业执行=status-success；
  *  类型区分交还给图标，不再用色相当装饰 */
 const REGULAR_META = {
-  iconColor: 'text-indigo-400',
-  iconBg: 'bg-indigo-500/15',
+  iconColor: 'text-app-brand-primary-light',
+  iconBg: 'bg-app-brand-primary/15',
 } as const;
 
 const TYPE_META: Record<string, TypeMeta> = {
