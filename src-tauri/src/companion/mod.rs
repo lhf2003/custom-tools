@@ -393,17 +393,19 @@ fn check_morning_digest(
     if *last_digest_date == today {
         return;
     }
-    *last_digest_date = today.clone();
-    analyzer::save_setting(db_path, "companion_last_digest_date", &today);
 
     let intents = db::pending_intents(conn).unwrap_or_default();
     let active: Vec<&db::Suggestion> = intents
         .iter()
         .filter(|i| intent_is_active(i, &today, now))
         .collect();
+    // 没有活跃意图时不消耗今日额度——稍后记下第一条的当天仍能收到汇总
     if active.is_empty() {
         return;
     }
+
+    *last_digest_date = today.clone();
+    analyzer::save_setting(db_path, "companion_last_digest_date", &today);
 
     let titles: Vec<String> = active.iter().take(3).map(|i| i.title.clone()).collect();
     let suffix = if active.len() > 3 {
