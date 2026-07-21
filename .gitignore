@@ -34,3 +34,6 @@ markdown-*.png
 mdeditor-*.png
 *-debug.png
 *-check.png
+
+# CodeGraph index
+.codegraph/
