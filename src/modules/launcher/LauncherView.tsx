@@ -1,5 +1,6 @@
 import { Search, User, PenLine } from 'lucide-react';
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import { parse as parseJsonc, type ParseError } from 'jsonc-parser';
 import { useAppStore } from '@/stores/appStore';
 import { useToastStore } from '@/stores/toastStore';
@@ -8,6 +9,7 @@ import type { ViewMode } from '@/types';
 import { safeInvoke, debouncedResize } from '../../utils/tauri';
 import { WINDOW_SIZE } from '../../constants/window';
 import { BUILT_IN_TOOLS } from '../../constants/tools';
+import { getCachedIcon, setCachedIcon } from './iconCache';
 
 const VIEW_MODES: readonly ViewMode[] = [
   'launcher',
@@ -28,13 +30,13 @@ function isViewMode(value: string): value is ViewMode {
 interface AppItemData {
   name: string;
   path: string;
-  iconPath?: string;
   isBuiltIn?: boolean;
   toolId?: string;
 }
 
 const ITEMS_PER_ROW = 9;
-const SEARCH_COLLAPSED_COUNT = 18;
+// 折叠态搜索结果数：210px 窗口物理上只容一整行网格，超出交给「展开」
+const SEARCH_COLLAPSED_COUNT = ITEMS_PER_ROW;
 // 冷启动填充上限（无任何使用记录时展示索引应用）：取 9 列 × 2 行，
 // 避免一次渲染全部索引应用、触发大量图标提取
 const RECENT_FALLBACK_COUNT = 18;
@@ -67,7 +69,8 @@ export function LauncherView() {
   // Compute displayed items before using in effects
   const displayedItems = isExpanded ? recentItems : recentItems.slice(0, ITEMS_PER_ROW);
 
-  // 合并内置工具与外部应用为结果集（工具优先，别名参与匹配），渲染与键盘导航共用
+  // 合并内置工具与外部应用为结果集（别名参与匹配），渲染与键盘导航共用
+  // 排序：最近使用过的应用（recentItems 即按使用排序）> 内置工具 > 其余应用
   const buildResults = useCallback((appItems: AppItemData[]): AppItemData[] => {
     if (!searchQuery) return displayedItems;
     const q = searchQuery.toLowerCase();
@@ -81,8 +84,13 @@ export function LauncherView() {
       isBuiltIn: true,
       toolId: tool.id,
     }));
-    return [...toolItems, ...appItems];
-  }, [searchQuery, displayedItems]);
+    const usageRank = new Map(recentItems.map((item, i) => [item.path, i]));
+    const usedApps = appItems
+      .filter(a => usageRank.has(a.path))
+      .sort((a, b) => (usageRank.get(a.path) ?? 0) - (usageRank.get(b.path) ?? 0));
+    const otherApps = appItems.filter(a => !usageRank.has(a.path));
+    return [...usedApps, ...toolItems, ...otherApps];
+  }, [searchQuery, displayedItems, recentItems]);
 
   const allResults = useMemo(() => buildResults(apps), [buildResults, apps]);
 
@@ -142,6 +150,19 @@ export function LauncherView() {
     const height = isExpanded ? WINDOW_SIZE.LAUNCHER.expanded : WINDOW_SIZE.LAUNCHER.collapsed;
     debouncedResize(height, WINDOW_SIZE.LAUNCHER.width);
   }, [isExpanded]);
+
+  // 唤起即折叠：与 query 重置一致的"每次唤起全新状态"语义
+  useEffect(() => {
+    const unlisten = listen('window:shown', () => {
+      setIsExpanded(false);
+    });
+
+    return () => {
+      unlisten.then((fn) => fn()).catch((err: unknown) => {
+        console.error('Failed to cleanup window:shown listener (launcher):', err);
+      });
+    };
+  }, []);
 
   const loadRecentItems = useCallback(async () => {
     try {
@@ -335,6 +356,14 @@ export function LauncherView() {
 
   // Handle keyboard navigation
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    // Esc 分层：有查询先清空（留在启动器），空查询时冒泡给全局处理（返回/隐藏）
+    if (e.key === 'Escape' && searchQuery) {
+      e.preventDefault();
+      e.stopPropagation();
+      setSearchQuery('');
+      return;
+    }
+
     // Ctrl+J 跳转 AI 聊天（不占用 Tab/Shift+Tab 的焦点导航语义）
     if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'j') {
       e.preventDefault();
@@ -403,7 +432,11 @@ export function LauncherView() {
           void (async () => {
             const freshApps = await searchApps(searchQuery);
             const freshItems = buildResults(freshApps);
-            const target = freshItems[selectedIndex];
+            // 尽量保持用户刚才看着的选中项：旧选中 path 仍在新鲜结果中则保持之
+            const previousPath = items[selectedIndex]?.path;
+            const target =
+              (previousPath && freshItems.find(i => i.path === previousPath)) ||
+              freshItems[Math.min(selectedIndex, freshItems.length - 1)];
             if (target) handleItemClick(target);
           })();
         } else if (items[selectedIndex]) {
@@ -428,6 +461,10 @@ export function LauncherView() {
           onPaste={handlePaste}
           placeholder={PLACEHOLDER_HINTS[hintIndex]}
           aria-label="搜索应用和指令"
+          role="combobox"
+          aria-expanded={!isNoteMode}
+          aria-controls="launcher-listbox"
+          aria-activedescendant={!isNoteMode && navItems.length > 0 ? `launcher-option-${selectedIndex}` : undefined}
           className="flex-1 bg-transparent text-lg text-app-text-primary placeholder-app-text-placeholder outline-none"
           autoFocus
         />
@@ -474,10 +511,11 @@ export function LauncherView() {
             </div>
 
             {/* App Grid */}
-            <div className="grid grid-cols-9 gap-2 overflow-y-auto overflow-x-hidden" role="listbox" aria-label="最近使用">
+            <div id="launcher-listbox" className="grid grid-cols-9 gap-2 overflow-y-auto overflow-x-hidden" role="listbox" aria-label="最近使用">
               {displayedItems.map((item, index) => (
                 <ItemCard
                   key={item.path}
+                  id={`launcher-option-${index}`}
                   item={item}
                   isSelected={index === selectedIndex}
                   onClick={() => handleItemClick(item)}
@@ -498,13 +536,15 @@ function ItemCard({
   isSelected,
   onClick,
   onHover,
+  id,
 }: {
   item: AppItemData;
   isSelected: boolean;
   onClick: () => void;
   onHover?: () => void;
+  id?: string;
 }) {
-  const [iconData, setIconData] = useState<string | null>(null);
+  const [iconData, setIconData] = useState<string | null>(() => getCachedIcon(item.path) ?? null);
   // 一次性守卫：每个卡片实例只尝试提取一次图标（null 结果不重试）
   const iconRequestedRef = useRef(false);
   const cardRef = useRef<HTMLButtonElement>(null);
@@ -516,14 +556,21 @@ function ItemCard({
     }
   }, [isSelected]);
 
-  // Load icon for external apps
+  // Load icon for external apps (with module-level cache to survive view switches)
   useEffect(() => {
     if (item.isBuiltIn || iconRequestedRef.current) return;
     iconRequestedRef.current = true;
 
+    const cached = getCachedIcon(item.path);
+    if (cached !== undefined) {
+      if (cached) setIconData(cached);
+      return;
+    }
+
     const loadIcon = async () => {
       try {
         const result = await safeInvoke('extract_app_icon', { path: item.path }) as string | null;
+        setCachedIcon(item.path, result);
         if (result) {
           setIconData(result);
         }
@@ -544,11 +591,13 @@ function ItemCard({
       return (
         <button
           ref={cardRef}
+          id={id}
           onClick={onClick}
           onMouseEnter={onHover}
           role="option"
           aria-selected={isSelected}
-          className={`flex flex-col items-center group py-2 rounded-lg transition-all ${isSelected ? 'bg-white/10' : ''}`}
+          tabIndex={-1}
+          className={`flex flex-col items-center group py-2 rounded-lg transition-colors ${isSelected ? 'bg-white/10' : ''}`}
         >
           <div className="w-8 h-8 rounded-lg bg-app-bg-elevated flex items-center justify-center mb-1.5 group-hover:scale-105 transition-transform">
             <Icon className="w-4 h-4 text-app-text-secondary" />
@@ -569,11 +618,13 @@ function ItemCard({
     return (
       <button
         ref={cardRef}
+        id={id}
         onClick={onClick}
         onMouseEnter={onHover}
         role="option"
         aria-selected={isSelected}
-        className={`flex flex-col items-center group py-2 rounded-lg transition-all ${isSelected ? 'bg-white/10' : ''}`}
+        tabIndex={-1}
+        className={`flex flex-col items-center group py-2 rounded-lg transition-colors ${isSelected ? 'bg-white/10' : ''}`}
       >
         <div className="w-8 h-8 rounded-lg overflow-hidden mb-1.5 group-hover:scale-105 transition-transform">
           <img
@@ -600,6 +651,7 @@ function ItemCard({
   return (
     <button
       ref={cardRef}
+      id={id}
       onClick={onClick}
       onMouseEnter={onHover}
       role="option"
@@ -677,10 +729,11 @@ function SearchResults({
           </button>
         )}
       </div>
-      <div className="grid grid-cols-9 gap-2 overflow-y-auto overflow-x-hidden" role="listbox" aria-label="搜索结果">
+      <div id="launcher-listbox" className="grid grid-cols-9 gap-2 overflow-y-auto overflow-x-hidden" role="listbox" aria-label="搜索结果">
         {visibleResults.map((item, index) => (
           <ItemCard
             key={item.path}
+            id={`launcher-option-${index}`}
             item={item}
             isSelected={index === selectedIndex}
             onClick={() => onItemClick(item)}
