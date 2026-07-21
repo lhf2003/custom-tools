@@ -132,6 +132,8 @@ const CLIPBOARD_CHECK_INTERVAL_SECS: i64 = 9;
 const INTENT_CHECK_INTERVAL_SECS: i64 = 9;
 /// 意图过期阈值：7 天未动自动降级（不再主动弹，但不删）
 const INTENT_EXPIRE_SECS: i64 = 7 * 86400;
+/// 触发器解析重试间隔（LLM 暂时不可达时，每小时补一次）
+const PARSE_RETRY_INTERVAL_SECS: i64 = 3600;
 /// IM 进程特征（③联系人触发只在这些进程下生效）
 const IM_PROCESS_HINTS: &[&str] = &[
     "weixin", "wechat", "dingtalk", "lark", "feishu", "qq.exe", "tim.exe",
@@ -183,6 +185,7 @@ fn run_collector(
         .unwrap_or(0);
     let mut last_clipboard_check: i64 = 0;
     let mut last_intent_check: i64 = 0;
+    let mut last_parse_retry: i64 = 0;
     // 晨间汇总：每天首次活动时只发一次
     let mut last_digest_date =
         analyzer::load_setting(&db_path, "companion_last_digest_date").unwrap_or_default();
@@ -272,6 +275,11 @@ fn run_collector(
                 &mut last_digest_date,
             );
             check_intent_triggers(&conn, &app_handle, &event);
+        }
+
+        if event.timestamp - last_parse_retry >= PARSE_RETRY_INTERVAL_SECS {
+            last_parse_retry = event.timestamp;
+            retry_intent_parse(&conn, &app_handle, &db_path);
         }
     }
 
@@ -418,6 +426,28 @@ fn check_morning_digest(
         Some(&body),
         None,
     );
+}
+
+/// 触发器解析重试：LLM 暂时不可达（如断网/VPN 未连）导致解析失败的意图，
+/// 每小时补试一次（每次最多 2 条，避免风暴）
+fn retry_intent_parse(conn: &Connection, app_handle: &AppHandle, db_path: &PathBuf) {
+    let pending: Vec<db::Suggestion> = db::pending_intents(conn)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|i| i.trigger_data.is_none())
+        .take(2)
+        .collect();
+
+    for intent in pending {
+        let text = intent.body.clone().unwrap_or_else(|| intent.title.clone());
+        let app = app_handle.clone();
+        let db = db_path.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Err(e) = analyzer::parse_and_store_triggers(&app, &db, intent.id, &text).await {
+                log::warn!("意图 #{} 重试解析仍失败: {}", intent.id, e);
+            }
+        });
+    }
 }
 
 /// 情境触发匹配：窗口标题命中关键词（②）或 IM 窗口命中联系人（③）

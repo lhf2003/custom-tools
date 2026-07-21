@@ -663,6 +663,27 @@ fn parse_llm_patterns(reply: &str) -> Result<LlmPatternsResponse, String> {
 
 // ── 意图触发器解析（B2）──────────────────────────────────────
 
+/// 解析意图触发器并写回数据库（创建和重试共用的完整链路）
+pub async fn parse_and_store_triggers(
+    app_handle: &AppHandle,
+    db_path: &PathBuf,
+    intent_id: i64,
+    text: &str,
+) -> Result<(), String> {
+    let triggers = parse_intent_triggers(app_handle, db_path, text).await?;
+    let has_triggers =
+        triggers.due.is_some() || triggers.person.is_some() || !triggers.keywords.is_empty();
+    if !has_triggers {
+        return Ok(());
+    }
+    let json = serde_json::to_string(&triggers).map_err(|e| e.to_string())?;
+    let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
+    db::update_intent_triggers(&conn, intent_id, &json, triggers.due.as_deref())
+        .map_err(|e| format!("写回触发器失败: {}", e))?;
+    log::info!("意图 #{} 触发器解析成功", intent_id);
+    Ok(())
+}
+
 /// 用 LLM 从意图原文解析触发器 {due, person, channel, keywords}。
 /// 失败不致命——调用方保留原文，靠晨间汇总兜底。
 pub async fn parse_intent_triggers(

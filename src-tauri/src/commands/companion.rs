@@ -178,25 +178,8 @@ pub fn create_companion_intent(
     // 异步解析触发器（不阻塞 launcher 返回）
     let db_path = db_state.0.clone();
     tauri::async_runtime::spawn(async move {
-        match analyzer::parse_intent_triggers(&app_handle, &db_path, &text).await {
-            Ok(triggers) => {
-                let has_triggers = triggers.due.is_some()
-                    || triggers.person.is_some()
-                    || !triggers.keywords.is_empty();
-                if has_triggers {
-                    if let Ok(json) = serde_json::to_string(&triggers) {
-                        if let Ok(conn) = Connection::open(&db_path) {
-                            let _ = db::update_intent_triggers(
-                                &conn,
-                                id,
-                                &json,
-                                triggers.due.as_deref(),
-                            );
-                        }
-                    }
-                }
-            }
-            Err(e) => log::warn!("意图 #{} 触发器解析失败（保留原文兜底）: {}", id, e),
+        if let Err(e) = analyzer::parse_and_store_triggers(&app_handle, &db_path, id, &text).await {
+            log::warn!("意图 #{} 触发器解析失败（保留原文兜底）: {}", id, e);
         }
     });
 
