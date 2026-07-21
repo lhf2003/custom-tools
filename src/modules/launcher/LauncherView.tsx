@@ -39,6 +39,14 @@ const SEARCH_COLLAPSED_COUNT = 18;
 // 避免一次渲染全部索引应用、触发大量图标提取
 const RECENT_FALLBACK_COUNT = 18;
 
+// 搜索框 placeholder 轮换：让隐藏能力（记/Ctrl+J/粘贴 JSON）被自然发现
+const PLACEHOLDER_HINTS = [
+  '搜索应用和指令 / 粘贴文件或图片...',
+  '输入「记 + 内容」快速记下备忘',
+  'Ctrl+J 打开 AI 聊天',
+  '粘贴 JSON 文本，自动打开格式化',
+];
+
 export function LauncherView() {
   const { searchQuery, setSearchQuery, setActiveView, setJsonFormatterData } = useAppStore();
   const { addToast } = useToastStore();
@@ -46,15 +54,25 @@ export function LauncherView() {
   const [recentItems, setRecentItems] = useState<AppItemData[]>([]);
   const [isExpanded, setIsExpanded] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [hintIndex, setHintIndex] = useState(0);
+
+  // placeholder 低频轮换（8s），只在输入为空时可见，不打扰输入过程
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setHintIndex(prev => (prev + 1) % PLACEHOLDER_HINTS.length);
+    }, 8000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Compute displayed items before using in effects
   const displayedItems = isExpanded ? recentItems : recentItems.slice(0, ITEMS_PER_ROW);
 
-  // All results for the current query (built-in tools first, then apps)
-  const getAllResults = useCallback((): AppItemData[] => {
+  // 合并内置工具与外部应用为结果集（工具优先，别名参与匹配），渲染与键盘导航共用
+  const buildResults = useCallback((appItems: AppItemData[]): AppItemData[] => {
     if (!searchQuery) return displayedItems;
+    const q = searchQuery.toLowerCase();
     const filteredTools = BUILT_IN_TOOLS.filter(tool =>
-      tool.name.toLowerCase().includes(searchQuery.toLowerCase())
+      tool.name.toLowerCase().includes(q) || tool.aliases?.some(alias => alias.includes(q))
     );
     const toolItems: AppItemData[] = filteredTools.map(tool => ({
       name: tool.name,
@@ -62,10 +80,10 @@ export function LauncherView() {
       isBuiltIn: true,
       toolId: tool.id,
     }));
-    return [...toolItems, ...apps];
-  }, [searchQuery, displayedItems, apps]);
+    return [...toolItems, ...appItems];
+  }, [searchQuery, displayedItems]);
 
-  const allResults = getAllResults();
+  const allResults = buildResults(apps);
   // 键盘导航集合与渲染集合必须一致：折叠态只渲染前 N 条，选中不可越界（防盲启动）
   const navItems = searchQuery && !isExpanded
     ? allResults.slice(0, SEARCH_COLLAPSED_COUNT)
@@ -84,11 +102,15 @@ export function LauncherView() {
     });
   }, [navItems.length]);
 
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Debounce search
   useEffect(() => {
     const timer = setTimeout(() => {
+      searchTimerRef.current = null;
       searchApps(searchQuery);
     }, 150);
+    searchTimerRef.current = timer;
     return () => clearTimeout(timer);
   }, [searchQuery, searchApps]);
 
@@ -349,12 +371,22 @@ export function LauncherView() {
             return;
           }
         }
-        if (items[selectedIndex]) {
+        // 防抖窗口内的回车：先冲刷搜索再启动，避免命中陈旧结果
+        if (searchQuery && searchTimerRef.current !== null) {
+          clearTimeout(searchTimerRef.current);
+          searchTimerRef.current = null;
+          void (async () => {
+            const freshApps = await searchApps(searchQuery);
+            const freshItems = buildResults(freshApps);
+            const target = freshItems[selectedIndex];
+            if (target) handleItemClick(target);
+          })();
+        } else if (items[selectedIndex]) {
           handleItemClick(items[selectedIndex]);
         }
         break;
     }
-  }, [searchQuery, navItems, selectedIndex, setActiveView, addToast, setSearchQuery]);
+  }, [searchQuery, navItems, selectedIndex, setActiveView, addToast, setSearchQuery, searchApps, buildResults]);
 
   return (
     <div
@@ -370,7 +402,7 @@ export function LauncherView() {
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           onPaste={handlePaste}
-          placeholder="搜索应用和指令 / 粘贴文件或图片..."
+          placeholder={PLACEHOLDER_HINTS[hintIndex]}
           aria-label="搜索应用和指令"
           className="flex-1 bg-transparent text-lg text-app-text-primary placeholder-app-text-placeholder outline-none"
           autoFocus
@@ -397,6 +429,7 @@ export function LauncherView() {
             onToggleExpand={() => setIsExpanded(!isExpanded)}
             selectedIndex={selectedIndex}
             onItemClick={handleItemClick}
+            onSelect={setSelectedIndex}
             searchError={searchError}
           />
         ) : (
@@ -420,6 +453,7 @@ export function LauncherView() {
                   item={item}
                   isSelected={index === selectedIndex}
                   onClick={() => handleItemClick(item)}
+                  onHover={() => setSelectedIndex(index)}
                 />
               ))}
             </div>
@@ -435,10 +469,12 @@ function ItemCard({
   item,
   isSelected,
   onClick,
+  onHover,
 }: {
   item: AppItemData;
   isSelected: boolean;
   onClick: () => void;
+  onHover?: () => void;
 }) {
   const [iconData, setIconData] = useState<string | null>(null);
   const [isLoadingIcon, setIsLoadingIcon] = useState(false);
@@ -482,6 +518,7 @@ function ItemCard({
         <button
           ref={cardRef}
           onClick={onClick}
+          onMouseEnter={onHover}
           role="option"
           aria-selected={isSelected}
           className={`flex flex-col items-center group py-2 rounded-lg transition-all ${isSelected ? 'bg-white/10' : ''}`}
@@ -506,6 +543,7 @@ function ItemCard({
       <button
         ref={cardRef}
         onClick={onClick}
+        onMouseEnter={onHover}
         role="option"
         aria-selected={isSelected}
         className={`flex flex-col items-center group py-2 rounded-lg transition-all ${isSelected ? 'bg-white/10' : ''}`}
@@ -520,7 +558,7 @@ function ItemCard({
         </div>
         <span
           title={item.name}
-          className={`line-clamp-2 text-xs w-full text-center group-hover:text-app-text-primary transition-colors leading-tight ${isSelected ? 'text-app-text-primary font-medium' : 'text-app-text-tertiary'}`}
+          className={`line-clamp-2 text-xs w-full text-center group-hover:text-app-text-primary transition-colors leading-tight ${isSelected ? 'text-app-brand-primary-light font-medium' : 'text-app-text-tertiary'}`}
         >
           {item.name}
         </span>
@@ -536,6 +574,7 @@ function ItemCard({
     <button
       ref={cardRef}
       onClick={onClick}
+      onMouseEnter={onHover}
       role="option"
       aria-selected={isSelected}
       className={`flex flex-col items-center group py-2 rounded-lg transition-all ${isSelected ? 'bg-white/10' : ''}`}
@@ -545,7 +584,7 @@ function ItemCard({
       </div>
       <span
         title={item.name}
-        className={`line-clamp-2 text-xs w-full text-center group-hover:text-app-text-primary transition-colors leading-tight ${isSelected ? 'text-app-text-primary font-medium' : 'text-app-text-tertiary'}`}
+        className={`line-clamp-2 text-xs w-full text-center group-hover:text-app-text-primary transition-colors leading-tight ${isSelected ? 'text-app-brand-primary-light font-medium' : 'text-app-text-tertiary'}`}
       >
         {item.name}
       </span>
@@ -562,6 +601,7 @@ function SearchResults({
   onToggleExpand,
   selectedIndex,
   onItemClick,
+  onSelect,
   searchError,
 }: {
   query: string;
@@ -571,6 +611,7 @@ function SearchResults({
   onToggleExpand: () => void;
   selectedIndex: number;
   onItemClick: (item: AppItemData) => void;
+  onSelect: (index: number) => void;
   searchError: string | null;
 }) {
   if (allResults.length === 0) {
@@ -591,7 +632,7 @@ function SearchResults({
     );
   }
 
-  const showExpandButton = allResults.length > SEARCH_COLLAPSED_COUNT;
+  const showExpandButton = allResults.length > ITEMS_PER_ROW;
 
   return (
     <section className="h-full flex flex-col">
@@ -615,6 +656,7 @@ function SearchResults({
             item={item}
             isSelected={index === selectedIndex}
             onClick={() => onItemClick(item)}
+            onHover={() => onSelect(index)}
           />
         ))}
       </div>
