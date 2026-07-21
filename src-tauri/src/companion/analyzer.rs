@@ -773,12 +773,25 @@ pub async fn parse_and_store_triggers(
 
 /// 用 LLM 从意图原文解析触发器 {due, person, channel, keywords}。
 /// 失败不致命——调用方保留原文，靠晨间汇总兜底。
+/// prompt 注入记忆层事实（如"刘光俊=前端同事"），让解析更懂用户语境。
 pub async fn parse_intent_triggers(
     app_handle: &AppHandle,
     db_path: &PathBuf,
     text: &str,
 ) -> Result<db::IntentTriggers, String> {
     let today = chrono::Local::now().format("%Y-%m-%d");
+
+    // 注入记忆层事实（最多 10 条，控制 prompt 长度）
+    let facts_context = Connection::open(db_path)
+        .ok()
+        .and_then(|conn| db::list_memory_facts(&conn, 10).ok())
+        .filter(|facts| !facts.is_empty())
+        .map(|facts| {
+            let lines: Vec<String> = facts.into_iter().map(|f| format!("- {}", f.fact)).collect();
+            format!("\n\n关于这个用户，你知道这些事实：\n{}", lines.join("\n"))
+        })
+        .unwrap_or_default();
+
     let prompt = format!(
         "从下面这句话中提取触发条件，用于在正确的时机提醒用户。\n\
          只输出 JSON，不要任何其他文字。格式：\n\
@@ -787,9 +800,10 @@ pub async fn parse_intent_triggers(
          1. 今天是 {today}。\"明天\"=\"今天+1天\"，\"周五\"=最近的周五，\"下周X\"=下周的星期X。没有明确时间则 due 为 null。\n\
          2. person 只提取明确的人名/称呼（如\"张三\"\"前端小李\"），没有则为 null。\n\
          3. channel 只在明确提到沟通软件时填写。\n\
-         4. keywords 提取能识别相关应用/项目/事项的实词（如项目名、\"接口文档\"），不要虚词。没有合适的关键词就给空数组。\n\
+         4. keywords 提取能识别相关应用/项目/事项的实词（如项目名、\"接口文档\"），不要虚词。没有合适的关键词就给空数组。{facts_context}\n\
          原话：「{text}」",
         today = today,
+        facts_context = facts_context,
         text = text
     );
 
