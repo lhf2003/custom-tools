@@ -54,7 +54,7 @@ pub fn load_all(conn: &Connection) -> Result<Vec<AppCacheEntry>> {
         "SELECT path, name, target_path, last_modified, is_valid, pinyin_initials
          FROM app_cache
          WHERE is_valid = 1
-         ORDER BY name COLLATE NOCASE"
+         ORDER BY name COLLATE NOCASE",
     )?;
 
     let entries = stmt.query_map([], |row| {
@@ -137,10 +137,7 @@ pub fn mark_invalid(conn: &Connection, path: &str) -> Result<()> {
 
 /// Delete invalid entries permanently
 pub fn cleanup_invalid(conn: &Connection) -> Result<usize> {
-    let count = conn.execute(
-        "DELETE FROM app_cache WHERE is_valid = 0",
-        [],
-    )?;
+    let count = conn.execute("DELETE FROM app_cache WHERE is_valid = 0", [])?;
 
     Ok(count)
 }
@@ -183,7 +180,10 @@ pub fn get_stats(conn: &Connection) -> Result<(usize, usize)> {
 pub fn get_file_modified(path: &std::path::Path) -> i64 {
     std::fs::metadata(path)
         .and_then(|m| m.modified())
-        .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid time")))
+        .and_then(|t| {
+            t.duration_since(SystemTime::UNIX_EPOCH)
+                .map_err(|_| std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid time"))
+        })
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
 }

@@ -2,10 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-/* MDEditor Styles */
-@import '@uiw/react-md-editor/markdown-editor.css';
-@import '@uiw/react-markdown-preview/markdown.css';
-
 /* ============================================
    CSS Custom Properties (Design Tokens)
    与 tailwind.config.js 和 THEME 常量保持同步

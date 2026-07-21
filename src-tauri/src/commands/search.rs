@@ -11,12 +11,6 @@ fn get_db_conn(db_state: &tauri::State<'_, DatabaseState>) -> Result<Connection,
 }
 
 #[tauri::command]
-pub fn index_apps(state: tauri::State<'_, SearchState>) -> Result<(), String> {
-    let mut index = state.0.lock().map_err(|e| e.to_string())?;
-    index.index_apps().map_err(|e| e.to_string())
-}
-
-#[tauri::command]
 pub fn search_apps(
     query: String,
     state: tauri::State<'_, SearchState>,
@@ -142,13 +136,6 @@ pub async fn search_everything(query: String, limit: usize) -> Vec<everything::F
         .unwrap_or_default()
 }
 
-#[tauri::command]
-pub async fn get_everything_version() -> Option<String> {
-    tokio::task::spawn_blocking(everything::get_version)
-        .await
-        .unwrap_or(None)
-}
-
 /// Download and install Everything client and/or es.exe into the app's own
 /// `<exe_dir>/Everything/` directory using a PowerShell script.
 ///
@@ -161,11 +148,9 @@ pub async fn install_everything(install_client: bool, install_es: bool) -> Resul
         return Ok(());
     }
 
-    let install_dir = everything::bundled_install_dir()
-        .ok_or("无法确定应用安装目录")?;
+    let install_dir = everything::bundled_install_dir().ok_or("无法确定应用安装目录")?;
 
-    std::fs::create_dir_all(&install_dir)
-        .map_err(|e| format!("创建目录失败: {}", e))?;
+    std::fs::create_dir_all(&install_dir).map_err(|e| format!("创建目录失败: {}", e))?;
 
     // Escape single quotes in the path for PowerShell single-quoted strings
     let dest = install_dir.to_string_lossy().replace('\'', "''");
@@ -209,7 +194,7 @@ function Fetch-AndExtract($url, $tmp, $d, $expect) {
         script.push_str(
             "Fetch-AndExtract \
              'https://www.voidtools.com/Everything-1.4.1.1032.x64.zip' \
-             \"$dest\\ev_tmp.zip\" $dest \"$dest\\Everything.exe\"\n"
+             \"$dest\\ev_tmp.zip\" $dest \"$dest\\Everything.exe\"\n",
         );
     }
 
@@ -217,7 +202,7 @@ function Fetch-AndExtract($url, $tmp, $d, $expect) {
         script.push_str(
             "Fetch-AndExtract \
              'https://www.voidtools.com/ES-1.1.0.36.x64.zip' \
-             \"$dest\\es_tmp.zip\" $dest \"$dest\\es.exe\"\n"
+             \"$dest\\es_tmp.zip\" $dest \"$dest\\es.exe\"\n",
         );
     }
 
@@ -230,7 +215,14 @@ function Fetch-AndExtract($url, $tmp, $d, $expect) {
 
     tokio::task::spawn_blocking(move || {
         let output = std::process::Command::new("powershell")
-            .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", &script])
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                &script,
+            ])
             .output()
             .map_err(|e| format!("无法启动 PowerShell: {}", e))?;
 
@@ -250,7 +242,10 @@ function Fetch-AndExtract($url, $tmp, $d, $expect) {
 pub fn open_file(path: String) -> Result<(), String> {
     // Open file with default application
     if let Err(e) = open::that(&path) {
-        log::warn!("Failed to open file with open crate: {}, trying fallback", e);
+        log::warn!(
+            "Failed to open file with open crate: {}, trying fallback",
+            e
+        );
         // Fallback to Windows start command
         #[cfg(windows)]
         {

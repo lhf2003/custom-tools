@@ -10,6 +10,9 @@ import {
   Activity,
   Eraser,
   Bot,
+  Pin,
+  Check,
+  X,
 } from 'lucide-react';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useToastStore } from '@/stores/toastStore';
@@ -35,6 +38,35 @@ interface Suggestion {
   body: string | null;
   status: string;
   created_at: number;
+  trigger_data?: string | null;
+  due_date?: string | null;
+  source?: string | null;
+}
+
+interface IntentTriggers {
+  due?: string | null;
+  person?: string | null;
+  channel?: string | null;
+  keywords?: string[];
+}
+
+function parseTriggers(triggerData: string | null | undefined): IntentTriggers | null {
+  if (!triggerData) return null;
+  try {
+    return JSON.parse(triggerData) as IntentTriggers;
+  } catch {
+    return null;
+  }
+}
+
+function formatTriggers(t: IntentTriggers | null): string {
+  if (!t) return '触发器解析中…';
+  const parts: string[] = [];
+  if (t.due) parts.push(`📅 ${t.due}`);
+  if (t.person) parts.push(`👤 ${t.person}`);
+  if (t.channel) parts.push(`💬 ${t.channel}`);
+  if (t.keywords && t.keywords.length > 0) parts.push(`🔑 ${t.keywords.join('、')}`);
+  return parts.length > 0 ? parts.join('  ') : '仅晨间汇总提醒';
 }
 
 const SUGGESTION_TYPE_LABEL: Record<string, string> = {
@@ -80,19 +112,22 @@ export function CompanionSettings() {
   const [todaySummary, setTodaySummary] = useState<[string, number][]>([]);
   const [patterns, setPatterns] = useState<HabitPattern[]>([]);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const [intents, setIntents] = useState<Suggestion[]>([]);
   const [analyzing, setAnalyzing] = useState(false);
   const [agentRunning, setAgentRunning] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
-      const [summary, patternList, suggestionList] = await Promise.all([
+      const [summary, patternList, suggestionList, intentList] = await Promise.all([
         invoke<[string, number][]>('get_companion_today_summary'),
         invoke<HabitPattern[]>('get_companion_patterns'),
         invoke<Suggestion[]>('get_companion_suggestions', { limit: 20 }),
+        invoke<Suggestion[]>('get_companion_intents', { limit: 50 }),
       ]);
       setTodaySummary(summary);
       setPatterns(patternList);
       setSuggestions(suggestionList);
+      setIntents(intentList);
     } catch (err) {
       console.error('Failed to load companion data:', err);
     }
@@ -162,6 +197,28 @@ export function CompanionSettings() {
     }
   };
 
+  const handleActSuggestion = async (id: number) => {
+    try {
+      await invoke('act_on_companion_suggestion', { id });
+      await loadData();
+    } catch (err) {
+      addToast({
+        type: 'error',
+        title: '操作失败',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
+  const handleDismissSuggestion = async (id: number) => {
+    try {
+      await invoke('dismiss_companion_suggestion', { id });
+      await loadData();
+    } catch (err) {
+      console.error('Failed to dismiss suggestion:', err);
+    }
+  };
+
   const retentionOptions = [
     { value: 7, label: '7 天' },
     { value: 30, label: '30 天' },
@@ -214,7 +271,7 @@ export function CompanionSettings() {
         <SettingCard title="数据保留时长" description="活动数据超过保留期后自动清理">
           <select
             value={companion_retention_days}
-            onChange={(e) => setCompanionRetentionDays(parseInt(e.target.value))}
+            onChange={(e) => setCompanionRetentionDays(Number(e.target.value))}
             className="bg-zinc-700 text-white text-sm rounded-lg px-3 py-2 outline-none cursor-pointer border border-zinc-600 hover:border-zinc-500 transition-colors appearance-none min-w-[100px]"
             style={selectStyle}
           >
@@ -234,7 +291,7 @@ export function CompanionSettings() {
             <Clock size={16} className="text-white/30" />
             <select
               value={companion_long_work_minutes}
-              onChange={(e) => setCompanionLongWorkMinutes(parseInt(e.target.value))}
+              onChange={(e) => setCompanionLongWorkMinutes(Number(e.target.value))}
               className="bg-zinc-700 text-white text-sm rounded-lg px-3 py-2 outline-none cursor-pointer border border-zinc-600 hover:border-zinc-500 transition-colors appearance-none min-w-[100px]"
               style={selectStyle}
             >
@@ -342,6 +399,65 @@ export function CompanionSettings() {
                         <Trash2 size={13} />
                       </button>
                     )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* 我的备忘（意图暂存） */}
+        <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Pin size={16} className="text-violet-400" />
+              <span className="text-white text-sm font-medium">我的备忘</span>
+            </div>
+            <span className="text-white/30 text-xs">启动器输入「记 xxx」回车即可记下</span>
+          </div>
+          {intents.length === 0 ? (
+            <p className="text-white/30 text-xs">
+              还没有备忘。试试：Alt+Space → 输入「记 明天在微信与张三对接接口」→ 回车
+            </p>
+          ) : (
+            <div className="space-y-1.5">
+              {intents.map((it) => {
+                const status = STATUS_LABEL[it.status] ?? STATUS_LABEL.pending;
+                const triggers = parseTriggers(it.trigger_data);
+                return (
+                  <div
+                    key={it.id}
+                    className={`rounded-lg px-3 py-2 ${
+                      it.status === 'pending' ? 'bg-white/5' : 'bg-white/[0.02] opacity-60'
+                    }`}
+                  >
+                    <div className="flex items-start gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="text-white/85 text-xs leading-relaxed">{it.body}</div>
+                        <div className="text-white/30 text-xs mt-1">
+                          {formatTriggers(triggers)} · {formatTime(it.created_at)} ·{' '}
+                          <span className={status.color}>{status.text}</span>
+                        </div>
+                      </div>
+                      {it.status === 'pending' && (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            onClick={() => handleActSuggestion(it.id)}
+                            className="p-1.5 rounded-md text-emerald-400/70 hover:text-emerald-400 hover:bg-emerald-500/15 transition-colors cursor-pointer"
+                            title="完成"
+                          >
+                            <Check size={13} />
+                          </button>
+                          <button
+                            onClick={() => handleDismissSuggestion(it.id)}
+                            className="p-1.5 rounded-md text-white/30 hover:text-red-400 hover:bg-red-500/15 transition-colors cursor-pointer"
+                            title="忽略"
+                          >
+                            <X size={13} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
               })}

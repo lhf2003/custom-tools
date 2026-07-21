@@ -2,7 +2,7 @@ use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
 };
-use base64::{Engine as _, engine::general_purpose::STANDARD};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use pbkdf2::pbkdf2_hmac;
 use rand::RngCore;
 use sha2::Sha256;
@@ -39,7 +39,9 @@ impl CryptoManager {
         let mut key = [0u8; 32];
         pbkdf2_hmac::<Sha256>(master_password.as_bytes(), salt, 100_000, &mut key);
 
-        let salt: [u8; 16] = salt.try_into().map_err(|_| anyhow::anyhow!("Invalid salt length"))?;
+        let salt: [u8; 16] = salt
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("Invalid salt length"))?;
 
         Ok(Self { key, salt })
     }
@@ -79,7 +81,7 @@ impl CryptoManager {
         }
 
         // Extract components
-        let _salt = &data[0..16];  // salt is embedded but we use self.key directly
+        let _salt = &data[0..16]; // salt is embedded but we use self.key directly
         let nonce_bytes = &data[16..28];
         let encrypted = &data[28..];
 
@@ -99,7 +101,10 @@ impl CryptoManager {
 
     /// Decrypt ciphertext using master password
     /// This method extracts the salt from the ciphertext and re-derives the key
-    pub fn decrypt_with_password(ciphertext: &str, master_password: &str) -> anyhow::Result<String> {
+    pub fn decrypt_with_password(
+        ciphertext: &str,
+        master_password: &str,
+    ) -> anyhow::Result<String> {
         // Base64 decode
         let data = STANDARD.decode(ciphertext)?;
 

@@ -1,7 +1,7 @@
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
-use tauri::{Manager, State};
 use sha2::{Digest, Sha256};
+use tauri::{Manager, State};
 
 use crate::clipboard::ClipboardSuppressFlag;
 use crate::db::DatabaseState;
@@ -73,26 +73,27 @@ pub fn get_clipboard_history(
         param_index += 1;
     }
 
-    sql.push_str(&format!(" ORDER BY created_at DESC LIMIT ?{} OFFSET ?{}", param_index, param_index + 1));
+    sql.push_str(&format!(
+        " ORDER BY created_at DESC LIMIT ?{} OFFSET ?{}",
+        param_index,
+        param_index + 1
+    ));
     params_vec.push(&limit);
     params_vec.push(&offset);
 
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
 
     let items = stmt
-        .query_map(
-            params_vec.as_slice(),
-            |row| {
-                Ok(ClipboardItem {
-                    id: row.get(0)?,
-                    content: row.get(1)?,
-                    content_type: row.get(2)?,
-                    source_app: row.get(3)?,
-                    is_favorite: row.get::<_, i32>(4)? != 0,
-                    created_at: row.get(5)?,
-                })
-            },
-        )
+        .query_map(params_vec.as_slice(), |row| {
+            Ok(ClipboardItem {
+                id: row.get(0)?,
+                content: row.get(1)?,
+                content_type: row.get(2)?,
+                source_app: row.get(3)?,
+                is_favorite: row.get::<_, i32>(4)? != 0,
+                created_at: row.get(5)?,
+            })
+        })
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
@@ -102,10 +103,7 @@ pub fn get_clipboard_history(
 
 /// Toggle favorite status
 #[tauri::command]
-pub fn toggle_clipboard_favorite(
-    db_state: State<DatabaseState>,
-    id: i64,
-) -> Result<bool, String> {
+pub fn toggle_clipboard_favorite(db_state: State<DatabaseState>, id: i64) -> Result<bool, String> {
     let conn = Connection::open(&db_state.0).map_err(|e| e.to_string())?;
 
     conn.execute(
@@ -134,42 +132,11 @@ pub fn delete_clipboard_item(db_state: State<DatabaseState>, id: i64) -> Result<
     let (content_type, content) = get_clipboard_item_for_cleanup(&conn, id)?;
 
     // Delete from database
-    conn.execute(
-        "DELETE FROM clipboard_history WHERE id = ?1",
-        params![id],
-    )
-    .map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM clipboard_history WHERE id = ?1", params![id])
+        .map_err(|e| e.to_string())?;
 
     // Cleanup image file if applicable
     cleanup_image_file(&content_type, &content);
-
-    Ok(())
-}
-
-/// Clear all clipboard history
-#[tauri::command]
-pub fn clear_clipboard_history(db_state: State<DatabaseState>) -> Result<(), String> {
-    let conn = Connection::open(&db_state.0).map_err(|e| e.to_string())?;
-
-    // Get all image paths first
-    let mut stmt = conn
-        .prepare("SELECT content FROM clipboard_history WHERE content_type = 'image'")
-        .map_err(|e| e.to_string())?;
-
-    let image_paths: Vec<String> = stmt
-        .query_map([], |row| row.get(0))
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-
-    // Delete all records
-    conn.execute("DELETE FROM clipboard_history", [])
-        .map_err(|e| e.to_string())?;
-
-    // Cleanup image files
-    for path in image_paths {
-        cleanup_image_file("image", &path);
-    }
 
     Ok(())
 }
@@ -273,10 +240,14 @@ pub fn copy_text_to_clipboard(
          (content, content_type, content_hash, source_app, is_favorite, usage_count, created_at)
          VALUES (?1, 'text', ?2, 'PartialCopy', 0, 1, CURRENT_TIMESTAMP)",
         params![text, hash],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
 
-    log::info!("Partial text copied to clipboard ({} chars): {}", text.len(),
-        if text.len() > 50 { &text[..50] } else { &text });
+    log::info!(
+        "Partial text copied to clipboard ({} chars): {}",
+        text.len(),
+        if text.len() > 50 { &text[..50] } else { &text }
+    );
 
     Ok(())
 }
@@ -284,10 +255,14 @@ pub fn copy_text_to_clipboard(
 /// Copy image data to Windows clipboard
 #[cfg(windows)]
 fn copy_image_to_windows_clipboard(image_data: &[u8]) -> Result<(), String> {
-    use windows::Win32::System::DataExchange::{OpenClipboard, CloseClipboard, SetClipboardData, EmptyClipboard};
     use windows::Win32::Foundation::HANDLE;
-    use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE, GMEM_ZEROINIT};
     use windows::Win32::Graphics::Gdi::BITMAPINFOHEADER;
+    use windows::Win32::System::DataExchange::{
+        CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
+    };
+    use windows::Win32::System::Memory::{
+        GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE, GMEM_ZEROINIT,
+    };
 
     unsafe {
         // Open clipboard
@@ -353,7 +328,7 @@ fn copy_image_to_windows_clipboard(image_data: &[u8]) -> Result<(), String> {
             for x in 0..width {
                 let pixel = img.get_pixel(x as u32, (height - 1 - y) as u32);
                 let offset = ((y * width + x) * 4) as usize;
-                *pixel_ptr.add(offset) = pixel[2];     // B
+                *pixel_ptr.add(offset) = pixel[2]; // B
                 *pixel_ptr.add(offset + 1) = pixel[1]; // G
                 *pixel_ptr.add(offset + 2) = pixel[0]; // R
                 *pixel_ptr.add(offset + 3) = pixel[3]; // A
@@ -380,7 +355,7 @@ fn copy_image_to_windows_clipboard(image_data: &[u8]) -> Result<(), String> {
     }
 }
 
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 
 /// Get clipboard image as base64 for preview
 #[tauri::command]
@@ -419,15 +394,12 @@ pub fn get_clipboard_image_base64(
     };
 
     let base64_str = BASE64.encode(&image_data);
-    Ok(format!("data:{};base64,{}" , mime_type, base64_str))
+    Ok(format!("data:{};base64,{}", mime_type, base64_str))
 }
 
 /// Handle pasted file from file system
 #[tauri::command]
-pub fn handle_pasted_file(
-    db_state: State<DatabaseState>,
-    path: String,
-) -> Result<(), String> {
+pub fn handle_pasted_file(db_state: State<DatabaseState>, path: String) -> Result<(), String> {
     log::info!("Handling pasted file: {}", path);
 
     // Verify file exists
@@ -455,10 +427,7 @@ pub fn handle_pasted_file(
     }
 }
 
-fn handle_pasted_image_file(
-    db_state: State<DatabaseState>,
-    path: &str,
-) -> Result<(), String> {
+fn handle_pasted_image_file(db_state: State<DatabaseState>, path: &str) -> Result<(), String> {
     // Read image data
     let image_data = std::fs::read(path).map_err(|e| e.to_string())?;
 
@@ -496,16 +465,14 @@ fn handle_pasted_image_file(
          VALUES (?1, 'image', ?2, 'FilePaste', 0, 0, CURRENT_TIMESTAMP)
          ON CONFLICT(content_hash) DO UPDATE SET created_at = CURRENT_TIMESTAMP",
         params![image_path.to_string_lossy().to_string(), hash],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
 
     log::info!("Pasted image file saved: {}", image_path.display());
     Ok(())
 }
 
-fn handle_pasted_generic_file(
-    db_state: State<DatabaseState>,
-    path: &str,
-) -> Result<(), String> {
+fn handle_pasted_generic_file(db_state: State<DatabaseState>, path: &str) -> Result<(), String> {
     // Calculate hash of the path
     let mut hasher = Sha256::new();
     hasher.update(path.as_bytes());
@@ -520,7 +487,8 @@ fn handle_pasted_generic_file(
          VALUES (?1, 'file', ?2, 'FilePaste', 0, 0, CURRENT_TIMESTAMP)
          ON CONFLICT(content_hash) DO UPDATE SET created_at = CURRENT_TIMESTAMP",
         params![path.to_string(), hash],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
 
     log::info!("Pasted file saved: {}", path);
     Ok(())
@@ -531,7 +499,7 @@ fn handle_pasted_generic_file(
 #[cfg(windows)]
 #[tauri::command]
 pub fn read_clipboard_image() -> Result<ClipboardReadResult, String> {
-    use windows::Win32::System::DataExchange::{OpenClipboard, CloseClipboard};
+    use windows::Win32::System::DataExchange::{CloseClipboard, OpenClipboard};
 
     unsafe {
         // Open clipboard (None means current process)
@@ -645,7 +613,9 @@ unsafe fn read_clipboard_content_inner() -> Result<ClipboardReadResult, String> 
 }
 
 #[cfg(windows)]
-unsafe fn read_hdrop_data(handle: windows::Win32::Foundation::HANDLE) -> Result<Vec<String>, String> {
+unsafe fn read_hdrop_data(
+    handle: windows::Win32::Foundation::HANDLE,
+) -> Result<Vec<String>, String> {
     use windows::Win32::UI::Shell::DragQueryFileW;
     use windows::Win32::UI::Shell::HDROP;
 
@@ -723,7 +693,8 @@ unsafe fn read_dib_data_and_save(ptr: *mut std::ffi::c_void) -> Result<String, S
     let image_size = (row_size * height) as usize;
 
     // Safety check
-    if image_size == 0 || image_size > 100_000_000 { // 100MB limit
+    if image_size == 0 || image_size > 100_000_000 {
+        // 100MB limit
         return Err(format!("Invalid image size: {}", image_size));
     }
 
@@ -767,7 +738,10 @@ unsafe fn read_dib_data_and_save(ptr: *mut std::ffi::c_void) -> Result<String, S
     {
         let cursor = std::io::Cursor::new(&mut png_data);
         image::DynamicImage::ImageRgba8(img)
-            .write_to(&mut std::io::BufWriter::new(cursor), image::ImageFormat::Png)
+            .write_to(
+                &mut std::io::BufWriter::new(cursor),
+                image::ImageFormat::Png,
+            )
             .map_err(|e| e.to_string())?;
     }
 
@@ -796,7 +770,8 @@ unsafe fn read_dib_data_and_save(ptr: *mut std::ffi::c_void) -> Result<String, S
          VALUES (?1, 'image', ?2, 'ScreenshotPaste', 0, 0, CURRENT_TIMESTAMP)
          ON CONFLICT(content_hash) DO UPDATE SET created_at = CURRENT_TIMESTAMP",
         params![image_path.to_string_lossy().to_string(), hash],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
 
     log::info!("Screenshot saved: {}", image_path.display());
     Ok(image_path.to_string_lossy().to_string())
@@ -815,18 +790,28 @@ pub fn paste_to_clipboard_item(
     copy_to_clipboard(db_state, app_handle.clone(), suppress_flag, id)?;
 
     // Check if auto-paste is enabled
-    let auto_paste_enabled = if let Some(settings_state) = app_handle.try_state::<crate::commands::settings::SettingsState>() {
-        settings_state.0.lock().map(|mgr| mgr.get_settings().clipboard_auto_paste).unwrap_or(true)
+    let auto_paste_enabled = if let Some(settings_state) =
+        app_handle.try_state::<crate::commands::settings::SettingsState>()
+    {
+        settings_state
+            .0
+            .lock()
+            .map(|mgr| mgr.get_settings().clipboard_auto_paste)
+            .unwrap_or(true)
     } else {
         true // Default to enabled if settings not available
     };
 
     // Get the previous focused window
     log::info!("Attempting to get previous focused window...");
-    let prev_hwnd = app_handle.try_state::<crate::PreviousFocusedWindow>()
+    let prev_hwnd = app_handle
+        .try_state::<crate::PreviousFocusedWindow>()
         .and_then(|state| {
             let hwnd = state.get();
-            log::info!("PreviousFocusedWindow state found, get() returned: {:?}", hwnd);
+            log::info!(
+                "PreviousFocusedWindow state found, get() returned: {:?}",
+                hwnd
+            );
             hwnd
         });
 
@@ -840,7 +825,10 @@ pub fn paste_to_clipboard_item(
     // If auto-paste is enabled and we have a valid previous window, try to paste
     if auto_paste_enabled {
         if let Some(hwnd) = prev_hwnd {
-            log::info!("Auto-paste enabled, attempting to paste to window: {}", hwnd);
+            log::info!(
+                "Auto-paste enabled, attempting to paste to window: {}",
+                hwnd
+            );
             #[cfg(windows)]
             {
                 // Small delay to ensure window is hidden and target is ready
@@ -861,14 +849,14 @@ pub fn paste_to_clipboard_item(
 /// Uses the ALT-key trick to reliably SetForegroundWindow on Windows
 #[cfg(windows)]
 unsafe fn simulate_paste_to_window(target_hwnd: isize) {
-    use windows::Win32::UI::WindowsAndMessaging::{
-        SetForegroundWindow, BringWindowToTop, IsWindow, IsWindowVisible
-    };
-    use windows::Win32::UI::Input::KeyboardAndMouse::{
-        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, KEYBD_EVENT_FLAGS,
-        VK_MENU, VK_CONTROL, VK_V
-    };
     use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
+        VK_CONTROL, VK_MENU, VK_V,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        BringWindowToTop, IsWindow, IsWindowVisible, SetForegroundWindow,
+    };
 
     // Validate the window still exists
     let hwnd = HWND(target_hwnd as *mut _);
@@ -910,7 +898,10 @@ unsafe fn simulate_paste_to_window(target_hwnd: isize) {
     };
 
     // Send ALT to unlock foreground window restrictions
-    SendInput(&[alt_input, alt_up_input], std::mem::size_of::<INPUT>() as i32);
+    SendInput(
+        &[alt_input, alt_up_input],
+        std::mem::size_of::<INPUT>() as i32,
+    );
 
     // Set the target window to foreground
     if SetForegroundWindow(hwnd).as_bool() {
@@ -980,52 +971,12 @@ unsafe fn simulate_paste_to_window(target_hwnd: isize) {
     if sent as usize == inputs.len() {
         log::info!("Successfully sent Ctrl+V to paste");
     } else {
-        log::warn!("SendInput only sent {} of {} keystrokes", sent, inputs.len());
+        log::warn!(
+            "SendInput only sent {} of {} keystrokes",
+            sent,
+            inputs.len()
+        );
     }
-}
-
-/// Copy file to clipboard (for screenshot files)
-#[tauri::command]
-pub fn copy_file_to_clipboard(
-    app_handle: tauri::AppHandle,
-    filepath: String,
-) -> Result<(), String> {
-    use tauri_plugin_clipboard_manager::ClipboardExt;
-
-    // Read image file
-    let image_data = std::fs::read(&filepath).map_err(|e| e.to_string())?;
-
-    // Get image format from file extension
-    let extension = std::path::Path::new(&filepath)
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_lowercase();
-
-    // Convert to PNG if needed (for clipboard compatibility)
-    let png_data = if extension == "png" {
-        image_data
-    } else {
-        let img = image::load_from_memory(&image_data).map_err(|e| e.to_string())?;
-        let mut output = Vec::new();
-        img.write_to(&mut std::io::Cursor::new(&mut output), image::ImageFormat::Png)
-            .map_err(|e| e.to_string())?;
-        output
-    };
-
-    // Write to clipboard
-    #[cfg(windows)]
-    {
-        copy_image_to_windows_clipboard(&png_data)?;
-    }
-
-    #[cfg(not(windows))]
-    {
-        log::warn!("Image clipboard copy not implemented for non-Windows platforms");
-    }
-
-    log::info!("File copied to clipboard: {}", filepath);
-    Ok(())
 }
 
 /// Read image file and return as base64 for display
@@ -1085,8 +1036,13 @@ mod tests {
     use std::path::PathBuf;
 
     /// Helper function to create a test database connection
+    /// 每个测试使用独立的临时目录，避免并行测试共享同一数据库文件导致主键冲突
     fn create_test_db() -> (Connection, PathBuf) {
-        let temp_dir = env::temp_dir().join(format!("clipboard_test_{}", std::process::id()));
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let unique = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let temp_dir =
+            env::temp_dir().join(format!("clipboard_test_{}_{}", std::process::id(), unique));
         fs::create_dir_all(&temp_dir).unwrap();
         let db_path = temp_dir.join("test.db");
 
@@ -1105,7 +1061,8 @@ mod tests {
                 last_used_at TEXT
             )",
             [],
-        ).unwrap();
+        )
+        .unwrap();
 
         (conn, temp_dir)
     }
@@ -1160,13 +1117,16 @@ mod tests {
             "INSERT INTO clipboard_history (content, content_type, content_hash, source_app)
              VALUES ('/path/to/image.png', 'image', 'test_hash', 'TestApp')",
             [],
-        ).unwrap();
+        )
+        .unwrap();
 
-        let id: i64 = conn.query_row(
-            "SELECT id FROM clipboard_history WHERE content_hash = 'test_hash'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        let id: i64 = conn
+            .query_row(
+                "SELECT id FROM clipboard_history WHERE content_hash = 'test_hash'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
 
         // Get item for cleanup
         let (content_type, content) = get_clipboard_item_for_cleanup(&conn, id).unwrap();
@@ -1190,19 +1150,23 @@ mod tests {
             "INSERT INTO clipboard_history (content, content_type, content_hash, source_app)
              VALUES (?1, 'image', 'test_hash', 'TestApp')",
             params![image_path.to_string_lossy().to_string()],
-        ).unwrap();
+        )
+        .unwrap();
 
-        let id: i64 = conn.query_row(
-            "SELECT id FROM clipboard_history WHERE content_hash = 'test_hash'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
+        let id: i64 = conn
+            .query_row(
+                "SELECT id FROM clipboard_history WHERE content_hash = 'test_hash'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
 
         // Get item info before deletion
         let (content_type, content) = get_clipboard_item_for_cleanup(&conn, id).unwrap();
 
         // Delete from database
-        conn.execute("DELETE FROM clipboard_history WHERE id = ?1", params![id]).unwrap();
+        conn.execute("DELETE FROM clipboard_history WHERE id = ?1", params![id])
+            .unwrap();
 
         // Cleanup image file
         cleanup_image_file(&content_type, &content);
@@ -1211,64 +1175,14 @@ mod tests {
         assert!(!image_path.exists(), "Image file should be deleted");
 
         // Verify database record is gone
-        let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM clipboard_history WHERE id = ?1",
-            params![id],
-            |row| row.get(0),
-        ).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_history WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .unwrap();
         assert_eq!(count, 0, "Database record should be deleted");
-    }
-
-    #[test]
-    fn test_clear_clipboard_history_deletes_image_files() {
-        let (conn, temp_dir) = create_test_db();
-
-        // Create test image files
-        let image_dir = temp_dir.join("clipboard-images");
-        fs::create_dir_all(&image_dir).unwrap();
-        let image_path1 = image_dir.join("image1.png");
-        let image_path2 = image_dir.join("image2.png");
-        fs::write(&image_path1, "fake image data 1").unwrap();
-        fs::write(&image_path2, "fake image data 2").unwrap();
-
-        // Insert records
-        conn.execute(
-            "INSERT INTO clipboard_history (content, content_type, content_hash, source_app)
-             VALUES (?1, 'image', 'hash1', 'TestApp')",
-            params![image_path1.to_string_lossy().to_string()],
-        ).unwrap();
-        conn.execute(
-            "INSERT INTO clipboard_history (content, content_type, content_hash, source_app)
-             VALUES (?1, 'image', 'hash2', 'TestApp')",
-            params![image_path2.to_string_lossy().to_string()],
-        ).unwrap();
-        conn.execute(
-            "INSERT INTO clipboard_history (content, content_type, content_hash, source_app)
-             VALUES ('text content', 'text', 'hash3', 'TestApp')",
-            [],
-        ).unwrap();
-
-        // Get all image paths before deletion
-        let mut stmt = conn
-            .prepare("SELECT content FROM clipboard_history WHERE content_type = 'image'")
-            .unwrap();
-        let image_paths: Vec<String> = stmt
-            .query_map([], |row| row.get(0))
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-
-        // Delete all records
-        conn.execute("DELETE FROM clipboard_history", []).unwrap();
-
-        // Cleanup image files
-        for path in image_paths {
-            cleanup_image_file("image", &path);
-        }
-
-        // Verify image files were deleted
-        assert!(!image_path1.exists(), "Image file 1 should be deleted");
-        assert!(!image_path2.exists(), "Image file 2 should be deleted");
     }
 
     #[test]
@@ -1308,10 +1222,12 @@ mod tests {
             .unwrap();
 
         // Delete old items (simulating cleanup_old_items behavior)
-        let deleted = conn.execute(
-            "DELETE FROM clipboard_history WHERE created_at < datetime('now', '-30 days')",
-            [],
-        ).unwrap();
+        let deleted = conn
+            .execute(
+                "DELETE FROM clipboard_history WHERE created_at < datetime('now', '-30 days')",
+                [],
+            )
+            .unwrap();
 
         assert_eq!(deleted, 1, "Should delete 1 old item");
 
@@ -1323,7 +1239,10 @@ mod tests {
         // Verify old image file was deleted
         assert!(!old_image_path.exists(), "Old image file should be deleted");
         // Verify recent image file still exists
-        assert!(recent_image_path.exists(), "Recent image file should not be deleted");
+        assert!(
+            recent_image_path.exists(),
+            "Recent image file should not be deleted"
+        );
     }
 
     #[test]
@@ -1370,10 +1289,9 @@ mod tests {
             .unwrap();
 
         // Delete the oldest record
-        let deleted = conn.execute(
-            "DELETE FROM clipboard_history WHERE id = 1",
-            [],
-        ).unwrap();
+        let deleted = conn
+            .execute("DELETE FROM clipboard_history WHERE id = 1", [])
+            .unwrap();
 
         assert_eq!(deleted, 1, "Should delete 1 oldest item");
 
@@ -1383,7 +1301,10 @@ mod tests {
         }
 
         // Verify oldest image file was deleted
-        assert!(!image_path1.exists(), "Oldest image (id=1) should be deleted");
+        assert!(
+            !image_path1.exists(),
+            "Oldest image (id=1) should be deleted"
+        );
         // Verify other image files still exist
         assert!(image_path2.exists(), "Image id=2 should exist");
         assert!(image_path3.exists(), "Image id=3 should exist");

@@ -84,7 +84,10 @@ fn read_flags(flags: &Arc<RwLock<CompanionFlags>>) -> CompanionFlags {
 /// bin 路径复用设置中的 Claude Code 配置；
 /// 工作区使用独立空目录（不继承其他工作区——那里的 CLAUDE.md、
 /// .claude hooks 会注入 agent 上下文，且可能含敏感信息）。
-pub fn run_agent_with_settings(app_handle: &AppHandle, db_path: &PathBuf) -> Result<String, String> {
+pub fn run_agent_with_settings(
+    app_handle: &AppHandle,
+    db_path: &std::path::Path,
+) -> Result<String, String> {
     use tauri::Manager;
 
     let settings_state = app_handle
@@ -96,16 +99,15 @@ pub fn run_agent_with_settings(app_handle: &AppHandle, db_path: &PathBuf) -> Res
         .map_err(|e| e.to_string())?
         .get_settings();
 
-    let notes_dir = crate::notes::get_default_notes_dir()
-        .map_err(|e| format!("获取笔记目录失败: {}", e))?;
+    let notes_dir =
+        crate::notes::get_default_notes_dir().map_err(|e| format!("获取笔记目录失败: {}", e))?;
 
     let work_dir = app_handle
         .path()
         .app_data_dir()
         .map_err(|e| e.to_string())?
         .join("companion-agent");
-    std::fs::create_dir_all(&work_dir)
-        .map_err(|e| format!("创建 agent 工作区失败: {}", e))?;
+    std::fs::create_dir_all(&work_dir).map_err(|e| format!("创建 agent 工作区失败: {}", e))?;
 
     agent::run_daily_report_agent(
         app_handle,
@@ -126,6 +128,37 @@ const LONG_WORK_COOLDOWN_SECS: i64 = 3600;
 const ERROR_COOLDOWN_SECS: i64 = 1800;
 /// 剪贴板检查节流间隔
 const CLIPBOARD_CHECK_INTERVAL_SECS: i64 = 9;
+/// 意图触发检查节流间隔
+const INTENT_CHECK_INTERVAL_SECS: i64 = 9;
+/// 意图过期阈值：7 天未动自动降级（不再主动弹，但不删）
+const INTENT_EXPIRE_SECS: i64 = 7 * 86400;
+/// IM 进程特征（③联系人触发只在这些进程下生效）
+const IM_PROCESS_HINTS: &[&str] = &[
+    "weixin", "wechat", "dingtalk", "lark", "feishu", "qq.exe", "tim.exe",
+];
+
+fn fmt_date(ts: i64) -> String {
+    chrono::DateTime::from_timestamp(ts, 0)
+        .map(|utc| {
+            utc.with_timezone(&chrono::Local)
+                .format("%Y-%m-%d")
+                .to_string()
+        })
+        .unwrap_or_default()
+}
+
+/// 意图是否处于活跃期（未过期、已到 due 日期）
+fn intent_is_active(intent: &db::Suggestion, today: &str, now: i64) -> bool {
+    if intent.created_at + INTENT_EXPIRE_SECS < now {
+        return false;
+    }
+    if let Some(due) = &intent.due_date {
+        if due.as_str() > today {
+            return false;
+        }
+    }
+    true
+}
 
 fn run_collector(
     app_handle: AppHandle,
@@ -149,6 +182,10 @@ fn run_collector(
         .map(|(id, _)| id)
         .unwrap_or(0);
     let mut last_clipboard_check: i64 = 0;
+    let mut last_intent_check: i64 = 0;
+    // 晨间汇总：每天首次活动时只发一次
+    let mut last_digest_date =
+        analyzer::load_setting(&db_path, "companion_last_digest_date").unwrap_or_default();
 
     for event in &rx {
         let f = read_flags(&flags);
@@ -194,11 +231,7 @@ fn run_collector(
                 event.timestamp,
             ) {
                 Ok(id) => {
-                    current = Some((
-                        id,
-                        event.process_name.clone(),
-                        event.window_title.clone(),
-                    ));
+                    current = Some((id, event.process_name.clone(), event.window_title.clone()));
                 }
                 Err(e) => log::warn!("Companion 写入活动失败: {}", e),
             }
@@ -226,12 +259,19 @@ fn run_collector(
 
         if event.timestamp - last_clipboard_check >= CLIPBOARD_CHECK_INTERVAL_SECS {
             last_clipboard_check = event.timestamp;
-            check_clipboard_error(
+            check_clipboard_error(&conn, &app_handle, event.timestamp, &mut last_clipboard_id);
+        }
+
+        if event.timestamp - last_intent_check >= INTENT_CHECK_INTERVAL_SECS {
+            last_intent_check = event.timestamp;
+            check_morning_digest(
                 &conn,
                 &app_handle,
+                &db_path,
                 event.timestamp,
-                &mut last_clipboard_id,
+                &mut last_digest_date,
             );
+            check_intent_triggers(&conn, &app_handle, &event);
         }
     }
 
@@ -252,15 +292,18 @@ fn check_long_work(
         return;
     }
     let continuous = now - process_since;
-    if continuous < flags.long_work_minutes * 60 {
+    if continuous < flags.long_work_minutes.saturating_mul(60) {
         return;
     }
     if now - *last_suggest < LONG_WORK_COOLDOWN_SECS {
         return;
     }
-    let already_pending =
-        db::has_pending_suggestion_since(conn, suggester::TYPE_LONG_WORK_BREAK, now - LONG_WORK_COOLDOWN_SECS)
-            .unwrap_or(true);
+    let already_pending = db::has_pending_suggestion_since(
+        conn,
+        suggester::TYPE_LONG_WORK_BREAK,
+        now - LONG_WORK_COOLDOWN_SECS,
+    )
+    .unwrap_or(true);
     if already_pending {
         return;
     }
@@ -303,9 +346,12 @@ fn check_clipboard_error(
     if !suggester::looks_like_error(&content) {
         return;
     }
-    let already_pending =
-        db::has_pending_suggestion_since(conn, suggester::TYPE_ERROR_ANALYSIS, now - ERROR_COOLDOWN_SECS)
-            .unwrap_or(true);
+    let already_pending = db::has_pending_suggestion_since(
+        conn,
+        suggester::TYPE_ERROR_ANALYSIS,
+        now - ERROR_COOLDOWN_SECS,
+    )
+    .unwrap_or(true);
     if already_pending {
         return;
     }
@@ -325,4 +371,138 @@ fn check_clipboard_error(
         Some(&format!("剪贴板中疑似错误堆栈：\n{}…", preview)),
         payload_json.as_deref(),
     );
+}
+
+/// 晨间汇总：每天首次活动时，把活跃意图汇总成一张卡片（每日仅一次）
+fn check_morning_digest(
+    conn: &Connection,
+    app_handle: &AppHandle,
+    db_path: &PathBuf,
+    now: i64,
+    last_digest_date: &mut String,
+) {
+    let today = fmt_date(now);
+    if *last_digest_date == today {
+        return;
+    }
+    *last_digest_date = today.clone();
+    analyzer::save_setting(db_path, "companion_last_digest_date", &today);
+
+    let intents = db::pending_intents(conn).unwrap_or_default();
+    let active: Vec<&db::Suggestion> = intents
+        .iter()
+        .filter(|i| intent_is_active(i, &today, now))
+        .collect();
+    if active.is_empty() {
+        return;
+    }
+
+    let titles: Vec<String> = active.iter().take(3).map(|i| i.title.clone()).collect();
+    let suffix = if active.len() > 3 {
+        format!("\n…以及另外 {} 条", active.len() - 3)
+    } else {
+        String::new()
+    };
+    let body = format!(
+        "今天有 {} 条备忘待办：\n{}{}",
+        active.len(),
+        titles.join("\n"),
+        suffix
+    );
+
+    let _ = suggester::push_suggestion(
+        conn,
+        app_handle,
+        "daily_digest",
+        "今日备忘",
+        Some(&body),
+        None,
+    );
+}
+
+/// 情境触发匹配：窗口标题命中关键词（②）或 IM 窗口命中联系人（③）
+/// 一次事件最多弹一条，同日同条不重复
+fn check_intent_triggers(conn: &Connection, app_handle: &AppHandle, event: &ForegroundEvent) {
+    let intents = db::pending_intents(conn).unwrap_or_default();
+    if intents.is_empty() {
+        return;
+    }
+
+    let today = fmt_date(event.timestamp);
+    let title_lower = event.window_title.to_lowercase();
+    let proc_lower = event.process_name.to_lowercase();
+    let is_im = IM_PROCESS_HINTS.iter().any(|h| proc_lower.contains(h));
+
+    for intent in &intents {
+        if !intent_is_active(intent, &today, event.timestamp) {
+            continue;
+        }
+        // 同日已触发过不重复
+        if intent
+            .last_triggered_at
+            .map(|t| fmt_date(t) == today)
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        let Some(trigger_data) = &intent.trigger_data else {
+            continue;
+        };
+        let Ok(triggers) = serde_json::from_str::<db::IntentTriggers>(trigger_data) else {
+            continue;
+        };
+
+        let keyword_hit = triggers.keywords.iter().any(|k| {
+            let kl = k.to_lowercase();
+            !kl.is_empty() && title_lower.contains(&kl)
+        });
+
+        // ③ 联系人/渠道触发。
+        // 现代 IM（微信4.0、钉钉）主窗口标题不含聊天对象，
+        // 所以：明确渠道 → 打开该 IM 即触发；未明渠道 → 退回标题含人名
+        // （兼容图片/文档预览等标题带人名的场景）
+        let contact_hit = is_im
+            && (im_channel_matches(triggers.channel.as_deref(), &proc_lower)
+                || person_in_title(triggers.person.as_deref(), &title_lower));
+
+        if keyword_hit || contact_hit {
+            log::info!(
+                "意图 #{} 情境触发（{}）",
+                intent.id,
+                if keyword_hit {
+                    "关键词"
+                } else {
+                    "联系人/渠道"
+                }
+            );
+            suggester::show_existing_suggestion(app_handle, intent);
+            let _ = db::touch_triggered(conn, intent.id, event.timestamp);
+            break;
+        }
+    }
+}
+
+/// 意图声明的渠道与当前 IM 进程是否匹配
+fn im_channel_matches(channel: Option<&str>, proc_lower: &str) -> bool {
+    let Some(ch) = channel else { return false };
+    let chl = ch.to_lowercase();
+    let wechat = chl.contains("微信") || chl.contains("weixin") || chl.contains("wechat");
+    let dingtalk = chl.contains("钉钉") || chl.contains("dingtalk");
+    let feishu = chl.contains("飞书") || chl.contains("lark") || chl.contains("feishu");
+    let qq = chl == "qq" || chl.contains("qq");
+
+    (wechat && (proc_lower.contains("weixin") || proc_lower.contains("wechat")))
+        || (dingtalk && proc_lower.contains("dingtalk"))
+        || (feishu && (proc_lower.contains("lark") || proc_lower.contains("feishu")))
+        || (qq && proc_lower.contains("qq"))
+}
+
+/// 窗口标题是否包含联系人名
+fn person_in_title(person: Option<&str>, title_lower: &str) -> bool {
+    person
+        .map(|p| {
+            let pl = p.to_lowercase();
+            !pl.is_empty() && title_lower.contains(&pl)
+        })
+        .unwrap_or(false)
 }

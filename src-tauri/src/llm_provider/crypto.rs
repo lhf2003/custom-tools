@@ -2,8 +2,8 @@ use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
 };
-use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
+use base64::Engine as _;
 use pbkdf2::pbkdf2_hmac;
 use rand::RngCore;
 use sha2::Sha256;
@@ -39,8 +39,8 @@ pub fn encrypt(plaintext: &str, app_data_dir: &Path) -> Result<String, String> {
     }
 
     let key = derive_key(app_data_dir)?;
-    let cipher = Aes256Gcm::new_from_slice(&key)
-        .map_err(|e| format!("Failed to create cipher: {}", e))?;
+    let cipher =
+        Aes256Gcm::new_from_slice(&key).map_err(|e| format!("Failed to create cipher: {}", e))?;
 
     // 生成随机 nonce
     let mut nonce_bytes = [0u8; NONCE_SIZE];
@@ -67,11 +67,12 @@ pub fn decrypt(ciphertext_b64: &str, app_data_dir: &Path) -> Result<String, Stri
     }
 
     let key = derive_key(app_data_dir)?;
-    let cipher = Aes256Gcm::new_from_slice(&key)
-        .map_err(|e| format!("Failed to create cipher: {}", e))?;
+    let cipher =
+        Aes256Gcm::new_from_slice(&key).map_err(|e| format!("Failed to create cipher: {}", e))?;
 
     // 解码 base64
-    let ciphertext = STANDARD.decode(ciphertext_b64)
+    let ciphertext = STANDARD
+        .decode(ciphertext_b64)
         .map_err(|e| format!("Base64 decode failed: {}", e))?;
 
     if ciphertext.len() < NONCE_SIZE {
@@ -87,8 +88,7 @@ pub fn decrypt(ciphertext_b64: &str, app_data_dir: &Path) -> Result<String, Stri
         .decrypt(nonce, encrypted_data)
         .map_err(|e| format!("Decryption failed: {}", e))?;
 
-    String::from_utf8(plaintext)
-        .map_err(|e| format!("Invalid UTF-8: {}", e))
+    String::from_utf8(plaintext).map_err(|e| format!("Invalid UTF-8: {}", e))
 }
 
 #[cfg(test)]

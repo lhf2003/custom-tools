@@ -20,7 +20,11 @@ pub async fn check_for_update(app: AppHandle) -> Result<Option<UpdateInfo>, Stri
 
     match updater.check().await {
         Ok(Some(update)) => {
-            log::info!("Update available: {} (current: {})", update.version, app_version);
+            log::info!(
+                "Update available: {} (current: {})",
+                update.version,
+                app_version
+            );
 
             // Build the info struct first, borrowing the fields
             let info = UpdateInfo {
@@ -60,7 +64,9 @@ pub async fn download_and_install_update(
             .try_state::<PendingUpdate>()
             .ok_or("No pending update state found")?;
         let mut guard = state.0.lock().map_err(|e| e.to_string())?;
-        guard.take().ok_or("No cached update, please check for updates first")?
+        guard
+            .take()
+            .ok_or("No cached update, please check for updates first")?
     };
 
     update

@@ -71,9 +71,10 @@ async fn fetch_ollama_models(
         return Err(format!("API 错误 ({}): {}", status, body));
     }
 
-    let resp: OllamaTagsResponse = response.json().await.map_err(|e| {
-        format!("解析响应失败: {}。请确认这是 Ollama 服务地址。", e)
-    })?;
+    let resp: OllamaTagsResponse = response
+        .json()
+        .await
+        .map_err(|e| format!("解析响应失败: {}。请确认这是 Ollama 服务地址。", e))?;
 
     let models: Vec<ModelInfo> = resp
         .models
@@ -142,12 +143,10 @@ async fn fetch_openai_compatible_models(
         return Err(format!("API 错误 ({}): {}", status, body));
     }
 
-    let resp: OpenAiModelsResponse = response.json().await.map_err(|e| {
-        format!(
-            "解析响应失败: {}。请确认这是 OpenAI 兼容 API 地址。",
-            e
-        )
-    })?;
+    let resp: OpenAiModelsResponse = response
+        .json()
+        .await
+        .map_err(|e| format!("解析响应失败: {}。请确认这是 OpenAI 兼容 API 地址。", e))?;
 
     let models: Vec<ModelInfo> = resp
         .data
@@ -163,6 +162,9 @@ async fn fetch_openai_compatible_models(
 }
 
 /// 测试与提供商的连接
-pub async fn test_connection(provider: &Provider, app_data_dir: &Path) -> Result<Vec<ModelInfo>, String> {
+pub async fn test_connection(
+    provider: &Provider,
+    app_data_dir: &Path,
+) -> Result<Vec<ModelInfo>, String> {
     fetch_models(provider, app_data_dir).await
 }

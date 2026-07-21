@@ -39,7 +39,7 @@ pub fn record_search(conn: &Connection, path: &str, name: &str) -> Result<()> {
 pub fn get_usage(conn: &Connection, path: &str) -> Result<Option<AppUsage>> {
     let mut stmt = conn.prepare(
         "SELECT path, name, launch_count, last_launch, search_count
-         FROM app_usage WHERE path = ?1"
+         FROM app_usage WHERE path = ?1",
     )?;
 
     let result = stmt.query_row([path], |row| {
@@ -66,7 +66,7 @@ pub fn get_recently_used(conn: &Connection, limit: usize) -> Result<Vec<AppUsage
          FROM app_usage
          WHERE last_launch IS NOT NULL
          ORDER BY last_launch DESC
-         LIMIT ?1"
+         LIMIT ?1",
     )?;
 
     let usages = stmt.query_map([limit], |row| {
@@ -88,7 +88,7 @@ pub fn get_most_used(conn: &Connection, limit: usize) -> Result<Vec<AppUsage>> {
         "SELECT path, name, launch_count, last_launch, search_count
          FROM app_usage
          ORDER BY launch_count DESC, last_launch DESC
-         LIMIT ?1"
+         LIMIT ?1",
     )?;
 
     let usages = stmt.query_map([limit], |row| {
@@ -108,7 +108,7 @@ pub fn get_most_used(conn: &Connection, limit: usize) -> Result<Vec<AppUsage>> {
 pub fn get_all_usage(conn: &Connection) -> Result<Vec<AppUsage>> {
     let mut stmt = conn.prepare(
         "SELECT path, name, launch_count, last_launch, search_count
-         FROM app_usage"
+         FROM app_usage",
     )?;
 
     let usages = stmt.query_map([], |row| {
@@ -138,11 +138,15 @@ pub struct AppUsage {
 pub fn calculate_frequency_score(usage: &AppUsage, now: i64) -> f64 {
     let launch_score = (usage.launch_count as f64).ln_1p() * 0.3;
 
-    let recency_score = usage.last_launch.map(|last| {
-        let days_since = (now - last) as f64 / 86400.0;
-        // Exponential decay: 1.0 for today, 0.5 after 7 days, 0.1 after 30 days
-        (-days_since / 14.0).exp()
-    }).unwrap_or(0.0) * 0.7;
+    let recency_score = usage
+        .last_launch
+        .map(|last| {
+            let days_since = (now - last) as f64 / 86400.0;
+            // Exponential decay: 1.0 for today, 0.5 after 7 days, 0.1 after 30 days
+            (-days_since / 14.0).exp()
+        })
+        .unwrap_or(0.0)
+        * 0.7;
 
     launch_score + recency_score
 }

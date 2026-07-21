@@ -2,6 +2,7 @@ import { Search, User, RefreshCw } from 'lucide-react';
 import { useEffect, useState, useCallback } from 'react';
 import { parse as parseJsonc, type ParseError } from 'jsonc-parser';
 import { useAppStore } from '@/stores/appStore';
+import { useToastStore } from '@/stores/toastStore';
 import { useSearch } from '@/hooks/useSearch';
 import type { ViewMode } from '@/types';
 import { safeInvoke, debouncedResize } from '../../utils/tauri';
@@ -37,6 +38,7 @@ const ITEMS_PER_ROW = 9;
 
 export function LauncherView() {
   const { searchQuery, setSearchQuery, setActiveView, setJsonFormatterData } = useAppStore();
+  const { addToast } = useToastStore();
   const { apps, isLoading, searchApps, launchApp, getRecentApps, recordAppUsage } = useSearch();
   const [recentItems, setRecentItems] = useState<AppItemData[]>([]);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -269,12 +271,38 @@ export function LauncherView() {
         break;
       case 'Enter':
         e.preventDefault();
+        // 「记」前缀：暂存意图备忘，不走搜索
+        {
+          const q = searchQuery.trim();
+          if (q === '记' || q.startsWith('记 ')) {
+            const content = q === '记' ? '' : q.slice(1).trim();
+            if (content) {
+              safeInvoke('create_companion_intent', { text: content })
+                .then(() => {
+                  addToast({
+                    type: 'success',
+                    title: '已记下 📌',
+                    message: content.length > 50 ? `${content.slice(0, 50)}…` : content,
+                  });
+                  setSearchQuery('');
+                })
+                .catch((err: unknown) => {
+                  addToast({
+                    type: 'error',
+                    title: '保存备忘失败',
+                    message: String(err),
+                  });
+                });
+            }
+            return;
+          }
+        }
         if (items[selectedIndex]) {
           handleItemClick(items[selectedIndex]);
         }
         break;
     }
-  }, [searchQuery, displayedItems, selectedIndex, setActiveView]);
+  }, [searchQuery, displayedItems, selectedIndex, setActiveView, addToast, setSearchQuery]);
 
   // Get all results for keyboard navigation during search
   const getAllResults = () => {
@@ -290,9 +318,6 @@ export function LauncherView() {
     }));
     return [...toolItems, ...apps];
   };
-
-  // Get all results for keyboard navigation during search
-  const allResults = searchQuery ? getAllResults() : displayedItems;
 
   return (
     <div

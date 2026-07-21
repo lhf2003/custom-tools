@@ -210,7 +210,10 @@ impl ShortcutManager {
         ];
         let mut configs: Vec<_> = self.configs.values().cloned().collect();
         configs.sort_by_key(|c| {
-            ORDER.iter().position(|&id| id == c.id).unwrap_or(usize::MAX)
+            ORDER
+                .iter()
+                .position(|&id| id == c.id)
+                .unwrap_or(usize::MAX)
         });
         configs
     }
@@ -221,7 +224,12 @@ impl ShortcutManager {
     }
 
     /// 更新快捷键
-    pub fn update_shortcut(&mut self, id: &str, custom_keys: Option<String>, enabled: bool) -> Result<()> {
+    pub fn update_shortcut(
+        &mut self,
+        id: &str,
+        custom_keys: Option<String>,
+        enabled: bool,
+    ) -> Result<()> {
         let conn = Connection::open(&self.db_path)?;
 
         // 验证ID是否存在
@@ -233,7 +241,11 @@ impl ShortcutManager {
         conn.execute(
             "INSERT OR REPLACE INTO shortcuts (id, custom_keys, enabled, updated_at)
              VALUES (?1, ?2, ?3, datetime('now'))",
-            rusqlite::params![id, custom_keys.as_deref().filter(|s| !s.is_empty()), enabled as i64],
+            rusqlite::params![
+                id,
+                custom_keys.as_deref().filter(|s| !s.is_empty()),
+                enabled as i64
+            ],
         )?;
 
         // 更新内存缓存
@@ -281,11 +293,9 @@ impl ShortcutManager {
 
     /// 检查快捷键是否已存在（用于冲突检测）
     pub fn check_conflict(&self, keys: &str, exclude_id: Option<&str>) -> Option<&ShortcutConfig> {
-        self.configs.values().find(|c| {
-            c.enabled
-                && c.effective_keys() == keys
-                && Some(c.id.as_str()) != exclude_id
-        })
+        self.configs
+            .values()
+            .find(|c| c.enabled && c.effective_keys() == keys && Some(c.id.as_str()) != exclude_id)
     }
 
     /// 注册所有启用的快捷键到系统
@@ -350,7 +360,11 @@ fn parse_shortcut(keys: &str) -> Result<Shortcut, String> {
 
     match key_code {
         Some(code) => Ok(Shortcut::new(
-            if modifiers.is_empty() { None } else { Some(modifiers) },
+            if modifiers.is_empty() {
+                None
+            } else {
+                Some(modifiers)
+            },
             code,
         )),
         None => Err(format!("No key code found in: {}", keys)),
@@ -498,7 +512,8 @@ fn handle_shortcut_action(app_handle: &AppHandle, action_id: &str) {
             // 复用 lib.rs 的 toggle_main_window（含 HWND 捕获、防闪烁、窗口定位）
             crate::toggle_main_window(app_handle);
         }
-        "open_clipboard" | "open_notes" | "open_passwords" | "open_settings" | "open_everything" => {
+        "open_clipboard" | "open_notes" | "open_passwords" | "open_settings"
+        | "open_everything" => {
             // 捕获前台窗口以支持自动粘贴
             #[cfg(windows)]
             crate::capture_prev_window_hwnd(app_handle);
@@ -522,4 +537,3 @@ fn handle_shortcut_action(app_handle: &AppHandle, action_id: &str) {
         }
     }
 }
-

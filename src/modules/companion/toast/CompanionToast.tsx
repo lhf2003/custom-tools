@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { AlertTriangle, Coffee, Rocket, X, Sparkles } from 'lucide-react';
+import { AlertTriangle, Coffee, Rocket, X, Sparkles, Pin, Sunrise, Music } from 'lucide-react';
 
 interface Suggestion {
   id: number;
@@ -44,6 +44,30 @@ const TYPE_META: Record<string, TypeMeta> = {
     iconBg: 'bg-blue-500/15',
     acceptLabel: '一键启动',
   },
+  intent: {
+    icon: Pin,
+    iconColor: 'text-violet-400',
+    iconBg: 'bg-violet-500/15',
+    acceptLabel: '完成',
+  },
+  daily_digest: {
+    icon: Sunrise,
+    iconColor: 'text-amber-400',
+    iconBg: 'bg-amber-500/15',
+    acceptLabel: '知道了',
+  },
+  agent_insight: {
+    icon: Sparkles,
+    iconColor: 'text-violet-400',
+    iconBg: 'bg-violet-500/15',
+    acceptLabel: '知道了',
+  },
+  context_routine: {
+    icon: Music,
+    iconColor: 'text-pink-400',
+    iconBg: 'bg-pink-500/15',
+    acceptLabel: '打开',
+  },
 };
 
 const DEFAULT_META: TypeMeta = {
@@ -58,8 +82,10 @@ export default function CompanionToast() {
   const [countdown, setCountdown] = useState(AUTO_HIDE_SECONDS);
   const [acting, setActing] = useState(false);
   const timerRef = useRef<number | null>(null);
+  const suggestionIdRef = useRef<number | null>(null);
 
   const hideWindow = useCallback(() => {
+    suggestionIdRef.current = null;
     getCurrentWindow()
       .hide()
       .catch((err: unknown) => console.error('Failed to hide toast window:', err));
@@ -71,18 +97,24 @@ export default function CompanionToast() {
   useEffect(() => {
     if (!suggestion) return;
 
+    suggestionIdRef.current = suggestion.id;
     setCountdown(AUTO_HIDE_SECONDS);
+    const startedAt = Date.now();
+    const id = suggestion.id;
+
     timerRef.current = window.setInterval(() => {
-      setCountdown((prev) => {
-        if (prev <= 1) {
-          if (timerRef.current !== null) {
-            window.clearInterval(timerRef.current);
-          }
-          hideWindow();
-          return 0;
+      // 期间来了新建议则本次倒计时作废
+      if (suggestionIdRef.current !== id) return;
+      const remaining = AUTO_HIDE_SECONDS - Math.floor((Date.now() - startedAt) / 1000);
+      if (remaining <= 0) {
+        if (timerRef.current !== null) {
+          window.clearInterval(timerRef.current);
         }
-        return prev - 1;
-      });
+        setCountdown(0);
+        hideWindow();
+      } else {
+        setCountdown(remaining);
+      }
     }, 1000);
 
     return () => {

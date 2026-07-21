@@ -51,6 +51,9 @@ pub fn run_scheduler(app_handle: AppHandle, db_path: PathBuf, flags: Arc<RwLock<
             if let Err(e) = match_work_suite(&app_handle, &db_path, now.timestamp()) {
                 log::warn!("Companion 工作套装匹配失败: {}", e);
             }
+            if let Err(e) = match_context_routines(&app_handle, &db_path, now.timestamp()) {
+                log::warn!("Companion 情境联动匹配失败: {}", e);
+            }
         }
 
         if now.hour() >= DAILY_ANALYSIS_HOUR && last_analysis_date.as_deref() != Some(&today) {
@@ -105,6 +108,29 @@ pub struct ComboPatternData {
     pub description: String,
 }
 
+/// LLM 产出的开机启动序列（B3）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StartupSequenceData {
+    pub apps: Vec<String>,
+    #[serde(default)]
+    pub description: String,
+}
+
+/// LLM 产出的情境习惯：时间 × 状态 → 行为（B3）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextRoutineData {
+    pub app: String,
+    pub time: String,
+    #[serde(default = "default_tolerance")]
+    pub tolerance_minutes: u32,
+    #[serde(default)]
+    pub description: String,
+}
+
+fn default_tolerance() -> u32 {
+    45
+}
+
 /// 当前时间命中某个已确认的应用组合时间窗，且组合内应用今天还没开过 → 建议一键启动
 fn match_work_suite(app_handle: &AppHandle, db_path: &PathBuf, now_ts: i64) -> Result<(), String> {
     let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
@@ -122,15 +148,29 @@ fn match_work_suite(app_handle: &AppHandle, db_path: &PathBuf, now_ts: i64) -> R
     let now_hm = minutes_of_day(now_ts);
 
     for pattern in combos {
-        let data: ComboPatternData = match serde_json::from_str(&pattern.pattern_data) {
-            Ok(d) => d,
-            Err(_) => continue,
+        // app_combo 带时间窗；startup_sequence 用默认晨间启动窗（5:00-12:00）
+        let (apps, window) = match pattern.pattern_type.as_str() {
+            "app_combo" => {
+                let data: ComboPatternData = match serde_json::from_str(&pattern.pattern_data) {
+                    Ok(d) => d,
+                    Err(_) => continue,
+                };
+                (data.apps, parse_time_window(&data.time_window))
+            }
+            "startup_sequence" => {
+                let data: StartupSequenceData = match serde_json::from_str(&pattern.pattern_data) {
+                    Ok(d) => d,
+                    Err(_) => continue,
+                };
+                (data.apps, Some((5 * 60, 12 * 60)))
+            }
+            _ => continue,
         };
-        if data.apps.len() < 2 {
+        if apps.len() < 2 {
             continue;
         }
 
-        let Some((win_start, win_end)) = parse_time_window(&data.time_window) else {
+        let Some((win_start, win_end)) = window else {
             continue;
         };
         // 窗口内或窗口结束后 30 分钟内都算命中
@@ -140,28 +180,26 @@ fn match_work_suite(app_handle: &AppHandle, db_path: &PathBuf, now_ts: i64) -> R
 
         // 组合内任一应用今天已使用过 → 用户已经自己开始干活了，不打扰
         let totals = db::process_totals_between(&conn, day_start, now_ts).unwrap_or_default();
-        let already_active = data
-            .apps
+        let already_active = apps
             .iter()
             .any(|exe| totals.iter().any(|(p, _)| p.eq_ignore_ascii_case(exe)));
         if already_active {
             continue;
         }
-
         // exe 名 → 可启动路径（从启动器的使用记录里解析）
-        let apps = resolve_app_paths(&conn, &data.apps);
-        if apps.is_empty() {
+        let launchable = resolve_app_paths(&conn, &apps);
+        if launchable.is_empty() {
             continue;
         }
 
         let payload = db::LaunchAppsPayload {
             action: "launch_apps".to_string(),
-            apps,
+            apps: launchable,
         };
         let payload_json = serde_json::to_string(&payload).ok();
         let names: Vec<&str> = payload.apps.iter().map(|a| a.name.as_str()).collect();
 
-        suggester::push_suggestion(
+        let sid = suggester::push_suggestion(
             &conn,
             app_handle,
             suggester::TYPE_WORK_SUITE,
@@ -173,7 +211,78 @@ fn match_work_suite(app_handle: &AppHandle, db_path: &PathBuf, now_ts: i64) -> R
             )),
             payload_json.as_deref(),
         )?;
+        let _ = db::link_suggestion_pattern(&conn, sid, pattern.id);
         break; // 一天最多一条
+    }
+
+    Ok(())
+}
+
+/// 情境习惯联动：当前时间命中 context_routine 且目标应用未开 → 「要来点 X 吗」（B3）
+fn match_context_routines(
+    app_handle: &AppHandle,
+    db_path: &PathBuf,
+    now_ts: i64,
+) -> Result<(), String> {
+    let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
+    let routines = db::active_context_routines(&conn).map_err(|e| e.to_string())?;
+    if routines.is_empty() {
+        return Ok(());
+    }
+
+    let day_start = day_start_ts(now_ts);
+    let now_hm = minutes_of_day(now_ts);
+
+    for pattern in routines {
+        let data: ContextRoutineData = match serde_json::from_str(&pattern.pattern_data) {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+        let Some(target) = parse_hm(&data.time) else {
+            continue;
+        };
+        // 命中区间：[目标时间, 目标时间 + 容忍度]
+        if now_hm < target || now_hm > target + data.tolerance_minutes {
+            continue;
+        }
+        // 今日已发过该 pattern 的建议 → 不重复
+        if db::has_pattern_suggestion_since(&conn, pattern.id, day_start).unwrap_or(true) {
+            continue;
+        }
+        // 目标应用近期已有活动 → 用户自己开了，不打扰
+        let recent_start = now_ts - data.tolerance_minutes as i64 * 60;
+        let totals = db::process_totals_between(&conn, recent_start, now_ts).unwrap_or_default();
+        if totals.iter().any(|(p, _)| p.eq_ignore_ascii_case(&data.app)) {
+            continue;
+        }
+        // 解析启动路径
+        let apps = resolve_app_paths(&conn, std::slice::from_ref(&data.app));
+        let Some(app_item) = apps.into_iter().next() else {
+            continue;
+        };
+
+        let payload = db::LaunchAppsPayload {
+            action: "launch_apps".to_string(),
+            apps: vec![app_item],
+        };
+        let payload_json = serde_json::to_string(&payload).ok();
+        let friendly = data.app.trim_end_matches(".exe");
+        let body = if data.description.is_empty() {
+            format!("这个时间你通常会打开 {}。", friendly)
+        } else {
+            data.description.clone()
+        };
+
+        let sid = suggester::push_suggestion(
+            &conn,
+            app_handle,
+            "context_routine",
+            &format!("要来点{}吗？", friendly),
+            Some(&body),
+            payload_json.as_deref(),
+        )?;
+        let _ = db::link_suggestion_pattern(&conn, sid, pattern.id);
+        break; // 一次最多一条
     }
 
     Ok(())
@@ -212,8 +321,7 @@ fn parse_hm(hm: &str) -> Option<u32> {
 }
 
 fn minutes_of_day(ts: i64) -> u32 {
-    let dt = chrono::DateTime::from_timestamp(ts, 0)
-        .map(|utc| utc.with_timezone(&chrono::Local));
+    let dt = chrono::DateTime::from_timestamp(ts, 0).map(|utc| utc.with_timezone(&chrono::Local));
     dt.map(|d| d.hour() * 60 + d.minute()).unwrap_or(0)
 }
 
@@ -232,7 +340,7 @@ fn day_start_ts(ts: i64) -> i64 {
 }
 
 /// 读写 settings 键值表（custom-tools.db 内的通用 KV，与模块自己的状态共存）
-fn load_setting(db_path: &PathBuf, key: &str) -> Option<String> {
+pub(crate) fn load_setting(db_path: &PathBuf, key: &str) -> Option<String> {
     let conn = Connection::open(db_path).ok()?;
     conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
         r.get(0)
@@ -240,7 +348,7 @@ fn load_setting(db_path: &PathBuf, key: &str) -> Option<String> {
     .ok()
 }
 
-fn save_setting(db_path: &PathBuf, key: &str, value: &str) {
+pub(crate) fn save_setting(db_path: &PathBuf, key: &str, value: &str) {
     if let Ok(conn) = Connection::open(db_path) {
         let _ = conn.execute(
             "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
@@ -260,7 +368,10 @@ pub fn run_daily_analysis_blocking(
 }
 
 /// 分析昨日活动流水，挖掘习惯模式写入 habit_patterns。返回人话摘要。
-pub async fn run_daily_analysis(app_handle: &AppHandle, db_path: &PathBuf) -> Result<String, String> {
+pub async fn run_daily_analysis(
+    app_handle: &AppHandle,
+    db_path: &PathBuf,
+) -> Result<String, String> {
     let conn = Connection::open(db_path).map_err(|e| format!("打开数据库失败: {}", e))?;
 
     let now = chrono::Local::now();
@@ -287,18 +398,47 @@ pub async fn run_daily_analysis(app_handle: &AppHandle, db_path: &PathBuf) -> Re
     let prompt = build_analysis_prompt(&aggregate_text);
 
     let reply = call_chat_scene_llm(app_handle, db_path, prompt).await?;
-    let patterns = parse_llm_patterns(&reply)?;
+    let parsed = parse_llm_patterns(&reply)?;
 
     let now_ts = chrono::Local::now().timestamp();
     let mut saved = 0;
-    for p in &patterns {
-        let signature = format!("{}:{}", p.pattern_type, p.apps.join("+"));
-        let data = ComboPatternData {
-            apps: p.apps.clone(),
-            time_window: p.time_window.clone(),
-            description: p.description.clone(),
+    for p in &parsed.patterns {
+        let (signature, data_json) = match p.pattern_type.as_str() {
+            "app_combo" => {
+                let data = ComboPatternData {
+                    apps: p.apps.clone(),
+                    time_window: p.time_window.clone(),
+                    description: p.description.clone(),
+                };
+                (
+                    format!("app_combo:{}", p.apps.join("+")),
+                    serde_json::to_string(&data).map_err(|e| e.to_string())?,
+                )
+            }
+            "startup_sequence" => {
+                let data = StartupSequenceData {
+                    apps: p.apps.clone(),
+                    description: p.description.clone(),
+                };
+                (
+                    format!("startup_sequence:{}", p.apps.join("→")),
+                    serde_json::to_string(&data).map_err(|e| e.to_string())?,
+                )
+            }
+            "context_routine" => {
+                let data = ContextRoutineData {
+                    app: p.app.clone(),
+                    time: p.time.clone(),
+                    tolerance_minutes: p.tolerance_minutes.unwrap_or(45),
+                    description: p.description.clone(),
+                };
+                (
+                    format!("context_routine:{}@{}", p.app, p.time),
+                    serde_json::to_string(&data).map_err(|e| e.to_string())?,
+                )
+            }
+            _ => continue,
         };
-        let data_json = serde_json::to_string(&data).map_err(|e| e.to_string())?;
         db::upsert_pattern(
             &conn,
             &p.pattern_type,
@@ -312,11 +452,20 @@ pub async fn run_daily_analysis(app_handle: &AppHandle, db_path: &PathBuf) -> Re
         saved += 1;
     }
 
+    // 沉淀个人事实（记忆层）
+    let mut facts_saved = 0;
+    for f in &parsed.facts {
+        db::upsert_memory_fact(&conn, &f.fact, &f.category, "daily_analysis", now_ts)
+            .map_err(|e| format!("保存事实失败: {}", e))?;
+        facts_saved += 1;
+    }
+
     Ok(format!(
-        "昨日 {} 条活动 → 聚合 {} 字符 → 提炼 {} 个模式",
+        "昨日 {} 条活动 → 聚合 {} 字符 → {} 个模式 + {} 条事实",
         activities.len(),
         aggregate_text.len(),
-        saved
+        saved,
+        facts_saved
     ))
 }
 
@@ -334,9 +483,9 @@ pub(crate) fn aggregate_activities(activities: &[ActivityLog]) -> String {
     for a in activities {
         let start = a.started_at;
         let end = a.ended_at.unwrap_or(a.started_at);
-        let mergeable = sessions.last().map(|s| {
-            s.process == a.process_name && start - s.end < SESSION_MERGE_GAP_SECS
-        });
+        let mergeable = sessions
+            .last()
+            .map(|s| s.process == a.process_name && start - s.end < SESSION_MERGE_GAP_SECS);
         if mergeable == Some(true) {
             if let Some(last) = sessions.last_mut() {
                 last.end = end;
@@ -390,7 +539,11 @@ pub(crate) fn aggregate_activities(activities: &[ActivityLog]) -> String {
 
 fn fmt_hm(ts: i64) -> String {
     chrono::DateTime::from_timestamp(ts, 0)
-        .map(|utc| utc.with_timezone(&chrono::Local).format("%H:%M").to_string())
+        .map(|utc| {
+            utc.with_timezone(&chrono::Local)
+                .format("%H:%M")
+                .to_string()
+        })
         .unwrap_or_default()
 }
 
@@ -406,8 +559,8 @@ pub(crate) fn aggregate_day(conn: &Connection, day_label: &str) -> Result<String
         .timestamp();
     let end = start + 86400;
 
-    let activities = db::activities_between(conn, start, end)
-        .map_err(|e| format!("读取活动失败: {}", e))?;
+    let activities =
+        db::activities_between(conn, start, end).map_err(|e| format!("读取活动失败: {}", e))?;
 
     if activities.is_empty() {
         return Ok(format!("{} 没有采集到活动记录", day_label));
@@ -424,14 +577,25 @@ pub(crate) fn aggregate_day(conn: &Connection, day_label: &str) -> Result<String
 fn build_analysis_prompt(aggregate_text: &str) -> String {
     format!(
         "以下是某位用户昨天电脑使用情况的聚合摘要（进程名 + 窗口标题 + 时段）。\n\
-         请从中挖掘「工作启动组合」模式：用户在一天开始工作时，通常会在某个时间窗内先后打开哪些应用。\n\n\
-         要求：\n\
-         1. 只输出 JSON，不要任何其他文字。格式：\n\
-         {{\"patterns\":[{{\"type\":\"app_combo\",\"apps\":[\"Code.exe\",\"chrome.exe\"],\"time_window\":\"09:00-09:45\",\"description\":\"一句话中文描述这个习惯\",\"confidence\":0.7}}]}}\n\
-         2. apps 必须使用摘要中出现的进程名原文，不要翻译或改写。\n\
-         3. 只保留 apps >= 2 个且置信度 >= 0.5 的模式；没有可靠模式就返回 {{\"patterns\":[]}}。\n\
-         4. 最多输出 3 个模式，按置信度降序。\n\
-         5. time_window 必须是 \"HH:MM-HH:MM\" 格式。\n\n\
+         请完成两项任务：\n\n\
+         【任务一：挖掘行为模式】\n\
+         1. app_combo：用户在某个时间窗内先后打开的应用组合（>=2 个）\n\
+         2. startup_sequence：一天开始工作时的固定启动序列（开机后最先打开的一串应用）\n\
+         3. context_routine：每天大约同一时间会做的小事（如下午打开音乐、午饭后刷视频）\n\n\
+         【任务二：沉淀关于用户的事实】\n\
+         从窗口标题和活动中推断关于用户本人的持久事实（同事称呼、项目名、偏好等），\n\
+         每条一句话，最多 3 条。不确定的不要写。\n\n\
+         只输出 JSON，不要任何其他文字。格式：\n\
+         {{\"patterns\":[\n\
+           {{\"type\":\"app_combo\",\"apps\":[\"Code.exe\",\"chrome.exe\"],\"time_window\":\"09:00-09:45\",\"description\":\"一句话\",\"confidence\":0.7}},\n\
+           {{\"type\":\"startup_sequence\",\"apps\":[\"Weixin.exe\",\"idea64.exe\"],\"description\":\"开机先开微信再开 IDEA\",\"confidence\":0.8}},\n\
+           {{\"type\":\"context_routine\",\"app\":\"cloudmusic.exe\",\"time\":\"15:00\",\"tolerance_minutes\":45,\"description\":\"下午三点工作时听音乐\",\"confidence\":0.6}}\n\
+         ],\n\
+         \"facts\":[{{\"fact\":\"张三可能是前端同事\",\"category\":\"person\"}}]}}\n\n\
+         规则：\n\
+         1. apps/app 必须使用摘要中的进程名原文。time/time_window 必须是 \"HH:MM\" / \"HH:MM-HH:MM\"。\n\
+         2. 只保留置信度 >= 0.5 的；每种 type 最多 2 个；没有可靠模式就返回空数组。\n\
+         3. facts 的 category 从 person/project/preference/general 中选。\n\n\
          摘要如下：\n{}",
         aggregate_text
     )
@@ -439,7 +603,10 @@ fn build_analysis_prompt(aggregate_text: &str) -> String {
 
 #[derive(Debug, Deserialize)]
 struct LlmPatternsResponse {
+    #[serde(default)]
     patterns: Vec<LlmPattern>,
+    #[serde(default)]
+    facts: Vec<LlmFact>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -451,31 +618,97 @@ struct LlmPattern {
     #[serde(default)]
     time_window: String,
     #[serde(default)]
+    app: String,
+    #[serde(default)]
+    time: String,
+    #[serde(default)]
+    tolerance_minutes: Option<u32>,
+    #[serde(default)]
     description: String,
     #[serde(default)]
     confidence: f64,
 }
 
-fn parse_llm_patterns(reply: &str) -> Result<Vec<LlmPattern>, String> {
+#[derive(Debug, Deserialize)]
+struct LlmFact {
+    fact: String,
+    #[serde(default = "default_fact_category")]
+    category: String,
+}
+
+fn default_fact_category() -> String {
+    "general".to_string()
+}
+
+fn parse_llm_patterns(reply: &str) -> Result<LlmPatternsResponse, String> {
     // 模型可能裹着 markdown 代码块输出，取第一个 { 到最后一个 } 之间的内容
     let start = reply.find('{').ok_or("LLM 响应中没有 JSON")?;
     let end = reply.rfind('}').ok_or("LLM 响应中没有 JSON")?;
     let json_str = &reply[start..=end];
 
-    let parsed: LlmPatternsResponse =
+    let mut parsed: LlmPatternsResponse =
         serde_json::from_str(json_str).map_err(|e| format!("解析 LLM JSON 失败: {}", e))?;
 
-    Ok(parsed
-        .patterns
-        .into_iter()
-        .filter(|p| p.pattern_type == "app_combo" && p.apps.len() >= 2)
-        .filter(|p| parse_time_window(&p.time_window).is_some())
-        .take(3)
-        .collect())
+    parsed.patterns.retain(|p| match p.pattern_type.as_str() {
+        "app_combo" => p.apps.len() >= 2 && parse_time_window(&p.time_window).is_some(),
+        "startup_sequence" => p.apps.len() >= 2,
+        "context_routine" => !p.app.is_empty() && parse_hm(&p.time).is_some(),
+        _ => false,
+    });
+    parsed.facts.retain(|f| f.fact.trim().len() >= 4);
+    parsed.facts.truncate(3);
+
+    Ok(parsed)
+}
+
+// ── 意图触发器解析（B2）──────────────────────────────────────
+
+/// 用 LLM 从意图原文解析触发器 {due, person, channel, keywords}。
+/// 失败不致命——调用方保留原文，靠晨间汇总兜底。
+pub async fn parse_intent_triggers(
+    app_handle: &AppHandle,
+    db_path: &PathBuf,
+    text: &str,
+) -> Result<db::IntentTriggers, String> {
+    let today = chrono::Local::now().format("%Y-%m-%d");
+    let prompt = format!(
+        "从下面这句话中提取触发条件，用于在正确的时机提醒用户。\n\
+         只输出 JSON，不要任何其他文字。格式：\n\
+         {{\"due\":\"YYYY-MM-DD 或 null\",\"person\":\"联系人名 或 null\",\"channel\":\"沟通渠道（微信/钉钉/飞书/QQ 等）或 null\",\"keywords\":[\"窗口标题里可能出现的关键词，最多3个\"]}}\n\
+         规则：\n\
+         1. 今天是 {today}。\"明天\"=\"今天+1天\"，\"周五\"=最近的周五，\"下周X\"=下周的星期X。没有明确时间则 due 为 null。\n\
+         2. person 只提取明确的人名/称呼（如\"张三\"\"前端小李\"），没有则为 null。\n\
+         3. channel 只在明确提到沟通软件时填写。\n\
+         4. keywords 提取能识别相关应用/项目/事项的实词（如项目名、\"接口文档\"），不要虚词。没有合适的关键词就给空数组。\n\
+         原话：「{text}」",
+        today = today,
+        text = text
+    );
+
+    let reply = call_chat_scene_llm(app_handle, db_path, prompt).await?;
+
+    let start = reply.find('{').ok_or("解析响应中没有 JSON")?;
+    let end = reply.rfind('}').ok_or("解析响应中没有 JSON")?;
+    let mut triggers: db::IntentTriggers = serde_json::from_str(&reply[start..=end])
+        .map_err(|e| format!("解析触发器 JSON 失败: {}", e))?;
+
+    // 校验 due 格式，非法则丢弃（不影响其他字段）
+    if let Some(due) = &triggers.due {
+        if chrono::NaiveDate::parse_from_str(due, "%Y-%m-%d").is_err() {
+            triggers.due = None;
+        }
+    }
+    // 清理空串和无效关键词
+    triggers.person = triggers.person.filter(|p| !p.trim().is_empty());
+    triggers.channel = triggers.channel.filter(|c| !c.trim().is_empty());
+    triggers.keywords.retain(|k| !k.trim().is_empty());
+    triggers.keywords.truncate(3);
+
+    Ok(triggers)
 }
 
 /// 复用「闲聊」场景的模型配置调用 LLM（companion 分析不单独占场景位）
-async fn call_chat_scene_llm(
+pub(crate) async fn call_chat_scene_llm(
     app_handle: &AppHandle,
     db_path: &PathBuf,
     prompt: String,
@@ -486,7 +719,9 @@ async fn call_chat_scene_llm(
     let (provider, model) = provider_db
         .get_scene_model(&conn, Scene::Chat)
         .map_err(|e| format!("获取场景模型失败: {}", e))?
-        .ok_or_else(|| "尚未配置 AI 模型，请先在「设置 → AI 模型」中为闲聊场景选择模型".to_string())?;
+        .ok_or_else(|| {
+            "尚未配置 AI 模型，请先在「设置 → AI 模型」中为闲聊场景选择模型".to_string()
+        })?;
 
     let thinking_mode = provider_db
         .get_scene_thinking_mode(&conn, Scene::Chat)

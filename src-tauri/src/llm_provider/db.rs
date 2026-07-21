@@ -1,8 +1,8 @@
 use rusqlite::{Connection, OptionalExtension, Result};
 use std::path::Path;
 
-use super::models::*;
 use super::crypto::encrypt;
+use super::models::*;
 
 pub struct LlmProviderDb;
 
@@ -158,7 +158,11 @@ impl LlmProviderDb {
 
         let now = chrono::Local::now().to_rfc3339();
 
-        let is_active_str = if is_active { "1".to_string() } else { "0".to_string() };
+        let is_active_str = if is_active {
+            "1".to_string()
+        } else {
+            "0".to_string()
+        };
         let api_key_str = api_key_encrypted.as_deref().unwrap_or("").to_string();
 
         conn.execute(
@@ -289,7 +293,11 @@ impl LlmProviderDb {
         Ok(saved_models)
     }
 
-    pub fn get_models_by_provider(&self, conn: &Connection, provider_id: i64) -> Result<Vec<Model>, String> {
+    pub fn get_models_by_provider(
+        &self,
+        conn: &Connection,
+        provider_id: i64,
+    ) -> Result<Vec<Model>, String> {
         let mut stmt = conn
             .prepare(
                 "SELECT id, provider_id, model_id, name, description, is_active, created_at, updated_at
@@ -317,7 +325,11 @@ impl LlmProviderDb {
         Ok(models)
     }
 
-    pub fn get_model_by_id(&self, conn: &Connection, model_id: i64) -> Result<Option<Model>, String> {
+    pub fn get_model_by_id(
+        &self,
+        conn: &Connection,
+        model_id: i64,
+    ) -> Result<Option<Model>, String> {
         let mut stmt = conn
             .prepare(
                 "SELECT id, provider_id, model_id, name, description, is_active, created_at, updated_at
@@ -364,34 +376,6 @@ impl LlmProviderDb {
             .map_err(|e| format!("停用模型失败: {}", e))?;
 
         Ok(rows_affected > 0)
-    }
-
-    pub fn get_active_models(&self, conn: &Connection) -> Result<Vec<Model>, String> {
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, provider_id, model_id, name, description, is_active, created_at, updated_at
-                 FROM llm_models WHERE is_active = 1 ORDER BY name",
-            )
-            .map_err(|e| format!("准备查询失败: {}", e))?;
-
-        let models = stmt
-            .query_map([], |row| {
-                Ok(Model {
-                    id: row.get(0)?,
-                    provider_id: row.get(1)?,
-                    model_id: row.get(2)?,
-                    name: row.get(3)?,
-                    description: row.get(4)?,
-                    is_active: row.get(5)?,
-                    created_at: row.get(6)?,
-                    updated_at: row.get(7)?,
-                })
-            })
-            .map_err(|e| format!("查询激活模型失败: {}", e))?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| format!("收集模型数据失败: {}", e))?;
-
-        Ok(models)
     }
 
     // SceneConfig 操作
@@ -460,15 +444,21 @@ impl LlmProviderDb {
 
     pub fn get_scene_thinking_mode(&self, conn: &Connection, scene: Scene) -> Result<bool, String> {
         let scene_str = scene.to_string();
-        let thinking_mode: bool = conn.query_row(
-            "SELECT thinking_mode FROM llm_scene_configs WHERE scene = ?1",
-            [&scene_str],
-            |row| row.get(0),
-        ).unwrap_or(false);
+        let thinking_mode: bool = conn
+            .query_row(
+                "SELECT thinking_mode FROM llm_scene_configs WHERE scene = ?1",
+                [&scene_str],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
         Ok(thinking_mode)
     }
 
-    pub fn get_scene_model(&self, conn: &Connection, scene: Scene) -> Result<Option<(Provider, Model)>, String> {
+    pub fn get_scene_model(
+        &self,
+        conn: &Connection,
+        scene: Scene,
+    ) -> Result<Option<(Provider, Model)>, String> {
         let scene_str = scene.to_string();
 
         let result = conn.query_row(

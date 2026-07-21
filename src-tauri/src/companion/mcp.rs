@@ -23,6 +23,13 @@ const NOTE_DIR_PREFIX: &str = "陪伴日报";
 
 /// MCP server 入口：阻塞式读取 stdin 直到 EOF（claude CLI 关闭管道时退出）
 pub fn run_mcp_server(db_path: PathBuf, notes_dir: PathBuf) {
+    // MCP 模式独立运行（不经过 Tauri 启动流程），需自行确保表结构就绪
+    if let Ok(conn) = Connection::open(&db_path) {
+        if let Err(e) = db::init_tables(&conn) {
+            eprintln!("[companion-mcp] 初始化表结构失败: {}", e);
+        }
+    }
+
     let server = McpServer { db_path, notes_dir };
 
     let stdin = std::io::stdin();
@@ -73,7 +80,12 @@ pub fn run_mcp_server(db_path: PathBuf, notes_dir: PathBuf) {
                 eprintln!("[companion-mcp] 忽略通知: {}", m);
             }
             _ => {
-                write_error(&mut out, &id, -32601, &format!("Method not found: {}", method));
+                write_error(
+                    &mut out,
+                    &id,
+                    -32601,
+                    &format!("Method not found: {}", method),
+                );
             }
         }
 
@@ -143,6 +155,11 @@ fn tools_list() -> Value {
                 "inputSchema": { "type": "object", "properties": {} }
             },
             {
+                "name": "get_memory_facts",
+                "description": "获取关于用户的持久事实记忆（同事称呼、项目、偏好等）。写日报或给建议前应该参考，让内容更贴合用户本人。",
+                "inputSchema": { "type": "object", "properties": {} }
+            },
+            {
                 "name": "write_note",
                 "description": format!(
                     "把内容写入笔记模块的「{}」目录（自动加 .md 后缀）。filename 只给名字，不要带路径。",
@@ -196,6 +213,7 @@ impl McpServer {
             "get_activity_summary" => self.tool_activity_summary(&args),
             "search_clipboard" => self.tool_search_clipboard(&args),
             "get_habit_patterns" => self.tool_habit_patterns(),
+            "get_memory_facts" => self.tool_memory_facts(),
             "write_note" => self.tool_write_note(&args),
             "create_suggestion" => self.tool_create_suggestion(&args),
             _ => Err(format!("未知工具: {}", name)),
@@ -259,17 +277,13 @@ impl McpServer {
             )
         };
 
-        let param_refs: Vec<&dyn rusqlite::ToSql> =
-            params_vec.iter().map(|p| p.as_ref()).collect();
+        let param_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
         let mut stmt = conn
             .prepare(&sql)
             .map_err(|e| format!("查询剪贴板失败: {}", e))?;
         let rows = stmt
             .query_map(&param_refs[..], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                ))
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             })
             .map_err(|e| format!("查询剪贴板失败: {}", e))?;
 
@@ -309,6 +323,27 @@ impl McpServer {
             return Ok("还没有学到任何习惯模式".to_string());
         }
         serde_json::to_string_pretty(&active).map_err(|e| e.to_string())
+    }
+
+    fn tool_memory_facts(&self) -> Result<String, String> {
+        let conn = self.open_db()?;
+        let facts = db::list_memory_facts(&conn, 30).map_err(|e| format!("查询记忆失败: {}", e))?;
+
+        if facts.is_empty() {
+            return Ok("还没有沉淀关于用户的事实记忆".to_string());
+        }
+
+        let items: Vec<Value> = facts
+            .into_iter()
+            .map(|f| {
+                json!({
+                    "fact": f.fact,
+                    "category": f.category,
+                    "confirmations": f.confirmations
+                })
+            })
+            .collect();
+        serde_json::to_string_pretty(&items).map_err(|e| e.to_string())
     }
 
     fn tool_write_note(&self, args: &Value) -> Result<String, String> {
@@ -356,9 +391,8 @@ impl McpServer {
 
         let conn = self.open_db()?;
         let now = chrono::Local::now().timestamp();
-        let suggestion =
-            db::create_suggestion(&conn, "agent_insight", title, body, None, now)
-                .map_err(|e| format!("创建建议失败: {}", e))?;
+        let suggestion = db::create_suggestion(&conn, "agent_insight", title, body, None, now)
+            .map_err(|e| format!("创建建议失败: {}", e))?;
 
         Ok(format!(
             "建议已记录（id: {}），会显示在用户的建议列表中",

@@ -31,7 +31,10 @@ impl WindowWatcher {
     }
 
     pub fn run(&self) {
-        log::info!("Companion window watcher started (poll every {}s)", POLL_INTERVAL.as_secs());
+        log::info!(
+            "Companion window watcher started (poll every {}s)",
+            POLL_INTERVAL.as_secs()
+        );
         loop {
             if let Some(event) = poll_foreground() {
                 if self.sender.send(event).is_err() {

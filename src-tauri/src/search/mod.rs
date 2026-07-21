@@ -1,13 +1,13 @@
+use nucleo::pattern::{CaseMatching, Normalization, Pattern};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use nucleo::pattern::{CaseMatching, Normalization, Pattern};
 
 pub mod everything;
+pub mod icon;
 pub mod registry;
 pub mod uwp;
-pub mod icon;
 pub mod watcher;
 
 /// Convert Chinese text to pinyin initials
@@ -16,15 +16,15 @@ fn to_pinyin_initials(text: &str) -> String {
 }
 
 use crate::db::app_cache::{self, AppCacheEntry};
-use crate::db::app_usage::{AppUsage, calculate_frequency_score};
+use crate::db::app_usage::{calculate_frequency_score, AppUsage};
 use crate::db::DatabaseState;
 
 /// Parse a Windows shortcut (.lnk) file and return the target path
 #[cfg(windows)]
 fn parse_shortcut_target(path: &Path) -> Option<String> {
     use windows::Win32::System::Com::{
-        CoInitializeEx, COINIT_APARTMENTTHREADED, CLSCTX_INPROC_SERVER,
-        CoCreateInstance, IPersistFile, STGM_READ,
+        CoCreateInstance, CoInitializeEx, IPersistFile, CLSCTX_INPROC_SERVER,
+        COINIT_APARTMENTTHREADED, STGM_READ,
     };
     use windows::Win32::UI::Shell::{IShellLinkW, ShellLink, SLGP_RAWPATH};
     use windows_core::Interface;
@@ -36,11 +36,8 @@ fn parse_shortcut_target(path: &Path) -> Option<String> {
 
     unsafe {
         // Create ShellLink instance
-        let shell_link: IShellLinkW = match CoCreateInstance(
-            &ShellLink,
-            None,
-            CLSCTX_INPROC_SERVER,
-        ) {
+        let shell_link: IShellLinkW = match CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)
+        {
             Ok(link) => link,
             Err(_) => return None,
         };
@@ -56,23 +53,29 @@ fn parse_shortcut_target(path: &Path) -> Option<String> {
         let wide_path: Vec<u16> = path_str.encode_utf16().chain(std::iter::once(0)).collect();
 
         // Load the shortcut file with read-only access
-        if persist_file.Load(windows::core::PCWSTR(wide_path.as_ptr()), STGM_READ).is_err() {
+        if persist_file
+            .Load(windows::core::PCWSTR(wide_path.as_ptr()), STGM_READ)
+            .is_err()
+        {
             return None;
         }
 
         // Get the target path
         let mut target_path = [0u16; 260];
-        let mut find_data: windows::Win32::Storage::FileSystem::WIN32_FIND_DATAW = std::mem::zeroed();
-        if shell_link.GetPath(
-            &mut target_path,
-            &mut find_data,
-            SLGP_RAWPATH.0 as u32,
-        ).is_err() {
+        let mut find_data: windows::Win32::Storage::FileSystem::WIN32_FIND_DATAW =
+            std::mem::zeroed();
+        if shell_link
+            .GetPath(&mut target_path, &mut find_data, SLGP_RAWPATH.0 as u32)
+            .is_err()
+        {
             return None;
         }
 
         // Convert wide string to String
-        let len = target_path.iter().position(|&c| c == 0).unwrap_or(target_path.len());
+        let len = target_path
+            .iter()
+            .position(|&c| c == 0)
+            .unwrap_or(target_path.len());
         let target = String::from_utf16_lossy(&target_path[..len]);
 
         if target.is_empty() {
@@ -108,16 +111,15 @@ impl From<AppCacheEntry> for AppItem {
 }
 
 /// 对单个应用执行模糊匹配，同时尝试名称和拼音首字母，返回两者中的最高分。
-fn score_app(
-    app: &AppItem,
-    pattern: &Pattern,
-    matcher: &mut nucleo::Matcher,
-) -> Option<u32> {
+fn score_app(app: &AppItem, pattern: &Pattern, matcher: &mut nucleo::Matcher) -> Option<u32> {
     let mut buf = Vec::new();
     let name_score = pattern.score(nucleo::Utf32Str::new(&app.name, &mut buf), matcher);
     buf.clear();
     let pinyin_score = if !app.pinyin_initials.is_empty() {
-        pattern.score(nucleo::Utf32Str::new(&app.pinyin_initials, &mut buf), matcher)
+        pattern.score(
+            nucleo::Utf32Str::new(&app.pinyin_initials, &mut buf),
+            matcher,
+        )
     } else {
         None
     };
@@ -184,7 +186,8 @@ impl SearchIndex {
         let mut seen = HashSet::new();
 
         // System start menu
-        let system_start_menu = PathBuf::from("C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs");
+        let system_start_menu =
+            PathBuf::from("C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs");
         if system_start_menu.exists() {
             self.scan_directory(&system_start_menu, &mut apps, &mut seen)?;
         }
@@ -210,7 +213,11 @@ impl SearchIndex {
         let registry_apps = registry::scan();
         log::info!("Registry scan found {} apps", registry_apps.len());
         for reg_app in registry_apps {
-            let key = format!("{}|{}", reg_app.name.to_lowercase(), reg_app.exe_path.to_lowercase());
+            let key = format!(
+                "{}|{}",
+                reg_app.name.to_lowercase(),
+                reg_app.exe_path.to_lowercase()
+            );
             if seen.insert(key) {
                 let pinyin = to_pinyin_initials(&reg_app.name);
                 apps.push(AppItem {
@@ -256,20 +263,23 @@ impl SearchIndex {
         // Update cache
         if let Some(ref db_state) = self.db_state {
             if let Ok(mut conn) = rusqlite::Connection::open(&db_state.0) {
-                let cache_entries: Vec<AppCacheEntry> = apps.iter().map(|app| {
-                    let target_path = parse_shortcut_target(Path::new(&app.path))
-                        .unwrap_or_else(|| app.path.clone());
-                    let last_modified = app_cache::get_file_modified(Path::new(&app.path));
+                let cache_entries: Vec<AppCacheEntry> = apps
+                    .iter()
+                    .map(|app| {
+                        let target_path = parse_shortcut_target(Path::new(&app.path))
+                            .unwrap_or_else(|| app.path.clone());
+                        let last_modified = app_cache::get_file_modified(Path::new(&app.path));
 
-                    AppCacheEntry {
-                        name: app.name.clone(),
-                        path: app.path.clone(),
-                        target_path,
-                        last_modified,
-                        is_valid: true,
-                        pinyin_initials: app.pinyin_initials.clone(),
-                    }
-                }).collect();
+                        AppCacheEntry {
+                            name: app.name.clone(),
+                            path: app.path.clone(),
+                            target_path,
+                            last_modified,
+                            is_valid: true,
+                            pinyin_initials: app.pinyin_initials.clone(),
+                        }
+                    })
+                    .collect();
 
                 if let Err(e) = app_cache::save_batch(&mut conn, &cache_entries) {
                     log::warn!("Failed to save cache: {}", e);
@@ -282,7 +292,11 @@ impl SearchIndex {
         self.apps = apps;
         self.indexed = true;
 
-        log::info!("Refreshed {} applications in {:?}", self.apps.len(), start.elapsed());
+        log::info!(
+            "Refreshed {} applications in {:?}",
+            self.apps.len(),
+            start.elapsed()
+        );
 
         Ok(())
     }
@@ -304,14 +318,19 @@ impl SearchIndex {
 
             // Update in-memory list
             if let Some(existing) = self.apps.iter_mut().find(|a| {
-                let existing_target = parse_shortcut_target(Path::new(&a.path))
-                    .unwrap_or_else(|| a.path.clone());
-                format!("{}|{}", a.name.to_lowercase(), existing_target.to_lowercase()) == key
+                let existing_target =
+                    parse_shortcut_target(Path::new(&a.path)).unwrap_or_else(|| a.path.clone());
+                format!(
+                    "{}|{}",
+                    a.name.to_lowercase(),
+                    existing_target.to_lowercase()
+                ) == key
             }) {
                 *existing = app.clone();
             } else {
                 self.apps.push(app.clone());
-                self.apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+                self.apps
+                    .sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
             }
 
             // Update database cache
@@ -347,7 +366,11 @@ impl SearchIndex {
         if let Some(ref db_state) = self.db_state {
             if let Ok(conn) = rusqlite::Connection::open(&db_state.0) {
                 if let Err(e) = app_cache::mark_invalid(&conn, &path_str) {
-                    log::warn!("Failed to mark {} as invalid in cache: {}", path.display(), e);
+                    log::warn!(
+                        "Failed to mark {} as invalid in cache: {}",
+                        path.display(),
+                        e
+                    );
                 }
             }
         }
@@ -373,7 +396,8 @@ impl SearchIndex {
                 if ext.eq_ignore_ascii_case("lnk") {
                     if let Some((app, target_path)) = self.parse_shortcut(&path) {
                         // Use target path for deduplication
-                        let key = format!("{}|{}", app.name.to_lowercase(), target_path.to_lowercase());
+                        let key =
+                            format!("{}|{}", app.name.to_lowercase(), target_path.to_lowercase());
                         if seen.insert(key) {
                             apps.push(app);
                         }
@@ -401,7 +425,8 @@ impl SearchIndex {
         }
 
         // Get the target path for deduplication
-        let target_path = parse_shortcut_target(path).unwrap_or_else(|| path.to_string_lossy().to_string());
+        let target_path =
+            parse_shortcut_target(path).unwrap_or_else(|| path.to_string_lossy().to_string());
 
         // Pre-compute pinyin initials for Chinese search support
         let pinyin_initials = to_pinyin_initials(&name);
@@ -447,10 +472,8 @@ impl SearchIndex {
             .unwrap_or_default()
             .as_secs() as i64;
 
-        let usage_map: HashMap<&str, &AppUsage> = usages
-            .iter()
-            .map(|u| (u.path.as_str(), u))
-            .collect();
+        let usage_map: HashMap<&str, &AppUsage> =
+            usages.iter().map(|u| (u.path.as_str(), u)).collect();
 
         let pattern = Pattern::parse(query, CaseMatching::Smart, Normalization::Smart);
         let mut matcher = nucleo::Matcher::new(nucleo::Config::DEFAULT);
@@ -464,7 +487,8 @@ impl SearchIndex {
                     let freq_bonus = usage_map
                         .get(app.path.as_str())
                         .map(|u| calculate_frequency_score(u, now))
-                        .unwrap_or(0.0) * 0.5; // 50% frequency weight
+                        .unwrap_or(0.0)
+                        * 0.5; // 50% frequency weight
                     (base_score * 0.5 + freq_bonus, app.clone()) // 50% match weight
                 })
             })
@@ -476,10 +500,8 @@ impl SearchIndex {
 
     /// Get apps sorted by recency (for empty query)
     pub fn get_recently_used(&self, usages: &[AppUsage]) -> Vec<AppItem> {
-        let usage_map: HashMap<&str, &AppUsage> = usages
-            .iter()
-            .map(|u| (u.path.as_str(), u))
-            .collect();
+        let usage_map: HashMap<&str, &AppUsage> =
+            usages.iter().map(|u| (u.path.as_str(), u)).collect();
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -590,5 +612,7 @@ pub fn launch_app(path: &str) -> anyhow::Result<()> {
 
 #[cfg(not(windows))]
 pub fn launch_app(_path: &str) -> anyhow::Result<()> {
-    Err(anyhow::anyhow!("Launching apps is only supported on Windows"))
+    Err(anyhow::anyhow!(
+        "Launching apps is only supported on Windows"
+    ))
 }

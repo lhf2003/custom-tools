@@ -105,15 +105,20 @@ pub fn search_files(query: &str, limit: usize) -> Vec<FileResult> {
     };
 
     // Empty query → wildcard to show recent files
-    let search_query = if query.trim().is_empty() { "*" } else { query.trim() };
+    let search_query = if query.trim().is_empty() {
+        "*"
+    } else {
+        query.trim()
+    };
 
     log::info!("Everything search query: '{}'", search_query);
 
     let mut cmd = make_cmd(&es_path);
-    cmd.arg("-n").arg(limit.to_string())
-       .arg("-csv")
-       .arg("-size")
-       .arg("-date-modified");
+    cmd.arg("-n")
+        .arg(limit.to_string())
+        .arg("-csv")
+        .arg("-size")
+        .arg("-date-modified");
 
     // Split by whitespace so "app ext:xls;xlsx" becomes two separate args (AND logic)
     for part in search_query.split_whitespace() {
@@ -132,7 +137,10 @@ pub fn search_files(query: &str, limit: usize) -> Vec<FileResult> {
     };
 
     if !output.status.success() {
-        log::warn!("es.exe returned error: {}", String::from_utf8_lossy(&output.stderr));
+        log::warn!(
+            "es.exe returned error: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         return Vec::new();
     }
 
@@ -170,7 +178,12 @@ fn parse_csv_line(line: &str) -> Option<FileResult> {
     let size = fields[1].trim().parse::<u64>().unwrap_or(0);
     let modified = parse_date_to_unix(fields[2].trim());
 
-    Some(FileResult { name, path: path_str, size, modified })
+    Some(FileResult {
+        name,
+        path: path_str,
+        size,
+        modified,
+    })
 }
 
 /// Split a CSV line respecting double-quoted fields (RFC 4180).
@@ -207,10 +220,10 @@ fn parse_date_to_unix(date_str: &str) -> u64 {
     use chrono::NaiveDateTime;
 
     let formats = [
-        "%m/%d/%Y %H:%M:%S",   // US: 01/15/2024 10:30:25
-        "%Y/%m/%d %H:%M:%S",   // CN: 2024/01/15 10:30:25
-        "%Y-%m-%d %H:%M:%S",   // ISO: 2024-01-15 10:30:25
-        "%d/%m/%Y %H:%M:%S",   // EU: 15/01/2024 10:30:25
+        "%m/%d/%Y %H:%M:%S", // US: 01/15/2024 10:30:25
+        "%Y/%m/%d %H:%M:%S", // CN: 2024/01/15 10:30:25
+        "%Y-%m-%d %H:%M:%S", // ISO: 2024-01-15 10:30:25
+        "%d/%m/%Y %H:%M:%S", // EU: 15/01/2024 10:30:25
     ];
 
     for fmt in formats {
@@ -219,15 +232,4 @@ fn parse_date_to_unix(date_str: &str) -> u64 {
         }
     }
     0
-}
-
-/// Get Everything version string via es.exe.
-pub fn get_version() -> Option<String> {
-    let es_path = find_es_exe()?;
-    let output = make_cmd(&es_path).arg("-version").output().ok()?;
-    if output.status.success() {
-        Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    } else {
-        None
-    }
 }

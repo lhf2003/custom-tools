@@ -1,6 +1,6 @@
-use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 pub mod fs;
 
@@ -86,11 +86,7 @@ impl NotesManager {
         self.read_dir_recursive(&self.root_path, "")
     }
 
-    fn read_dir_recursive(
-        &self,
-        dir: &Path,
-        relative_path: &str,
-    ) -> anyhow::Result<Vec<NoteItem>> {
+    fn read_dir_recursive(&self, dir: &Path, relative_path: &str) -> anyhow::Result<Vec<NoteItem>> {
         let mut items = Vec::new();
 
         if !dir.exists() {
@@ -135,8 +131,16 @@ impl NotesManager {
 
         // Sort by custom order first, then folders first, then by name
         items.sort_by(|a, b| {
-            let order_a = order_metadata.order.get(&a.name).copied().unwrap_or(usize::MAX);
-            let order_b = order_metadata.order.get(&b.name).copied().unwrap_or(usize::MAX);
+            let order_a = order_metadata
+                .order
+                .get(&a.name)
+                .copied()
+                .unwrap_or(usize::MAX);
+            let order_b = order_metadata
+                .order
+                .get(&b.name)
+                .copied()
+                .unwrap_or(usize::MAX);
 
             if order_a != order_b {
                 return order_a.cmp(&order_b);
@@ -334,7 +338,9 @@ impl NotesManager {
         let new_full_path = target_full.join(file_name);
 
         if new_full_path.exists() {
-            return Err(anyhow::anyhow!("An item with this name already exists in target folder"));
+            return Err(anyhow::anyhow!(
+                "An item with this name already exists in target folder"
+            ));
         }
 
         std::fs::rename(&source_full, &new_full_path)?;
@@ -350,7 +356,7 @@ impl NotesManager {
 
 /// Get default notes directory
 pub fn get_default_notes_dir() -> anyhow::Result<PathBuf> {
-    let data_dir = dirs::data_dir()
-        .ok_or_else(|| anyhow::anyhow!("Failed to get data directory"))?;
+    let data_dir =
+        dirs::data_dir().ok_or_else(|| anyhow::anyhow!("Failed to get data directory"))?;
     Ok(data_dir.join("custom-tools").join("notes"))
 }

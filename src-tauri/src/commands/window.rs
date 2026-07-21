@@ -1,24 +1,5 @@
 use tauri::Manager;
 
-/// 获取当前窗口效果类型（供前端主动查询）
-#[tauri::command]
-pub fn get_window_effect() -> String {
-    #[cfg(target_os = "windows")]
-    {
-        match crate::get_windows_version() {
-            Some((major, minor, build)) => {
-                let effect = crate::WindowEffect::from_windows_version(major, minor, build);
-                effect.name().to_string()
-            }
-            None => "Unknown".to_string(),
-        }
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        "Unknown".to_string()
-    }
-}
-
 /// Position window at top of screen with padding on the monitor with cursor
 fn position_window_at_top(window: &tauri::WebviewWindow) -> Result<(), String> {
     const TOP_PADDING: i32 = 100;
@@ -88,15 +69,6 @@ pub async fn toggle_window(app_handle: tauri::AppHandle) -> Result<bool, String>
     } else {
         Err("Main window not found".to_string())
     }
-}
-
-/// Center the window on screen
-#[tauri::command]
-pub async fn center_window(app_handle: tauri::AppHandle) -> Result<(), String> {
-    if let Some(window) = app_handle.get_webview_window("main") {
-        window.center().map_err(|e| e.to_string())?;
-    }
-    Ok(())
 }
 
 /// Resize the window to specified dimensions

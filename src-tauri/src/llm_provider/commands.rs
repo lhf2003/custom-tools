@@ -1,15 +1,13 @@
-use tauri::{AppHandle, Manager, State};
 use rusqlite::Connection;
+use tauri::{AppHandle, Manager, State};
 
-use crate::db::DatabaseState;
 use super::db::LlmProviderDb;
 use super::fetcher;
 use super::models::*;
+use crate::db::DatabaseState;
 
 #[tauri::command]
-pub async fn get_llm_providers(
-    db: State<'_, DatabaseState>,
-) -> Result<Vec<Provider>, String> {
+pub async fn get_llm_providers(db: State<'_, DatabaseState>) -> Result<Vec<Provider>, String> {
     let conn = Connection::open(&db.0).map_err(|e| format!("打开数据库失败: {}", e))?;
     let db_ops = LlmProviderDb;
     db_ops.get_all_providers(&conn)
@@ -21,17 +19,20 @@ pub async fn create_llm_provider(
     app_handle: AppHandle,
     req: CreateProviderRequest,
 ) -> Result<Provider, String> {
-    log::info!("create_llm_provider called with name: {}, type: {}", req.name, req.provider_type);
+    log::info!(
+        "create_llm_provider called with name: {}, type: {}",
+        req.name,
+        req.provider_type
+    );
 
     let conn = Connection::open(&db.0).map_err(|e| {
         log::error!("Failed to open database: {}", e);
         format!("打开数据库失败: {}", e)
     })?;
-    let app_data_dir = app_handle.path().app_data_dir()
-        .map_err(|e| {
-            log::error!("Failed to get app data dir: {}", e);
-            format!("获取应用数据目录失败: {}", e)
-        })?;
+    let app_data_dir = app_handle.path().app_data_dir().map_err(|e| {
+        log::error!("Failed to get app data dir: {}", e);
+        format!("获取应用数据目录失败: {}", e)
+    })?;
 
     let db_ops = LlmProviderDb;
     let result = db_ops.create_provider(&conn, req, &app_data_dir);
@@ -46,7 +47,9 @@ pub async fn update_llm_provider(
     req: UpdateProviderRequest,
 ) -> Result<Provider, String> {
     let conn = Connection::open(&db.0).map_err(|e| format!("打开数据库失败: {}", e))?;
-    let app_data_dir = app_handle.path().app_data_dir()
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
         .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
 
     let db_ops = LlmProviderDb;
@@ -54,10 +57,7 @@ pub async fn update_llm_provider(
 }
 
 #[tauri::command]
-pub async fn delete_llm_provider(
-    db: State<'_, DatabaseState>,
-    id: i64,
-) -> Result<bool, String> {
+pub async fn delete_llm_provider(db: State<'_, DatabaseState>, id: i64) -> Result<bool, String> {
     let conn = Connection::open(&db.0).map_err(|e| format!("打开数据库失败: {}", e))?;
     let db_ops = LlmProviderDb;
     db_ops.delete_provider(&conn, id)
@@ -72,10 +72,13 @@ pub async fn test_llm_provider_connection(
     let conn = Connection::open(&db.0).map_err(|e| format!("打开数据库失败: {}", e))?;
     let db_ops = LlmProviderDb;
 
-    let provider = db_ops.get_provider(&conn, id)?
+    let provider = db_ops
+        .get_provider(&conn, id)?
         .ok_or_else(|| "提供商不存在".to_string())?;
 
-    let app_data_dir = app_handle.path().app_data_dir()
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
         .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
 
     match fetcher::test_connection(&provider, &app_data_dir).await {
@@ -117,10 +120,13 @@ pub async fn fetch_llm_models(
     let conn = Connection::open(&db.0).map_err(|e| format!("打开数据库失败: {}", e))?;
     let db_ops = LlmProviderDb;
 
-    let provider = db_ops.get_provider(&conn, provider_id)?
+    let provider = db_ops
+        .get_provider(&conn, provider_id)?
         .ok_or_else(|| "提供商不存在".to_string())?;
 
-    let app_data_dir = app_handle.path().app_data_dir()
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
         .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
 
     // Fetch models from provider API
@@ -142,7 +148,8 @@ pub async fn activate_llm_model(
     let db_ops = LlmProviderDb;
     db_ops.activate_model(&conn, model_id)?;
     // Return the updated model
-    db_ops.get_model_by_id(&conn, model_id)?
+    db_ops
+        .get_model_by_id(&conn, model_id)?
         .ok_or_else(|| "模型不存在".to_string())
 }
 
@@ -155,23 +162,13 @@ pub async fn deactivate_llm_model(
     let db_ops = LlmProviderDb;
     db_ops.deactivate_model(&conn, model_id)?;
     // Return the updated model
-    db_ops.get_model_by_id(&conn, model_id)?
+    db_ops
+        .get_model_by_id(&conn, model_id)?
         .ok_or_else(|| "模型不存在".to_string())
 }
 
 #[tauri::command]
-pub async fn get_active_llm_models(
-    db: State<'_, DatabaseState>,
-) -> Result<Vec<Model>, String> {
-    let conn = Connection::open(&db.0).map_err(|e| format!("打开数据库失败: {}", e))?;
-    let db_ops = LlmProviderDb;
-    db_ops.get_active_models(&conn)
-}
-
-#[tauri::command]
-pub async fn get_scene_configs(
-    db: State<'_, DatabaseState>,
-) -> Result<Vec<SceneConfig>, String> {
+pub async fn get_scene_configs(db: State<'_, DatabaseState>) -> Result<Vec<SceneConfig>, String> {
     let conn = Connection::open(&db.0).map_err(|e| format!("打开数据库失败: {}", e))?;
     let db_ops = LlmProviderDb;
     db_ops.get_scene_configs(&conn)
@@ -184,7 +181,13 @@ pub async fn set_scene_model(
 ) -> Result<SceneConfig, String> {
     let conn = Connection::open(&db.0).map_err(|e| format!("打开数据库失败: {}", e))?;
     let db_ops = LlmProviderDb;
-    db_ops.set_scene_model(&conn, req.scene, req.provider_id, &req.model_id, req.thinking_mode)
+    db_ops.set_scene_model(
+        &conn,
+        req.scene,
+        req.provider_id,
+        &req.model_id,
+        req.thinking_mode,
+    )
 }
 
 #[tauri::command]

@@ -27,18 +27,22 @@ pub fn push_suggestion(
     action_payload: Option<&str>,
 ) -> Result<i64, String> {
     let now = chrono::Local::now().timestamp();
-    let suggestion =
-        db::create_suggestion(conn, suggestion_type, title, body, action_payload, now)
-            .map_err(|e| format!("创建建议失败: {}", e))?;
+    let suggestion = db::create_suggestion(conn, suggestion_type, title, body, action_payload, now)
+        .map_err(|e| format!("创建建议失败: {}", e))?;
 
     log::info!("Companion 新建议 [{}]: {}", suggestion_type, title);
 
-    show_toast_window(app_handle);
-    if let Err(e) = app_handle.emit("companion:suggestion", &suggestion) {
-        log::warn!("emit companion:suggestion 失败: {}", e);
-    }
+    show_existing_suggestion(app_handle, &suggestion);
 
     Ok(suggestion.id)
+}
+
+/// 把一条已存在的建议/意图推送到 toast 窗口（情境触发意图时用）
+pub fn show_existing_suggestion(app_handle: &AppHandle, suggestion: &db::Suggestion) {
+    show_toast_window(app_handle);
+    if let Err(e) = app_handle.emit("companion:suggestion", suggestion) {
+        log::warn!("emit companion:suggestion 失败: {}", e);
+    }
 }
 
 pub fn hide_toast_window(app_handle: &AppHandle) {
@@ -68,10 +72,7 @@ fn show_toast_window(app_handle: &AppHandle) {
             width: win_w as u32,
             height: win_h as u32,
         }));
-        let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
-            x,
-            y,
-        }));
+        let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
     }
 
     if let Err(e) = window.show() {
@@ -119,9 +120,8 @@ pub fn looks_like_error(text: &str) -> bool {
 
     // 弱特征组合：多行 + 错误关键字 + 调用栈帧形态
     let line_count = trimmed.lines().count();
-    let has_error_word = trimmed.contains("Error")
-        || trimmed.contains("Exception")
-        || trimmed.contains("error:");
+    let has_error_word =
+        trimmed.contains("Error") || trimmed.contains("Exception") || trimmed.contains("error:");
     let has_stack_frame = trimmed.contains("\n    at ")
         || trimmed.contains("\n  at ")
         || trimmed.contains(".rs:")
@@ -153,6 +153,8 @@ mod tests {
     fn ignores_short_text_and_urls() {
         assert!(!looks_like_error("error"));
         assert!(!looks_like_error("https://example.com/error-page"));
-        assert!(!looks_like_error("今天开会讨论一下 error 的处理方案，这个单子比较着急，明天再说"));
+        assert!(!looks_like_error(
+            "今天开会讨论一下 error 的处理方案，这个单子比较着急，明天再说"
+        ));
     }
 }

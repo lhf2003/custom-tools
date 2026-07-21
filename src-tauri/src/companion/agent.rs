@@ -35,8 +35,7 @@ pub fn run_daily_report_agent(
     bin_path: &str,
     work_dir: &Path,
 ) -> Result<String, String> {
-    let exe = std::env::current_exe()
-        .map_err(|e| format!("获取自身 exe 路径失败: {}", e))?;
+    let exe = std::env::current_exe().map_err(|e| format!("获取自身 exe 路径失败: {}", e))?;
 
     // 确保 companion MCP server 已注册到 claude 用户配置
     // （--mcp-config 在本版本 CLI 下不生效，用户级注册是唯一可靠通道）
@@ -69,24 +68,41 @@ pub fn run_daily_report_agent(
         cmd.creation_flags(CREATE_NO_WINDOW.0);
     }
 
-    let output = cmd
-        .output()
-        .map_err(|e| format!("执行 claude CLI 失败（{} 是否在 PATH 或配置正确？）: {}", bin_path, e))?;
+    let output = cmd.output().map_err(|e| {
+        format!(
+            "执行 claude CLI 失败（{} 是否在 PATH 或配置正确？）: {}",
+            bin_path, e
+        )
+    })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("claude CLI 退出码异常: {}", stderr.chars().take(500).collect::<String>()));
+        return Err(format!(
+            "claude CLI 退出码异常: {}",
+            stderr.chars().take(500).collect::<String>()
+        ));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let parsed: ClaudeCliResult = serde_json::from_str(stdout.trim())
-        .map_err(|e| format!("解析 claude CLI 输出失败: {} — 原始输出: {}", e, stdout.chars().take(300).collect::<String>()))?;
+    let parsed: ClaudeCliResult = serde_json::from_str(stdout.trim()).map_err(|e| {
+        format!(
+            "解析 claude CLI 输出失败: {} — 原始输出: {}",
+            e,
+            stdout.chars().take(300).collect::<String>()
+        )
+    })?;
 
     if parsed.is_error == Some(true) {
         return Err(format!(
             "agent 执行失败（{}）: {}",
             parsed.subtype.as_deref().unwrap_or("unknown"),
-            parsed.result.as_deref().unwrap_or("").chars().take(300).collect::<String>()
+            parsed
+                .result
+                .as_deref()
+                .unwrap_or("")
+                .chars()
+                .take(300)
+                .collect::<String>()
         ));
     }
 
@@ -95,10 +111,7 @@ pub fn run_daily_report_agent(
     let summary = parsed.result.unwrap_or_else(|| "日报已生成".to_string());
     let summary_preview: String = summary.chars().take(200).collect();
 
-    log::info!(
-        "Companion 日报 agent 完成: {} 轮, 成本 ${:.4}",
-        turns, cost
-    );
+    log::info!("Companion 日报 agent 完成: {} 轮, 成本 ${:.4}", turns, cost);
 
     // 推送"日报已生成"建议卡片，用户可点击查看
     if let Ok(conn) = rusqlite::Connection::open(db_path) {

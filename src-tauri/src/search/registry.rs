@@ -20,9 +20,18 @@ pub fn scan() -> Vec<RegistryApp> {
     let mut seen = std::collections::HashSet::new();
 
     let hives: &[(_, &str)] = &[
-        (HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
-        (HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
-        (HKEY_CURRENT_USER,  r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (
+            HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+        ),
+        (
+            HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
+        ),
+        (
+            HKEY_CURRENT_USER,
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+        ),
     ];
 
     for (root, path) in hives {
@@ -34,7 +43,10 @@ pub fn scan() -> Vec<RegistryApp> {
         for subkey_name in hive.enum_keys().flatten() {
             let subkey = match hive.open_subkey_with_flags(&subkey_name, KEY_READ) {
                 Ok(k) => k,
-                Err(e) => { log::debug!("Registry: skip subkey {}: {}", subkey_name, e); continue; }
+                Err(e) => {
+                    log::debug!("Registry: skip subkey {}: {}", subkey_name, e);
+                    continue;
+                }
             };
 
             let name: String = match subkey.get_value("DisplayName") {
@@ -73,9 +85,7 @@ pub fn scan() -> Vec<RegistryApp> {
 fn is_system_component(key: &RegKey) -> bool {
     let is_sys: u32 = key.get_value("SystemComponent").unwrap_or(0);
     let release_type: String = key.get_value("ReleaseType").unwrap_or_default();
-    is_sys != 0
-        || release_type == "Update"
-        || release_type == "Hotfix"
+    is_sys != 0 || release_type == "Update" || release_type == "Hotfix"
 }
 
 /// Try to extract an absolute exe path.

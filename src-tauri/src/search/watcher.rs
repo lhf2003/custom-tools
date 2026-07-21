@@ -1,8 +1,8 @@
 use notify::{Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex, mpsc};
-use std::time::{Duration, Instant};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use crate::db::DatabaseState;
 use crate::search::SearchIndex;
@@ -94,10 +94,15 @@ impl AppWatcher {
 
     fn watch_directories(&mut self) -> anyhow::Result<()> {
         // System start menu
-        let system_start_menu = PathBuf::from("C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs");
+        let system_start_menu =
+            PathBuf::from("C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs");
         if system_start_menu.exists() {
-            self.watcher.watch(&system_start_menu, RecursiveMode::Recursive)?;
-            log::info!("Watching system start menu: {}", system_start_menu.display());
+            self.watcher
+                .watch(&system_start_menu, RecursiveMode::Recursive)?;
+            log::info!(
+                "Watching system start menu: {}",
+                system_start_menu.display()
+            );
         }
 
         // User start menu
@@ -105,7 +110,8 @@ impl AppWatcher {
             let user_start_menu = PathBuf::from(user_profile)
                 .join("AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs");
             if user_start_menu.exists() {
-                self.watcher.watch(&user_start_menu, RecursiveMode::Recursive)?;
+                self.watcher
+                    .watch(&user_start_menu, RecursiveMode::Recursive)?;
                 log::info!("Watching user start menu: {}", user_start_menu.display());
             }
         }
@@ -130,10 +136,7 @@ impl AppWatcher {
 }
 
 /// Background task to process watcher events with debouncing
-fn process_events(
-    index: Arc<Mutex<SearchIndex>>,
-    receiver: mpsc::Receiver<WatcherEvent>,
-) {
+fn process_events(index: Arc<Mutex<SearchIndex>>, receiver: mpsc::Receiver<WatcherEvent>) {
     let mut pending_adds = Vec::new();
     let mut pending_removes = Vec::new();
     let mut last_update = Instant::now();

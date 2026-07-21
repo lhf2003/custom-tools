@@ -126,7 +126,11 @@ pub async fn call_llm(
             model,
             messages: &messages,
             stream: false,
-            reasoning_effort: if thinking_mode && !is_bailian { Some("medium") } else { None },
+            reasoning_effort: if thinking_mode && !is_bailian {
+                Some("medium")
+            } else {
+                None
+            },
             extra_body,
         };
         client.post(&url).json(&request)
@@ -227,7 +231,11 @@ pub async fn call_llm_stream(
             model,
             messages: &messages,
             stream: true,
-            reasoning_effort: if thinking_mode && !is_bailian { Some("medium") } else { None },
+            reasoning_effort: if thinking_mode && !is_bailian {
+                Some("medium")
+            } else {
+                None
+            },
             extra_body,
         };
         let mut builder = client.post(&url).json(&request);
@@ -237,14 +245,11 @@ pub async fn call_llm_stream(
         builder
     };
 
-    let response = req_builder
-        .send()
-        .await
-        .map_err(|e| {
-            let msg = format!("请求失败: {}", e);
-            let _ = app_handle.emit("llm:error", &msg);
-            msg
-        })?;
+    let response = req_builder.send().await.map_err(|e| {
+        let msg = format!("请求失败: {}", e);
+        let _ = app_handle.emit("llm:error", &msg);
+        msg
+    })?;
 
     let status = response.status();
     if !status.is_success() {
@@ -271,7 +276,9 @@ pub async fn call_llm_stream(
             if byte == b'\n' {
                 // 处理一行（去掉末尾可能的 \r）
                 let line = {
-                    let raw = std::str::from_utf8(&line_buf).unwrap_or("").trim_end_matches('\r');
+                    let raw = std::str::from_utf8(&line_buf)
+                        .unwrap_or("")
+                        .trim_end_matches('\r');
                     raw.to_string()
                 };
                 line_buf.clear();
@@ -341,7 +348,10 @@ pub async fn call_llm_stream(
 
     // 处理流结束后 line_buf 中剩余的最后一行（无结尾换行符的情况）
     if !line_buf.is_empty() {
-        let line = std::str::from_utf8(&line_buf).unwrap_or("").trim_end_matches('\r').to_string();
+        let line = std::str::from_utf8(&line_buf)
+            .unwrap_or("")
+            .trim_end_matches('\r')
+            .to_string();
         if !line.is_empty() && is_ollama_native {
             if let Ok(chunk_data) = serde_json::from_str::<OllamaStreamChunk>(&line) {
                 let content = &chunk_data.message.content;

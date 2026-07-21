@@ -21,29 +21,9 @@ pub struct CreatePasswordRequest {
     pub category_id: Option<i64>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct UpdatePasswordRequest {
-    pub id: i64,
-    pub title: String,
-    pub username: Option<String>,
-    pub password: String,
-    pub url: Option<String>,
-    pub notes: Option<String>,
-    pub category_id: Option<i64>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CreateCategoryRequest {
-    pub name: String,
-    pub icon: Option<String>,
-    pub color: Option<String>,
-}
-
 /// Check if password manager is unlocked
 #[tauri::command]
-pub fn is_password_manager_unlocked(
-    state: State<PasswordManagerState>,
-) -> Result<bool, String> {
+pub fn is_password_manager_unlocked(state: State<PasswordManagerState>) -> Result<bool, String> {
     Ok(state.0.is_unlocked())
 }
 
@@ -75,9 +55,7 @@ pub fn get_password_categories(
     let conn = Connection::open(&db_state.0).map_err(|e| e.to_string())?;
 
     let mut stmt = conn
-        .prepare(
-            "SELECT id, name, icon, color FROM password_categories ORDER BY sort_order, name",
-        )
+        .prepare("SELECT id, name, icon, color FROM password_categories ORDER BY sort_order, name")
         .map_err(|e| e.to_string())?;
 
     let categories = stmt
@@ -137,35 +115,29 @@ pub fn get_password_entries(
         params_vec.push(Box::new(search_pattern.clone().unwrap()));
     }
 
-    let param_refs: Vec<&dyn rusqlite::ToSql> = params_vec
-        .iter()
-        .map(|p| p.as_ref())
-        .collect();
+    let param_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
 
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
 
     let entries = stmt
-        .query_map(
-            &param_refs[..],
-            |row| {
-                let _encrypted_password: String = row.get(3)?;
-                // Return masked password
-                let masked_password = "•".repeat(8);
+        .query_map(&param_refs[..], |row| {
+            let _encrypted_password: String = row.get(3)?;
+            // Return masked password
+            let masked_password = "•".repeat(8);
 
-                Ok(PasswordEntry {
-                    id: row.get(0)?,
-                    title: row.get(1)?,
-                    username: row.get(2)?,
-                    password: masked_password,
-                    url: row.get(4)?,
-                    notes: row.get(5)?,
-                    category_id: row.get(6)?,
-                    favorite: row.get(7)?,
-                    created_at: row.get(8)?,
-                    updated_at: row.get(9)?,
-                })
-            },
-        )
+            Ok(PasswordEntry {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                username: row.get(2)?,
+                password: masked_password,
+                url: row.get(4)?,
+                notes: row.get(5)?,
+                category_id: row.get(6)?,
+                favorite: row.get(7)?,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
+            })
+        })
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
@@ -194,7 +166,12 @@ pub fn create_password_entry(
 
     // Encrypt notes if provided
     let encrypted_notes = if let Some(notes) = request.notes {
-        Some(crypto_state.0.encrypt_password(&notes).map_err(|e| e.to_string())?)
+        Some(
+            crypto_state
+                .0
+                .encrypt_password(&notes)
+                .map_err(|e| e.to_string())?,
+        )
     } else {
         None
     };
@@ -253,76 +230,13 @@ pub fn get_decrypted_password(
     Ok(decrypted)
 }
 
-/// Toggle favorite status
-#[tauri::command]
-pub fn toggle_password_favorite(
-    db_state: State<DatabaseState>,
-    id: i64,
-) -> Result<bool, String> {
-    let conn = Connection::open(&db_state.0).map_err(|e| e.to_string())?;
-
-    conn.execute(
-        "UPDATE password_entries SET favorite = NOT favorite WHERE id = ?1",
-        params![id],
-    )
-    .map_err(|e| e.to_string())?;
-
-    let is_favorite: bool = conn
-        .query_row(
-            "SELECT favorite FROM password_entries WHERE id = ?1",
-            params![id],
-            |row| row.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-
-    Ok(is_favorite)
-}
-
 /// Delete password entry
 #[tauri::command]
 pub fn delete_password_entry(db_state: State<DatabaseState>, id: i64) -> Result<(), String> {
     let conn = Connection::open(&db_state.0).map_err(|e| e.to_string())?;
 
-    conn.execute(
-        "DELETE FROM password_entries WHERE id = ?1",
-        params![id],
-    )
-    .map_err(|e| e.to_string())?;
-
-    Ok(())
-}
-
-/// Create category
-#[tauri::command]
-pub fn create_password_category(
-    db_state: State<DatabaseState>,
-    request: CreateCategoryRequest,
-) -> Result<i64, String> {
-    let conn = Connection::open(&db_state.0).map_err(|e| e.to_string())?;
-
-    conn.execute(
-        "INSERT INTO password_categories (name, icon, color) VALUES (?1, ?2, ?3)",
-        params![
-            request.name,
-            request.icon.unwrap_or_else(|| "folder".to_string()),
-            request.color.unwrap_or_else(|| "#6366f1".to_string())
-        ],
-    )
-    .map_err(|e| e.to_string())?;
-
-    Ok(conn.last_insert_rowid())
-}
-
-/// Delete category
-#[tauri::command]
-pub fn delete_password_category(db_state: State<DatabaseState>, id: i64) -> Result<(), String> {
-    let conn = Connection::open(&db_state.0).map_err(|e| e.to_string())?;
-
-    conn.execute(
-        "DELETE FROM password_categories WHERE id = ?1",
-        params![id],
-    )
-    .map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM password_entries WHERE id = ?1", params![id])
+        .map_err(|e| e.to_string())?;
 
     Ok(())
 }

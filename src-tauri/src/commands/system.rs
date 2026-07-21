@@ -9,7 +9,10 @@ pub fn open_external_url(url: String) -> Result<(), String> {
 pub fn save_image_to_path(base64_data: String, path: String) -> Result<(), String> {
     use base64::{engine::general_purpose, Engine as _};
 
-    log::info!("[save_image_to_path] Received base64_data length: {}", base64_data.len());
+    log::info!(
+        "[save_image_to_path] Received base64_data length: {}",
+        base64_data.len()
+    );
     log::info!("[save_image_to_path] Target path: {}", path);
 
     let bytes = general_purpose::STANDARD
@@ -21,32 +24,11 @@ pub fn save_image_to_path(base64_data: String, path: String) -> Result<(), Strin
 
     log::info!("[save_image_to_path] Decoded {} bytes", bytes.len());
 
-    std::fs::write(&path, &bytes)
-        .map_err(|e| {
-            log::error!("[save_image_to_path] File write failed: {}", e);
-            format!("文件写入失败: {}", e)
-        })?;
+    std::fs::write(&path, &bytes).map_err(|e| {
+        log::error!("[save_image_to_path] File write failed: {}", e);
+        format!("文件写入失败: {}", e)
+    })?;
 
     log::info!("[save_image_to_path] File saved successfully");
     Ok(())
-}
-
-/// Save a base64-encoded PNG image to the user's Downloads folder
-#[tauri::command]
-pub fn save_image_to_downloads(base64_data: String, filename: String) -> Result<String, String> {
-    use base64::{engine::general_purpose, Engine as _};
-
-    let bytes = general_purpose::STANDARD
-        .decode(&base64_data)
-        .map_err(|e| format!("base64 解码失败: {}", e))?;
-
-    let download_dir = dirs::download_dir()
-        .ok_or_else(|| "无法获取下载目录".to_string())?;
-
-    let file_path = download_dir.join(&filename);
-
-    std::fs::write(&file_path, &bytes)
-        .map_err(|e| format!("文件写入失败: {}", e))?;
-
-    Ok(file_path.to_string_lossy().to_string())
 }

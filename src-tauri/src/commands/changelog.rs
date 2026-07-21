@@ -49,20 +49,6 @@ pub fn add_changelog(
     Ok(())
 }
 
-/// Mark a changelog as read
-#[tauri::command]
-pub fn mark_changelog_read(app: AppHandle, version: String) -> Result<(), String> {
-    let conn = get_db_connection(&app)?;
-
-    conn.execute(
-        "UPDATE changelog SET is_read = 1 WHERE version = ?1",
-        params![version],
-    )
-    .map_err(|e| format!("Failed to mark changelog as read: {}", e))?;
-
-    Ok(())
-}
-
 /// Mark all changelogs as read
 #[tauri::command]
 pub fn mark_all_changelogs_read(app: AppHandle) -> Result<(), String> {
@@ -72,39 +58,6 @@ pub fn mark_all_changelogs_read(app: AppHandle) -> Result<(), String> {
         .map_err(|e| format!("Failed to mark all changelogs as read: {}", e))?;
 
     Ok(())
-}
-
-/// Get all changelog entries, optionally filtered by read status
-#[tauri::command]
-pub fn get_changelogs(
-    app: AppHandle,
-    unread_only: Option<bool>,
-) -> Result<Vec<ChangelogEntry>, String> {
-    let conn = get_db_connection(&app)?;
-
-    let query = match unread_only {
-        Some(true) => "SELECT version, release_date, content, is_read, created_at FROM changelog WHERE is_read = 0 ORDER BY created_at DESC",
-        Some(false) => "SELECT version, release_date, content, is_read, created_at FROM changelog WHERE is_read = 1 ORDER BY created_at DESC",
-        None => "SELECT version, release_date, content, is_read, created_at FROM changelog ORDER BY created_at DESC",
-    };
-
-    let mut stmt = conn.prepare(query).map_err(|e| format!("Failed to prepare query: {}", e))?;
-
-    let entries = stmt
-        .query_map([], |row| {
-            Ok(ChangelogEntry {
-                version: row.get(0)?,
-                release_date: row.get(1)?,
-                content: row.get(2)?,
-                is_read: row.get(3)?,
-                created_at: row.get(4)?,
-            })
-        })
-        .map_err(|e| format!("Failed to query changelogs: {}", e))?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| format!("Failed to collect changelogs: {}", e))?;
-
-    Ok(entries)
 }
 
 /// Check if there are unread changelogs for the current version

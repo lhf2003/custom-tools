@@ -8,13 +8,13 @@ use windows::Win32::System::DataExchange::{
     AddClipboardFormatListener, CloseClipboard, GetClipboardData, OpenClipboard,
     RemoveClipboardFormatListener,
 };
-use windows::Win32::UI::Shell::{DragQueryFileW, HDROP};
-use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
+use windows::Win32::UI::Shell::{DragQueryFileW, HDROP};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW,
-    PostQuitMessage, RegisterClassW, TranslateMessage, CS_HREDRAW, CS_VREDRAW,
-    MSG, WM_CLIPBOARDUPDATE, WM_CREATE, WM_DESTROY, WNDCLASSW, WS_OVERLAPPEDWINDOW,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, PostQuitMessage,
+    RegisterClassW, TranslateMessage, CS_HREDRAW, CS_VREDRAW, MSG, WM_CLIPBOARDUPDATE, WM_CREATE,
+    WM_DESTROY, WNDCLASSW, WS_OVERLAPPEDWINDOW,
 };
 
 use super::{ClipboardContent, ClipboardEvent};
@@ -347,8 +347,10 @@ impl ClipboardWatcher {
         let mut png_data = Vec::new();
         {
             let cursor = std::io::Cursor::new(&mut png_data);
-            image::DynamicImage::ImageRgba8(image)
-                .write_to(&mut std::io::BufWriter::new(cursor), image::ImageFormat::Png)?;
+            image::DynamicImage::ImageRgba8(image).write_to(
+                &mut std::io::BufWriter::new(cursor),
+                image::ImageFormat::Png,
+            )?;
         }
 
         log::info!("Image converted to PNG: {} bytes", png_data.len());
@@ -365,7 +367,10 @@ impl ClipboardWatcher {
 
         // Try text content first (most common)
         let text_handle: Result<HANDLE, _> = GetClipboardData(CF_UNICODETEXT);
-        let has_text = text_handle.as_ref().map(|h| !h.is_invalid()).unwrap_or(false);
+        let has_text = text_handle
+            .as_ref()
+            .map(|h| !h.is_invalid())
+            .unwrap_or(false);
         log::info!("CF_UNICODETEXT (13): available={}", has_text);
 
         if let Ok(handle) = text_handle {
@@ -396,7 +401,13 @@ impl ClipboardWatcher {
         // Check for files (CF_HDROP)
         const CF_HDROP: u32 = 15;
         let hdrop_handle: Result<HANDLE, _> = GetClipboardData(CF_HDROP);
-        log::info!("CF_HDROP (15): available={}", hdrop_handle.as_ref().map(|h| !h.is_invalid()).unwrap_or(false));
+        log::info!(
+            "CF_HDROP (15): available={}",
+            hdrop_handle
+                .as_ref()
+                .map(|h| !h.is_invalid())
+                .unwrap_or(false)
+        );
 
         if let Ok(handle) = hdrop_handle {
             if !handle.is_invalid() {
@@ -419,7 +430,10 @@ impl ClipboardWatcher {
         // Check for bitmap/image (CF_DIB - Device Independent Bitmap is preferred over CF_BITMAP)
         const CF_DIB: u32 = 8;
         let dib_handle: Result<HANDLE, _> = GetClipboardData(CF_DIB);
-        let has_dib = dib_handle.as_ref().map(|h| !h.is_invalid()).unwrap_or(false);
+        let has_dib = dib_handle
+            .as_ref()
+            .map(|h| !h.is_invalid())
+            .unwrap_or(false);
         log::info!("CF_DIB (8): available={}", has_dib);
 
         if let Ok(handle) = dib_handle {
@@ -433,7 +447,10 @@ impl ClipboardWatcher {
                     let _ = GlobalUnlock(hglobal);
                     match result {
                         Ok(image_data) => {
-                            log::info!("DIB data converted successfully: {} bytes", image_data.len());
+                            log::info!(
+                                "DIB data converted successfully: {} bytes",
+                                image_data.len()
+                            );
                             return Ok(ClipboardContent::Image(image_data));
                         }
                         Err(e) => {
@@ -451,7 +468,10 @@ impl ClipboardWatcher {
         // Fallback to CF_BITMAP if CF_DIB is not available
         const CF_BITMAP: u32 = 2;
         let bitmap_handle: Result<HANDLE, _> = GetClipboardData(CF_BITMAP);
-        let has_bitmap = bitmap_handle.as_ref().map(|h| !h.is_invalid()).unwrap_or(false);
+        let has_bitmap = bitmap_handle
+            .as_ref()
+            .map(|h| !h.is_invalid())
+            .unwrap_or(false);
         log::info!("CF_BITMAP (2): available={}", has_bitmap);
 
         if let Ok(handle) = bitmap_handle {
@@ -463,7 +483,10 @@ impl ClipboardWatcher {
         // Try CF_DIBV5 (V5 bitmap format used by some apps)
         const CF_DIBV5: u32 = 17;
         let dibv5_handle: Result<HANDLE, _> = GetClipboardData(CF_DIBV5);
-        let has_dibv5 = dibv5_handle.as_ref().map(|h| !h.is_invalid()).unwrap_or(false);
+        let has_dibv5 = dibv5_handle
+            .as_ref()
+            .map(|h| !h.is_invalid())
+            .unwrap_or(false);
         log::info!("CF_DIBV5 (17): available={}", has_dibv5);
 
         if let Ok(handle) = dibv5_handle {

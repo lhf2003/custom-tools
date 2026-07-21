@@ -13,10 +13,7 @@ pub struct ChatHistoryMessage {
 
 /// 创建新会话，返回 session_id
 #[tauri::command]
-pub fn create_chat_session(
-    db_state: State<DatabaseState>,
-    mode: String,
-) -> Result<i64, String> {
+pub fn create_chat_session(db_state: State<DatabaseState>, mode: String) -> Result<i64, String> {
     let conn = Connection::open(&db_state.0).map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO chat_sessions (mode) VALUES (?1)",
@@ -72,7 +69,8 @@ pub fn get_session_messages(
         })
         .map_err(|e| e.to_string())?;
 
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 /// 获取同 mode 下最近一次会话的 id

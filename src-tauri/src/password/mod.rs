@@ -48,11 +48,17 @@ impl PasswordManager {
     pub fn unlock(&self, master_password: &str) -> anyhow::Result<()> {
         let crypto = CryptoManager::new(master_password)?;
 
-        let mut crypto_guard = self.crypto.lock().map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
+        let mut crypto_guard = self
+            .crypto
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
         *crypto_guard = Some(crypto);
 
         // Store master password for decryption
-        let mut password_guard = self.master_password.lock().map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
+        let mut password_guard = self
+            .master_password
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
         *password_guard = Some(master_password.to_string());
 
         Ok(())
@@ -73,10 +79,7 @@ impl PasswordManager {
 
     /// Check if unlocked
     pub fn is_unlocked(&self) -> bool {
-        self.crypto
-            .lock()
-            .map(|c| c.is_some())
-            .unwrap_or(false)
+        self.crypto.lock().map(|c| c.is_some()).unwrap_or(false)
     }
 
     /// Encrypt password
@@ -86,7 +89,9 @@ impl PasswordManager {
             .lock()
             .map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
 
-        let crypto = crypto.as_ref().ok_or_else(|| anyhow::anyhow!("Not unlocked"))?;
+        let crypto = crypto
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Not unlocked"))?;
         crypto.encrypt(plaintext)
     }
 
@@ -116,7 +121,10 @@ impl PasswordManager {
         let new_crypto = CryptoManager::new(new_password)?;
 
         // Update stored crypto
-        let mut crypto_guard = self.crypto.lock().map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
+        let mut crypto_guard = self
+            .crypto
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
         *crypto_guard = Some(new_crypto);
 
         Ok(())

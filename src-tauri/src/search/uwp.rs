@@ -26,7 +26,7 @@ pub fn launch_path(app_id: &str) -> String {
 pub fn scan() -> Vec<UwpApp> {
     let output = run_powershell(
         "Get-StartApps | Where-Object { $_.AppID -like '*!*' } | \
-         Select-Object Name, AppID | ConvertTo-Json -Compress"
+         Select-Object Name, AppID | ConvertTo-Json -Compress",
     );
 
     match output {

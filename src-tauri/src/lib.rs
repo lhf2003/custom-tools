@@ -1,14 +1,17 @@
-use tauri::{Manager, Emitter};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
+use std::time::Duration;
+use tauri::{Emitter, Manager};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_updater::UpdaterExt;
-use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
-use std::time::Duration;
 
 /// 获取当前鼠标位置（Windows API）
 #[cfg(target_os = "windows")]
 pub fn get_cursor_pos() -> Option<(i32, i32)> {
-    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
     use windows::Win32::Foundation::POINT;
+    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
     unsafe {
         let mut point = POINT { x: 0, y: 0 };
@@ -55,170 +58,6 @@ pub fn get_monitor_at_cursor(app_handle: &tauri::AppHandle) -> Option<tauri::Mon
     app_handle.primary_monitor().ok().flatten()
 }
 
-/// Windows 窗口效果类型
-#[cfg(target_os = "windows")]
-#[derive(Debug, Clone, Copy)]
-pub enum WindowEffect {
-    /// Mica - Windows 11 原生效果（推荐）
-    Mica,
-    /// Acrylic - Windows 10 v1903+ / Windows 11（但有兼容性问题）
-    Acrylic,
-    /// Blur - 旧版 Windows 后备方案
-    Blur,
-    /// 无效果 - 纯 CSS 兜底
-    None,
-}
-
-#[cfg(target_os = "windows")]
-impl WindowEffect {
-    /// 根据 Windows 版本选择最佳效果
-    pub fn from_windows_version(major: u64, _minor: u64, build: u64) -> Self {
-        match (major, build) {
-            // Windows 11 (build 22000+)
-            // 使用 Mica，因为它在 Win11 上最稳定
-            (10, build) if build >= 22000 => WindowEffect::Mica,
-
-            // Windows 10 v1903+ (build 18362+)
-            // Acrylic 在 Win10 上工作正常
-            (10, build) if build >= 18362 => WindowEffect::Acrylic,
-
-            // Windows 7/8/8.1 或更旧的 Win10
-            // 使用简单的 Blur 效果
-            _ => WindowEffect::Blur,
-        }
-    }
-
-    /// 获取效果名称（用于日志）
-    pub fn name(&self) -> &'static str {
-        match self {
-            WindowEffect::Mica => "Mica",
-            WindowEffect::Acrylic => "Acrylic",
-            WindowEffect::Blur => "Blur",
-            WindowEffect::None => "None",
-        }
-    }
-}
-
-/// 应用窗口效果，带降级策略
-#[cfg(target_os = "windows")]
-pub fn apply_window_effect(
-    window: &tauri::WebviewWindow,
-    effect: WindowEffect,
-) -> Result<(), Box<dyn std::error::Error>> {
-    match effect {
-        WindowEffect::Mica => {
-            // 尝试应用 Mica 效果
-            match window_vibrancy::apply_mica(window, Some(true)) {
-                Ok(_) => {
-                    log::info!("Successfully applied Mica effect");
-                    Ok(())
-                }
-                Err(e) => {
-                    log::warn!("Failed to apply Mica effect: {}, falling back to Acrylic", e);
-                    // 降级到 Acrylic
-                    apply_window_effect(window, WindowEffect::Acrylic)
-                }
-            }
-        }
-        WindowEffect::Acrylic => {
-            // 尝试应用 Acrylic 效果（使用半透明深色背景）
-            match window_vibrancy::apply_acrylic(window, Some((18, 18, 18, 120))) {
-                Ok(_) => {
-                    log::info!("Successfully applied Acrylic effect");
-                    Ok(())
-                }
-                Err(e) => {
-                    log::warn!("Failed to apply Acrylic effect: {}, falling back to Blur", e);
-                    // 降级到 Blur
-                    apply_window_effect(window, WindowEffect::Blur)
-                }
-            }
-        }
-        WindowEffect::Blur => {
-            // 尝试应用简单模糊效果
-            match window_vibrancy::apply_blur(window, Some((18, 18, 18, 120))) {
-                Ok(_) => {
-                    log::info!("Successfully applied Blur effect");
-                    Ok(())
-                }
-                Err(e) => {
-                    log::warn!("Failed to apply Blur effect: {}, using CSS fallback", e);
-                    // 降级到无效果（纯 CSS 兜底）
-                    apply_window_effect(window, WindowEffect::None)
-                }
-            }
-        }
-        WindowEffect::None => {
-            // 不应用任何 OS 级效果，依赖 CSS 样式
-            log::info!("Using CSS fallback for window background");
-            Ok(())
-        }
-    }
-}
-
-/// 获取 Windows 版本信息
-/// 使用 RtlGetVersion 获取真实版本（绕过 app manifest shim）
-#[cfg(target_os = "windows")]
-pub fn get_windows_version() -> Option<(u64, u64, u64)> {
-    use windows::core::PCSTR;
-    use windows::Win32::System::LibraryLoader::GetModuleHandleA;
-    use windows::Win32::System::LibraryLoader::GetProcAddress;
-
-    // RtlGetVersion 函数签名
-    type RtlGetVersionFn = unsafe extern "system" fn(*mut OSVERSIONINFOW) -> i32;
-
-    #[repr(C)]
-    #[derive(Debug)]
-    struct OSVERSIONINFOW {
-        dwOSVersionInfoSize: u32,
-        dwMajorVersion: u32,
-        dwMinorVersion: u32,
-        dwBuildNumber: u32,
-        dwPlatformId: u32,
-        szCSDVersion: [u16; 128],
-    }
-
-    unsafe {
-        // 获取 ntdll.dll 模块
-        let ntdll = GetModuleHandleA(PCSTR::from_raw("ntdll.dll\0".as_ptr()));
-        if ntdll.is_err() {
-            log::warn!("Failed to get ntdll.dll handle");
-            return None;
-        }
-        let ntdll = ntdll.unwrap();
-
-        // 获取 RtlGetVersion 函数地址
-        let rtl_get_version = GetProcAddress(
-            ntdll,
-            PCSTR::from_raw("RtlGetVersion\0".as_ptr()),
-        );
-
-        if let Some(rtl_get_version) = rtl_get_version {
-            let rtl_get_version: RtlGetVersionFn = std::mem::transmute(rtl_get_version);
-
-            let mut osvi: OSVERSIONINFOW = std::mem::zeroed();
-            osvi.dwOSVersionInfoSize = std::mem::size_of::<OSVERSIONINFOW>() as u32;
-
-            let status = rtl_get_version(&mut osvi);
-            if status == 0 {
-                // STATUS_SUCCESS
-                Some((
-                    osvi.dwMajorVersion as u64,
-                    osvi.dwMinorVersion as u64,
-                    osvi.dwBuildNumber as u64,
-                ))
-            } else {
-                log::warn!("RtlGetVersion returned non-success status: {}", status);
-                None
-            }
-        } else {
-            log::warn!("Failed to get RtlGetVersion function address");
-            None
-        }
-    }
-}
-
-
 pub mod clipboard;
 pub mod commands;
 pub mod companion;
@@ -235,16 +74,13 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             // Setup system tray
@@ -253,7 +89,8 @@ pub fn run() {
             // Initialize updater plugin (desktop only)
             #[cfg(desktop)]
             {
-                app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())?;
             }
 
             // Initialize logging
@@ -366,7 +203,9 @@ pub fn run() {
                 }
             }
 
-            app.manage(commands::settings::SettingsState(Mutex::new(settings_manager)));
+            app.manage(commands::settings::SettingsState(Mutex::new(
+                settings_manager,
+            )));
 
             // Initialize shortcut manager
             let shortcuts_db_path = app
@@ -383,7 +222,9 @@ pub fn run() {
                 log::warn!("Failed to register shortcuts: {}", e);
             }
 
-            app.manage(commands::settings::ShortcutManagerState(Mutex::new(shortcut_manager)));
+            app.manage(commands::settings::ShortcutManagerState(Mutex::new(
+                shortcut_manager,
+            )));
 
             // Setup window event handlers (after settings initialized)
             setup_window_handlers(app.handle());
@@ -394,11 +235,13 @@ pub fn run() {
             // Start clipboard manager
             let suppress_flag = Arc::new(AtomicBool::new(false));
             app.manage(clipboard::ClipboardSuppressFlag(Arc::clone(&suppress_flag)));
-            let clipboard_manager = clipboard::ClipboardManager::new(app.handle().clone(), suppress_flag)
-                .map_err(|e| {
-                    log::error!("Failed to create clipboard manager: {}", e);
-                    e
-                })?;
+            let clipboard_manager =
+                clipboard::ClipboardManager::new(app.handle().clone(), suppress_flag).map_err(
+                    |e| {
+                        log::error!("Failed to create clipboard manager: {}", e);
+                        e
+                    },
+                )?;
             app.manage(Mutex::new(clipboard_manager));
 
             // Initialize notes manager
@@ -406,7 +249,9 @@ pub fn run() {
                 .unwrap_or_else(|_| app.path().app_data_dir().unwrap().join("notes"));
             std::fs::create_dir_all(&notes_dir).ok();
             let notes_manager = notes::NotesManager::new(notes_dir);
-            app.manage(commands::notes::NotesManagerState(Mutex::new(notes_manager)));
+            app.manage(commands::notes::NotesManagerState(Mutex::new(
+                notes_manager,
+            )));
 
             // Initialize password manager
             let password_manager = password::PasswordManager::new();
@@ -435,7 +280,9 @@ pub fn run() {
             let search_index_for_watcher = search_index_arc.clone();
             let db_state_for_watcher = db_state.clone();
             std::thread::spawn(move || {
-                if let Err(e) = search::watcher::init_watcher(search_index_for_watcher, db_state_for_watcher) {
+                if let Err(e) =
+                    search::watcher::init_watcher(search_index_for_watcher, db_state_for_watcher)
+                {
                     log::warn!("Failed to start file watcher: {}", e);
                 }
             });
@@ -490,11 +337,7 @@ pub fn run() {
 
             // 启动陪伴模块（窗口活动采集 + 情境建议 + LLM 习惯分析）
             {
-                let companion_db_path = app
-                    .path()
-                    .app_data_dir()
-                    .unwrap()
-                    .join("custom-tools.db");
+                let companion_db_path = app.path().app_data_dir().unwrap().join("custom-tools.db");
                 let flags = companion::CompanionFlags {
                     enabled: settings.companion_enabled,
                     paused: settings.companion_paused,
@@ -502,8 +345,7 @@ pub fn run() {
                     long_work_minutes: settings.companion_long_work_minutes as i64,
                     agent_enabled: settings.companion_agent_enabled,
                 };
-                let companion_state =
-                    companion::start(app.handle(), companion_db_path, flags);
+                let companion_state = companion::start(app.handle(), companion_db_path, flags);
                 app.manage(companion_state);
             }
 
@@ -511,25 +353,20 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             // Window commands
-            commands::window::get_window_effect,
             commands::window::show_window,
             commands::window::hide_window,
             commands::window::toggle_window,
-            commands::window::center_window,
             commands::window::resize_window,
             commands::clipboard::get_clipboard_history,
             commands::clipboard::toggle_clipboard_favorite,
             commands::clipboard::delete_clipboard_item,
-            commands::clipboard::clear_clipboard_history,
             commands::clipboard::copy_to_clipboard,
             commands::clipboard::copy_text_to_clipboard,
-            commands::clipboard::copy_file_to_clipboard,
             commands::clipboard::paste_to_clipboard_item,
             commands::clipboard::get_clipboard_image_base64,
             commands::clipboard::handle_pasted_file,
             commands::clipboard::read_clipboard_image,
             commands::clipboard::read_image_file_as_base64,
-            commands::notes::init_notes_manager,
             commands::notes::get_notes_directory,
             commands::notes::get_note_tree,
             commands::notes::read_note,
@@ -546,11 +383,7 @@ pub fn run() {
             commands::password::get_password_entries,
             commands::password::create_password_entry,
             commands::password::get_decrypted_password,
-            commands::password::toggle_password_favorite,
             commands::password::delete_password_entry,
-            commands::password::create_password_category,
-            commands::password::delete_password_category,
-            commands::search::index_apps,
             commands::search::search_apps,
             commands::search::refresh_apps,
             commands::search::launch_app,
@@ -560,7 +393,6 @@ pub fn run() {
             // Everything integration
             commands::search::is_everything_available,
             commands::search::search_everything,
-            commands::search::get_everything_version,
             commands::search::install_everything,
             commands::search::open_file,
             commands::settings::get_settings,
@@ -579,22 +411,16 @@ pub fn run() {
             commands::settings::get_custom_scan_dirs,
             commands::settings::set_custom_scan_dirs,
             commands::system::open_external_url,
-            commands::system::save_image_to_downloads,
             commands::system::save_image_to_path,
             // Updater commands
             commands::updater::check_for_update,
             commands::updater::download_and_install_update,
             // Changelog commands
             commands::changelog::add_changelog,
-            commands::changelog::mark_changelog_read,
             commands::changelog::mark_all_changelogs_read,
-            commands::changelog::get_changelogs,
             commands::changelog::check_version_changelog,
             commands::changelog::cleanup_old_changelogs,
-            commands::llm::call_llm,
-            commands::llm::call_llm_by_scene,
             commands::llm::test_llm_connection,
-            commands::llm::call_llm_stream,
             commands::llm::call_llm_stream_by_scene,
             commands::chat::create_chat_session,
             commands::chat::save_chat_message,
@@ -610,7 +436,6 @@ pub fn run() {
             llm_provider::commands::fetch_llm_models,
             llm_provider::commands::activate_llm_model,
             llm_provider::commands::deactivate_llm_model,
-            llm_provider::commands::get_active_llm_models,
             llm_provider::commands::get_scene_configs,
             llm_provider::commands::set_scene_model,
             llm_provider::commands::get_scene_model,
@@ -624,6 +449,8 @@ pub fn run() {
             commands::companion::clear_companion_activities,
             commands::companion::analyze_companion_now,
             commands::companion::run_companion_agent_now,
+            commands::companion::create_companion_intent,
+            commands::companion::get_companion_intents,
             commands::companion::set_companion_enabled,
             commands::companion::set_companion_paused,
             commands::companion::set_companion_retention_days,
@@ -652,7 +479,9 @@ fn setup_window_handlers(app_handle: &tauri::AppHandle) {
                 }
 
                 // Check settings and hide if configured
-                if let Some(settings_state) = app_handle_clone.try_state::<commands::settings::SettingsState>() {
+                if let Some(settings_state) =
+                    app_handle_clone.try_state::<commands::settings::SettingsState>()
+                {
                     if let Ok(manager) = settings_state.0.lock() {
                         if manager.should_hide_on_blur() {
                             if let Some(window) = app_handle_clone.get_webview_window("main") {
@@ -712,7 +541,11 @@ impl PreviousFocusedWindow {
     pub fn get(&self) -> Option<isize> {
         self.hwnd.lock().ok().and_then(|hwnd| {
             let h = *hwnd;
-            if h == 0 { None } else { Some(h) }
+            if h == 0 {
+                None
+            } else {
+                Some(h)
+            }
         })
     }
 }
@@ -766,7 +599,8 @@ pub(crate) fn show_main_window(app_handle: &tauri::AppHandle) {
             let x = monitor_pos.x + (monitor_size.width as i32 - window_width_physical) / 2;
             let y = monitor_pos.y + TOP_PADDING;
 
-            let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
+            let _ =
+                window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
         }
 
         let _ = window.show();
@@ -790,18 +624,22 @@ pub(crate) fn toggle_main_window(app_handle: &tauri::AppHandle) {
 
 /// Send system notification with app icon
 #[cfg(target_os = "windows")]
-fn send_notification_with_icon(
-    app_handle: &tauri::AppHandle,
-    title: &str,
-    body: &str,
-) {
+fn send_notification_with_icon(app_handle: &tauri::AppHandle, title: &str, body: &str) {
     use tauri_plugin_notification::NotificationExt;
 
     // Try multiple possible icon locations
     let icon_paths = [
         // Production build paths
-        app_handle.path().resource_dir().ok().map(|d| d.join("icons\\icon.ico")),
-        app_handle.path().resource_dir().ok().map(|d| d.join("icons\\128x128.png")),
+        app_handle
+            .path()
+            .resource_dir()
+            .ok()
+            .map(|d| d.join("icons\\icon.ico")),
+        app_handle
+            .path()
+            .resource_dir()
+            .ok()
+            .map(|d| d.join("icons\\128x128.png")),
         // Development paths (from src-tauri directory)
         Some(std::path::PathBuf::from("icons\\icon.ico")),
         Some(std::path::PathBuf::from("icons\\128x128.png")),
@@ -830,11 +668,7 @@ fn send_notification_with_icon(
 
 /// Send system notification (non-Windows fallback)
 #[cfg(not(target_os = "windows"))]
-fn send_notification_with_icon(
-    app_handle: &tauri::AppHandle,
-    title: &str,
-    body: &str,
-) {
+fn send_notification_with_icon(app_handle: &tauri::AppHandle, title: &str, body: &str) {
     use tauri_plugin_notification::NotificationExt;
     let _ = app_handle
         .notification()
@@ -859,7 +693,11 @@ async fn check_update_from_tray(app_handle: tauri::AppHandle) {
 
     match updater.check().await {
         Ok(Some(update)) => {
-            log::info!("Update available: {} (current: {})", update.version, app_version);
+            log::info!(
+                "Update available: {} (current: {})",
+                update.version,
+                app_version
+            );
 
             // Cache the update for later install
             if let Some(state) = app_handle.try_state::<commands::updater::PendingUpdate>() {
@@ -886,7 +724,7 @@ async fn check_update_from_tray(app_handle: tauri::AppHandle) {
             send_notification_with_icon(
                 &app_handle,
                 &format!("发现新版本: {}", update.version),
-                body
+                body,
             );
         }
         Ok(None) => {
@@ -894,7 +732,7 @@ async fn check_update_from_tray(app_handle: tauri::AppHandle) {
             send_notification_with_icon(
                 &app_handle,
                 "已是最新版本",
-                &format!("当前版本: {}", app_version)
+                &format!("当前版本: {}", app_version),
             );
         }
         Err(e) => {
@@ -902,7 +740,7 @@ async fn check_update_from_tray(app_handle: tauri::AppHandle) {
             send_notification_with_icon(
                 &app_handle,
                 "检查更新失败",
-                "网络连接错误或更新服务器不可用"
+                "网络连接错误或更新服务器不可用",
             );
         }
     }
@@ -922,7 +760,11 @@ async fn check_update_on_startup(app_handle: tauri::AppHandle) {
 
     match updater.check().await {
         Ok(Some(update)) => {
-            log::info!("Update available on startup: {} (current: {})", update.version, app_version);
+            log::info!(
+                "Update available on startup: {} (current: {})",
+                update.version,
+                app_version
+            );
 
             // Cache the update for later install
             if let Some(state) = app_handle.try_state::<commands::updater::PendingUpdate>() {
@@ -949,7 +791,7 @@ async fn check_update_on_startup(app_handle: tauri::AppHandle) {
             send_notification_with_icon(
                 &app_handle,
                 &format!("发现新版本: {}", update.version),
-                body
+                body,
             );
         }
         Ok(None) => {
@@ -962,7 +804,10 @@ async fn check_update_on_startup(app_handle: tauri::AppHandle) {
 }
 
 /// Remove log files older than the specified number of days.
-fn cleanup_old_logs(logs_dir: &std::path::Path, days: u64) -> Result<(), Box<dyn std::error::Error>> {
+fn cleanup_old_logs(
+    logs_dir: &std::path::Path,
+    days: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
     let retention = std::time::Duration::from_secs(days * 24 * 60 * 60);
     let now = std::time::SystemTime::now();
 
@@ -987,39 +832,52 @@ fn setup_system_tray(app_handle: &tauri::AppHandle) -> Result<(), Box<dyn std::e
 
     // Create menu items
     let settings_item = MenuItem::with_id(app_handle, "settings", "设置", true, None::<&str>)?;
-    let check_update_item = MenuItem::with_id(app_handle, "check_update", "检查更新", true, None::<&str>)?;
+    let check_update_item =
+        MenuItem::with_id(app_handle, "check_update", "检查更新", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app_handle)?;
     let quit_item = MenuItem::with_id(app_handle, "quit", "退出", true, None::<&str>)?;
 
     // Create menu
-    let menu = Menu::with_items(app_handle, &[&settings_item, &separator, &check_update_item, &separator, &quit_item])?;
+    let menu = Menu::with_items(
+        app_handle,
+        &[
+            &settings_item,
+            &separator,
+            &check_update_item,
+            &separator,
+            &quit_item,
+        ],
+    )?;
 
     // Build tray icon
     let _tray = tauri::tray::TrayIconBuilder::new()
         .icon(app_handle.default_window_icon().unwrap().clone())
         .menu(&menu)
-        .on_menu_event(|app, event| {
-            match event.id.as_ref() {
-                "settings" => {
-                    show_main_window(app);
-                    if let Err(e) = app.emit("shortcut:open_module", "settings") {
-                        log::warn!("Failed to emit open settings event: {}", e);
-                    }
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "settings" => {
+                show_main_window(app);
+                if let Err(e) = app.emit("shortcut:open_module", "settings") {
+                    log::warn!("Failed to emit open settings event: {}", e);
                 }
-                "check_update" => {
-                    let app_handle = app.clone();
-                    tauri::async_runtime::spawn(async move {
-                        check_update_from_tray(app_handle).await;
-                    });
-                }
-                "quit" => {
-                    app.exit(0);
-                }
-                _ => {}
             }
+            "check_update" => {
+                let app_handle = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    check_update_from_tray(app_handle).await;
+                });
+            }
+            "quit" => {
+                app.exit(0);
+            }
+            _ => {}
         })
         .on_tray_icon_event(|tray, event| {
-            if let tauri::tray::TrayIconEvent::Click { button, button_state, .. } = event {
+            if let tauri::tray::TrayIconEvent::Click {
+                button,
+                button_state,
+                ..
+            } = event
+            {
                 if button == tauri::tray::MouseButton::Left
                     && button_state == tauri::tray::MouseButtonState::Up
                 {

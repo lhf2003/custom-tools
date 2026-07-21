@@ -1,13 +1,13 @@
 use anyhow::{anyhow, Result};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use lru::LruCache;
+use once_cell::sync::Lazy;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use once_cell::sync::Lazy;
-use lru::LruCache;
 use xxhash_rust::xxh3::xxh3_64;
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
-const ICON_SIZE: i32 = 256;  // 高清图标尺寸
+const ICON_SIZE: i32 = 256; // 高清图标尺寸
 
 const MEMORY_CACHE_SIZE: usize = 100;
 const DISK_CACHE_DAYS: u64 = 7;
@@ -96,7 +96,9 @@ pub fn extract_icon(path: &str) -> Result<Option<String>> {
 
     // 2. 检查内存缓存
     {
-        let mut cache = MEMORY_CACHE.lock().map_err(|e| anyhow!("Lock error: {}", e))?;
+        let mut cache = MEMORY_CACHE
+            .lock()
+            .map_err(|e| anyhow!("Lock error: {}", e))?;
         if let Some(cached) = cache.get(&(path_hash, mod_time)) {
             log::debug!("Icon memory cache hit: {}", path);
             return Ok(Some(cached.clone()));
@@ -108,7 +110,9 @@ pub fn extract_icon(path: &str) -> Result<Option<String>> {
     if let Ok(cached) = read_disk_cache(&cache_key) {
         log::debug!("Icon disk cache hit: {}", path);
         // 回填内存缓存
-        let mut cache = MEMORY_CACHE.lock().map_err(|e| anyhow!("Lock error: {}", e))?;
+        let mut cache = MEMORY_CACHE
+            .lock()
+            .map_err(|e| anyhow!("Lock error: {}", e))?;
         cache.put((path_hash, mod_time), cached.clone());
         return Ok(Some(cached));
     }
@@ -131,7 +135,9 @@ pub fn extract_icon(path: &str) -> Result<Option<String>> {
 
     // 写入内存缓存
     {
-        let mut cache = MEMORY_CACHE.lock().map_err(|e| anyhow!("Lock error: {}", e))?;
+        let mut cache = MEMORY_CACHE
+            .lock()
+            .map_err(|e| anyhow!("Lock error: {}", e))?;
         cache.put((path_hash, mod_time), base64_str.clone());
     }
 
@@ -159,10 +165,12 @@ fn extract_icon_to_png(path: &str) -> Result<Vec<u8>> {
 /// 使用 IShellItemImageFactory 获取 256x256 高清图标
 #[cfg(windows)]
 fn extract_icon_highres(path: &str) -> Result<Vec<u8>> {
-    use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
-    use windows::Win32::UI::Shell::{SHCreateItemFromParsingName, IShellItemImageFactory, SIIGBF_RESIZETOFIT};
-    use windows::Win32::Graphics::Gdi::{HBITMAP, DeleteObject};
     use windows::core::PCWSTR;
+    use windows::Win32::Graphics::Gdi::{DeleteObject, HBITMAP};
+    use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
+    use windows::Win32::UI::Shell::{
+        IShellItemImageFactory, SHCreateItemFromParsingName, SIIGBF_RESIZETOFIT,
+    };
 
     let path_wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
 
@@ -171,10 +179,8 @@ fn extract_icon_highres(path: &str) -> Result<Vec<u8>> {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
 
         // 创建 ShellItem 并获取 IShellItemImageFactory 接口
-        let image_factory: IShellItemImageFactory = SHCreateItemFromParsingName(
-            PCWSTR(path_wide.as_ptr()),
-            None,
-        )?;
+        let image_factory: IShellItemImageFactory =
+            SHCreateItemFromParsingName(PCWSTR(path_wide.as_ptr()), None)?;
 
         // 请求 256x256 图标
         let size = ICON_SIZE;
@@ -196,28 +202,19 @@ fn extract_icon_highres(path: &str) -> Result<Vec<u8>> {
 /// 后备方案：使用 ExtractIconExW 获取图标
 #[cfg(windows)]
 fn extract_icon_fallback(path: &str) -> Result<Vec<u8>> {
+    use windows::core::PCWSTR;
     use windows::Win32::Graphics::Gdi::{
-        CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetDIBits, ReleaseDC,
-        BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, BITMAP,
-        GetObjectW,
+        CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetDIBits, GetObjectW, ReleaseDC,
+        BITMAP, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS,
     };
     use windows::Win32::UI::Shell::ExtractIconExW;
-    use windows::Win32::UI::WindowsAndMessaging::{
-        DestroyIcon, GetIconInfo, HICON, ICONINFO,
-    };
-    use windows::core::PCWSTR;
+    use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, HICON, ICONINFO};
 
     let path_wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
 
     unsafe {
         // 1. 获取图标数量
-        let icon_count = ExtractIconExW(
-            PCWSTR(path_wide.as_ptr()),
-            -1,
-            None,
-            None,
-            0,
-        );
+        let icon_count = ExtractIconExW(PCWSTR(path_wide.as_ptr()), -1, None, None, 0);
 
         if icon_count == 0 {
             return extract_icon_shgetfileinfo(path);
@@ -225,13 +222,7 @@ fn extract_icon_fallback(path: &str) -> Result<Vec<u8>> {
 
         // 2. 提取大图标
         let mut hicon: HICON = HICON(std::ptr::null_mut());
-        let extracted = ExtractIconExW(
-            PCWSTR(path_wide.as_ptr()),
-            0,
-            Some(&mut hicon),
-            None,
-            1,
-        );
+        let extracted = ExtractIconExW(PCWSTR(path_wide.as_ptr()), 0, Some(&mut hicon), None, 1);
 
         if extracted == 0 || hicon.0.is_null() {
             return extract_icon_shgetfileinfo(path);
@@ -320,10 +311,14 @@ fn extract_icon_fallback(path: &str) -> Result<Vec<u8>> {
             width as u32,
             height.unsigned_abs(),
             buffer,
-        ).ok_or_else(|| anyhow!("Failed to create image buffer"))?;
+        )
+        .ok_or_else(|| anyhow!("Failed to create image buffer"))?;
 
         let mut png_data = Vec::new();
-        img.write_to(&mut std::io::Cursor::new(&mut png_data), image::ImageFormat::Png)?;
+        img.write_to(
+            &mut std::io::Cursor::new(&mut png_data),
+            image::ImageFormat::Png,
+        )?;
 
         Ok(png_data)
     }
@@ -333,8 +328,8 @@ fn extract_icon_fallback(path: &str) -> Result<Vec<u8>> {
 #[cfg(windows)]
 fn hbitmap_to_png(hbitmap: windows::Win32::Graphics::Gdi::HBITMAP) -> Result<Vec<u8>> {
     use windows::Win32::Graphics::Gdi::{
-        CreateCompatibleDC, DeleteDC, GetDC, GetDIBits, ReleaseDC,
-        BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, BITMAP, GetObjectW,
+        CreateCompatibleDC, DeleteDC, GetDC, GetDIBits, GetObjectW, ReleaseDC, BITMAP, BITMAPINFO,
+        BITMAPINFOHEADER, DIB_RGB_COLORS,
     };
 
     unsafe {
@@ -394,14 +389,15 @@ fn hbitmap_to_png(hbitmap: windows::Win32::Graphics::Gdi::HBITMAP) -> Result<Vec
         }
 
         // 转为 PNG
-        let img = image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(
-            width as u32,
-            height as u32,
-            buffer,
-        ).ok_or_else(|| anyhow!("Failed to create image buffer"))?;
+        let img =
+            image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(width as u32, height as u32, buffer)
+                .ok_or_else(|| anyhow!("Failed to create image buffer"))?;
 
         let mut png_data = Vec::new();
-        img.write_to(&mut std::io::Cursor::new(&mut png_data), image::ImageFormat::Png)?;
+        img.write_to(
+            &mut std::io::Cursor::new(&mut png_data),
+            image::ImageFormat::Png,
+        )?;
 
         Ok(png_data)
     }
@@ -410,14 +406,16 @@ fn hbitmap_to_png(hbitmap: windows::Win32::Graphics::Gdi::HBITMAP) -> Result<Vec
 /// 后备方案：使用 SHGetFileInfo 提取图标
 #[cfg(windows)]
 fn extract_icon_shgetfileinfo(path: &str) -> Result<Vec<u8>> {
+    use windows::core::PCWSTR;
     use windows::Win32::Graphics::Gdi::{
-        CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetDIBits, ReleaseDC,
-        SelectObject, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS,
+        CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetDIBits, ReleaseDC, SelectObject,
+        BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS,
     };
     use windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES;
     use windows::Win32::UI::Shell::{SHGetFileInfoW, SHGFI_ICON, SHGFI_LARGEICON};
-    use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, DrawIconEx, GetIconInfo, ICONINFO, DI_NORMAL};
-    use windows::core::PCWSTR;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        DestroyIcon, DrawIconEx, GetIconInfo, DI_NORMAL, ICONINFO,
+    };
 
     let path_wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
 
@@ -481,15 +479,7 @@ fn extract_icon_shgetfileinfo(path: &str) -> Result<Vec<u8>> {
 
         // 绘制图标（缩放到 48x48）
         let _ = DrawIconEx(
-            hdc_mem,
-            0,
-            0,
-            hicon,
-            ICON_SIZE,
-            ICON_SIZE,
-            0,
-            None,
-            DI_NORMAL,
+            hdc_mem, 0, 0, hicon, ICON_SIZE, ICON_SIZE, 0, None, DI_NORMAL,
         );
 
         // 提取像素数据
@@ -525,10 +515,14 @@ fn extract_icon_shgetfileinfo(path: &str) -> Result<Vec<u8>> {
             ICON_SIZE as u32,
             ICON_SIZE as u32,
             bitmap_data,
-        ).ok_or_else(|| anyhow!("Failed to create image buffer"))?;
+        )
+        .ok_or_else(|| anyhow!("Failed to create image buffer"))?;
 
         let mut png_data = Vec::new();
-        img.write_to(&mut std::io::Cursor::new(&mut png_data), image::ImageFormat::Png)?;
+        img.write_to(
+            &mut std::io::Cursor::new(&mut png_data),
+            image::ImageFormat::Png,
+        )?;
 
         Ok(png_data)
     }
@@ -570,10 +564,7 @@ pub fn get_cache_stats() -> Result<CacheStats> {
         }
     }
 
-    let memory_count = MEMORY_CACHE
-        .lock()
-        .map(|c| c.len())
-        .unwrap_or(0);
+    let memory_count = MEMORY_CACHE.lock().map(|c| c.len()).unwrap_or(0);
 
     Ok(CacheStats {
         disk_file_count: file_count,

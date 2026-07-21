@@ -1,5 +1,5 @@
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc::channel;
@@ -112,14 +112,16 @@ impl ClipboardManager {
                 let hash = Self::calculate_hash(&text);
 
                 // Check if content already exists (within last hour)
-                let exists: bool = conn.query_row(
-                    "SELECT 1 FROM clipboard_history
+                let exists: bool = conn
+                    .query_row(
+                        "SELECT 1 FROM clipboard_history
                      WHERE content_hash = ?1
                      AND created_at > datetime('now', '-1 hour')
                      LIMIT 1",
-                    [&hash],
-                    |_| Ok(true),
-                ).unwrap_or(false);
+                        [&hash],
+                        |_| Ok(true),
+                    )
+                    .unwrap_or(false);
 
                 if exists {
                     log::debug!("Duplicate clipboard content ignored");
@@ -144,14 +146,16 @@ impl ClipboardManager {
                 let hash = Self::calculate_hash(&data);
 
                 // Check if the same image was already saved recently
-                let exists: bool = conn.query_row(
-                    "SELECT 1 FROM clipboard_history
+                let exists: bool = conn
+                    .query_row(
+                        "SELECT 1 FROM clipboard_history
                      WHERE content_hash = ?1
                      AND created_at > datetime('now', '-1 hour')
                      LIMIT 1",
-                    [&hash],
-                    |_| Ok(true),
-                ).unwrap_or(false);
+                        [&hash],
+                        |_| Ok(true),
+                    )
+                    .unwrap_or(false);
 
                 if exists {
                     log::debug!("Duplicate clipboard image ignored");
@@ -222,7 +226,10 @@ impl ClipboardManager {
     }
 
     /// Cleanup old clipboard items based on settings
-    fn cleanup_old_items(app_handle: &AppHandle, conn: &rusqlite::Connection) -> anyhow::Result<()> {
+    fn cleanup_old_items(
+        app_handle: &AppHandle,
+        conn: &rusqlite::Connection,
+    ) -> anyhow::Result<()> {
         // Get settings
         let keep_days: i32 = if let Some(settings_state) = app_handle.try_state::<SettingsState>() {
             if let Ok(settings) = settings_state.0.lock() {
@@ -235,7 +242,11 @@ impl ClipboardManager {
         };
 
         // Helper function to collect image paths for deletion
-        fn collect_image_paths(conn: &rusqlite::Connection, query: &str, params: &[&dyn rusqlite::ToSql]) -> anyhow::Result<Vec<String>> {
+        fn collect_image_paths(
+            conn: &rusqlite::Connection,
+            query: &str,
+            params: &[&dyn rusqlite::ToSql],
+        ) -> anyhow::Result<Vec<String>> {
             let mut stmt = conn.prepare(query)?;
             let paths: Vec<String> = stmt
                 .query_map(params, |row| row.get(0))?
@@ -257,7 +268,7 @@ impl ClipboardManager {
                  )
                  AND content_type = 'image'
                  AND is_favorite = 0",
-                &[]
+                &[],
             )?;
 
             let deleted = conn.execute(
@@ -296,7 +307,7 @@ impl ClipboardManager {
              WHERE created_at < datetime('now', ?1 || ' days')
              AND content_type = 'image'
              AND is_favorite = 0",
-            &[&keep_days_str as &dyn rusqlite::ToSql]
+            &[&keep_days_str as &dyn rusqlite::ToSql],
         )?;
 
         let deleted = conn.execute(
@@ -307,7 +318,11 @@ impl ClipboardManager {
         )?;
 
         if deleted > 0 {
-            log::info!("Cleaned up {} clipboard items older than {} days", deleted, keep_days);
+            log::info!(
+                "Cleaned up {} clipboard items older than {} days",
+                deleted,
+                keep_days
+            );
         }
 
         // Cleanup image files from age-based deletion
@@ -331,7 +346,7 @@ impl ClipboardManager {
              )
              AND content_type = 'image'
              AND is_favorite = 0",
-            &[]
+            &[],
         )?;
 
         let deleted_max = conn.execute(

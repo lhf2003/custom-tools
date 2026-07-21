@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 
 pub mod shortcuts;
-pub use shortcuts::{ShortcutConfig, ShortcutManager, get_default_shortcuts};
+pub use shortcuts::{get_default_shortcuts, ShortcutConfig, ShortcutManager};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {

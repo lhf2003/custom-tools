@@ -154,6 +154,65 @@ pub async fn run_companion_agent_now(
     .map_err(|e| format!("agent 线程异常: {}", e))?
 }
 
+// ── 意图（「记」）─────────────────────────────────────────────
+
+/// 创建一条用户意图（launcher「记 xxx」入口）。
+/// 原文立即落库（保真），触发器由 LLM 异步解析写回——解析失败不影响原文。
+#[tauri::command]
+pub fn create_companion_intent(
+    db_state: State<DatabaseState>,
+    app_handle: AppHandle,
+    text: String,
+) -> Result<i64, String> {
+    let text = text.trim().to_string();
+    if text.is_empty() {
+        return Err("备忘内容不能为空".to_string());
+    }
+
+    let conn = open_conn(&db_state)?;
+    let now = chrono::Local::now().timestamp();
+    let intent =
+        db::create_intent(&conn, &text, now).map_err(|e| format!("保存备忘失败: {}", e))?;
+    let id = intent.id;
+
+    // 异步解析触发器（不阻塞 launcher 返回）
+    let db_path = db_state.0.clone();
+    tauri::async_runtime::spawn(async move {
+        match analyzer::parse_intent_triggers(&app_handle, &db_path, &text).await {
+            Ok(triggers) => {
+                let has_triggers = triggers.due.is_some()
+                    || triggers.person.is_some()
+                    || !triggers.keywords.is_empty();
+                if has_triggers {
+                    if let Ok(json) = serde_json::to_string(&triggers) {
+                        if let Ok(conn) = Connection::open(&db_path) {
+                            let _ = db::update_intent_triggers(
+                                &conn,
+                                id,
+                                &json,
+                                triggers.due.as_deref(),
+                            );
+                        }
+                    }
+                }
+            }
+            Err(e) => log::warn!("意图 #{} 触发器解析失败（保留原文兜底）: {}", id, e),
+        }
+    });
+
+    Ok(id)
+}
+
+/// 列出用户意图（设置页「我的备忘」）
+#[tauri::command]
+pub fn get_companion_intents(
+    db_state: State<DatabaseState>,
+    limit: Option<i64>,
+) -> Result<Vec<db::Suggestion>, String> {
+    let conn = open_conn(&db_state)?;
+    db::list_intents(&conn, limit.unwrap_or(100)).map_err(|e| format!("查询备忘失败: {}", e))
+}
+
 // ── 开关（持久化 + 运行时镜像同步）─────────────────────────────
 
 macro_rules! companion_flag_command {

@@ -21,7 +21,9 @@ pub fn set_setting(
     value: String,
 ) -> Result<(), String> {
     let manager = state.0.lock().map_err(|e| e.to_string())?;
-    manager.set_setting(&key, &value).map_err(|e| e.to_string())?;
+    manager
+        .set_setting(&key, &value)
+        .map_err(|e| e.to_string())?;
 
     Ok(())
 }
@@ -36,7 +38,11 @@ pub fn toggle_always_on_top(
     let current = manager.is_always_on_top();
     let new_value = !current;
 
-    log::info!("Toggling always_on_top: current={}, new={}", current, new_value);
+    log::info!(
+        "Toggling always_on_top: current={}, new={}",
+        current,
+        new_value
+    );
 
     // Update setting
     manager
@@ -77,7 +83,9 @@ pub fn set_always_on_top(
 
     // Apply to window
     if let Some(window) = app_handle.get_webview_window("main") {
-        window.set_always_on_top(enabled).map_err(|e| e.to_string())?;
+        window
+            .set_always_on_top(enabled)
+            .map_err(|e| e.to_string())?;
     }
 
     Ok(())
@@ -164,7 +172,9 @@ pub fn set_startup_launch(
 
 /// Get all shortcut configurations
 #[tauri::command]
-pub fn get_shortcuts(state: State<'_, ShortcutManagerState>) -> Result<Vec<ShortcutConfig>, String> {
+pub fn get_shortcuts(
+    state: State<'_, ShortcutManagerState>,
+) -> Result<Vec<ShortcutConfig>, String> {
     let manager = state.0.lock().map_err(|e| e.to_string())?;
     Ok(manager.get_all_configs())
 }
@@ -179,7 +189,9 @@ pub fn update_shortcut(
     enabled: bool,
 ) -> Result<(), String> {
     let mut manager = state.0.lock().map_err(|e| e.to_string())?;
-    manager.update_shortcut(&id, custom_keys, enabled).map_err(|e| e.to_string())?;
+    manager
+        .update_shortcut(&id, custom_keys, enabled)
+        .map_err(|e| e.to_string())?;
 
     // Re-register all shortcuts after update
     if let Err(e) = manager.reregister_all(&app_handle) {
@@ -232,7 +244,9 @@ pub fn check_shortcut_conflict(
     exclude_id: Option<String>,
 ) -> Result<Option<ShortcutConfig>, String> {
     let manager = state.0.lock().map_err(|e| e.to_string())?;
-    Ok(manager.check_conflict(&keys, exclude_id.as_deref()).cloned())
+    Ok(manager
+        .check_conflict(&keys, exclude_id.as_deref())
+        .cloned())
 }
 
 /// Toggle auto update setting
