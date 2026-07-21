@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>陪伴 · 常驻数字伙伴 — 功能展示</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    background: #09090b; color: #e4e4e7; line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 48px 24px 80px; }
+
+  /* Hero */
+  .hero { text-align: center; padding: 56px 0 48px; }
+  .hero .badge {
+    display: inline-block; padding: 4px 14px; border-radius: 999px;
+    background: rgba(139, 92, 246, .15); color: #a78bfa; font-size: 13px;
+    border: 1px solid rgba(139, 92, 246, .3); margin-bottom: 20px;
+  }
+  .hero h1 { font-size: 42px; font-weight: 700; letter-spacing: 1px; }
+  .hero h1 .accent {
+    background: linear-gradient(135deg, #a78bfa, #818cf8);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .hero p { margin-top: 14px; color: #a1a1aa; font-size: 17px; }
+  .hero .creed {
+    margin-top: 24px; display: inline-block; padding: 10px 22px;
+    border-radius: 12px; background: rgba(255,255,255,.04);
+    border: 1px solid rgba(255,255,255,.08); color: #d4d4d8; font-size: 14px;
+  }
+
+  section { margin-top: 56px; }
+  h2 {
+    font-size: 22px; font-weight: 600; margin-bottom: 8px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  h2::before { content: ""; width: 4px; height: 22px; border-radius: 2px;
+    background: linear-gradient(180deg, #a78bfa, #6366f1); }
+  .sub { color: #71717a; font-size: 14px; margin-bottom: 20px; }
+
+  /* 卡片网格 */
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .card {
+    background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+    border-radius: 14px; padding: 20px; transition: border-color .2s, transform .2s;
+  }
+  .card:hover { border-color: rgba(139, 92, 246, .4); transform: translateY(-2px); }
+  .card .icon { font-size: 24px; margin-bottom: 10px; }
+  .card h3 { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+  .card p { font-size: 13.5px; color: #a1a1aa; }
+  .card .tag {
+    display: inline-block; margin-top: 10px; padding: 2px 8px; font-size: 11px;
+    border-radius: 6px; background: rgba(139, 92, 246, .12); color: #a78bfa;
+  }
+
+  /* 流程图 */
+  .flow {
+    background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.07);
+    border-radius: 14px; padding: 24px; font-family: Consolas, monospace;
+    font-size: 13px; color: #a1a1aa; white-space: pre; overflow-x: auto; line-height: 1.9;
+  }
+  .flow .hl { color: #a78bfa; font-weight: 600; }
+  .flow .ok { color: #34d399; }
+
+  /* 状态机 */
+  .states { display: flex; align-items: stretch; gap: 0; flex-wrap: wrap; }
+  .state {
+    flex: 1; min-width: 150px; text-align: center; padding: 16px 12px;
+    background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
+  }
+  .state:first-child { border-radius: 12px 0 0 12px; }
+  .state:last-child { border-radius: 0 12px 12px 0; }
+  .state .t { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+  .state .d { font-size: 12px; color: #71717a; }
+  .arrow { align-self: center; padding: 0 8px; color: #6366f1; font-size: 18px; }
+
+  /* 表格 */
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,.07); }
+  th { color: #a78bfa; font-weight: 600; font-size: 12.5px; }
+  td { color: #d4d4d8; }
+  td.ok { color: #34d399; }
+
+  footer { margin-top: 64px; text-align: center; color: #52525b; font-size: 12.5px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Hero -->
+  <div class="hero">
+    <div class="badge">FlowHub · Companion</div>
+    <h1>陪伴 · <span class="accent">常驻数字伙伴</span></h1>
+    <p>想到的那一刻用一句话扔给系统，系统在正确的时间把它还给你。<br>
+       同时它默默学习你的行为链，用「毕业制」逐步获得替你动手的权限。</p>
+    <div class="creed">信条：信噪比 &gt; 智能 · 宁可漏弹，不可错弹 · 被无视 = 死亡</div>
+  </div>
+
+  <!-- 三条能力线 -->
+  <section>
+    <h2>三条能力线</h2>
+    <p class="sub">意图暂存（你说了算的）· 场景联动（系统自己学的）· 记忆层（所有线的燃料）</p>
+    <div class="grid">
+      <div class="card">
+        <div class="icon">📌</div>
+        <h3>意图暂存「记」</h3>
+        <p>Alt+Space 唤起启动器，输入「记 明天在微信与张三对接接口」回车，2 秒完事。原文保真永不动，LLM 只解析触发索引（时间/人/渠道/关键词），在正确的情境把它还给你。</p>
+        <span class="tag">B2 · 已交付</span>
+      </div>
+      <div class="card">
+        <div class="icon">⚡</div>
+        <h3>场景联动 · 毕业制</h3>
+        <p>系统从活动流水学习行为链（开机→微信→飞连→IDEA；15:00×在工作→音乐）。先弹卡请示，被接受 3 次后毕业直接执行，被忽略降频，被拒绝停用。信任用脚投票。</p>
+        <span class="tag">B3 · 已交付</span>
+      </div>
+      <div class="card">
+        <div class="icon">🧠</div>
+        <h3>个人记忆层</h3>
+        <p>每日分析自动沉淀关于你的持久事实（同事称呼、项目、偏好），供日报 agent、意图解析、建议文案消费。设置页可见、可删。</p>
+        <span class="tag">B3 · 已交付</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 架构 -->
+  <section>
+    <h2>运行时架构</h2>
+    <p class="sub">三个后台线程 + 独立 Toast 窗口 + Claude agent 通道，全部数据仅存本机 SQLite</p>
+    <div class="flow">watcher 线程（3s 轮询前台窗口 + AFK 检测）
+        │
+        ▼
+collector ──→ <span class="hl">activity_log</span> ──┬─ 长时工作提醒（90min 冷却 1h）
+        │            ├─ 错误堆栈检测（剪贴板，冷却 30min）
+        │            ├─ ② 关键词触发 / ③ 渠道触发（你的备忘）
+        │            └─ ① 每日首次活动·晨间汇总 Toast
+        ▼
+scheduler ──┬─ 模式匹配（工作套装 / 情境联动 · <span class="hl">毕业制闸门</span>）
+            ├─ 每日 21:00 LLM 分析 → 行为链 + <span class="hl">memory_facts</span>
+            └─ 过期数据清理（保留 N 天可配）
+        ▼
+<span class="hl">suggestions</span>（统一流：系统建议 + 你的备忘）──→ Toast 弹窗（屏幕右下，15s 自隐）
+        ▲
+21:00 日报 agent：claude -p --allowedTools "mcp__companion__*"
+        └─→ MCP server（get_activity_summary / search_clipboard /
+             get_habit_patterns / <span class="hl">get_memory_facts</span> / write_note / create_suggestion）
+             → 日报写入笔记模块 · <span class="ok">实测 $0.45/次</span></div>
+  </section>
+
+  <!-- 毕业制状态机 -->
+  <section>
+    <h2>毕业制：信任是用脚投票投出来的</h2>
+    <p class="sub">不需要你配任何规则——每次点击都是一张选票</p>
+    <div class="states">
+      <div class="state"><div class="t">学习期</div><div class="d">弹卡片请示<br>「要放音乐吗？」</div></div>
+      <div class="arrow">→</div>
+      <div class="state"><div class="t">接受 ×3</div><div class="d">毕业：直接执行<br>+ 事后轻告知</div></div>
+      <div class="arrow">·</div>
+      <div class="state"><div class="t">忽略 ×2</div><div class="d">降频<br>隔天再请示</div></div>
+      <div class="arrow">·</div>
+      <div class="state"><div class="t">拒绝 ×2</div><div class="d">永久停用<br>不再打扰</div></div>
+    </div>
+  </section>
+
+  <!-- 触发通道 -->
+  <section>
+    <h2>意图的三条归还通道</h2>
+    <div class="grid">
+      <div class="card">
+        <div class="icon">🌅</div>
+        <h3>① 晨间汇总</h3>
+        <p>每日首次电脑活动，单张卡片「今天有 N 条备忘」。每天仅一次，可预期不追魂；没有备忘时当天不消耗额度。</p>
+      </div>
+      <div class="card">
+        <div class="icon">🔑</div>
+        <h3>② 关键词触发</h3>
+        <p>前台窗口标题命中解析出的关键词（项目名、「接口文档」），相关备忘自动浮现。同日同条不重复。</p>
+      </div>
+      <div class="card">
+        <div class="icon">💬</div>
+        <h3>③ 渠道触发</h3>
+        <p>声明了渠道（微信/钉钉）的备忘，打开对应 IM 即弹出附话术。现代 IM 主窗口标题不含聊天对象，故按进程而非标题匹配。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 验收标准 -->
+  <section>
+    <h2>验收标准（用一周再评判）</h2>
+    <table>
+      <tr><th>指标</th><th>目标</th><th>说明</th></tr>
+      <tr><td>真实暂存</td><td>≥ 5 条</td><td>「记」成为肌肉记忆才算活</td></tr>
+      <tr><td>②③ 触发命中</td><td>≥ 2 次</td><td>正确的时间还给正确的你</td></tr>
+      <tr><td>误弹</td><td>≤ 1 次</td><td>信噪比是生命线</td></tr>
+      <tr><td>主观标准</td><td class="ok">出差回来对接不再卡壳</td><td>周五的场景不再重演</td></tr>
+      <tr><td>反标准</td><td>开始无视弹窗 = 失败</td><td>立即砍触发频率</td></tr>
+    </table>
+  </section>
+
+  <!-- 隐私 -->
+  <section>
+    <h2>数据边界</h2>
+    <p class="sub">全量采集，仅存本机</p>
+    <div class="grid">
+      <div class="card"><div class="icon">🔒</div><h3>不出本机</h3><p>活动流水、剪贴板、记忆事实全部存于本机 SQLite，无云端同步。LLM 分析走你配置的公司内网模型。</p></div>
+      <div class="card"><div class="icon">⏸️</div><h3>随时暂停</h3><p>设置页一键暂停采集（数据保留），一键清空全部活动记录。保留天数 7/30/90/180 可配，过期自动清理。</p></div>
+      <div class="card"><div class="icon">🧱</div><h3>权限最小化</h3><p>agent 仅能用 5 个 MCP 工具（只读为主），写笔记限定「陪伴日报」目录；自动执行只到「打开应用」，不碰凭证与登录态。</p></div>
+    </div>
+  </section>
+
+  <footer>
+    FlowHub Companion · B1 采集与日报 agent → B2 意图暂存「记」→ B3 场景联动与记忆层<br>
+    需求文档：docs/2026-07-20-CASE-001-陪伴功能需求定义_01.md
+  </footer>
+
+</div>
+</body>
+</html>
