@@ -1,5 +1,5 @@
-import { Search, User } from 'lucide-react';
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { Search, User, PenLine } from 'lucide-react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { parse as parseJsonc, type ParseError } from 'jsonc-parser';
 import { useAppStore } from '@/stores/appStore';
 import { useToastStore } from '@/stores/toastStore';
@@ -71,8 +71,9 @@ export function LauncherView() {
   const buildResults = useCallback((appItems: AppItemData[]): AppItemData[] => {
     if (!searchQuery) return displayedItems;
     const q = searchQuery.toLowerCase();
+    // 单字符查询只做名称匹配：别名在此长度下噪音过大（'a' 会命中 'ai'/'format'/'paste'）
     const filteredTools = BUILT_IN_TOOLS.filter(tool =>
-      tool.name.toLowerCase().includes(q) || tool.aliases?.some(alias => alias.includes(q))
+      tool.name.toLowerCase().includes(q) || (q.length >= 2 && tool.aliases?.some(alias => alias.includes(q)))
     );
     const toolItems: AppItemData[] = filteredTools.map(tool => ({
       name: tool.name,
@@ -83,11 +84,25 @@ export function LauncherView() {
     return [...toolItems, ...appItems];
   }, [searchQuery, displayedItems]);
 
-  const allResults = buildResults(apps);
+  const allResults = useMemo(() => buildResults(apps), [buildResults, apps]);
+
+  // 「记」命令解析：兼容全角空格与连续空格。null = 非备忘模式
+  const noteContent = (() => {
+    const q = searchQuery.trim();
+    if (q === '记') return '';
+    const m = q.match(/^记[\s\u3000]+([\s\S]*)$/);
+    return m ? m[1].trim() : null;
+  })();
+  const isNoteMode = noteContent !== null;
+
   // 键盘导航集合与渲染集合必须一致：折叠态只渲染前 N 条，选中不可越界（防盲启动）
-  const navItems = searchQuery && !isExpanded
-    ? allResults.slice(0, SEARCH_COLLAPSED_COUNT)
-    : allResults;
+  // 备忘模式无结果网格，导航集合为空
+  const navItems = useMemo(() => isNoteMode
+    ? []
+    : searchQuery && !isExpanded
+      ? allResults.slice(0, SEARCH_COLLAPSED_COUNT)
+      : allResults,
+  [isNoteMode, searchQuery, isExpanded, allResults]);
 
   // Reset selection when items change
   useEffect(() => {
@@ -103,6 +118,14 @@ export function LauncherView() {
   }, [navItems.length]);
 
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 方向键导航时间戳：scrollIntoView 会合成 mouseover，短时间内的 hover 选中必须屏蔽
+  const lastKeyboardNavRef = useRef(0);
+
+  // hover 即选中，但方向键导航后的 200ms 内忽略（防 scrollIntoView 合成事件吸回选择）
+  const handleHoverSelect = useCallback((index: number) => {
+    if (Date.now() - lastKeyboardNavRef.current < 200) return;
+    setSelectedIndex(index);
+  }, []);
 
   // Debounce search
   useEffect(() => {
@@ -207,6 +230,11 @@ export function LauncherView() {
       return;
     }
 
+    // 纯文本粘贴：不拦截，放行默认插入行为，让文本进入搜索框
+    const hasFiles = e.clipboardData?.types.includes('Files') ?? false;
+    if (!hasFiles) return;
+
+    // 文件/图片粘贴：拦截默认行为，走后端处理
     e.preventDefault();
 
     try {
@@ -226,12 +254,9 @@ export function LauncherView() {
             }
             break;
           case 'image':
-            console.log('Image saved to clipboard history:', result.path);
+            // 后端已写入剪贴板历史，watcher 会触发界面刷新
             break;
           case 'text':
-            // Text is already handled by clipboard watcher
-            console.log('Text pasted');
-            break;
           case 'none':
             // Backend couldn't read clipboard, try browser API as fallback
             await handleBrowserPaste(e);
@@ -323,53 +348,53 @@ export function LauncherView() {
     switch (e.key) {
       case 'ArrowDown':
         e.preventDefault();
+        lastKeyboardNavRef.current = Date.now();
         setSelectedIndex(prev => Math.min(prev + ITEMS_PER_ROW, maxIndex));
         break;
       case 'ArrowUp':
         e.preventDefault();
+        lastKeyboardNavRef.current = Date.now();
         setSelectedIndex(prev => Math.max(prev - ITEMS_PER_ROW, 0));
         break;
       case 'ArrowRight':
         e.preventDefault();
+        lastKeyboardNavRef.current = Date.now();
         setSelectedIndex(prev => Math.min(prev + 1, maxIndex));
         break;
       case 'ArrowLeft':
         e.preventDefault();
+        lastKeyboardNavRef.current = Date.now();
         setSelectedIndex(prev => Math.max(prev - 1, 0));
         break;
       case 'Enter':
         e.preventDefault();
-        // 「记」前缀：暂存意图备忘，不走搜索
-        {
-          const q = searchQuery.trim();
-          if (q === '记' || q.startsWith('记 ')) {
-            const content = q === '记' ? '' : q.slice(1).trim();
-            if (content) {
-              safeInvoke('create_companion_intent', { text: content })
-                .then(() => {
-                  addToast({
-                    type: 'success',
-                    title: '已记下',
-                    message: content.length > 50 ? `${content.slice(0, 50)}…` : content,
-                  });
-                  setSearchQuery('');
-                })
-                .catch((err: unknown) => {
-                  addToast({
-                    type: 'error',
-                    title: '保存备忘失败',
-                    message: String(err),
-                  });
+        // 「记」命令：暂存意图备忘，不走搜索
+        if (isNoteMode) {
+          if (noteContent) {
+            safeInvoke('create_companion_intent', { text: noteContent })
+              .then(() => {
+                addToast({
+                  type: 'success',
+                  title: '已记下',
+                  message: noteContent.length > 50 ? `${noteContent.slice(0, 50)}…` : noteContent,
                 });
-            } else {
-              addToast({
-                type: 'info',
-                title: '记下备忘',
-                message: '输入「记 + 内容」，如：记 明天下午交周报',
+                setSearchQuery('');
+              })
+              .catch((err: unknown) => {
+                addToast({
+                  type: 'error',
+                  title: '保存备忘失败',
+                  message: String(err),
+                });
               });
-            }
-            return;
+          } else {
+            addToast({
+              type: 'info',
+              title: '记下备忘',
+              message: '输入「记 + 内容」，如：记 明天下午交周报',
+            });
           }
+          return;
         }
         // 防抖窗口内的回车：先冲刷搜索再启动，避免命中陈旧结果
         if (searchQuery && searchTimerRef.current !== null) {
@@ -386,13 +411,12 @@ export function LauncherView() {
         }
         break;
     }
-  }, [searchQuery, navItems, selectedIndex, setActiveView, addToast, setSearchQuery, searchApps, buildResults, handleItemClick]);
+  }, [searchQuery, navItems, selectedIndex, setActiveView, addToast, setSearchQuery, searchApps, buildResults, handleItemClick, isNoteMode, noteContent]);
 
   return (
     <div
       className="w-full h-full flex flex-col rounded-lg overflow-hidden outline-none bg-transparent"
       onKeyDown={handleKeyDown}
-      tabIndex={0}
     >
       {/* Search Bar */}
       <div className="w-full flex items-center px-4 py-3 search-shadow">
@@ -420,7 +444,9 @@ export function LauncherView() {
 
       {/* Main Content */}
       <div className="w-full flex-1 px-4 pb-4 overflow-hidden">
-        {searchQuery ? (
+        {isNoteMode ? (
+          <NoteActionPreview content={noteContent} />
+        ) : searchQuery ? (
           <SearchResults
             query={searchQuery}
             allResults={allResults}
@@ -429,7 +455,7 @@ export function LauncherView() {
             onToggleExpand={() => setIsExpanded(!isExpanded)}
             selectedIndex={selectedIndex}
             onItemClick={handleItemClick}
-            onSelect={setSelectedIndex}
+            onSelect={handleHoverSelect}
             searchError={searchError}
           />
         ) : (
@@ -437,12 +463,14 @@ export function LauncherView() {
             {/* Section Header */}
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-semibold text-app-text-tertiary">最近使用</h2>
-              <button
-                onClick={() => setIsExpanded(!isExpanded)}
-                className="text-xs text-app-text-tertiary cursor-pointer hover:text-app-text-secondary transition-colors"
-              >
-                {isExpanded ? '收缩' : `展开 (${recentItems.length})`}
-              </button>
+              {recentItems.length > ITEMS_PER_ROW && (
+                <button
+                  onClick={() => setIsExpanded(!isExpanded)}
+                  className="text-xs text-app-text-tertiary cursor-pointer hover:text-app-text-secondary transition-colors"
+                >
+                  {isExpanded ? '收缩' : `展开 (${recentItems.length})`}
+                </button>
+              )}
             </div>
 
             {/* App Grid */}
@@ -453,7 +481,7 @@ export function LauncherView() {
                   item={item}
                   isSelected={index === selectedIndex}
                   onClick={() => handleItemClick(item)}
-                  onHover={() => setSelectedIndex(index)}
+                  onHover={() => handleHoverSelect(index)}
                 />
               ))}
             </div>
@@ -527,7 +555,7 @@ function ItemCard({
           </div>
           <span
             title={item.name}
-            className={`line-clamp-2 text-xs w-full text-center group-hover:text-app-text-primary transition-colors leading-tight ${isSelected ? 'text-app-brand-primary-light font-medium' : 'text-app-text-secondary'}`}
+            className={`line-clamp-2 text-xs w-full text-center group-hover:text-app-text-primary transition-colors leading-tight ${isSelected ? 'text-app-brand-primary-light font-medium' : 'text-app-text-tertiary'}`}
           >
             {item.name}
           </span>
@@ -576,7 +604,8 @@ function ItemCard({
       onMouseEnter={onHover}
       role="option"
       aria-selected={isSelected}
-      className={`flex flex-col items-center group py-2 rounded-lg transition-all ${isSelected ? 'bg-white/10' : ''}`}
+      tabIndex={-1}
+      className={`flex flex-col items-center group py-2 rounded-lg transition-colors ${isSelected ? 'bg-white/10' : ''}`}
     >
       <div className="w-8 h-8 rounded-lg bg-app-bg-elevated flex items-center justify-center mb-1.5 group-hover:scale-105 transition-transform">
         <span className="text-app-text-secondary text-xs font-bold">{initial}</span>
@@ -658,6 +687,27 @@ function SearchResults({
             onHover={() => onSelect(index)}
           />
         ))}
+      </div>
+    </section>
+  );
+}
+
+// 「记」命令的动作预览：替代搜索结果区，让命令的反馈不再伪装成"未找到"
+function NoteActionPreview({ content }: { content: string }) {
+  return (
+    <section className="h-full flex flex-col">
+      <div className="flex items-center gap-3 px-3 py-3 rounded-lg bg-white/5">
+        <div className="w-8 h-8 rounded-lg bg-app-bg-elevated flex items-center justify-center flex-shrink-0">
+          <PenLine className="w-4 h-4 text-app-text-secondary" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-app-text-primary truncate">
+            {content ? `回车记下：${content}` : '回车记下一条备忘'}
+          </p>
+          <p className="text-xs text-app-text-tertiary mt-0.5 truncate">
+            {content || '输入「记 + 内容」，如：记 明天下午交周报'}
+          </p>
+        </div>
       </div>
     </section>
   );

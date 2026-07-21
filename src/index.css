@@ -144,7 +144,7 @@
 @layer utilities {
   /* Search bar shadow */
   .search-shadow {
-    box-shadow: var(--app-shadow-lg), 0 0 0 1px var(--app-alpha-white-5);
+    box-shadow: var(--app-shadow-md), 0 0 0 1px var(--app-alpha-white-5);
   }
 
   /* Card shadow for elevated elements */

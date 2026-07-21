@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 
 export interface AppItem {
@@ -7,34 +7,36 @@ export interface AppItem {
   icon?: string;
 }
 
-export interface FileResult {
-  name: string;
-  path: string;
-  size: number;
-  modified: number;
-}
-
 export function useSearch() {
   const [apps, setApps] = useState<AppItem[]>([]);
   const [searchError, setSearchError] = useState<string | null>(null);
+  // 竞态序列号：慢后端时旧响应不得覆盖新结果
+  const searchSeqRef = useRef(0);
 
   // 返回搜索结果：调用方（如回车即时搜索）可绕过防抖直接使用新鲜结果
   const searchApps = useCallback(async (query: string): Promise<AppItem[]> => {
+    const seq = ++searchSeqRef.current;
     try {
       // Check if we're in Tauri environment
       if (typeof window !== 'undefined' && (window as unknown as { __TAURI__?: unknown }).__TAURI__) {
         const results = await invoke<AppItem[]>('search_apps', { query });
-        setApps(results);
-        setSearchError(null);
+        if (seq === searchSeqRef.current) {
+          setApps(results);
+          setSearchError(null);
+        }
         return results;
       }
-      setApps([]);
+      if (seq === searchSeqRef.current) {
+        setApps([]);
+      }
       return [];
     } catch (err) {
       console.error('Failed to search apps:', err);
-      setApps([]);
-      // 暴露错误态：搜索失败不能伪装成"未找到"
-      setSearchError(err instanceof Error ? err.message : String(err));
+      if (seq === searchSeqRef.current) {
+        setApps([]);
+        // 暴露错误态：搜索失败不能伪装成"未找到"
+        setSearchError(err instanceof Error ? err.message : String(err));
+      }
       return [];
     }
   }, []);
@@ -74,11 +76,6 @@ export function useSearch() {
       console.error('Failed to record app usage:', err);
     }
   }, []);
-
-  useEffect(() => {
-    // Initial load
-    searchApps('');
-  }, [searchApps]);
 
   return {
     apps,
