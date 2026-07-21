@@ -47,6 +47,7 @@ const PLACEHOLDER_HINTS = [
   '输入「记 + 内容」快速记下备忘',
   'Ctrl+J 打开 AI 聊天',
   '粘贴 JSON 文本，自动打开格式化',
+  '「记」下的备忘，会在对的时机还给你',
 ];
 
 export function LauncherView() {

@@ -88,6 +88,11 @@ const SUGGESTION_TYPE_LABEL: Record<string, string> = {
   error_analysis: '错误分析',
   long_work_break: '休息提醒',
   work_suite: '工作套装',
+  intent: '备忘',
+  daily_digest: '晨间汇总',
+  agent_insight: 'agent 洞察',
+  context_routine: '情境联动',
+  auto_executed: '自动执行',
 };
 
 const STATUS_LABEL: Record<string, { text: string; color: string }> = {
@@ -357,7 +362,7 @@ export function CompanionSettings() {
         </div>
 
         {/* 使用概览 */}
-        <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+        <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
           <div className="flex items-center gap-2 mb-3">
             <Activity size={16} className="text-white/40" />
             <span className="text-white text-sm font-medium">使用概览</span>
@@ -385,7 +390,7 @@ export function CompanionSettings() {
         </div>
 
         {/* 我的备忘（意图暂存） */}
-        <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+        <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <Pin size={16} className="text-white/40" />
@@ -398,15 +403,15 @@ export function CompanionSettings() {
               还没有备忘。试试：Alt+Space → 输入「记 明天在微信与张三对接接口」→ 回车
             </p>
           ) : (
-            <div className="space-y-1.5">
+            <div className="divide-y divide-white/5">
               {intents.map((it) => {
                 const status = STATUS_LABEL[it.status] ?? STATUS_LABEL.pending;
                 const triggers = parseTriggers(it.trigger_data);
                 return (
                   <div
                     key={it.id}
-                    className={`rounded-lg px-3 py-2 ${
-                      it.status === 'pending' ? 'bg-white/5' : 'bg-white/[0.02] opacity-60'
+                    className={`rounded-lg px-3 py-2 hover:bg-white/5 transition-colors ${
+                      it.status === 'pending' ? '' : 'opacity-60'
                     }`}
                   >
                     <div className="flex items-start gap-2">
@@ -450,7 +455,7 @@ export function CompanionSettings() {
         </div>
 
         {/* 学习到的模式 */}
-        <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+        <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <Brain size={16} className="text-white/40" />
@@ -470,13 +475,13 @@ export function CompanionSettings() {
               还没有学到模式。积累一天数据后，每晚 21 点自动分析，或点「立即分析」。
             </p>
           ) : (
-            <div className="space-y-2">
+            <div className="divide-y divide-white/5">
               {patterns.map((p) => {
                 const status = STATUS_LABEL[p.status] ?? STATUS_LABEL.learning;
                 return (
                   <div
                     key={p.id}
-                    className="flex items-start gap-2 rounded-lg bg-white/5 px-3 py-2"
+                    className="flex items-start gap-2 rounded-lg px-3 py-2 hover:bg-white/5 transition-colors"
                   >
                     <div className="flex-1 min-w-0">
                       <div className="text-white/80 text-xs">{p.description}</div>
@@ -502,7 +507,7 @@ export function CompanionSettings() {
         </div>
 
         {/* 记忆（关于我的事实） */}
-        <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+        <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
           <div className="flex items-center gap-2 mb-3">
             <Sparkles size={16} className="text-white/40" />
             <span className="text-white text-sm font-medium">它记住的你</span>
@@ -511,11 +516,11 @@ export function CompanionSettings() {
           {memoryFacts.length === 0 ? (
             <p className="text-white/30 text-xs">还没有沉淀事实，今晚 21 点分析后可能出现</p>
           ) : (
-            <div className="space-y-1.5">
+            <div className="divide-y divide-white/5">
               {memoryFacts.map((f) => (
                 <div
                   key={f.id}
-                  className="flex items-center gap-2 rounded-lg bg-white/5 px-3 py-2 text-xs"
+                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs hover:bg-white/5 transition-colors"
                 >
                   <span className="text-white/40 shrink-0 w-16">
                     {CATEGORY_LABEL[f.category] ?? CATEGORY_LABEL.general}
@@ -536,7 +541,7 @@ export function CompanionSettings() {
         </div>
 
         {/* 建议历史 */}
-        <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+        <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
           <div className="flex items-center gap-2 mb-3">
             <History size={16} className="text-white/40" />
             <span className="text-white text-sm font-medium">建议历史</span>
@@ -544,13 +549,13 @@ export function CompanionSettings() {
           {suggestions.length === 0 ? (
             <p className="text-white/30 text-xs">还没有收到过建议</p>
           ) : (
-            <div className="space-y-1.5">
+            <div className="divide-y divide-white/5">
               {suggestions.map((s) => {
                 const status = STATUS_LABEL[s.status] ?? STATUS_LABEL.pending;
                 return (
                   <div
                     key={s.id}
-                    className="flex items-center gap-2 text-xs rounded-lg bg-white/5 px-3 py-2"
+                    className="flex items-center gap-2 text-xs rounded-lg px-3 py-2 hover:bg-white/5 transition-colors"
                   >
                     <span className="text-white/40 shrink-0">
                       {SUGGESTION_TYPE_LABEL[s.suggestion_type] ?? s.suggestion_type}

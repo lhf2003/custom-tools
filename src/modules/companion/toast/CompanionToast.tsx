@@ -227,7 +227,7 @@ export default function CompanionToast() {
         {/* 剩余时间细线（替代倒计时数字，降低催促感）；1s 步进靠 CSS 过渡抹平 */}
         <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white/5">
           <div
-            className="h-full bg-white/25 transition-[width] duration-1000 ease-linear motion-reduce:transition-none"
+            className="h-full bg-white/40 transition-[width] duration-1000 ease-linear motion-reduce:transition-none"
             style={{ width: `${(countdown / AUTO_HIDE_SECONDS) * 100}%` }}
           />
         </div>
