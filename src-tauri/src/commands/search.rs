@@ -77,40 +77,38 @@ pub fn record_app_usage(
 
 #[tauri::command]
 pub fn get_recent_apps(
-    limit: usize,
+    limit: Option<usize>,
     db_state: tauri::State<'_, DatabaseState>,
     state: tauri::State<'_, SearchState>,
 ) -> Result<Vec<AppItem>, String> {
     let index = state.0.lock().map_err(|e| e.to_string())?;
     let conn = get_db_conn(&db_state)?;
 
+    // usages 已按 last_launch DESC 排好序，直接按此顺序输出
     let usages = app_usage::get_recently_used(&conn, limit).map_err(|e| e.to_string())?;
 
-    // Map usage records back to AppItems
-    let usage_paths: std::collections::HashSet<&str> =
-        usages.iter().map(|u| u.path.as_str()).collect();
-
-    // Get all apps and filter by usage
-    let all_apps = index.get_all();
-    let mut recent_apps: Vec<AppItem> = all_apps
+    // 索引内应用 path → AppItem，用于过滤已卸载的外部应用
+    let indexed: std::collections::HashMap<String, AppItem> = index
+        .get_all()
         .into_iter()
-        .filter(|app| usage_paths.contains(app.path.as_str()))
+        .map(|app| (app.path.clone(), app))
         .collect();
 
-    // Sort by last_launch time (from usage records)
-    recent_apps.sort_by(|a, b| {
-        let a_time = usages
-            .iter()
-            .find(|u| u.path == a.path)
-            .and_then(|u| u.last_launch)
-            .unwrap_or(0);
-        let b_time = usages
-            .iter()
-            .find(|u| u.path == b.path)
-            .and_then(|u| u.last_launch)
-            .unwrap_or(0);
-        b_time.cmp(&a_time) // Descending
-    });
+    let recent_apps: Vec<AppItem> = usages
+        .into_iter()
+        .filter_map(|u| {
+            // 内置工具不在应用索引中，直接放行（不存在"已卸载"）
+            if u.path.starts_with("builtin://") {
+                return Some(AppItem {
+                    name: u.name,
+                    path: u.path,
+                    icon: None,
+                    pinyin_initials: String::new(),
+                });
+            }
+            indexed.get(&u.path).cloned()
+        })
+        .collect();
 
     Ok(recent_apps)
 }

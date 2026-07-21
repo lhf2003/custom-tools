@@ -59,17 +59,27 @@ pub fn get_usage(conn: &Connection, path: &str) -> Result<Option<AppUsage>> {
     }
 }
 
-/// Get top N recently used apps (sorted by last_launch desc)
-pub fn get_recently_used(conn: &Connection, limit: usize) -> Result<Vec<AppUsage>> {
-    let mut stmt = conn.prepare(
-        "SELECT path, name, launch_count, last_launch, search_count
-         FROM app_usage
-         WHERE last_launch IS NOT NULL
-         ORDER BY last_launch DESC
-         LIMIT ?1",
-    )?;
+/// Get recently used apps (sorted by last_launch desc), `None` limit means no cap
+pub fn get_recently_used(conn: &Connection, limit: Option<usize>) -> Result<Vec<AppUsage>> {
+    let sql = match limit {
+        Some(_) => {
+            "SELECT path, name, launch_count, last_launch, search_count
+             FROM app_usage
+             WHERE last_launch IS NOT NULL
+             ORDER BY last_launch DESC
+             LIMIT ?1"
+        }
+        None => {
+            "SELECT path, name, launch_count, last_launch, search_count
+             FROM app_usage
+             WHERE last_launch IS NOT NULL
+             ORDER BY last_launch DESC"
+        }
+    };
 
-    let usages = stmt.query_map([limit], |row| {
+    let mut stmt = conn.prepare(sql)?;
+
+    let map_row = |row: &rusqlite::Row| {
         Ok(AppUsage {
             path: row.get(0)?,
             name: row.get(1)?,
@@ -77,7 +87,12 @@ pub fn get_recently_used(conn: &Connection, limit: usize) -> Result<Vec<AppUsage
             last_launch: row.get(3)?,
             search_count: row.get(4)?,
         })
-    })?;
+    };
+
+    let usages = match limit {
+        Some(l) => stmt.query_map([l], map_row)?,
+        None => stmt.query_map([], map_row)?,
+    };
 
     usages.collect::<Result<Vec<_>, _>>()
 }
