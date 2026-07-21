@@ -24,7 +24,8 @@ import { CSS } from '@dnd-kit/utilities';
 import { GripVertical, ChevronRight, ChevronDown, Folder, FileText } from 'lucide-react';
 import { Tooltip } from '@/components/Tooltip';
 import type { NoteItemData } from '../types';
-import { ContextMenu, MenuIcons, type MenuItem } from './ContextMenu';
+import { ContextMenu, type MenuItem } from './ContextMenu';
+import { MenuIcons } from './menuIcons';
 
 interface TreeItemProps {
   item: NoteItemData;
@@ -32,10 +33,6 @@ interface TreeItemProps {
   expandedFolders: Set<string>;
   onSelect: (id: string) => void;
   onToggle: (id: string) => void;
-  onCreate: (parent: string) => void;
-  onRename: (item: NoteItemData) => void;
-  onDelete: (item: NoteItemData) => void;
-  onRevealInExplorer: (item: NoteItemData) => void;
   level: number;
 }
 
@@ -45,10 +42,6 @@ function SortableTreeItem({
   expandedFolders,
   onSelect,
   onToggle,
-  onCreate,
-  onRename,
-  onDelete,
-  onRevealInExplorer,
   level,
   onContextMenu,
 }: TreeItemProps & { onContextMenu: (e: React.MouseEvent, item: NoteItemData) => void }) {
@@ -453,10 +446,6 @@ export function SortableNoteTree({
               expandedFolders={expandedFolders}
               onSelect={onSelect}
               onToggle={onToggle}
-              onCreate={onCreate}
-              onRename={onRename}
-              onDelete={onDelete}
-              onRevealInExplorer={onRevealInExplorer || (() => {})}
               level={level}
               onContextMenu={handleItemContextMenu}
             />

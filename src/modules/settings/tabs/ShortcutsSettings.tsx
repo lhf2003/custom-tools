@@ -111,7 +111,6 @@ function ShortcutItem({
   onClearConflict,
 }: ShortcutItemProps) {
   const { updateShortcut, resetShortcut, checkShortcutConflict } = useSettingsStore();
-  const [tempKeys, setTempKeys] = useState(effectiveKeys);
 
   const handleReset = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -146,8 +145,6 @@ function ShortcutItem({
             <p className="text-white/40 text-xs mt-0.5">{config.description}</p>
           </div>
           <KeyRecorder
-            value={tempKeys}
-            onChange={setTempKeys}
             onSave={handleSave}
             onCancel={onCancel}
           />

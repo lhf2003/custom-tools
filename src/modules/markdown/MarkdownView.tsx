@@ -4,7 +4,7 @@ import { Tooltip } from '@/components/Tooltip';
 import { save } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
-import type { NoteItemData, NoteContentData, CreateNoteRequest } from './types';
+import type { NoteItemData, CreateNoteRequest } from './types';
 import { useNotes } from './hooks/useNotes';
 import { Modal, EmptyState, SortableNoteTree, ErrorBoundary, VditorEditor, ContextMenu, MenuIcons } from './components';
 import { exportNoteAsImage } from './utils/export';
@@ -31,7 +31,6 @@ export function MarkdownView() {
     error,
     setError,
     expandedFolders,
-    setExpandedFolders,
     loadNoteTree,
     toggleFolder,
   } = useNotes();
@@ -229,11 +228,12 @@ export function MarkdownView() {
   };
 
   // Sync editing title when note changes
+  const noteName = noteContent?.name;
   useEffect(() => {
-    if (noteContent) {
-      setEditingTitle(noteContent.name.replace(/\.md$/, ''));
+    if (noteName) {
+      setEditingTitle(noteName.replace(/\.md$/, ''));
     }
-  }, [noteContent?.name]);
+  }, [noteName]);
 
   const openRenameModal = (item: NoteItemData) => {
     setRenameItem(item);

@@ -17,7 +17,7 @@ function formatKey(key: string): string {
   return mapped.charAt(0).toUpperCase() + mapped.slice(1);
 }
 
-export function buildCombo(e: React.KeyboardEvent): string {
+function buildCombo(e: React.KeyboardEvent): string {
   const parts: string[] = [];
   if (e.ctrlKey) parts.push('Ctrl');
   if (e.shiftKey) parts.push('Shift');
@@ -32,13 +32,11 @@ export function buildCombo(e: React.KeyboardEvent): string {
 }
 
 interface KeyRecorderProps {
-  value: string;
-  onChange: (keys: string) => void;
   onSave: (keys: string) => void;
   onCancel: () => void;
 }
 
-export function KeyRecorder({ value, onChange, onSave, onCancel }: KeyRecorderProps) {
+export function KeyRecorder({ onSave, onCancel }: KeyRecorderProps) {
   const [currentCombo, setCurrentCombo] = useState<string>('');
   const containerRef = useRef<HTMLDivElement>(null);
 

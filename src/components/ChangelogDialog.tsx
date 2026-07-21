@@ -77,7 +77,7 @@ export function ChangelogDialog({ isOpen, onClose, initialData }: ChangelogDialo
     return content
       .replace(/^## (.*$)/gim, '<h2 class="text-lg font-semibold text-zinc-200 mt-4 mb-2">$1</h2>')
       .replace(/^### (.*$)/gim, '<h3 class="text-base font-medium text-zinc-300 mt-3 mb-1">$1</h3>')
-      .replace(/^\- (.*$)/gim, '<li class="text-zinc-400 ml-4 mb-1">$1</li>')
+      .replace(/^- (.*$)/gim, '<li class="text-zinc-400 ml-4 mb-1">$1</li>')
       .replace(/^\* (.*$)/gim, '<li class="text-zinc-400 ml-4 mb-1">$1</li>')
       .replace(/\*\*(.*?)\*\*/g, '<strong class="text-zinc-200">$1</strong>')
       .replace(/\*(.*?)\*/g, '<em class="text-zinc-300">$1</em>')

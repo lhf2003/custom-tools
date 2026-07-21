@@ -164,10 +164,9 @@ export function EverythingView() {
   const [files, setFiles] = useState<FileResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [everythingStatus, setEverythingStatus] = useState<EverythingStatus>(null);
-  const [error, setError] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<FileCategory>('all');
   const [selectedFile, setSelectedFile] = useState<FileResult | null>(null);
-  const [sortBy, setSortBy] = useState<'modified' | 'size' | 'name'>('modified');
+  const [sortBy] = useState<'modified' | 'size' | 'name'>('modified');
   const [sortDesc, setSortDesc] = useState(true);
   const [isOpenFolderHovered, setIsOpenFolderHovered] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -204,7 +203,6 @@ export function EverythingView() {
     }
 
     setIsLoading(true);
-    setError(null);
 
     try {
       // Build query with category filter
@@ -235,7 +233,6 @@ export function EverythingView() {
       setSelectedFile(results?.[0] || null);
     } catch (err) {
       console.error('Search failed:', err);
-      setError('搜索失败');
       setFiles([]);
       setSelectedFile(null);
     } finally {
@@ -350,15 +347,6 @@ export function EverythingView() {
     }
 
     return <FileText className="w-10 h-10 text-zinc-400" />;
-  };
-
-  // Get file type name
-  const getFileTypeName = (filename: string): string => {
-    const ext = filename.split('.').pop()?.toLowerCase() || '';
-    for (const cat of categories) {
-      if (cat.ext.includes(ext)) return cat.name + '文件';
-    }
-    return ext.toUpperCase() + ' 文件';
   };
 
   if (everythingStatus === null) {

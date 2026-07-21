@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Command, Settings, Palette, Keyboard, Search, Bot, BookOpen, History, Info, Sparkles } from 'lucide-react';
+import { Command, Settings, Palette, Search, Bot, BookOpen, History, Info, Sparkles } from 'lucide-react';
 import { immediateResize } from '@/utils/tauri';
 import { THEME } from '@/constants/theme';
 import { WINDOW_SIZE } from '@/constants/window';

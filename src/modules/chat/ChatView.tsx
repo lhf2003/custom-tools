@@ -285,7 +285,7 @@ export function ChatView() {
       setIsLoading(false);
       setError(typeof err === 'string' ? err : '发送失败，请检查 AI 模型设置');
     }
-  }, [input, isLoading, messages, mode]);
+  }, [input, isLoading, messages, mode, sceneConfigs]);
 
   // ── Cycle mode ────────────────────────────────────────────────────
   const cycleMode = useCallback(() => {

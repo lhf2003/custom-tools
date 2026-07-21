@@ -270,7 +270,7 @@ export function LauncherView() {
     }
   };
 
-  const handleItemClick = async (item: AppItemData) => {
+  const handleItemClick = useCallback(async (item: AppItemData) => {
     // Optimistic update: move item to first position of recent list
     const promoteToRecent = () => {
       setRecentItems(prev => [item, ...prev.filter(i => i.path !== item.path)]);
@@ -306,7 +306,7 @@ export function LauncherView() {
     } catch (err) {
       console.error('Failed to hide window:', err);
     }
-  };
+  }, [setActiveView, recordAppUsage, launchApp, addToast]);
 
   // Handle keyboard navigation
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -386,7 +386,7 @@ export function LauncherView() {
         }
         break;
     }
-  }, [searchQuery, navItems, selectedIndex, setActiveView, addToast, setSearchQuery, searchApps, buildResults]);
+  }, [searchQuery, navItems, selectedIndex, setActiveView, addToast, setSearchQuery, searchApps, buildResults, handleItemClick]);
 
   return (
     <div
@@ -477,7 +477,8 @@ function ItemCard({
   onHover?: () => void;
 }) {
   const [iconData, setIconData] = useState<string | null>(null);
-  const [isLoadingIcon, setIsLoadingIcon] = useState(false);
+  // 一次性守卫：每个卡片实例只尝试提取一次图标（null 结果不重试）
+  const iconRequestedRef = useRef(false);
   const cardRef = useRef<HTMLButtonElement>(null);
 
   // 键盘选中项滚动跟随，保证 Enter 作用的对象始终可见
@@ -489,10 +490,10 @@ function ItemCard({
 
   // Load icon for external apps
   useEffect(() => {
-    if (item.isBuiltIn || iconData || isLoadingIcon) return;
+    if (item.isBuiltIn || iconRequestedRef.current) return;
+    iconRequestedRef.current = true;
 
     const loadIcon = async () => {
-      setIsLoadingIcon(true);
       try {
         const result = await safeInvoke('extract_app_icon', { path: item.path }) as string | null;
         if (result) {
@@ -500,8 +501,6 @@ function ItemCard({
         }
       } catch (err) {
         console.error('Failed to load icon for', item.name, err);
-      } finally {
-        setIsLoadingIcon(false);
       }
     };
 

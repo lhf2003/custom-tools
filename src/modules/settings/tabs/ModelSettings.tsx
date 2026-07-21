@@ -233,24 +233,6 @@ const SCENE_LABELS: Record<Scene, { label: string; icon: typeof MessageSquare; d
   translate: { label: '翻译', icon: Languages, description: '翻译场景' },
 };
 
-// Provider type badge color
-const getProviderTypeColor = (type: ProviderType) => {
-  switch (type) {
-    case 'openai':
-      return 'bg-green-500/20 text-green-400 border-green-500/30';
-    case 'deepseek':
-      return 'bg-blue-500/20 text-blue-400 border-blue-500/30';
-    case 'bailian':
-      return 'bg-orange-500/20 text-orange-400 border-orange-500/30';
-    case 'ollama':
-      return 'bg-purple-500/20 text-purple-400 border-purple-500/30';
-    case 'custom':
-      return 'bg-gray-500/20 text-gray-400 border-gray-500/30';
-    default:
-      return 'bg-gray-500/20 text-gray-400 border-gray-500/30';
-  }
-};
-
 // Connection status badge
 const getConnectionStatusBadge = (status: string) => {
   switch (status) {
@@ -277,7 +259,6 @@ export function ModelSettings() {
     deleteProvider,
     testProviderConnection,
     refreshProviderModels,
-    setProviderActive,
     loadModels,
     setModelActive,
     loadSceneConfigs,
@@ -318,7 +299,7 @@ export function ModelSettings() {
       }
     };
     initData();
-  }, []);
+  }, [loadProviders, loadSceneConfigs]);
 
   // Load models when expanding a provider
   const handleToggleExpand = async (providerId: number) => {

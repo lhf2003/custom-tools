@@ -25,6 +25,14 @@ interface TypeMeta {
   acceptLabel: string;
 }
 
+/** 常规建议的统一色彩：Signal Indigo Light（#818cf8，深色表面实测 5.0:1）。
+ *  颜色只承载语义——常规=Indigo、错误=status-error、已毕业执行=status-success；
+ *  类型区分交还给图标，不再用色相当装饰 */
+const REGULAR_META = {
+  iconColor: 'text-indigo-400',
+  iconBg: 'bg-indigo-500/15',
+} as const;
+
 const TYPE_META: Record<string, TypeMeta> = {
   error_analysis: {
     icon: AlertTriangle,
@@ -34,38 +42,32 @@ const TYPE_META: Record<string, TypeMeta> = {
   },
   long_work_break: {
     icon: Coffee,
-    iconColor: 'text-emerald-400',
-    iconBg: 'bg-emerald-500/15',
+    ...REGULAR_META,
     acceptLabel: '好的',
   },
   work_suite: {
     icon: Rocket,
-    iconColor: 'text-blue-400',
-    iconBg: 'bg-blue-500/15',
+    ...REGULAR_META,
     acceptLabel: '一键启动',
   },
   intent: {
     icon: Pin,
-    iconColor: 'text-violet-400',
-    iconBg: 'bg-violet-500/15',
+    ...REGULAR_META,
     acceptLabel: '完成',
   },
   daily_digest: {
     icon: Sunrise,
-    iconColor: 'text-amber-400',
-    iconBg: 'bg-amber-500/15',
+    ...REGULAR_META,
     acceptLabel: '知道了',
   },
   agent_insight: {
     icon: Sparkles,
-    iconColor: 'text-violet-400',
-    iconBg: 'bg-violet-500/15',
+    ...REGULAR_META,
     acceptLabel: '知道了',
   },
   context_routine: {
     icon: Music,
-    iconColor: 'text-pink-400',
-    iconBg: 'bg-pink-500/15',
+    ...REGULAR_META,
     acceptLabel: '打开',
   },
   auto_executed: {
@@ -78,8 +80,7 @@ const TYPE_META: Record<string, TypeMeta> = {
 
 const DEFAULT_META: TypeMeta = {
   icon: Sparkles,
-  iconColor: 'text-violet-400',
-  iconBg: 'bg-violet-500/15',
+  ...REGULAR_META,
   acceptLabel: '知道了',
 };
 

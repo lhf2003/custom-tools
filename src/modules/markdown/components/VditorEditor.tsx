@@ -21,11 +21,17 @@ export const VditorEditor = forwardRef<VditorEditorRef, VditorEditorProps>(
     const isUpdatingRef = useRef(false);
     const [error, setError] = useState<string | null>(null);
     const valueRef = useRef(value);
+    const onChangeRef = useRef(onChange);
+    const onReadyRef = useRef(onReady);
+    const placeholderRef = useRef(placeholder);
 
-    // 保持 value 引用最新
+    // 保持回调与 value 引用最新（初始化 effect 只运行一次，经 ref 读取最新值）
     useEffect(() => {
       valueRef.current = value;
-    }, [value]);
+      onChangeRef.current = onChange;
+      onReadyRef.current = onReady;
+      placeholderRef.current = placeholder;
+    }, [value, onChange, onReady, placeholder]);
 
     // 暴露获取预览 HTML 的方法给父组件
     useImperativeHandle(ref, () => ({
@@ -87,8 +93,8 @@ export const VditorEditor = forwardRef<VditorEditorRef, VditorEditorProps>(
       try {
         const vditor = new Vditor(containerRef.current, {
           mode: 'ir',
-          value,
-          placeholder,
+          value: valueRef.current,
+          placeholder: placeholderRef.current,
           theme: 'dark',
           height: '100%',
           minHeight: 300,
@@ -132,11 +138,11 @@ export const VditorEditor = forwardRef<VditorEditorRef, VditorEditorProps>(
             if (valueRef.current) {
               vditor.setValue(valueRef.current);
             }
-            onReady?.();
+            onReadyRef.current?.();
           },
           input: (text: string) => {
             isUpdatingRef.current = true;
-            onChange(text);
+            onChangeRef.current(text);
             requestAnimationFrame(() => {
               isUpdatingRef.current = false;
             });

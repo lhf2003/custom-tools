@@ -8,14 +8,12 @@ import {
   FileText,
   Image,
   Folder,
-  ExternalLink,
   X,
   Filter,
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
-import { convertFileSrc } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Tooltip } from '@/components/Tooltip';
 import { THEME } from '../../constants/theme';
@@ -151,7 +149,7 @@ export function ClipboardView() {
 
   useEffect(() => {
     fetchClipboardHistory(false);
-  }, [activeTab, searchQuery]);
+  }, [fetchClipboardHistory]);
 
   // Listen for clipboard updates from backend
   useEffect(() => {
@@ -197,7 +195,7 @@ export function ClipboardView() {
     }
   };
 
-  const handleCopyToClipboard = async (id: number) => {
+  const handleCopyToClipboard = useCallback(async (id: number) => {
     try {
       await invoke('copy_to_clipboard', { id });
       // 刷新列表以显示更新后的排序
@@ -207,7 +205,7 @@ export function ClipboardView() {
       console.error('Failed to copy to clipboard:', err);
       setError(`复制失败: ${message}`);
     }
-  };
+  }, [fetchClipboardHistory]);
 
   const handleCopyPartialText = async (text: string) => {
     try {
@@ -705,14 +703,13 @@ const ClipboardItem = forwardRef<HTMLDivElement, ClipboardItemProps>(function Cl
   };
 
   const config = getTypeConfig(item.content_type, item.content);
-  const TypeIcon = config.icon;
 
   // Check if this is an image (either image type or image file)
   const isImage = item.content_type === 'image' ||
     (item.content_type === 'file' && isImageFile(item.content));
 
   // Handle click: only select the item
-  const handleClick = (e: React.MouseEvent) => {
+  const handleClick = () => {
     // Check if user has selected text - if so, don't interfere
     const selection = window.getSelection();
     if (selection && selection.toString().trim().length > 0) {

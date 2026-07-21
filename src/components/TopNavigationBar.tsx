@@ -7,16 +7,12 @@ import type { MenuItem } from '@/types';
 interface TopNavigationBarProps {
   title: string;
   menuItems: MenuItem[];
-  alwaysOnTop?: boolean;
-  onToggleAlwaysOnTop?: () => void;
   onBack: () => void;
 }
 
 export function TopNavigationBar({
                                    title,
                                    menuItems,
-                                   alwaysOnTop,
-                                   onToggleAlwaysOnTop,
                                    onBack,
                                  }: TopNavigationBarProps) {
   return (

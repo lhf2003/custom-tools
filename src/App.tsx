@@ -261,7 +261,7 @@ function App() {
       },
     };
     return configs;
-  }, [always_on_top, commonMenuItems, handleToggleAlwaysOnTop, setActiveView, handleClearClipboard, handleExportClipboard, handleResetSettings]);
+  }, [always_on_top, commonMenuItems, handleToggleAlwaysOnTop, handleClearClipboard, handleExportClipboard, handleResetSettings]);
 
   // Load settings on mount
   useEffect(() => {
@@ -308,7 +308,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [toggleWindow, activeView]);
+  }, [toggleWindow, activeView, setActiveView]);
 
   // Listen for global shortcut events from backend
   useEffect(() => {
@@ -401,8 +401,6 @@ function App() {
             <TopNavigationBar
               title={currentConfig?.title || ''}
               menuItems={currentConfig?.menuItems || []}
-              alwaysOnTop={always_on_top}
-              onToggleAlwaysOnTop={toggleAlwaysOnTop}
               onBack={handleBack}
             />
           </div>

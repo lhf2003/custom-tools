@@ -1,5 +1,4 @@
 import { useEffect, useRef } from 'react';
-import { FolderPlus, FilePlus, Edit3, Trash2, FolderOpen } from 'lucide-react';
 import { THEME } from '@/constants/theme';
 
 export interface MenuItem {
@@ -140,12 +139,3 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
     </div>
   );
 }
-
-// Predefined menu item icons
-export const MenuIcons = {
-  newNote: <FilePlus size={14} />,
-  newFolder: <FolderPlus size={14} />,
-  rename: <Edit3 size={14} />,
-  delete: <Trash2 size={14} />,
-  openLocation: <FolderOpen size={14} />,
-};
