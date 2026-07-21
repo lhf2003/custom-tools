@@ -176,7 +176,7 @@ export default function CompanionToast() {
 
   return (
     <div className="w-full h-full flex items-stretch justify-stretch bg-transparent">
-      <div className="flex-1 m-1 rounded-xl border border-white/10 bg-zinc-900/95 backdrop-blur-md shadow-2xl overflow-hidden flex flex-col">
+      <div className="relative flex-1 m-1 rounded-xl border border-white/10 bg-zinc-900/95 backdrop-blur-md shadow-2xl overflow-hidden flex flex-col">
         {/* 标题栏（可拖动） */}
         <div
           data-tauri-drag-region
@@ -188,7 +188,6 @@ export default function CompanionToast() {
           <div data-tauri-drag-region className="flex-1 text-white text-sm font-medium truncate">
             {suggestion.title}
           </div>
-          <div className="text-white/30 text-xs tabular-nums shrink-0">{countdown}s</div>
           <button
             onClick={handleDismiss}
             className="text-white/40 hover:text-white/80 transition-colors cursor-pointer shrink-0"
@@ -223,6 +222,14 @@ export default function CompanionToast() {
           >
             {acting ? '执行中…' : meta.acceptLabel}
           </button>
+        </div>
+
+        {/* 剩余时间细线（替代倒计时数字，降低催促感）；1s 步进靠 CSS 过渡抹平 */}
+        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white/5">
+          <div
+            className="h-full bg-white/25 transition-[width] duration-1000 ease-linear motion-reduce:transition-none"
+            style={{ width: `${(countdown / AUTO_HIDE_SECONDS) * 100}%` }}
+          />
         </div>
       </div>
     </div>

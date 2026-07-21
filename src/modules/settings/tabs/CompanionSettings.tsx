@@ -337,15 +337,30 @@ export function CompanionSettings() {
         >
           <div className="flex items-center gap-2">
             <Bot size={16} className="text-white/30" />
+            {companion_agent_enabled && (
+              <button
+                onClick={handleRunAgent}
+                disabled={agentRunning || !companion_enabled}
+                className="px-2.5 py-1.5 rounded-lg bg-blue-500/20 text-blue-300 text-xs border border-blue-500/30 hover:bg-blue-500/30 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {agentRunning ? '生成中…' : '立即生成日报'}
+              </button>
+            )}
             <Toggle enabled={companion_agent_enabled} onToggle={setCompanionAgentEnabled} />
           </div>
         </SettingCard>
 
-        {/* 今日概览 */}
+        {/* 分组：今日 */}
+        <div className="flex items-center gap-2 pt-3">
+          <span className="text-white/40 text-xs font-medium">今日</span>
+          <div className="flex-1 h-px bg-white/5" />
+        </div>
+
+        {/* 使用概览 */}
         <div className="rounded-xl border border-white/10 bg-white/5 p-4">
           <div className="flex items-center gap-2 mb-3">
-            <Activity size={16} className="text-violet-400" />
-            <span className="text-white text-sm font-medium">今日使用概览</span>
+            <Activity size={16} className="text-white/40" />
+            <span className="text-white text-sm font-medium">使用概览</span>
           </div>
           {todaySummary.length === 0 ? (
             <p className="text-white/30 text-xs">今天还没有采集到数据</p>
@@ -356,7 +371,7 @@ export function CompanionSettings() {
                   <span className="text-white/60 w-32 truncate">{proc}</span>
                   <div className="flex-1 h-1.5 rounded-full bg-white/10 overflow-hidden">
                     <div
-                      className="h-full rounded-full bg-violet-500/70"
+                      className="h-full rounded-full bg-app-brand-primary/70"
                       style={{ width: `${Math.max(2, (secs / maxTotal) * 100)}%` }}
                     />
                   </div>
@@ -369,109 +384,11 @@ export function CompanionSettings() {
           )}
         </div>
 
-        {/* 学习到的模式 */}
-        <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <Brain size={16} className="text-violet-400" />
-              <span className="text-white text-sm font-medium">学到的习惯模式</span>
-            </div>
-            <div className="flex items-center gap-2">
-              {companion_agent_enabled && (
-                <button
-                  onClick={handleRunAgent}
-                  disabled={agentRunning || !companion_enabled}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-500/20 text-blue-300 text-xs border border-blue-500/30 hover:bg-blue-500/30 transition-colors cursor-pointer disabled:opacity-50"
-                >
-                  <Bot size={12} className={agentRunning ? 'animate-pulse' : ''} />
-                  {agentRunning ? 'agent 运行中…' : '立即生成日报'}
-                </button>
-              )}
-              <button
-                onClick={handleAnalyzeNow}
-                disabled={analyzing || !companion_enabled}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-500/20 text-violet-300 text-xs border border-violet-500/30 hover:bg-violet-500/30 transition-colors cursor-pointer disabled:opacity-50"
-              >
-                <RefreshCw size={12} className={analyzing ? 'animate-spin' : ''} />
-                {analyzing ? '分析中…' : '立即分析'}
-              </button>
-            </div>
-          </div>
-          {patterns.length === 0 ? (
-            <p className="text-white/30 text-xs">
-              还没有学到模式。积累一天数据后，每晚 21 点自动分析，或点「立即分析」。
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {patterns.map((p) => {
-                const status = STATUS_LABEL[p.status] ?? STATUS_LABEL.learning;
-                return (
-                  <div
-                    key={p.id}
-                    className="flex items-start gap-2 rounded-lg bg-white/5 px-3 py-2"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="text-white/80 text-xs">{p.description}</div>
-                      <div className="text-white/30 text-xs mt-1">
-                        置信度 {Math.round(p.confidence * 100)}% · 观察到 {p.occurrences} 次 ·{' '}
-                        <span className={status.color}>{status.text}</span>
-                      </div>
-                    </div>
-                    {p.status !== 'dismissed' && (
-                      <button
-                        onClick={() => handleDismissPattern(p.id)}
-                        className="text-white/30 hover:text-red-400 transition-colors cursor-pointer shrink-0"
-                        title="不再使用此模式"
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* 记忆（关于我的事实） */}
-        <div className="rounded-xl border border-white/10 bg-white/5 p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <Sparkles size={16} className="text-violet-400" />
-            <span className="text-white text-sm font-medium">它记住的你</span>
-            <span className="text-white/30 text-xs">每日分析自动沉淀，日报会参考</span>
-          </div>
-          {memoryFacts.length === 0 ? (
-            <p className="text-white/30 text-xs">还没有沉淀事实，今晚 21 点分析后可能出现</p>
-          ) : (
-            <div className="space-y-1.5">
-              {memoryFacts.map((f) => (
-                <div
-                  key={f.id}
-                  className="flex items-center gap-2 rounded-lg bg-white/5 px-3 py-2 text-xs"
-                >
-                  <span className="text-white/40 shrink-0 w-16">
-                    {CATEGORY_LABEL[f.category] ?? CATEGORY_LABEL.general}
-                  </span>
-                  <span className="text-white/80 flex-1">{f.fact}</span>
-                  <span className="text-white/30 shrink-0">×{f.confirmations}</span>
-                  <button
-                    onClick={() => handleDeleteFact(f.id)}
-                    className="text-white/30 hover:text-red-400 transition-colors cursor-pointer shrink-0"
-                    title="删除这条记忆"
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
         {/* 我的备忘（意图暂存） */}
         <div className="rounded-xl border border-white/10 bg-white/5 p-4">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
-              <Pin size={16} className="text-violet-400" />
+              <Pin size={16} className="text-white/40" />
               <span className="text-white text-sm font-medium">我的备忘</span>
             </div>
             <span className="text-white/30 text-xs">启动器输入「记 xxx」回车即可记下</span>
@@ -526,10 +443,102 @@ export function CompanionSettings() {
           )}
         </div>
 
+        {/* 分组：学习 */}
+        <div className="flex items-center gap-2 pt-3">
+          <span className="text-white/40 text-xs font-medium">学习</span>
+          <div className="flex-1 h-px bg-white/5" />
+        </div>
+
+        {/* 学习到的模式 */}
+        <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Brain size={16} className="text-white/40" />
+              <span className="text-white text-sm font-medium">学到的习惯模式</span>
+            </div>
+            <button
+              onClick={handleAnalyzeNow}
+              disabled={analyzing || !companion_enabled}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-500/20 text-blue-300 text-xs border border-blue-500/30 hover:bg-blue-500/30 transition-colors cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw size={12} className={analyzing ? 'animate-spin' : ''} />
+              {analyzing ? '分析中…' : '立即分析'}
+            </button>
+          </div>
+          {patterns.length === 0 ? (
+            <p className="text-white/30 text-xs">
+              还没有学到模式。积累一天数据后，每晚 21 点自动分析，或点「立即分析」。
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {patterns.map((p) => {
+                const status = STATUS_LABEL[p.status] ?? STATUS_LABEL.learning;
+                return (
+                  <div
+                    key={p.id}
+                    className="flex items-start gap-2 rounded-lg bg-white/5 px-3 py-2"
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="text-white/80 text-xs">{p.description}</div>
+                      <div className="text-white/30 text-xs mt-1">
+                        置信度 {Math.round(p.confidence * 100)}% · 观察到 {p.occurrences} 次 ·{' '}
+                        <span className={status.color}>{status.text}</span>
+                      </div>
+                    </div>
+                    {p.status !== 'dismissed' && (
+                      <button
+                        onClick={() => handleDismissPattern(p.id)}
+                        className="text-white/30 hover:text-red-400 transition-colors cursor-pointer shrink-0"
+                        title="不再使用此模式"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* 记忆（关于我的事实） */}
+        <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <Sparkles size={16} className="text-white/40" />
+            <span className="text-white text-sm font-medium">它记住的你</span>
+            <span className="text-white/30 text-xs">每日分析自动沉淀，日报会参考</span>
+          </div>
+          {memoryFacts.length === 0 ? (
+            <p className="text-white/30 text-xs">还没有沉淀事实，今晚 21 点分析后可能出现</p>
+          ) : (
+            <div className="space-y-1.5">
+              {memoryFacts.map((f) => (
+                <div
+                  key={f.id}
+                  className="flex items-center gap-2 rounded-lg bg-white/5 px-3 py-2 text-xs"
+                >
+                  <span className="text-white/40 shrink-0 w-16">
+                    {CATEGORY_LABEL[f.category] ?? CATEGORY_LABEL.general}
+                  </span>
+                  <span className="text-white/80 flex-1">{f.fact}</span>
+                  <span className="text-white/30 shrink-0">×{f.confirmations}</span>
+                  <button
+                    onClick={() => handleDeleteFact(f.id)}
+                    className="text-white/30 hover:text-red-400 transition-colors cursor-pointer shrink-0"
+                    title="删除这条记忆"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         {/* 建议历史 */}
         <div className="rounded-xl border border-white/10 bg-white/5 p-4">
           <div className="flex items-center gap-2 mb-3">
-            <History size={16} className="text-violet-400" />
+            <History size={16} className="text-white/40" />
             <span className="text-white text-sm font-medium">建议历史</span>
           </div>
           {suggestions.length === 0 ? (
@@ -543,7 +552,7 @@ export function CompanionSettings() {
                     key={s.id}
                     className="flex items-center gap-2 text-xs rounded-lg bg-white/5 px-3 py-2"
                   >
-                    <span className="text-violet-300/70 shrink-0">
+                    <span className="text-white/40 shrink-0">
                       {SUGGESTION_TYPE_LABEL[s.suggestion_type] ?? s.suggestion_type}
                     </span>
                     <span className="text-white/70 flex-1 truncate">{s.title}</span>
@@ -556,6 +565,12 @@ export function CompanionSettings() {
               })}
             </div>
           )}
+        </div>
+
+        {/* 分组：数据 */}
+        <div className="flex items-center gap-2 pt-3">
+          <span className="text-white/40 text-xs font-medium">数据</span>
+          <div className="flex-1 h-px bg-white/5" />
         </div>
 
         {/* 隐私 */}
