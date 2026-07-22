@@ -84,6 +84,10 @@ const DEFAULT_META: TypeMeta = {
   acceptLabel: '知道了',
 };
 
+/** 动作型建议（启动应用/AI 分析）：Enter 不直达，防打字中误触——
+ *  误接受会启动应用并污染毕业制投票数据，必须鼠标点击确认 */
+const ACTION_TYPES = new Set(['work_suite', 'context_routine', 'error_analysis']);
+
 export default function CompanionToast() {
   const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
   const [countdown, setCountdown] = useState(AUTO_HIDE_SECONDS);
@@ -167,12 +171,33 @@ export default function CompanionToast() {
     }
   }, [suggestion, acting, hideWindow]);
 
+  // 键盘快捷键：Esc 忽略全类型直达；Enter 仅确认型直达（动作型防误触）。
+  // 焦点来自 Rust 端 show 后的 set_focus 尝试，或用户点击窗口
+  useEffect(() => {
+    if (!suggestion) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        void handleDismiss();
+      } else if (e.key === 'Enter') {
+        if (ACTION_TYPES.has(suggestion.suggestion_type)) return;
+        // 按钮已聚焦时交给原生行为，避免双重触发
+        if (e.target instanceof HTMLElement && e.target.tagName === 'BUTTON') return;
+        e.preventDefault();
+        void handleAccept();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [suggestion, handleAccept, handleDismiss]);
+
   if (!suggestion) {
     return null;
   }
 
   const meta = TYPE_META[suggestion.suggestion_type] ?? DEFAULT_META;
   const Icon = meta.icon;
+  const isActionType = ACTION_TYPES.has(suggestion.suggestion_type);
 
   return (
     <div className="w-full h-full flex items-stretch justify-stretch bg-transparent">
@@ -191,7 +216,7 @@ export default function CompanionToast() {
           <button
             onClick={handleDismiss}
             className="text-white/40 hover:text-white/80 transition-colors cursor-pointer shrink-0"
-            title="忽略"
+            title="忽略（Esc）"
           >
             <X size={14} />
           </button>
@@ -208,6 +233,9 @@ export default function CompanionToast() {
 
         {/* 操作区 */}
         <div className="flex items-center justify-end gap-2 px-3 pb-2.5 pt-1">
+          <span className="mr-auto text-[10px] font-medium text-white/30 select-none">
+            {isActionType ? 'Esc 忽略' : '⏎ 接受 · Esc 忽略'}
+          </span>
           <button
             onClick={handleDismiss}
             disabled={acting}
@@ -218,6 +246,7 @@ export default function CompanionToast() {
           <button
             onClick={handleAccept}
             disabled={acting}
+            title={isActionType ? '动作型建议需点击确认（防误触）' : '点击或按 Enter'}
             className="px-3 py-1.5 rounded-lg text-xs bg-blue-500/80 hover:bg-blue-500 text-white font-medium transition-colors cursor-pointer disabled:opacity-50"
           >
             {acting ? '执行中…' : meta.acceptLabel}

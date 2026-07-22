@@ -77,6 +77,10 @@ fn show_toast_window(app_handle: &AppHandle) {
 
     if let Err(e) = window.show() {
         log::warn!("显示 companion-toast 窗口失败: {}", e);
+    } else {
+        // 尝试抢焦点以支持 Esc/Enter 快捷键；后台进程可能被 Windows 焦点锁
+        // 拦截，此时自动退化为「点击 toast 后可用键盘」，失败无需处理
+        let _ = window.set_focus();
     }
 }
 
