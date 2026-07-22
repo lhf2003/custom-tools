@@ -410,8 +410,10 @@ export function CompanionSettings() {
                 return (
                   <div
                     key={it.id}
-                    className={`rounded-lg px-3 py-2 hover:bg-white/5 transition-colors ${
-                      it.status === 'pending' ? '' : 'opacity-60'
+                    className={`rounded-lg px-3 py-2 transition-colors ${
+                      it.status === 'pending'
+                        ? 'bg-white/5 hover:bg-white/10'
+                        : 'opacity-60 hover:bg-white/5'
                     }`}
                   >
                     <div className="flex items-start gap-2">
