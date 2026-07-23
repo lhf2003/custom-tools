@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { X, Copy, Download, Check } from 'lucide-react';
 import { save } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
@@ -7,12 +7,54 @@ interface Props {
   imageDataUrl: string;
   defaultFilename: string;
   onClose: () => void;
+
+}
+
+interface SaveMsg {
+  text: string;
+  ok: boolean;
 }
 
 export function JsonExportPreviewModal({ imageDataUrl, defaultFilename, onClose }: Props) {
   const [copied, setCopied] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [saveMsg, setSaveMsg] = useState<SaveMsg | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Esc 只关闭本模态 + Tab 焦点陷阱，统一在 capture 阶段处理：
+  // - Esc：stopPropagation，避免 App 级全局 Esc（返回启动器）把整个模块一起带走
+  // - Tab/Shift+Tab：焦点困在 dialog 内循环，逃出时拉回（aria-modal="true" 的承诺）
+  // 不给背后内容加 inert：React 18 对 inert 属性支持不一致，焦点陷阱已覆盖键盘路径，
+  // 鼠标点击背景由 backdrop onClick 拦截（等于关闭模态）。
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const focusables = dialog.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      const focusOutside = !dialog.contains(active);
+      if (e.shiftKey && (focusOutside || active === first)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (focusOutside || active === last)) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [onClose]);
 
   const handleCopy = useCallback(async () => {
     try {
@@ -21,8 +63,8 @@ export function JsonExportPreviewModal({ imageDataUrl, defaultFilename, onClose 
       await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error('Copy image failed:', err);
+    } catch {
+      setSaveMsg({ text: '复制图片失败，请重试', ok: false });
     }
   }, [imageDataUrl]);
 
@@ -37,12 +79,10 @@ export function JsonExportPreviewModal({ imageDataUrl, defaultFilename, onClose 
       if (!path) return; // user cancelled
       const base64Data = imageDataUrl.replace('data:image/png;base64,', '');
       await invoke('save_image_to_path', { base64Data, path });
-      setSaveMsg(`已保存至 ${path}`);
-      setTimeout(() => setSaveMsg(null), 5000);
-    } catch (err) {
-      console.error('Save image failed:', err);
-      setSaveMsg('保存失败');
-      setTimeout(() => setSaveMsg(null), 3000);
+      // 成功路径常驻显示（不自动消失）且可选中复制——保存位置是用户要带走的信息
+      setSaveMsg({ text: `已保存至 ${path}`, ok: true });
+    } catch {
+      setSaveMsg({ text: '保存失败，请重试', ok: false });
     } finally {
       setSaving(false);
     }
@@ -54,47 +94,53 @@ export function JsonExportPreviewModal({ imageDataUrl, defaultFilename, onClose 
       onClick={onClose}
     >
       <div
-        className="flex flex-col bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl w-[700px] max-h-[88vh]"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="导出预览"
+        className="flex flex-col bg-app-bg-primary border border-app-border rounded-xl
+                   shadow-[0_25px_60px_rgba(0,0,0,0.6)] w-[700px] max-h-[88vh]"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800 flex-shrink-0">
-          <span className="text-sm font-medium text-zinc-200">导出预览</span>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-app-border flex-shrink-0">
+          <span className="text-sm font-medium text-app-text-primary">导出预览</span>
           <button
             onClick={onClose}
-            className="text-zinc-500 hover:text-zinc-200 transition-colors"
+            aria-label="关闭"
+            className="text-app-text-tertiary hover:text-app-text-primary transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
         {/* Image preview */}
-        <div className="flex-1 overflow-auto min-h-0 p-4 bg-zinc-950/40">
+        <div className="flex-1 overflow-auto min-h-0 p-4 bg-black/20">
           <img
             src={imageDataUrl}
             alt="JSON 导出预览"
-            className="w-full rounded border border-zinc-800"
+            className="w-full rounded border border-app-border"
             draggable={false}
           />
         </div>
 
-        {/* Save result message */}
+        {/* Save / copy result — stays visible until the next action, path is selectable */}
         {saveMsg && (
-          <div className={`px-4 py-2 text-xs flex-shrink-0 ${
-            saveMsg === '保存失败'
-              ? 'bg-red-900/30 border-t border-red-800/50 text-red-300'
-              : 'bg-emerald-900/30 border-t border-emerald-800/50 text-emerald-300'
+          <div className={`px-4 py-2 text-xs flex-shrink-0 select-text border-t ${
+            saveMsg.ok
+              ? 'bg-emerald-900/30 border-emerald-800/50 text-emerald-300'
+              : 'bg-red-900/30 border-red-800/50 text-red-300'
           }`}>
-            {saveMsg}
+            {saveMsg.text}
           </div>
         )}
 
         {/* Action bar */}
-        <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-zinc-800 flex-shrink-0">
+        <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-app-border flex-shrink-0">
           <button
             onClick={onClose}
-            className="px-3 py-1.5 rounded-lg text-xs text-zinc-400 hover:text-zinc-200
-                       hover:bg-zinc-800 transition-colors"
+            className="px-3 py-1.5 rounded-lg text-xs text-app-text-tertiary
+                       hover:text-app-text-primary hover:bg-white/5 transition-colors"
           >
             关闭
           </button>
@@ -102,10 +148,10 @@ export function JsonExportPreviewModal({ imageDataUrl, defaultFilename, onClose 
           <button
             onClick={handleCopy}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
-                       bg-zinc-700 hover:bg-zinc-600 text-zinc-200 transition-colors"
+                       bg-app-bg-elevated hover:bg-app-bg-pressed text-app-text-primary transition-colors"
           >
             {copied
-              ? <Check className="w-3.5 h-3.5 text-green-400" />
+              ? <Check className="w-3.5 h-3.5 text-app-status-success" />
               : <Copy className="w-3.5 h-3.5" />}
             {copied ? '已复制' : '复制图片'}
           </button>
@@ -113,8 +159,9 @@ export function JsonExportPreviewModal({ imageDataUrl, defaultFilename, onClose 
           <button
             onClick={handleSave}
             disabled={saving}
+            autoFocus
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
-                       bg-blue-600 hover:bg-blue-500 text-white transition-colors
+                       bg-app-status-info hover:bg-blue-600 text-white transition-colors
                        disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Download className="w-3.5 h-3.5" />

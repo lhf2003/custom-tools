@@ -54,7 +54,7 @@ export const BUILT_IN_TOOLS: readonly BuiltInTool[] = [
     icon: Braces,
     aliases: ['json', 'format', 'jq'],
     description:
-      '在线格式化与校验 JSON 数据，支持折叠/展开树形视图、一键压缩或美化、导出为文件，帮助快速定位语法错误。',
+      '本地格式化与校验 JSON 数据，树形视图折叠/展开，语法错误定位到行与列，支持复制结果或导出为图片。',
   },
   {
     id: 'everything',

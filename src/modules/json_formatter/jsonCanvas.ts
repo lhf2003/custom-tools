@@ -86,16 +86,16 @@ function flatten(
 // ─── Color palette (mirrors Tailwind classes used in JsonTreeView) ────────────
 
 const C = {
-  bg:         '#18181b', // zinc-900
-  lineNum:    '#52525b', // zinc-600
+  bg:         '#27272a', // app-bg-primary（与界面树视图底色一致）
+  lineNum:    '#8e8e96', // app-text-placeholder（与界面行号一致）
   keyObj:     '#7dd3fc', // sky-300
-  keyIdx:     '#71717a', // zinc-500
+  keyIdx:     '#a1a1aa', // app-text-tertiary（下标是内容，zinc-500 不达标）
   sep:        '#71717a', // zinc-500
   bracket:    '#a1a1aa', // zinc-400
   valString:  '#6ee7b7', // emerald-300
   valNumber:  '#fcd34d', // amber-300
   valBoolean: '#c4b5fd', // violet-400
-  valNull:    '#71717a', // zinc-500
+  valNull:    '#a1a1aa', // app-text-tertiary（null 是内容，zinc-500 不达标）
   comma:      '#71717a', // zinc-500
 };
 
@@ -106,19 +106,66 @@ const FONT_PX   = 14;   // px — text-sm
 const HINT_PX   = 12;   // px — text-xs (line numbers)
 const INDENT_PX = 16;   // px per indent level (2 monospace chars)
 const PAD_Y     = 8;    // px top/bottom padding
-const CANVAS_W  = 800;  // px — matches app window width
 const PAD_LN_L  = 12;   // px — pl-3
 const PAD_LN_R  = 16;   // px — pr-4
+
+const MIN_CANVAS_W  = 800;    // px — matches app window width
+const PAD_CONTENT_R = 16;     // px right padding after the widest line
+// WebView2/Chromium canvas per-dimension texture limit. Exceeding it silently
+// produces a blank/clipped image, so height is guarded with an explicit error.
+const MAX_TEXTURE_PX = 16384;
 
 const MONO = 'ui-monospace, "Cascadia Code", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace';
 const FONT      = `${FONT_PX}px ${MONO}`;
 const HINT_FONT = `${HINT_PX}px ${MONO}`;
+
+// ─── Line segments (shared by width measurement and drawing) ─────────────────
+
+interface Segment {
+  text: string;
+  color: string;
+}
+
+function buildLineSegments(line: FlatLine): Segment[] {
+  const segs: Segment[] = [];
+
+  if (line.isClosingBracket) {
+    segs.push({ text: line.closingChar, color: C.bracket });
+  } else {
+    if (line.key !== null) {
+      segs.push({ text: line.key, color: line.keyIsIndex ? C.keyIdx : C.keyObj });
+      segs.push({ text: ': ', color: C.sep });
+    }
+    if (line.isExpandable) {
+      segs.push({ text: line.nodeType === 'object' ? '{' : '[', color: C.bracket });
+    } else {
+      switch (line.nodeType) {
+        case 'string':
+          segs.push({ text: `"${String(line.primitiveValue)}"`, color: C.valString });
+          break;
+        case 'number':
+          segs.push({ text: String(line.primitiveValue), color: C.valNumber });
+          break;
+        case 'boolean':
+          segs.push({ text: String(line.primitiveValue), color: C.valBoolean });
+          break;
+        default:
+          segs.push({ text: 'null', color: C.valNull });
+      }
+    }
+  }
+
+  if (line.addComma) segs.push({ text: ',', color: C.comma });
+  return segs;
+}
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
  * Render the full (always-expanded) JSON tree to an HTMLCanvasElement.
  * Returns the canvas; caller can call `.toDataURL('image/png')`.
+ * Throws when the content exceeds the canvas texture limit (too many lines) —
+ * callers must surface that error instead of shipping a silently blank image.
  */
 export function renderJsonToCanvas(
   data: Record<string, unknown> | unknown[],
@@ -136,21 +183,45 @@ export function renderJsonToCanvas(
   const digits = Math.max(3, String(lines.length).length);
   const lineNumCol = PAD_LN_L + Math.ceil((digits + 1) * charW) + PAD_LN_R;
 
+  const maxDim = Math.floor(MAX_TEXTURE_PX / pixelRatio);
+
+  // Guard the texture height limit: exceeding it silently blanks the image.
   const totalH = PAD_Y * 2 + lines.length * LINE_H;
+  if (totalH > maxDim) {
+    throw new Error(`内容过长（${lines.length} 行），超出图片画布上限`);
+  }
+
+  // Segments are built once and shared by width measurement and drawing.
+  const rows = lines.map(line => ({ line, segs: buildLineSegments(line) }));
+
+  // Canvas width follows the widest line. Like height, exceeding the texture
+  // limit is an explicit error — silently clamping would crop long lines.
+  let maxContentW = 0;
+  for (const { line, segs } of rows) {
+    let w = line.indent * INDENT_PX;
+    for (const s of segs) w += probe.measureText(s.text).width;
+    if (w > maxContentW) maxContentW = w;
+  }
+  const neededW = Math.ceil(lineNumCol + maxContentW + PAD_CONTENT_R);
+  if (neededW > maxDim) {
+    throw new Error(`存在超长行（约 ${Math.round(maxContentW / charW)} 字符），超出图片画布上限`);
+  }
+  const canvasW = Math.max(MIN_CANVAS_W, neededW);
 
   const canvas = document.createElement('canvas');
-  canvas.width  = CANVAS_W * pixelRatio;
-  canvas.height = totalH   * pixelRatio;
+  canvas.width  = canvasW * pixelRatio;
+  canvas.height = totalH  * pixelRatio;
 
   const ctx = canvas.getContext('2d')!;
   ctx.scale(pixelRatio, pixelRatio);
 
   // Background
   ctx.fillStyle = C.bg;
-  ctx.fillRect(0, 0, CANVAS_W, totalH);
+  ctx.fillRect(0, 0, canvasW, totalH);
   ctx.textBaseline = 'middle';
+  ctx.font = FONT;
 
-  lines.forEach((line, i) => {
+  rows.forEach(({ line, segs }, i) => {
     const midY = PAD_Y + i * LINE_H + LINE_H / 2;
 
     // ── Line number ─────────────────────────────────────────────────────────
@@ -163,44 +234,11 @@ export function renderJsonToCanvas(
 
     // ── Content ─────────────────────────────────────────────────────────────
     let x = lineNumCol + line.indent * INDENT_PX;
-
-    const put = (text: string, color: string, small = false): void => {
-      ctx.font = small ? HINT_FONT : FONT;
-      ctx.fillStyle = color;
-      ctx.fillText(text, x, midY);
-      x += ctx.measureText(text).width;
-      if (small) ctx.font = FONT;
-    };
-
-    if (line.isClosingBracket) {
-      put(line.closingChar, C.bracket);
-    } else {
-      // Key
-      if (line.key !== null) {
-        put(line.key, line.keyIsIndex ? C.keyIdx : C.keyObj);
-        put(': ', C.sep);
-      }
-      // Opening bracket (expandable) or leaf value
-      if (line.isExpandable) {
-        put(line.nodeType === 'object' ? '{' : '[', C.bracket);
-      } else {
-        switch (line.nodeType) {
-          case 'string':
-            put(`"${String(line.primitiveValue)}"`, C.valString);
-            break;
-          case 'number':
-            put(String(line.primitiveValue), C.valNumber);
-            break;
-          case 'boolean':
-            put(String(line.primitiveValue), C.valBoolean);
-            break;
-          default:
-            put('null', C.valNull);
-        }
-      }
+    for (const s of segs) {
+      ctx.fillStyle = s.color;
+      ctx.fillText(s.text, x, midY);
+      x += ctx.measureText(s.text).width;
     }
-
-    if (line.addComma) put(',', C.comma);
   });
 
   return canvas;
