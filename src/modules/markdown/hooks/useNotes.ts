@@ -5,6 +5,7 @@ import { AUTO_SAVE_DELAY } from '../constants';
 
 const LS_SELECTED_NOTE = 'markdown:lastSelectedNote';
 const LS_EXPANDED_FOLDERS = 'markdown:lastExpandedFolders';
+const SAVE_RETRY_DELAYS = [3000, 8000];
 
 function loadSelectedNote(): string | null {
   try {
@@ -68,9 +69,13 @@ export function useNotes() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [contentError, setContentError] = useState<string | null>(null);
   const [expandedFolders, setExpandedFoldersState] = useState<Set<string>>(loadExpandedFolders);
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pendingSaveContent = useRef<string | null>(null);
+  const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryCount = useRef(0);
+  const pendingSave = useRef<{ path: string; content: string } | null>(null);
 
   const setSelectedNote = useCallback((path: string | null) => {
     setSelectedNoteState(path);
@@ -104,54 +109,101 @@ export function useNotes() {
     loadNoteTree();
   }, [loadNoteTree]);
 
+  // Save note content with a stale-write guard; on failure surfaces saveError and retries with backoff
+  const performSaveRef = useRef<(path: string, content: string) => Promise<void>>(async () => {});
+  const performSave = useCallback(async (path: string, content: string) => {
+    setIsSaving(true);
+    setSaveError(null);
+    try {
+      await invoke('save_note', {
+        request: { path, content },
+      });
+      // Only clear pending if this save is still the latest intent
+      if (pendingSave.current?.path === path && pendingSave.current.content === content) {
+        pendingSave.current = null;
+      }
+      setNoteContent((prev) => (prev && prev.path === path ? { ...prev, content } : prev));
+      retryCount.current = 0;
+    } catch (err) {
+      console.error('Failed to save note:', err);
+      setSaveError(err instanceof Error ? err.message : '保存失败');
+      // Automatic retry with backoff, guarded by the latest pending intent
+      if (retryCount.current < SAVE_RETRY_DELAYS.length) {
+        const delay = SAVE_RETRY_DELAYS[retryCount.current++];
+        if (retryTimer.current) {
+          clearTimeout(retryTimer.current);
+        }
+        retryTimer.current = setTimeout(() => {
+          const pending = pendingSave.current;
+          if (pending?.path === path && pending.content === content) {
+            void performSaveRef.current(path, content);
+          }
+        }, delay);
+      }
+    } finally {
+      setIsSaving(false);
+    }
+  }, []);
+
+  // Keep the ref pointing at the latest performSave for the retry timer
+  useEffect(() => {
+    performSaveRef.current = performSave;
+  }, [performSave]);
+
+  const loadNoteContent = useCallback(async (path: string) => {
+    setContentError(null);
+    try {
+      const content = await invoke<NoteContentData>('read_note', { path });
+      setNoteContent(content);
+      setEditorContent(content.content);
+    } catch (err) {
+      // The file may have been removed externally — surface it in the editor area
+      console.error('Failed to load note:', err);
+      setNoteContent(null);
+      setContentError(err instanceof Error ? err.message : '加载笔记内容失败');
+    }
+  }, []);
+
   // Load note content when selected
   useEffect(() => {
+    // Flush the previous note's pending save before switching away from it
+    const pending = pendingSave.current;
+    if (pending && pending.path !== selectedNote) {
+      void performSave(pending.path, pending.content);
+    }
+    setSaveError(null);
+    retryCount.current = 0;
+
     if (!selectedNote) {
       setNoteContent(null);
       setEditorContent('');
+      setContentError(null);
       return;
     }
 
-    const loadContent = async () => {
-      try {
-        const content = await invoke<NoteContentData>('read_note', { path: selectedNote });
-        setNoteContent(content);
-        setEditorContent(content.content);
-      } catch (err) {
-        console.error('Failed to load note:', err);
-      }
-    };
-
-    loadContent();
-  }, [selectedNote]);
+    void loadNoteContent(selectedNote);
+  }, [selectedNote, loadNoteContent, performSave]);
 
   // Auto save with race condition fix
   useEffect(() => {
-    if (!selectedNote || !noteContent || editorContent === noteContent.content) {
+    // Guard against the stale pair while the newly selected note is still loading
+    if (!selectedNote || !noteContent || noteContent.path !== selectedNote) {
       return;
     }
+    if (editorContent === noteContent.content) {
+      return;
+    }
+
+    pendingSave.current = { path: selectedNote, content: editorContent };
 
     if (autoSaveTimer.current) {
       clearTimeout(autoSaveTimer.current);
     }
 
-    const contentToSave = editorContent;
-    pendingSaveContent.current = contentToSave;
-
-    autoSaveTimer.current = setTimeout(async () => {
-      try {
-        setIsSaving(true);
-        await invoke('save_note', {
-          request: { path: selectedNote, content: contentToSave },
-        });
-        // Only update if content hasn't changed since we started saving
-        if (pendingSaveContent.current === contentToSave) {
-          setNoteContent((prev) => (prev ? { ...prev, content: contentToSave } : null));
-        }
-      } catch (err) {
-        console.error('Failed to save note:', err);
-      } finally {
-        setIsSaving(false);
+    autoSaveTimer.current = setTimeout(() => {
+      const pending = pendingSave.current;
+      if (pending) {
+        void performSave(pending.path, pending.content);
       }
     }, AUTO_SAVE_DELAY);
 
@@ -160,13 +212,22 @@ export function useNotes() {
         clearTimeout(autoSaveTimer.current);
       }
     };
-  }, [editorContent, selectedNote, noteContent]);
+  }, [editorContent, selectedNote, noteContent, performSave]);
 
-  // Cleanup on unmount
+  // Flush pending save and clear timers on unmount
   useEffect(() => {
     return () => {
       if (autoSaveTimer.current) {
         clearTimeout(autoSaveTimer.current);
+      }
+      if (retryTimer.current) {
+        clearTimeout(retryTimer.current);
+      }
+      const pending = pendingSave.current;
+      if (pending) {
+        invoke('save_note', {
+          request: { path: pending.path, content: pending.content },
+        }).catch((err) => console.error('Failed to flush save on unmount:', err));
       }
     };
   }, []);
@@ -191,6 +252,15 @@ export function useNotes() {
     return pathIndex.get(parentPath) || [];
   }, [pathIndex]);
 
+  // Manual retry for a failed save (auto-retry budget is reset)
+  const retrySave = useCallback(() => {
+    const pending = pendingSave.current;
+    if (pending) {
+      retryCount.current = 0;
+      void performSave(pending.path, pending.content);
+    }
+  }, [performSave]);
+
   return {
     notes,
     setNotes,
@@ -204,6 +274,10 @@ export function useNotes() {
     isSaving,
     error,
     setError,
+    saveError,
+    contentError,
+    retrySave,
+    loadNoteContent,
     expandedFolders,
     setExpandedFolders,
     loadNoteTree,

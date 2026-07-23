@@ -15,7 +15,7 @@ export function EmptyState() {
           选择一个笔记或创建新笔记
         </p>
         <p className="text-sm mt-1" style={{ color: THEME.TEXT_DISABLED }}>
-          支持 Markdown 格式
+          Ctrl+N 新建笔记 · Ctrl+F 搜索笔记
         </p>
       </div>
     </div>

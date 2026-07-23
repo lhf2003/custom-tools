@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import {
   DndContext,
   closestCenter,
@@ -34,6 +34,9 @@ interface TreeItemProps {
   onSelect: (id: string) => void;
   onToggle: (id: string) => void;
   level: number;
+  tabIndex: number;
+  registerRef: (path: string, el: HTMLButtonElement | null) => void;
+  onFocusItem: (path: string) => void;
 }
 
 function SortableTreeItem({
@@ -43,6 +46,9 @@ function SortableTreeItem({
   onSelect,
   onToggle,
   level,
+  tabIndex,
+  registerRef,
+  onFocusItem,
   onContextMenu,
 }: TreeItemProps & { onContextMenu: (e: React.MouseEvent, item: NoteItemData) => void }) {
   const {
@@ -70,7 +76,14 @@ function SortableTreeItem({
   const isSelected = selectedId === item.path;
 
   return (
-    <div ref={setNodeRef} style={style}>
+    <div
+      ref={setNodeRef}
+      style={style}
+      role="treeitem"
+      aria-level={level + 1}
+      aria-selected={isSelected}
+      {...(item.is_folder ? { 'aria-expanded': isExpanded } : {})}
+    >
       <div
         className="group flex items-center gap-1 py-0.5 rounded text-sm transition-all duration-200"
         style={{
@@ -99,6 +112,7 @@ function SortableTreeItem({
             {...listeners}
             className="cursor-grab active:cursor-grabbing py-0.5 px-0.5 rounded inline-flex items-center touch-none"
             style={{ color: '#52525b' }}
+            aria-label={`拖拽移动 ${item.name.replace(/\.md$/, '')}`}
             onMouseEnter={(e) => {
               e.currentTarget.style.backgroundColor = 'rgba(82, 82, 91, 0.3)';
             }}
@@ -111,9 +125,14 @@ function SortableTreeItem({
         </Tooltip>
 
         {/* Content Area */}
-        <div
+        <button
+          type="button"
+          ref={(el) => registerRef(item.path, el)}
+          data-tree-path={item.path}
+          tabIndex={tabIndex}
+          onFocus={() => onFocusItem(item.path)}
           onClick={() => (item.is_folder ? onToggle(item.path) : onSelect(item.path))}
-          className="flex items-center gap-0.5 flex-1 min-w-0 cursor-pointer"
+          className="flex items-center gap-0.5 flex-1 min-w-0 cursor-pointer rounded text-left focus-visible:bg-white/5"
         >
           {item.is_folder ? (
             <span className="w-4 shrink-0" style={{ color: '#71717a' }}>
@@ -123,7 +142,7 @@ function SortableTreeItem({
             <span className="w-4 shrink-0" />
           )}
           <span className="truncate">{item.is_folder ? item.name : item.name.replace(/\.md$/, '')}</span>
-        </div>
+        </button>
       </div>
 
     </div>
@@ -165,6 +184,18 @@ export function SortableNoteTree({
   onRevealInExplorer,
 }: SortableNoteTreeProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
+
+  // Roving tabindex keyboard navigation state
+  const [focusPath, setFocusPath] = useState<string | null>(null);
+  const itemRefs = useRef(new Map<string, HTMLButtonElement>());
+
+  const registerRef = useCallback((path: string, el: HTMLButtonElement | null) => {
+    if (el) {
+      itemRefs.current.set(path, el);
+    } else {
+      itemRefs.current.delete(path);
+    }
+  }, []);
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
     visible: boolean;
@@ -278,6 +309,80 @@ export function SortableNoteTree({
 
   const flattenedItems = useMemo(() => flattenTree(items), [flattenTree, items]);
   const itemIds = useMemo(() => flattenedItems.map((i) => i.id), [flattenedItems]);
+
+  // Keep the roving focus target valid as the visible list changes
+  useEffect(() => {
+    if (flattenedItems.length === 0) {
+      setFocusPath(null);
+      return;
+    }
+    if (!focusPath || !flattenedItems.some((f) => f.id === focusPath)) {
+      const preferred =
+        selectedId && flattenedItems.some((f) => f.id === selectedId)
+          ? selectedId
+          : flattenedItems[0].id;
+      setFocusPath(preferred);
+    }
+  }, [flattenedItems, focusPath, selectedId]);
+
+  // WAI-ARIA treeview keyboard navigation
+  const handleTreeKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      const target = (e.target as HTMLElement).closest<HTMLElement>('[data-tree-path]');
+      if (!target) return;
+      const path = target.dataset.treePath;
+      if (!path) return;
+      const index = flattenedItems.findIndex((f) => f.id === path);
+      if (index === -1) return;
+      const current = flattenedItems[index];
+
+      const moveFocus = (nextIndex: number) => {
+        const next = flattenedItems[nextIndex];
+        if (!next) return;
+        setFocusPath(next.id);
+        itemRefs.current.get(next.id)?.focus();
+      };
+
+      switch (e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          moveFocus(index + 1);
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          moveFocus(index - 1);
+          break;
+        case 'Home':
+          e.preventDefault();
+          moveFocus(0);
+          break;
+        case 'End':
+          e.preventDefault();
+          moveFocus(flattenedItems.length - 1);
+          break;
+        case 'ArrowRight':
+          if (current.item.is_folder) {
+            e.preventDefault();
+            if (!expandedFolders.has(current.id)) {
+              onToggle(current.id);
+            } else {
+              moveFocus(index + 1);
+            }
+          }
+          break;
+        case 'ArrowLeft':
+          e.preventDefault();
+          if (current.item.is_folder && expandedFolders.has(current.id)) {
+            onToggle(current.id);
+          } else if (current.parentPath) {
+            setFocusPath(current.parentPath);
+            itemRefs.current.get(current.parentPath)?.focus();
+          }
+          break;
+      }
+    },
+    [flattenedItems, expandedFolders, onToggle]
+  );
 
   // Build parent map for quick lookup
   const parentMap = useMemo(() => {
@@ -437,7 +542,7 @@ export function SortableNoteTree({
       onDragEnd={handleDragEnd}
     >
       <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
-        <div className="space-y-0.5">
+        <div className="space-y-0.5" role="tree" aria-label="笔记列表" onKeyDown={handleTreeKeyDown}>
           {flattenedItems.map(({ item, level }) => (
             <SortableTreeItem
               key={item.path}
@@ -447,6 +552,9 @@ export function SortableNoteTree({
               onSelect={onSelect}
               onToggle={onToggle}
               level={level}
+              tabIndex={focusPath === item.path ? 0 : -1}
+              registerRef={registerRef}
+              onFocusItem={setFocusPath}
               onContextMenu={handleItemContextMenu}
             />
           ))}
