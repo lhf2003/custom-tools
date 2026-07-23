@@ -1,11 +1,10 @@
 import { useState, useEffect } from 'react';
-import { Command, Settings, Palette, Search, Bot, BookOpen, History, Info, Sparkles } from 'lucide-react';
+import { Command, Settings, Search, Bot, BookOpen, History, Info, Sparkles } from 'lucide-react';
 import { immediateResize } from '@/utils/tauri';
 import { THEME } from '@/constants/theme';
 import { WINDOW_SIZE } from '@/constants/window';
 import { GeneralSettings } from './tabs/GeneralSettings';
 import { ShortcutsSettings } from './tabs/ShortcutsSettings';
-import { AppearanceSettings } from './tabs/AppearanceSettings';
 import { SearchSettings } from './tabs/SearchSettings';
 import { ModelSettings } from './tabs/ModelSettings';
 import { CompanionSettings } from './tabs/CompanionSettings';
@@ -16,7 +15,6 @@ import { AboutSettings } from './tabs/AboutSettings';
 const SETTING_TABS = [
   { id: 'general', name: '通用', icon: Settings },
   { id: 'shortcuts', name: '快捷键', icon: Command },
-  { id: 'appearance', name: '外观', icon: Palette },
   { id: 'search', name: '搜索', icon: Search },
   { id: 'model', name: 'AI 模型', icon: Bot },
   { id: 'companion', name: '陪伴', icon: Sparkles },
@@ -30,7 +28,6 @@ type TabId = (typeof SETTING_TABS)[number]['id'];
 const TAB_CONTENT: Record<TabId, React.ReactNode> = {
   general: <GeneralSettings />,
   shortcuts: <ShortcutsSettings />,
-  appearance: <AppearanceSettings />,
   search: <SearchSettings />,
   model: <ModelSettings />,
   companion: <CompanionSettings />,
