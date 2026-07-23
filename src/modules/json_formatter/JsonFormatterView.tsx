@@ -369,7 +369,7 @@ export function JsonFormatterView() {
           onClick={handleCopy}
           disabled={!hasContent}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
-                     bg-app-status-info hover:bg-blue-600 text-white
+                     bg-app-status-info hover:bg-blue-700 text-white
                      transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {copied

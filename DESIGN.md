@@ -5,8 +5,8 @@ colors:
   signal-indigo: "#6366f1"
   signal-indigo-light: "#818cf8"
   secondary-violet: "#a855f7"
-  action-blue: "#3b82f6"
-  action-blue-deep: "#2563eb"
+  action-blue: "#2563eb"
+  action-blue-deep: "#1d4ed8"
   surface-base: "#27272a"
   surface-sidebar: "#2a2a2a"
   surface-card: "#2d2d2d"
@@ -20,7 +20,7 @@ colors:
   status-success: "#22c55e"
   status-warning: "#f59e0b"
   status-error: "#ef4444"
-  status-info: "#3b82f6"
+  status-info: "#2563eb"
   scrim-white-5: "#ffffff0d"
   scrim-white-10: "#ffffff1a"
 typography:
@@ -118,7 +118,7 @@ FlowHub 的设计目标是让用户忘记它是一个第三方应用。它驻留
 - **Secondary Violet** (#a855f7): Signal Indigo 的辅助色，仅用于需要第二品牌色相的场合（如内置工具图标底）。使用频率低于 Indigo。
 
 ### Secondary
-- **Action Blue** (#3b82f6): 系统级操作色。主按钮、选中态、链接、info 状态。语义是"这是一个可执行的操作"，与 Indigo 的"这是品牌"分工明确。Hover 加深至 Action Blue Deep (#2563eb)。
+- **Action Blue** (#2563eb): 系统级操作色。主按钮、选中态、链接、info 状态。语义是"这是一个可执行的操作"，与 Indigo 的"这是品牌"分工明确。Hover 加深至 Action Blue Deep (#1d4ed8)。白字对比度 5.17:1，WCAG AA 达标（原 #3b82f6 仅 3.68:1，2026-07-22 降档）。
 
 ### Neutral
 - **Surface Base** (#27272a): 应用主背景，一切表面的基座。
@@ -134,7 +134,8 @@ FlowHub 的设计目标是让用户忘记它是一个第三方应用。它驻留
 - **Scrim White 5/10** (#ffffff0d / #ffffff1a): 白色透明度纱层，用于列表选中、hover 底色——玻璃体系里"提亮"的唯一方式。
 
 ### 状态色
-- Success (#22c55e) / Warning (#f59e0b) / Error (#ef4444) / Info (#3b82f6)：仅用于语义状态，不做装饰。
+- Success (#22c55e) / Warning (#f59e0b) / Error (#ef4444) / Info (#2563eb)：仅用于语义状态，不做装饰。
+- **Error Text** (#f87171): 深色表面上需要错误「文字」时（内联错误条、加载失败说明）使用的提亮变体（实测约 5.9:1 on Surface Base）；Error 原色直接作文字仅约 4.0:1，仅用于图标/底色语义，不作正文。
 
 ### Named Rules
 **The One Voice Rule.** Signal Indigo 在任何单屏面积 ≤10%。它的稀缺性就是它的意义——满屏靛蓝等于没有品牌。

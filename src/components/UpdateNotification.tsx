@@ -104,7 +104,7 @@ export function UpdateNotification() {
             </button>
             <button
               onClick={handleUpdate}
-              className="flex-1 px-3 py-2 rounded-lg bg-blue-500 text-white text-xs hover:bg-blue-600 transition-colors"
+              className="flex-1 px-3 py-2 rounded-lg bg-blue-600 text-white text-xs hover:bg-blue-700 transition-colors"
             >
               立即更新
             </button>

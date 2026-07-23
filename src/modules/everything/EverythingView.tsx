@@ -132,7 +132,7 @@ function EverythingInstallPage({ onInstalled }: { onInstalled: () => void }) {
         <button
           onClick={handleInstall}
           disabled={noneSelected || isInstalling}
-          className="flex items-center gap-2 px-5 py-2.5 bg-blue-500 hover:bg-blue-600 disabled:bg-zinc-600 disabled:cursor-not-allowed rounded-lg text-white text-sm font-medium transition-colors"
+          className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-600 disabled:cursor-not-allowed rounded-lg text-white text-sm font-medium transition-colors"
         >
           {isInstalling ? (
             <>
@@ -507,7 +507,7 @@ export function EverythingView() {
               <div className="flex gap-2 mt-6 w-full">
                 <button
                   onClick={() => handleOpenFile(selectedFile.path)}
-                  className="flex-1 px-3 py-2 bg-blue-500 hover:bg-blue-600 rounded text-white text-sm"
+                  className="flex-1 px-3 py-2 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm"
                 >
                   打开
                 </button>

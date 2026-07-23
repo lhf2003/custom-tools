@@ -79,7 +79,7 @@ export function KeyRecorder({ onSave, onCancel }: KeyRecorderProps) {
       <button
         onClick={handleSave}
         disabled={!currentCombo}
-        className="px-4 py-2 rounded-lg bg-blue-500 text-white text-sm font-medium hover:bg-blue-600 transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+        className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
       >
         保存
       </button>

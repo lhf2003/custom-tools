@@ -247,7 +247,7 @@ export default function CompanionToast() {
             onClick={handleAccept}
             disabled={acting}
             title={isActionType ? '动作型建议需点击确认（防误触）' : '点击或按 Enter'}
-            className="px-3 py-1.5 rounded-lg text-xs bg-blue-500/80 hover:bg-blue-500 text-white font-medium transition-colors cursor-pointer disabled:opacity-50"
+            className="px-3 py-1.5 rounded-lg text-xs bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors cursor-pointer disabled:opacity-50"
           >
             {acting ? '执行中…' : meta.acceptLabel}
           </button>

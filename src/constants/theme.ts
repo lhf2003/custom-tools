@@ -35,7 +35,7 @@ const PRIMITIVE = {
     SUCCESS: '#22c55e', // green-500
     WARNING: '#f59e0b', // amber-500
     ERROR: '#ef4444', // red-500
-    INFO: '#3b82f6', // blue-500
+    INFO: '#2563eb', // blue-600（白字 5.17:1，AA 达标）
   },
 } as const;
 
@@ -114,6 +114,8 @@ export const THEME = {
   WARNING: PRIMITIVE.FUNCTIONAL.WARNING,
   ERROR: PRIMITIVE.FUNCTIONAL.ERROR,
   INFO: PRIMITIVE.FUNCTIONAL.INFO,
+  /** 深色表面上的错误文字（red-400，#27272a 上约 5.9:1，满足 4.5:1） */
+  ERROR_TEXT: '#f87171',
 
   // -----------------------------------------
   // 透明度变体 (Alpha Variants)

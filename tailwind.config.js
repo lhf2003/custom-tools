@@ -40,7 +40,7 @@ export default {
           success: '#22c55e',
           warning: '#f59e0b',
           error: '#ef4444',
-          info: '#3b82f6',
+          info: '#2563eb',
         },
         // 保留原有的 glass 颜色
         glass: {
