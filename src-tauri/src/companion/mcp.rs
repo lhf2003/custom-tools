@@ -19,7 +19,7 @@ const SERVER_NAME: &str = "companion";
 const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// write_note 工具被限制在该目录前缀下，防止 agent 越权写其他笔记
-const NOTE_DIR_PREFIX: &str = "陪伴日报";
+pub(crate) const NOTE_DIR_PREFIX: &str = "陪伴日报";
 
 /// MCP server 入口：阻塞式读取 stdin 直到 EOF（claude CLI 关闭管道时退出）
 pub fn run_mcp_server(db_path: PathBuf, notes_dir: PathBuf) {

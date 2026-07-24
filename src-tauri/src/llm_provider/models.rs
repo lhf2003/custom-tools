@@ -117,6 +117,7 @@ pub enum Scene {
     Chat,
     Qa,
     Translate,
+    Companion,
 }
 
 impl std::fmt::Display for Scene {
@@ -125,6 +126,7 @@ impl std::fmt::Display for Scene {
             Scene::Chat => write!(f, "chat"),
             Scene::Qa => write!(f, "qa"),
             Scene::Translate => write!(f, "translate"),
+            Scene::Companion => write!(f, "companion"),
         }
     }
 }
@@ -137,6 +139,7 @@ impl std::str::FromStr for Scene {
             "chat" | "闲聊" => Ok(Scene::Chat),
             "qa" | "问答" => Ok(Scene::Qa),
             "translate" | "翻译" => Ok(Scene::Translate),
+            "companion" | "陪伴" => Ok(Scene::Companion),
             _ => Err(format!("Unknown scene: {}", s)),
         }
     }

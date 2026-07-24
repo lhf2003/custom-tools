@@ -20,7 +20,6 @@ pub struct CompanionFlags {
     pub paused: bool,
     pub retention_days: i64,
     pub long_work_minutes: i64,
-    pub agent_enabled: bool,
 }
 
 impl Default for CompanionFlags {
@@ -30,7 +29,6 @@ impl Default for CompanionFlags {
             paused: false,
             retention_days: 30,
             long_work_minutes: 90,
-            agent_enabled: false,
         }
     }
 }
@@ -80,13 +78,26 @@ fn read_flags(flags: &Arc<RwLock<CompanionFlags>>) -> CompanionFlags {
         .unwrap_or_else(|_| CompanionFlags::default())
 }
 
+/// 全局 Claude Code 开关（「设置 → AI 模型」中配置）。
+/// 门控陪伴的日报 agent、LLM 路由与缺报补跑。
+pub fn claude_code_enabled(app_handle: &AppHandle) -> bool {
+    use tauri::Manager;
+
+    app_handle
+        .try_state::<crate::commands::settings::SettingsState>()
+        .and_then(|s| s.0.lock().ok().map(|m| m.get_settings().claude_code_enabled))
+        .unwrap_or(false)
+}
+
 /// 解析 agent 运行配置并启动日报 agent。
+/// `date` 为日报目标日期（YYYY-MM-DD）。
 /// bin 路径复用设置中的 Claude Code 配置；
 /// 工作区使用独立空目录（不继承其他工作区——那里的 CLAUDE.md、
 /// .claude hooks 会注入 agent 上下文，且可能含敏感信息）。
 pub fn run_agent_with_settings(
     app_handle: &AppHandle,
     db_path: &std::path::Path,
+    date: &str,
 ) -> Result<String, String> {
     use tauri::Manager;
 
@@ -102,12 +113,7 @@ pub fn run_agent_with_settings(
     let notes_dir =
         crate::notes::get_default_notes_dir().map_err(|e| format!("获取笔记目录失败: {}", e))?;
 
-    let work_dir = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("companion-agent");
-    std::fs::create_dir_all(&work_dir).map_err(|e| format!("创建 agent 工作区失败: {}", e))?;
+    let work_dir = agent::resolve_work_dir(app_handle, &settings.claude_code_work_dir)?;
 
     agent::run_daily_report_agent(
         app_handle,
@@ -115,6 +121,7 @@ pub fn run_agent_with_settings(
         &notes_dir,
         &settings.claude_code_bin_path,
         &work_dir,
+        date,
     )
 }
 

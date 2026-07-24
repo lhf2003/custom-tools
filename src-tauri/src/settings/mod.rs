@@ -19,13 +19,13 @@ pub struct AppSettings {
     pub llm_api_key: String,
     pub llm_model: String,
     pub llm_thinking_mode: bool,
+    pub claude_code_enabled: bool,
     pub claude_code_bin_path: String,
     pub claude_code_work_dir: String,
     pub companion_enabled: bool,
     pub companion_paused: bool,
     pub companion_retention_days: i32,
     pub companion_long_work_minutes: i32,
-    pub companion_agent_enabled: bool,
 }
 
 impl Default for AppSettings {
@@ -43,13 +43,13 @@ impl Default for AppSettings {
             llm_api_key: String::new(),
             llm_model: "gpt-4o-mini".to_string(),
             llm_thinking_mode: false,
+            claude_code_enabled: false,
             claude_code_bin_path: "claude".to_string(),
             claude_code_work_dir: String::new(),
             companion_enabled: true,
             companion_paused: false,
             companion_retention_days: 30,
             companion_long_work_minutes: 90,
-            companion_agent_enabled: false,
         }
     }
 }
@@ -147,6 +147,11 @@ impl SettingsManager {
                         settings.llm_thinking_mode = v;
                     }
                 }
+                "claude_code_enabled" => {
+                    if let Ok(v) = value.parse::<bool>() {
+                        settings.claude_code_enabled = v;
+                    }
+                }
                 "claude_code_bin_path" => settings.claude_code_bin_path = value,
                 "claude_code_work_dir" => settings.claude_code_work_dir = value,
                 "companion_enabled" => {
@@ -167,11 +172,6 @@ impl SettingsManager {
                 "companion_long_work_minutes" => {
                     if let Ok(v) = value.parse::<i32>() {
                         settings.companion_long_work_minutes = v.clamp(15, 480);
-                    }
-                }
-                "companion_agent_enabled" => {
-                    if let Ok(v) = value.parse::<bool>() {
-                        settings.companion_agent_enabled = v;
                     }
                 }
                 _ => {}
@@ -256,6 +256,11 @@ impl SettingsManager {
                         cache.llm_thinking_mode = v;
                     }
                 }
+                "claude_code_enabled" => {
+                    if let Ok(v) = value.parse::<bool>() {
+                        cache.claude_code_enabled = v;
+                    }
+                }
                 "claude_code_bin_path" => cache.claude_code_bin_path = value.to_string(),
                 "claude_code_work_dir" => cache.claude_code_work_dir = value.to_string(),
                 "companion_enabled" => {
@@ -276,11 +281,6 @@ impl SettingsManager {
                 "companion_long_work_minutes" => {
                     if let Ok(v) = value.parse::<i32>() {
                         cache.companion_long_work_minutes = v.clamp(15, 480);
-                    }
-                }
-                "companion_agent_enabled" => {
-                    if let Ok(v) = value.parse::<bool>() {
-                        cache.companion_agent_enabled = v;
                     }
                 }
                 _ => {}

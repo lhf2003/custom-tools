@@ -120,12 +120,11 @@ export function CompanionSettings() {
     companion_paused,
     companion_retention_days,
     companion_long_work_minutes,
-    companion_agent_enabled,
+    claude_code_enabled,
     setCompanionEnabled,
     setCompanionPaused,
     setCompanionRetentionDays,
     setCompanionLongWorkMinutes,
-    setCompanionAgentEnabled,
   } = useSettingsStore();
   const { addToast } = useToastStore();
 
@@ -337,12 +336,16 @@ export function CompanionSettings() {
         </SettingCard>
 
         <SettingCard
-          title="日报 agent（Claude Code）"
-          description="每晚 21 点由 Claude agent 自主查询数据并生成日报写入笔记；关闭则使用普通模型分析"
+          title="日报（Claude Code）"
+          description={
+            claude_code_enabled
+              ? '每晚 21 点由 Claude Code 生成日报写入笔记，并同步进行模式挖掘'
+              : '在「设置 → AI 模型」中开启 Claude Code 后，可生成每日日报'
+          }
         >
-          <div className="flex items-center gap-2">
-            <Bot size={16} className="text-white/30" />
-            {companion_agent_enabled && (
+          {claude_code_enabled && (
+            <div className="flex items-center gap-2">
+              <Bot size={16} className="text-white/30" />
               <button
                 onClick={handleRunAgent}
                 disabled={agentRunning || !companion_enabled}
@@ -350,9 +353,8 @@ export function CompanionSettings() {
               >
                 {agentRunning ? '生成中…' : '立即生成日报'}
               </button>
-            )}
-            <Toggle enabled={companion_agent_enabled} onToggle={setCompanionAgentEnabled} />
-          </div>
+            </div>
+          )}
         </SettingCard>
 
         {/* 分组：今日 */}

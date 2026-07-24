@@ -1,7 +1,7 @@
 //! 日报 agent：通过 claude CLI（headless 模式）驱动一个受限 agentic 循环，
 //! agent 经 companion MCP server 查询应用数据，生成日报写入笔记模块。
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use serde::Deserialize;
@@ -27,6 +27,7 @@ struct ClaudeCliResult {
 }
 
 /// 运行日报 agent（阻塞式，调用方需放在独立线程）。
+/// `date` 为日报目标日期（YYYY-MM-DD），通常是今天，补跑时为过去某天。
 /// 成功返回人话摘要；失败返回错误（调用方负责回退到单次 LLM 分析）。
 pub fn run_daily_report_agent(
     app_handle: &AppHandle,
@@ -34,6 +35,7 @@ pub fn run_daily_report_agent(
     notes_dir: &Path,
     bin_path: &str,
     work_dir: &Path,
+    date: &str,
 ) -> Result<String, String> {
     let exe = std::env::current_exe().map_err(|e| format!("获取自身 exe 路径失败: {}", e))?;
 
@@ -41,12 +43,11 @@ pub fn run_daily_report_agent(
     // （--mcp-config 在本版本 CLI 下不生效，用户级注册是唯一可靠通道）
     ensure_mcp_registered(bin_path, &exe, db_path, notes_dir)?;
 
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-    let prompt = build_report_prompt(&today);
+    let prompt = build_report_prompt(date);
 
     log::info!("Companion 日报 agent 启动: {}", bin_path);
 
-    let mut cmd = Command::new(bin_path);
+    let mut cmd = cli_command(bin_path, work_dir);
     cmd.arg("-p")
         .arg(&prompt)
         .arg("--allowedTools")
@@ -54,19 +55,7 @@ pub fn run_daily_report_agent(
         .arg("--output-format")
         .arg("json")
         .arg("--max-turns")
-        .arg(MAX_TURNS)
-        // 关键：禁用 ToolSearch 延迟加载，否则 MCP 工具在 headless 会话中不可见
-        .env("ENABLE_TOOL_SEARCH", "false")
-        .current_dir(work_dir)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        use windows::Win32::System::Threading::CREATE_NO_WINDOW;
-        cmd.creation_flags(CREATE_NO_WINDOW.0);
-    }
+        .arg(MAX_TURNS);
 
     let output = cmd.output().map_err(|e| {
         format!(
@@ -75,22 +64,7 @@ pub fn run_daily_report_agent(
         )
     })?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!(
-            "claude CLI 退出码异常: {}",
-            stderr.chars().take(500).collect::<String>()
-        ));
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let parsed: ClaudeCliResult = serde_json::from_str(stdout.trim()).map_err(|e| {
-        format!(
-            "解析 claude CLI 输出失败: {} — 原始输出: {}",
-            e,
-            stdout.chars().take(300).collect::<String>()
-        )
-    })?;
+    let parsed = parse_cli_output(&output)?;
 
     if parsed.is_error == Some(true) {
         return Err(format!(
@@ -119,7 +93,7 @@ pub fn run_daily_report_agent(
             &conn,
             app_handle,
             "daily_report",
-            "今日日报已生成",
+            &format!("{} 日报已生成", date),
             Some(&summary_preview),
             None,
         );
@@ -129,6 +103,106 @@ pub fn run_daily_report_agent(
         "日报 agent 完成（{} 轮，${:.4}）: {}",
         turns, cost, summary_preview
     ))
+}
+
+/// 构建 claude CLI 子进程（headless、无窗口、管道输出）。
+/// ENABLE_TOOL_SEARCH=false 是关键：禁用 ToolSearch 延迟加载，
+/// 否则 MCP 工具在 headless 会话中不可见。
+fn cli_command(bin_path: &str, work_dir: &Path) -> Command {
+    let mut cmd = Command::new(bin_path);
+    cmd.env("ENABLE_TOOL_SEARCH", "false")
+        .current_dir(work_dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        use windows::Win32::System::Threading::CREATE_NO_WINDOW;
+        cmd.creation_flags(CREATE_NO_WINDOW.0);
+    }
+
+    cmd
+}
+
+/// 解析 claude CLI 的 JSON 输出（进程级错误在这里，业务级 is_error 由调用方判断）
+fn parse_cli_output(output: &std::process::Output) -> Result<ClaudeCliResult, String> {
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "claude CLI 退出码异常: {}",
+            stderr.chars().take(500).collect::<String>()
+        ));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    serde_json::from_str(stdout.trim()).map_err(|e| {
+        format!(
+            "解析 claude CLI 输出失败: {} — 原始输出: {}",
+            e,
+            stdout.chars().take(300).collect::<String>()
+        )
+    })
+}
+
+/// Claude Code 单次问答：禁工具、单轮，返回 result 文本。
+/// 用于陪伴的模式挖掘/意图解析等「一问一答」场景（不做 MCP 注册）。
+pub fn run_oneshot(bin_path: &str, work_dir: &Path, prompt: &str) -> Result<String, String> {
+    let mut cmd = cli_command(bin_path, work_dir);
+    cmd.arg("-p")
+        .arg(prompt)
+        .arg("--allowedTools")
+        .arg("")
+        .arg("--output-format")
+        .arg("json")
+        .arg("--max-turns")
+        .arg("1");
+
+    let output = cmd.output().map_err(|e| {
+        format!(
+            "执行 claude CLI 失败（{} 是否在 PATH 或配置正确？）: {}",
+            bin_path, e
+        )
+    })?;
+
+    let parsed = parse_cli_output(&output)?;
+
+    if parsed.is_error == Some(true) {
+        return Err(format!(
+            "claude 单次问答失败（{}）: {}",
+            parsed.subtype.as_deref().unwrap_or("unknown"),
+            parsed
+                .result
+                .as_deref()
+                .unwrap_or("")
+                .chars()
+                .take(300)
+                .collect::<String>()
+        ));
+    }
+
+    parsed
+        .result
+        .ok_or_else(|| "claude 未返回结果".to_string())
+}
+
+/// 解析 Claude Code 工作目录：配置了用配置值，否则默认 app_data_dir/companion-agent。
+/// 默认目录独立为空——不继承用户工作区（那里的 CLAUDE.md、.claude hooks
+/// 会注入 agent 上下文，且可能含敏感信息）。
+pub fn resolve_work_dir(app_handle: &AppHandle, configured: &str) -> Result<PathBuf, String> {
+    use tauri::Manager;
+
+    let dir = if configured.trim().is_empty() {
+        app_handle
+            .path()
+            .app_data_dir()
+            .map_err(|e| e.to_string())?
+            .join("companion-agent")
+    } else {
+        PathBuf::from(configured.trim())
+    };
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建 agent 工作区失败: {}", e))?;
+    Ok(dir)
 }
 
 /// 检查 claude 用户配置中是否已有 companion MCP server，没有则注册。
@@ -194,23 +268,23 @@ fn ensure_mcp_registered(
     Ok(())
 }
 
-fn build_report_prompt(today: &str) -> String {
+fn build_report_prompt(date: &str) -> String {
     format!(
-        "你是我的工作陪伴 agent。请完成「{today}」的工作日报，严格按以下步骤执行：\n\
-         1. 调用 get_activity_summary 获取今天的电脑使用聚合（不传 date 参数即是今天）\n\
-         2. 调用 search_clipboard（limit 设 15）了解今天复制过的内容主题\n\
+        "你是我的工作陪伴 agent。请完成「{date}」的工作日报，严格按以下步骤执行：\n\
+         1. 调用 get_activity_summary（date 参数传 \"{date}\"）获取当日的电脑使用聚合\n\
+         2. 调用 search_clipboard（limit 设 15）了解近期复制过的内容主题\n\
          3. 调用 get_habit_patterns 查看已学到的习惯模式\n\
-         4. 如果第 1 步返回没有活动记录，直接回复\"今日无数据\"并结束，不要编造内容\n\
+         4. 如果第 1 步返回没有活动记录，直接回复\"当日无数据\"并结束，不要编造内容\n\
          5. 基于以上真实数据写一份简洁的中文日报（Markdown），包含：\n\
-            - 今日工作主题（从窗口标题和剪贴板内容推断，一句话）\n\
+            - 当日工作主题（从窗口标题和剪贴板内容推断，一句话）\n\
             - 时间分配（各应用时长）\n\
             - 值得注意的点（亮点或问题，一两句）\n\
-            - 明日建议（一两句）\n\
-         6. 调用 write_note 把日报写入笔记，filename 用 \"{today}\"\n\
+            - 次日建议（一两句）\n\
+         6. 调用 write_note 把日报写入笔记，filename 用 \"{date}\"\n\
          7. 如果你从数据中发现了一个此前没有的、稳定的工作习惯（比如固定的应用组合），\n\
             调用 create_suggestion 告诉我；没有发现就跳过\n\
          8. 最后用一句话回复日报的核心结论\n\
          注意：所有内容必须基于工具返回的真实数据，不要臆造。",
-        today = today
+        date = date
     )
 }

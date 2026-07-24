@@ -18,9 +18,12 @@ import {
   HelpCircle,
   Languages,
   Brain,
+  FolderOpen,
 } from 'lucide-react';
 import { Tooltip } from '@/components/Tooltip';
 import { useLlmProviderStore, type Provider, type ProviderType, type Model, type Scene, type SceneConfig } from '@/stores/llmProviderStore';
+import { useSettingsStore } from '@/stores/settingsStore';
+import { Toggle } from '../components/SettingCard';
 
 // Custom Select Component
 interface SelectOption {
@@ -231,6 +234,7 @@ const SCENE_LABELS: Record<Scene, { label: string; icon: typeof MessageSquare; d
   chat: { label: '闲聊', icon: MessageSquare, description: '日常对话场景' },
   qa: { label: '问答', icon: HelpCircle, description: '知识问答场景' },
   translate: { label: '翻译', icon: Languages, description: '翻译场景' },
+  companion: { label: '陪伴', icon: Bot, description: '陪伴功能（模式挖掘、意图解析）' },
 };
 
 // Connection status badge
@@ -271,6 +275,32 @@ export function ModelSettings() {
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
   const [testingProvider, setTestingProvider] = useState<number | null>(null);
   const [refreshingProvider, setRefreshingProvider] = useState<number | null>(null);
+
+  // Claude Code 全局配置（文本输入本地编辑，onBlur 提交）
+  const {
+    claude_code_enabled,
+    claude_code_bin_path,
+    claude_code_work_dir,
+    setClaudeCodeEnabled,
+    setClaudeCodeBinPath,
+    setClaudeCodeWorkDir,
+  } = useSettingsStore();
+  const [binPathInput, setBinPathInput] = useState(claude_code_bin_path);
+  const [workDirInput, setWorkDirInput] = useState(claude_code_work_dir);
+  useEffect(() => setBinPathInput(claude_code_bin_path), [claude_code_bin_path]);
+  useEffect(() => setWorkDirInput(claude_code_work_dir), [claude_code_work_dir]);
+
+  const browseWorkDir = async () => {
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const selected = await open({ directory: true, multiple: false });
+      if (typeof selected === 'string') {
+        await setClaudeCodeWorkDir(selected);
+      }
+    } catch (e) {
+      console.error('Failed to open directory picker:', e);
+    }
+  };
 
   // Form state for new/edit provider
   const [formData, setFormData] = useState({
@@ -827,6 +857,66 @@ export function ModelSettings() {
               );
             })}
           </div>
+        </div>
+
+        {/* Claude Code 全局配置 */}
+        <div className="rounded-xl border border-white/10 bg-white/[0.02] overflow-hidden">
+          <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between gap-4">
+            <div>
+              <h3 className="text-white/90 text-sm font-medium">Claude Code</h3>
+              <p className="text-white/40 text-xs mt-0.5">
+                开启后，支持 Claude Code 的功能（如陪伴）将由本地 Claude Code 执行
+              </p>
+            </div>
+            <Toggle enabled={claude_code_enabled} onToggle={setClaudeCodeEnabled} />
+          </div>
+
+          {claude_code_enabled && (
+            <div className="divide-y divide-white/5">
+              <div className="px-4 py-3">
+                <label className="block text-white/60 text-xs mb-1.5">CLI 路径</label>
+                <input
+                  type="text"
+                  value={binPathInput}
+                  onChange={(e) => setBinPathInput(e.target.value)}
+                  onBlur={() => setClaudeCodeBinPath(binPathInput.trim() || 'claude')}
+                  placeholder="claude"
+                  className="w-full bg-zinc-800 text-white text-sm rounded-lg px-3 py-2 outline-none border border-zinc-700 focus:border-white/25 transition-colors placeholder:text-white/20"
+                />
+                <p className="text-white/30 text-xs mt-1.5">claude CLI 可执行文件路径，默认从 PATH 查找</p>
+              </div>
+
+              <div className="px-4 py-3">
+                <label className="block text-white/60 text-xs mb-1.5">工作目录</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={workDirInput}
+                    onChange={(e) => setWorkDirInput(e.target.value)}
+                    onBlur={() => setClaudeCodeWorkDir(workDirInput.trim())}
+                    placeholder="留空使用默认目录"
+                    className="flex-1 bg-zinc-800 text-white text-sm rounded-lg px-3 py-2 outline-none border border-zinc-700 focus:border-white/25 transition-colors placeholder:text-white/20"
+                  />
+                  <button
+                    onClick={browseWorkDir}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white/5 text-white/60 text-xs border border-white/10 hover:bg-white/10 transition-colors cursor-pointer"
+                  >
+                    <FolderOpen size={14} />
+                    <span>浏览</span>
+                  </button>
+                  <button
+                    onClick={() => setClaudeCodeWorkDir('')}
+                    className="px-3 py-2 rounded-lg bg-white/5 text-white/60 text-xs border border-white/10 hover:bg-white/10 transition-colors cursor-pointer"
+                  >
+                    恢复默认
+                  </button>
+                </div>
+                <p className="text-white/30 text-xs mt-1.5">
+                  Claude Code 执行任务时的工作目录，留空使用默认目录（应用数据目录/companion-agent）
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </>

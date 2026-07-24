@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 
 export type ProviderType = 'openai' | 'ollama' | 'deepseek' | 'bailian' | 'custom';
 export type ConnectionStatus = 'unknown' | 'connected' | 'disconnected' | 'error';
-export type Scene = 'chat' | 'qa' | 'translate';
+export type Scene = 'chat' | 'qa' | 'translate' | 'companion';
 
 export interface Provider {
   id: number;
@@ -104,8 +104,8 @@ interface LlmProviderState {
 export const useLlmProviderStore = create<LlmProviderState>((set, get) => ({
   providers: [],
   models: {},
-  sceneConfigs: { chat: null, qa: null, translate: null },
-  sceneModelInfo: { chat: null, qa: null, translate: null },
+  sceneConfigs: { chat: null, qa: null, translate: null, companion: null },
+  sceneModelInfo: { chat: null, qa: null, translate: null, companion: null },
   isLoading: false,
   error: null,
 
@@ -228,7 +228,7 @@ export const useLlmProviderStore = create<LlmProviderState>((set, get) => ({
   loadSceneConfigs: async () => {
     try {
       const configs = await invoke<SceneConfig[]>('get_scene_configs');
-      const sceneConfigs: Record<Scene, SceneConfig | null> = { chat: null, qa: null, translate: null };
+      const sceneConfigs: Record<Scene, SceneConfig | null> = { chat: null, qa: null, translate: null, companion: null };
       configs.forEach((config) => {
         sceneConfigs[config.scene] = config;
       });

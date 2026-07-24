@@ -14,13 +14,13 @@ export interface AppSettings {
   llm_api_key: string;
   llm_model: string;
   llm_thinking_mode: boolean;
+  claude_code_enabled: boolean;
   claude_code_bin_path: string;
   claude_code_work_dir: string;
   companion_enabled: boolean;
   companion_paused: boolean;
   companion_retention_days: number;
   companion_long_work_minutes: number;
-  companion_agent_enabled: boolean;
 }
 
 export interface ShortcutConfig {
@@ -58,6 +58,7 @@ interface SettingsState extends AppSettings {
   toggleLlmThinkingMode: () => Promise<boolean>;
   testLlmConnection: () => Promise<string>;
 
+  setClaudeCodeEnabled: (enabled: boolean) => Promise<void>;
   setClaudeCodeBinPath: (path: string) => Promise<void>;
   setClaudeCodeWorkDir: (dir: string) => Promise<void>;
 
@@ -66,7 +67,6 @@ interface SettingsState extends AppSettings {
   setCompanionPaused: (paused: boolean) => Promise<void>;
   setCompanionRetentionDays: (days: number) => Promise<void>;
   setCompanionLongWorkMinutes: (minutes: number) => Promise<void>;
-  setCompanionAgentEnabled: (enabled: boolean) => Promise<void>;
 
   // Shortcut Actions
   loadShortcuts: () => Promise<void>;
@@ -89,13 +89,13 @@ const defaultSettings: AppSettings = {
   llm_api_key: '',
   llm_model: 'gpt-4o-mini',
   llm_thinking_mode: false,
+  claude_code_enabled: false,
   claude_code_bin_path: 'claude',
   claude_code_work_dir: '',
   companion_enabled: true,
   companion_paused: false,
   companion_retention_days: 30,
   companion_long_work_minutes: 90,
-  companion_agent_enabled: false,
 };
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
@@ -286,6 +286,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }
   },
 
+  setClaudeCodeEnabled: async (enabled: boolean) => {
+    try {
+      await invoke('set_setting', { key: 'claude_code_enabled', value: enabled.toString() });
+      set({ claude_code_enabled: enabled });
+    } catch (err) {
+      console.error('Failed to set claude_code_enabled:', err);
+    }
+  },
+
   setClaudeCodeBinPath: async (path: string) => {
     try {
       await invoke('set_setting', { key: 'claude_code_bin_path', value: path });
@@ -341,15 +350,6 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       set({ companion_long_work_minutes: minutes });
     } catch (err) {
       console.error('Failed to set companion_long_work_minutes:', err);
-    }
-  },
-
-  setCompanionAgentEnabled: async (enabled: boolean) => {
-    try {
-      await invoke('set_companion_agent_enabled', { value: enabled });
-      set({ companion_agent_enabled: enabled });
-    } catch (err) {
-      console.error('Failed to set companion_agent_enabled:', err);
     }
   },
 

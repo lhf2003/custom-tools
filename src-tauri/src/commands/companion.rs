@@ -141,14 +141,19 @@ pub async fn analyze_companion_now(
 }
 
 /// 手动触发一次日报 agent（阻塞执行，可能耗时几分钟，返回人话结果）
+/// 需要先在「设置 → AI 模型」中开启全局 Claude Code
 #[tauri::command]
 pub async fn run_companion_agent_now(
     db_state: State<'_, DatabaseState>,
     app_handle: AppHandle,
 ) -> Result<String, String> {
+    if !crate::companion::claude_code_enabled(&app_handle) {
+        return Err("请先在「设置 → AI 模型」中开启 Claude Code".to_string());
+    }
     let db_path = db_state.0.clone();
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     tauri::async_runtime::spawn_blocking(move || {
-        crate::companion::run_agent_with_settings(&app_handle, &db_path)
+        crate::companion::run_agent_with_settings(&app_handle, &db_path, &today)
     })
     .await
     .map_err(|e| format!("agent 线程异常: {}", e))?
@@ -253,10 +258,4 @@ companion_flag_command!(
     "companion_long_work_minutes",
     long_work_minutes,
     i64
-);
-companion_flag_command!(
-    set_companion_agent_enabled,
-    "companion_agent_enabled",
-    agent_enabled,
-    bool
 );

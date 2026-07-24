@@ -246,7 +246,7 @@ impl Database {
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS llm_scene_configs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                scene TEXT NOT NULL UNIQUE CHECK (scene IN ('chat', 'qa', 'translate')),
+                scene TEXT NOT NULL UNIQUE CHECK (scene IN ('chat', 'qa', 'translate', 'companion')),
                 provider_id INTEGER REFERENCES llm_providers(id),
                 model_id TEXT,
                 thinking_mode BOOLEAN DEFAULT 0,
@@ -261,8 +261,11 @@ impl Database {
             [],
         );
 
+        // Migration: 老库的 CHECK 约束不含 'companion'，SQLite 无法改 CHECK，需重建表
+        self.migrate_scene_configs_check()?;
+
         // Insert default scene configs if not exists (provider_id and model_id are NULL initially)
-        let default_scenes = ["chat", "qa", "translate"];
+        let default_scenes = ["chat", "qa", "translate", "companion"];
         for scene in &default_scenes {
             self.conn.execute(
                 "INSERT OR IGNORE INTO llm_scene_configs (scene, provider_id, model_id) VALUES (?1, NULL, NULL)",
@@ -273,6 +276,53 @@ impl Database {
         // Companion tables (activity_log / habit_patterns / suggestions)
         crate::companion::db::init_tables(&self.conn)?;
 
+        Ok(())
+    }
+
+    /// 老库 llm_scene_configs 的 CHECK 只允许 3 个场景值，SQLite 无法修改 CHECK，
+    /// 需 RENAME → 重建 → 显式列名拷贝 → DROP。失败只记日志，不阻断启动
+    /// （后果仅是 companion 场景行插不进去，用户重新配置即可，不丢老数据）。
+    fn migrate_scene_configs_check(&self) -> Result<()> {
+        let table_sql: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='llm_scene_configs'",
+                [],
+                |row| row.get(0),
+            )
+            .ok();
+
+        let needs_migration = table_sql
+            .map(|sql| !sql.contains("'companion'"))
+            .unwrap_or(false);
+        if !needs_migration {
+            return Ok(());
+        }
+
+        let result = (|| -> Result<()> {
+            let tx = self.conn.unchecked_transaction()?;
+            tx.execute_batch(
+                "ALTER TABLE llm_scene_configs RENAME TO llm_scene_configs_old;
+                 CREATE TABLE llm_scene_configs (
+                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                     scene TEXT NOT NULL UNIQUE CHECK (scene IN ('chat', 'qa', 'translate', 'companion')),
+                     provider_id INTEGER REFERENCES llm_providers(id),
+                     model_id TEXT,
+                     thinking_mode BOOLEAN DEFAULT 0,
+                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                 );
+                 INSERT INTO llm_scene_configs (id, scene, provider_id, model_id, thinking_mode, updated_at)
+                     SELECT id, scene, provider_id, model_id, thinking_mode, updated_at
+                     FROM llm_scene_configs_old;
+                 DROP TABLE llm_scene_configs_old;",
+            )?;
+            tx.commit()
+        })();
+
+        match result {
+            Ok(_) => log::info!("llm_scene_configs 迁移完成：CHECK 约束已包含 companion"),
+            Err(e) => log::error!("llm_scene_configs 迁移失败（旧约束保留）: {}", e),
+        }
         Ok(())
     }
 }
