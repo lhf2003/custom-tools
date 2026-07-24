@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "FlowHub",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "identifier": "com.flowhub.app",
   "build": {
     "frontendDist": "../dist",

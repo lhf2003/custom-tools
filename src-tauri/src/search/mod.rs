@@ -154,10 +154,13 @@ impl SearchIndex {
         }
     }
 
-    /// Fast load from cache, then refresh in background
-    pub fn load_from_cache(&mut self) -> anyhow::Result<()> {
+    /// Fast load from cache. Returns Ok(true) if the cache was loaded,
+    /// Ok(false) if no cache exists (caller should run a full index, preferably
+    /// off the main thread — scanning touches the filesystem, registry and
+    /// external processes and may block for a long time in bad environments).
+    pub fn load_from_cache(&mut self) -> anyhow::Result<bool> {
         if self.indexed {
-            return Ok(());
+            return Ok(true);
         }
 
         // Try to load from database cache
@@ -170,16 +173,20 @@ impl SearchIndex {
                 self.indexed = true;
 
                 log::info!("Loaded {} applications from cache", self.apps.len());
-                return Ok(());
+                return Ok(true);
             }
         }
 
-        // Fall back to full indexing if no cache
-        self.index_apps()
+        Ok(false)
     }
 
-    /// Background refresh - scans directories and updates cache
-    pub fn refresh_in_background(&mut self) -> anyhow::Result<()> {
+    /// Scan all app sources and return the full app list **without touching `self`**.
+    /// 设计上允许在不持有索引锁的情况下执行——扫描会触达文件系统/注册表/外部
+    /// 进程，在慢速或不可达环境（网络盘、EDR 拦截）中可能长时间阻塞；持锁执行
+    /// 会饿死搜索命令与文件监听线程。
+    pub fn collect_all_apps(
+        db_state: &Option<Arc<DatabaseState>>,
+    ) -> anyhow::Result<Vec<AppItem>> {
         let start = std::time::Instant::now();
 
         let mut apps = Vec::new();
@@ -188,25 +195,16 @@ impl SearchIndex {
         // System start menu
         let system_start_menu =
             PathBuf::from("C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs");
-        if system_start_menu.exists() {
-            self.scan_directory(&system_start_menu, &mut apps, &mut seen)?;
-        }
+        scan_dir_if_local(&system_start_menu, &mut apps, &mut seen);
 
-        // User start menu
+        // User start menu & Desktop shortcuts
         if let Ok(user_profile) = std::env::var("USERPROFILE") {
-            let user_start_menu = PathBuf::from(user_profile)
+            let user_start_menu = PathBuf::from(user_profile.clone())
                 .join("AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs");
-            if user_start_menu.exists() {
-                self.scan_directory(&user_start_menu, &mut apps, &mut seen)?;
-            }
-        }
+            scan_dir_if_local(&user_start_menu, &mut apps, &mut seen);
 
-        // Desktop shortcuts
-        if let Ok(user_profile) = std::env::var("USERPROFILE") {
             let desktop = PathBuf::from(user_profile).join("Desktop");
-            if desktop.exists() {
-                self.scan_directory(&desktop, &mut apps, &mut seen)?;
-            }
+            scan_dir_if_local(&desktop, &mut apps, &mut seen);
         }
 
         // Registry apps (green software without Start Menu shortcuts)
@@ -247,21 +245,17 @@ impl SearchIndex {
         }
 
         // Custom directories configured by user
-        let custom_dirs = self.load_custom_dirs();
+        let custom_dirs = load_custom_dirs(db_state);
         for dir_path in custom_dirs {
             let dir = PathBuf::from(&dir_path);
-            if dir.exists() {
-                if let Err(e) = self.scan_directory(&dir, &mut apps, &mut seen) {
-                    log::warn!("Failed to scan custom dir {}: {}", dir_path, e);
-                }
-            }
+            scan_dir_if_local(&dir, &mut apps, &mut seen);
         }
 
         // Sort by name alphabetically
         apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
 
         // Update cache
-        if let Some(ref db_state) = self.db_state {
+        if let Some(ref db_state) = db_state {
             if let Ok(mut conn) = rusqlite::Connection::open(&db_state.0) {
                 let cache_entries: Vec<AppCacheEntry> = apps
                     .iter()
@@ -289,14 +283,24 @@ impl SearchIndex {
             }
         }
 
+        log::info!("Collected {} applications in {:?}", apps.len(), start.elapsed());
+        Ok(apps)
+    }
+
+    /// Replace the in-memory index with apps collected elsewhere (see
+    /// `collect_all_apps`). Used to swap in results of an unlocked background scan.
+    pub fn apply_indexed_apps(&mut self, apps: Vec<AppItem>) {
+        self.apps = apps;
+        self.indexed = true;
+    }
+
+    /// Background refresh - scans directories and updates cache
+    pub fn refresh_in_background(&mut self) -> anyhow::Result<()> {
+        let apps = Self::collect_all_apps(&self.db_state)?;
         self.apps = apps;
         self.indexed = true;
 
-        log::info!(
-            "Refreshed {} applications in {:?}",
-            self.apps.len(),
-            start.elapsed()
-        );
+        log::info!("Refreshed {} applications", self.apps.len());
 
         Ok(())
     }
@@ -312,7 +316,7 @@ impl SearchIndex {
 
     /// Incremental update for a single file
     pub fn add_or_update_app(&mut self, path: &Path) -> anyhow::Result<()> {
-        if let Some((app, target_path)) = self.parse_shortcut(path) {
+        if let Some((app, target_path)) = parse_shortcut(path) {
             // Check for duplicates
             let key = format!("{}|{}", app.name.to_lowercase(), target_path.to_lowercase());
 
@@ -377,70 +381,132 @@ impl SearchIndex {
 
         Ok(())
     }
+}
 
-    fn scan_directory(
-        &self,
-        dir: &Path,
-        apps: &mut Vec<AppItem>,
-        seen: &mut HashSet<String>,
-    ) -> anyhow::Result<()> {
-        let entries = std::fs::read_dir(dir)?;
+/// 目录递归扫描的最大深度（开始菜单/桌面正常不超过 3 层，限制深度防御异常目录树）
+const MAX_SCAN_DEPTH: usize = 5;
 
-        for entry in entries.flatten() {
-            let path = entry.path();
+/// Scan a local directory for shortcuts. UNC paths are skipped outright — a
+/// disconnected network drive can block `read_dir` for tens of seconds.
+fn scan_dir_if_local(dir: &Path, apps: &mut Vec<AppItem>, seen: &mut HashSet<String>) {
+    if dir.as_os_str().to_string_lossy().starts_with("\\\\") {
+        log::warn!("Skipping UNC scan directory: {}", dir.display());
+        return;
+    }
+    if !dir.exists() {
+        return;
+    }
+    if let Err(e) = scan_directory(dir, apps, seen, 0) {
+        log::warn!("Failed to scan directory {}: {}", dir.display(), e);
+    }
+}
 
-            if path.is_dir() {
-                // Recursively scan subdirectories
-                self.scan_directory(&path, apps, seen)?;
-            } else if let Some(ext) = path.extension() {
-                if ext.eq_ignore_ascii_case("lnk") {
-                    if let Some((app, target_path)) = self.parse_shortcut(&path) {
-                        // Use target path for deduplication
-                        let key =
-                            format!("{}|{}", app.name.to_lowercase(), target_path.to_lowercase());
-                        if seen.insert(key) {
-                            apps.push(app);
-                        }
+fn scan_directory(
+    dir: &Path,
+    apps: &mut Vec<AppItem>,
+    seen: &mut HashSet<String>,
+    depth: usize,
+) -> anyhow::Result<()> {
+    if depth > MAX_SCAN_DEPTH {
+        log::warn!("Scan depth limit reached, skipping subtree: {}", dir.display());
+        return Ok(());
+    }
+
+    let entries = std::fs::read_dir(dir)?;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+
+        // DirEntry::file_type 不跟随链接:跳过 junction/符号链接目录,
+        // 避免目录循环导致的无限递归与网络位置递归。
+        let file_type = match entry.file_type() {
+            Ok(ft) => ft,
+            Err(_) => continue,
+        };
+
+        if file_type.is_dir() && !file_type.is_symlink() {
+            // 单个子目录失败(权限/网络超时)不拖垮整个扫描
+            if let Err(e) = scan_directory(&path, apps, seen, depth + 1) {
+                log::warn!("Failed to scan subdirectory {}: {}", path.display(), e);
+            }
+        } else if let Some(ext) = path.extension() {
+            if ext.eq_ignore_ascii_case("lnk") {
+                if let Some((app, target_path)) = parse_shortcut(&path) {
+                    // Use target path for deduplication
+                    let key =
+                        format!("{}|{}", app.name.to_lowercase(), target_path.to_lowercase());
+                    if seen.insert(key) {
+                        apps.push(app);
                     }
                 }
             }
         }
-
-        Ok(())
     }
 
-    fn parse_shortcut(&self, path: &Path) -> Option<(AppItem, String)> {
-        let file_stem = path.file_stem()?;
-        let name = file_stem.to_string_lossy().to_string();
+    Ok(())
+}
 
-        // Clean up common suffixes
-        let name = name
-            .replace(" - 快捷方式", "")
-            .replace(" - Shortcut", "")
-            .trim()
-            .to_string();
+fn parse_shortcut(path: &Path) -> Option<(AppItem, String)> {
+    let file_stem = path.file_stem()?;
+    let name = file_stem.to_string_lossy().to_string();
 
-        if name.is_empty() {
-            return None;
+    // Clean up common suffixes
+    let name = name
+        .replace(" - 快捷方式", "")
+        .replace(" - Shortcut", "")
+        .trim()
+        .to_string();
+
+    if name.is_empty() {
+        return None;
+    }
+
+    // Get the target path for deduplication
+    let target_path =
+        parse_shortcut_target(path).unwrap_or_else(|| path.to_string_lossy().to_string());
+
+    // Pre-compute pinyin initials for Chinese search support
+    let pinyin_initials = to_pinyin_initials(&name);
+
+    let app = AppItem {
+        name,
+        path: path.to_string_lossy().to_string(),
+        icon: None,
+        pinyin_initials,
+    };
+
+    Some((app, target_path))
+}
+
+/// Read custom scan directories from the database settings table.
+fn load_custom_dirs(db_state: &Option<Arc<DatabaseState>>) -> Vec<String> {
+    let db_state = match db_state {
+        Some(s) => s,
+        None => return Vec::new(),
+    };
+
+    let conn = match rusqlite::Connection::open(&db_state.0) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+
+    let result: rusqlite::Result<String> = conn.query_row(
+        "SELECT value FROM settings WHERE key = 'custom_scan_dirs'",
+        [],
+        |row| row.get(0),
+    );
+
+    match result {
+        Ok(json) => serde_json::from_str(&json).unwrap_or_default(),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Vec::new(),
+        Err(e) => {
+            log::warn!("Failed to load custom_scan_dirs: {}", e);
+            Vec::new()
         }
-
-        // Get the target path for deduplication
-        let target_path =
-            parse_shortcut_target(path).unwrap_or_else(|| path.to_string_lossy().to_string());
-
-        // Pre-compute pinyin initials for Chinese search support
-        let pinyin_initials = to_pinyin_initials(&name);
-
-        let app = AppItem {
-            name,
-            path: path.to_string_lossy().to_string(),
-            icon: None,
-            pinyin_initials,
-        };
-
-        Some((app, target_path))
     }
+}
 
+impl SearchIndex {
     pub fn search(&self, query: &str) -> Vec<AppItem> {
         if query.is_empty() {
             return self.get_all();
@@ -550,34 +616,6 @@ impl SearchIndex {
 
     pub fn is_indexed(&self) -> bool {
         self.indexed
-    }
-
-    /// Read custom scan directories from the database settings table.
-    fn load_custom_dirs(&self) -> Vec<String> {
-        let db_state = match &self.db_state {
-            Some(s) => s,
-            None => return Vec::new(),
-        };
-
-        let conn = match rusqlite::Connection::open(&db_state.0) {
-            Ok(c) => c,
-            Err(_) => return Vec::new(),
-        };
-
-        let result: rusqlite::Result<String> = conn.query_row(
-            "SELECT value FROM settings WHERE key = 'custom_scan_dirs'",
-            [],
-            |row| row.get(0),
-        );
-
-        match result {
-            Ok(json) => serde_json::from_str(&json).unwrap_or_default(),
-            Err(rusqlite::Error::QueryReturnedNoRows) => Vec::new(),
-            Err(e) => {
-                log::warn!("Failed to load custom_scan_dirs: {}", e);
-                Vec::new()
-            }
-        }
     }
 }
 

@@ -88,6 +88,33 @@ fn is_system_component(key: &RegKey) -> bool {
     is_sys != 0 || release_type == "Update" || release_type == "Hotfix"
 }
 
+/// 判断路径是否位于远程/网络位置(UNC 或映射网络驱动器)。
+/// 对不可达的网络路径调用 exists()/read_dir() 会阻塞数十秒(Windows 网络超时),
+/// Uninstall 键下残留几十个此类条目时整个扫描近乎永久卡死。
+#[cfg(windows)]
+fn is_remote_path(path: &str) -> bool {
+    // UNC 路径(\\server\share\...)
+    if path.starts_with("\\\\") || path.starts_with("//") {
+        return true;
+    }
+
+    // 映射网络驱动器(Z:\...):取盘符根用 GetDriveTypeW 判断
+    let bytes = path.as_bytes();
+    if bytes.len() >= 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic() {
+        use windows::Win32::Storage::FileSystem::GetDriveTypeW;
+        const DRIVE_REMOTE: u32 = 4;
+
+        let root: Vec<u16> = format!("{}\\", &path[..2])
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        let drive_type = unsafe { GetDriveTypeW(windows::core::PCWSTR(root.as_ptr())) };
+        return drive_type == DRIVE_REMOTE;
+    }
+
+    false
+}
+
 /// Try to extract an absolute exe path.
 /// Priority: DisplayIcon → InstallLocation main exe → InstallLocation itself.
 #[cfg(windows)]
@@ -107,7 +134,10 @@ fn resolve_exe_path(key: &RegKey) -> Option<String> {
             icon
         };
         let icon = icon.trim().trim_matches('"').to_string();
-        if icon.to_lowercase().ends_with(".exe") && std::path::Path::new(&icon).exists() {
+        if icon.to_lowercase().ends_with(".exe")
+            && !is_remote_path(&icon)
+            && std::path::Path::new(&icon).exists()
+        {
             return Some(icon);
         }
     }
@@ -115,7 +145,7 @@ fn resolve_exe_path(key: &RegKey) -> Option<String> {
     // Fallback: look for a single .exe in InstallLocation
     if let Ok(location) = key.get_value::<String, _>("InstallLocation") {
         let location = location.trim().trim_matches('"').to_string();
-        if location.is_empty() {
+        if location.is_empty() || is_remote_path(&location) {
             return None;
         }
         let dir = std::path::Path::new(&location);

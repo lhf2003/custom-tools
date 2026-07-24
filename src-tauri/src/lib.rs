@@ -71,7 +71,11 @@ pub mod settings;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    install_panic_hook();
+
     tauri::Builder::default()
+        // 日志插件必须最先注册:托盘/updater 等后续初始化失败时才能留下日志
+        .plugin(build_log_plugin().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_notification::init())
@@ -93,51 +97,18 @@ pub fn run() {
                     .plugin(tauri_plugin_updater::Builder::new().build())?;
             }
 
-            // Initialize logging
-            let log_level = if cfg!(debug_assertions) {
-                log::LevelFilter::Debug
-            } else {
-                log::LevelFilter::Info
-            };
-
-            let logs_dir = app.path().app_data_dir().unwrap().join("logs");
-            std::fs::create_dir_all(&logs_dir).ok();
-
-            app.handle().plugin(
-                tauri_plugin_log::Builder::default()
-                    .targets([
-                        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Folder {
-                            path: logs_dir.clone(),
-                            file_name: None,
-                        }),
-                        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
-                        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
-                    ])
-                    .level(log_level)
-                    .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepAll)
-                    .max_file_size(1_000_000)
-                    .format(|out, message, record| {
-                        out.finish(format_args!(
-                            "[{}] [{}] [{}] {}",
-                            chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
-                            record.level(),
-                            record.target(),
-                            message
-                        ))
-                    })
-                    .build(),
-            )?;
-
             // Clean up logs older than 30 days in background
-            let logs_dir_for_cleanup = logs_dir.clone();
-            std::thread::spawn(move || {
-                if let Err(e) = cleanup_old_logs(&logs_dir_for_cleanup, 30) {
-                    eprintln!("Failed to cleanup old logs: {}", e);
-                }
-            });
+            if let Ok(logs_dir) = app.path().app_log_dir() {
+                std::thread::spawn(move || {
+                    if let Err(e) = cleanup_old_logs(&logs_dir, 30) {
+                        log::warn!("Failed to cleanup old logs: {}", e);
+                    }
+                });
+            }
 
             // Initialize database
             db::init(app.handle())?;
+            log::info!("Database initialized");
 
             // Initialize pending update cache (populated by check_for_update)
             app.manage(commands::updater::PendingUpdate(Mutex::new(None)));
@@ -206,6 +177,7 @@ pub fn run() {
             app.manage(commands::settings::SettingsState(Mutex::new(
                 settings_manager,
             )));
+            log::info!("Settings manager initialized");
 
             // Initialize shortcut manager
             let shortcuts_db_path = app
@@ -243,6 +215,7 @@ pub fn run() {
                     },
                 )?;
             app.manage(Mutex::new(clipboard_manager));
+            log::info!("Clipboard manager initialized");
 
             // Initialize notes manager
             let notes_dir = notes::get_default_notes_dir()
@@ -257,24 +230,61 @@ pub fn run() {
             let password_manager = password::PasswordManager::new();
             app.manage(password::PasswordManagerState(Arc::new(password_manager)));
 
-            // Initialize search index with database for caching
+            // Initialize search index with database for caching.
+            // 注意:这里只创建空索引并托管状态,首次索引(读缓存/全量扫描)全部在
+            // 后台线程执行——扫描会触达文件系统/注册表/外部进程,在慢速或不可达
+            // 环境(网络盘、EDR 拦截)可能长时间阻塞,同步跑在主事件循环线程会导致
+            // 窗口不显示、托盘菜单不弹、快捷键无响应(整个 UI 消息泵停摆)。
             let db_path = app.path().app_data_dir().unwrap().join("custom-tools.db");
             let db_state = Arc::new(db::DatabaseState(db_path));
 
-            // Create search index with db connection
-            let mut search_index = search::SearchIndex::with_db(db_state.clone());
-
-            // Fast load from cache first
-            if let Err(e) = search_index.load_from_cache() {
-                log::warn!("Failed to load from cache: {}", e);
-                // Fall back to full index
-                if let Err(e) = search_index.index_apps() {
-                    log::warn!("Failed to index apps: {}", e);
-                }
-            }
-
+            let search_index = search::SearchIndex::with_db(db_state.clone());
             let search_index_arc = Arc::new(Mutex::new(search_index));
             app.manage(commands::search::SearchState(search_index_arc.clone()));
+
+            // Background initial indexing: load cache first, fall back to full scan
+            {
+                let search_index_for_init = search_index_arc.clone();
+                let db_state_for_init = db_state.clone();
+                std::thread::spawn(move || {
+                    log::info!("Background initial app indexing started");
+
+                    // 缓存加载只读本地 SQLite,毫秒级,持锁无碍
+                    let cache_loaded = match search_index_for_init.lock() {
+                        Ok(mut idx) => match idx.load_from_cache() {
+                            Ok(loaded) => loaded,
+                            Err(e) => {
+                                log::warn!("Failed to load app cache: {}", e);
+                                false
+                            }
+                        },
+                        Err(e) => {
+                            log::warn!("Search index lock poisoned: {}", e);
+                            false
+                        }
+                    };
+
+                    if !cache_loaded {
+                        // 全量扫描不持锁(可能极慢),完成后再短暂持锁交换结果
+                        match search::SearchIndex::collect_all_apps(&Some(db_state_for_init))
+                        {
+                            Ok(apps) => {
+                                let count = apps.len();
+                                if let Ok(mut idx) = search_index_for_init.lock() {
+                                    idx.apply_indexed_apps(apps);
+                                    log::info!(
+                                        "Background initial app indexing finished: {} apps",
+                                        count
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                log::warn!("Background initial app indexing failed: {}", e)
+                            }
+                        }
+                    }
+                });
+            }
 
             // Start file watcher in background thread to avoid blocking startup
             let search_index_for_watcher = search_index_arc.clone();
@@ -348,6 +358,7 @@ pub fn run() {
                 app.manage(companion_state);
             }
 
+            log::info!("Application setup completed");
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -895,4 +906,66 @@ fn setup_system_tray(app_handle: &tauri::AppHandle) -> Result<(), Box<dyn std::e
 
     log::info!("System tray icon set up successfully");
     Ok(())
+}
+
+/// 构建日志插件。日志目录用 TargetKind::LogDir(Tauri 自动解析
+/// app_log_dir,Windows 上为 %APPDATA%\<identifier>\logs),
+/// 插件在 Builder 链首位注册,保证后续所有初始化阶段的日志都能落盘。
+fn build_log_plugin() -> tauri_plugin_log::Builder {
+    let log_level = if cfg!(debug_assertions) {
+        log::LevelFilter::Debug
+    } else {
+        log::LevelFilter::Info
+    };
+
+    tauri_plugin_log::Builder::default()
+        .targets([
+            tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                file_name: None,
+            }),
+            tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+            tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
+        ])
+        .level(log_level)
+        .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepAll)
+        .max_file_size(1_000_000)
+        .format(|out, message, record| {
+            out.finish(format_args!(
+                "[{}] [{}] [{}] {}",
+                chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
+                record.level(),
+                record.target(),
+                message
+            ))
+        })
+}
+
+/// 全局 panic hook:panic 写入日志,并直接落盘到 panic.log 兜底。
+/// GUI 子系统应用没有控制台,panic 默认无声无息,用户机器上崩溃完全无法排查。
+fn install_panic_hook() {
+    std::panic::set_hook(Box::new(|info| {
+        let msg = format!("{}", info);
+        log::error!("PANIC: {}", msg);
+
+        // 兜底:logger 可能尚未初始化或已失效,直接追加写文件。
+        // 注意:此 identifier 需与 tauri.conf.json 的 identifier 保持一致。
+        if let Some(data_dir) = dirs::data_dir() {
+            let logs_dir = data_dir.join("com.flowhub.app").join("logs");
+            if std::fs::create_dir_all(&logs_dir).is_ok() {
+                use std::io::Write;
+                if let Ok(mut file) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(logs_dir.join("panic.log"))
+                {
+                    let _ = writeln!(
+                        file,
+                        "[{}] PANIC: {}",
+                        chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f"),
+                        msg
+                    );
+                }
+            }
+        }
+    }));
 }

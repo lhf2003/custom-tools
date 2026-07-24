@@ -16,7 +16,16 @@ pub fn search_apps(
     state: tauri::State<'_, SearchState>,
     db_state: tauri::State<'_, DatabaseState>,
 ) -> Result<Vec<AppItem>, String> {
-    let index = state.0.lock().map_err(|e| e.to_string())?;
+    // try_lock:首次全量索引在后台线程执行,持锁期间这里若用 lock() 会把
+    // 主线程(sync command)一起卡死。索引忙时降级返回空结果,前端表现为
+    // 暂时无搜索结果,UI 不受影响。
+    let index = match state.0.try_lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            log::debug!("Search index busy (initial indexing in progress), returning empty");
+            return Ok(Vec::new());
+        }
+    };
     let conn = get_db_conn(&db_state)?;
 
     // Get all usage stats
@@ -46,7 +55,10 @@ pub fn search_apps(
 
 #[tauri::command]
 pub fn refresh_apps(state: tauri::State<'_, SearchState>) -> Result<(), String> {
-    let mut index = state.0.lock().map_err(|e| e.to_string())?;
+    let mut index = match state.0.try_lock() {
+        Ok(guard) => guard,
+        Err(_) => return Err("索引正在后台更新中,请稍后重试".to_string()),
+    };
     index.refresh().map_err(|e| e.to_string())
 }
 
@@ -81,7 +93,14 @@ pub fn get_recent_apps(
     db_state: tauri::State<'_, DatabaseState>,
     state: tauri::State<'_, SearchState>,
 ) -> Result<Vec<AppItem>, String> {
-    let index = state.0.lock().map_err(|e| e.to_string())?;
+    // 同 search_apps:索引持锁期间降级返回空,不阻塞主线程
+    let index = match state.0.try_lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            log::debug!("Search index busy (initial indexing in progress), returning empty");
+            return Ok(Vec::new());
+        }
+    };
     let conn = get_db_conn(&db_state)?;
 
     // usages 已按 last_launch DESC 排好序，直接按此顺序输出
