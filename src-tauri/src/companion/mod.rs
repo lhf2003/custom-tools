@@ -1,7 +1,9 @@
 pub mod agent;
 pub mod analyzer;
+pub mod chat;
 pub mod db;
 pub mod mcp;
+pub mod persona;
 pub mod suggester;
 pub mod watcher;
 
@@ -326,7 +328,7 @@ fn check_long_work(
     let minutes = continuous / 60;
     let title = format!("已连续工作 {} 分钟", minutes);
     let body = format!(
-        "你在 {} 上已连续工作了 {} 分钟，站起来活动一下、喝口水吧。",
+        "在 {} 上连续肝了 {} 分钟了，起来接杯水、走两步。",
         current_process, minutes
     );
     if suggester::push_suggestion(
@@ -383,7 +385,7 @@ fn check_clipboard_error(
         app_handle,
         suggester::TYPE_ERROR_ANALYSIS,
         "检测到错误日志",
-        Some(&format!("剪贴板中疑似错误堆栈：\n{}…", preview)),
+        Some(&format!("剪贴板里躺着一段疑似报错：\n{}…", preview)),
         payload_json.as_deref(),
     );
 }

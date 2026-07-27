@@ -191,6 +191,24 @@ fn tools_list() -> Value {
                     },
                     "required": ["title"]
                 }
+            },
+            {
+                "name": "append_evolution",
+                "description": "把一条工作经验追加到经验本 evolution.md 的指定小节。\n\n适用场景：本次任务中发现了「下次还用得上」的做法或教训（日报写法、弹窗分寸、提取事实的分寸）。\n不适用：记录关于用户的事实（那是 memory_facts，本工具不写）、临时状态、感想闲聊。\n\n返回：追加结果说明。",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "section": {
+                            "type": "string",
+                            "description": "小节名，四选一：日报写作 | 弹窗分寸 | 分析提取 | 其他"
+                        },
+                        "lesson": {
+                            "type": "string",
+                            "description": "一句话经验，不超过 200 字，说清做什么、为什么"
+                        }
+                    },
+                    "required": ["section", "lesson"]
+                }
             }
         ]
     })
@@ -216,6 +234,7 @@ impl McpServer {
             "get_memory_facts" => self.tool_memory_facts(),
             "write_note" => self.tool_write_note(&args),
             "create_suggestion" => self.tool_create_suggestion(&args),
+            "append_evolution" => self.tool_append_evolution(&args),
             _ => Err(format!("未知工具: {}", name)),
         };
 
@@ -398,5 +417,55 @@ impl McpServer {
             "建议已记录（id: {}），会显示在用户的建议列表中",
             suggestion.id
         ))
+    }
+
+    /// 把一条经验追加到经验本对应小节标题下（最新在最上）。
+    /// 只认四个固定小节，防止 agent 把文件写乱；写前确保已播种。
+    fn tool_append_evolution(&self, args: &Value) -> Result<String, String> {
+        let section = args
+            .get("section")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or("缺少参数 section")?;
+        let lesson = args
+            .get("lesson")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or("缺少参数 lesson")?;
+        if lesson.chars().count() > 200 {
+            return Err("lesson 过长（不超过 200 字）".to_string());
+        }
+        const SECTIONS: [&str; 4] = ["日报写作", "弹窗分寸", "分析提取", "其他"];
+        if !SECTIONS.contains(&section) {
+            return Err(format!(
+                "未知小节「{}」，可选：{}",
+                section,
+                SECTIONS.join(" / ")
+            ));
+        }
+
+        // 经验本在应用数据目录 companion/ 下（与 db 同级推导）
+        let app_data = self
+            .db_path
+            .parent()
+            .map(|p| p.to_path_buf())
+            .ok_or("无法定位应用数据目录")?;
+        let path = app_data.join("companion").join("evolution.md");
+        let mut content = super::persona::load_evolution(&app_data);
+        if content.len() > 16 * 1024 {
+            return Err("经验本已满（16KB），请提醒用户整理后再写".to_string());
+        }
+
+        let date = chrono::Local::now().format("%Y-%m-%d");
+        let heading = format!("## {}", section);
+        let pos = content
+            .find(&heading)
+            .ok_or(format!("经验本中找不到小节「{}」", section))?;
+        content.insert_str(pos + heading.len(), &format!("\n- [{}] {}", date, lesson));
+
+        std::fs::write(&path, content).map_err(|e| format!("写入经验本失败: {}", e))?;
+        Ok(format!("已记入经验本「{}」", section))
     }
 }

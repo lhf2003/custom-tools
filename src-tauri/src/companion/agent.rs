@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use serde::Deserialize;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 use super::suggester;
 
@@ -43,7 +43,20 @@ pub fn run_daily_report_agent(
     // （--mcp-config 在本版本 CLI 下不生效，用户级注册是唯一可靠通道）
     ensure_mcp_registered(bin_path, &exe, db_path, notes_dir)?;
 
-    let prompt = build_report_prompt(date);
+    let app_data = app_handle.path().app_data_dir().ok();
+    let persona = app_data
+        .as_ref()
+        .map(|dir| super::persona::load(dir))
+        .unwrap_or_default();
+    let evolution = app_data
+        .as_ref()
+        .map(|dir| super::persona::load_evolution(dir))
+        .unwrap_or_default();
+    let role = app_data
+        .as_ref()
+        .map(|dir| super::persona::load_role(dir, "reporter"))
+        .unwrap_or_default();
+    let prompt = build_report_prompt(&persona, &evolution, &role, date);
 
     log::info!("Companion 日报 agent 启动: {}", bin_path);
 
@@ -108,7 +121,7 @@ pub fn run_daily_report_agent(
 /// 构建 claude CLI 子进程（headless、无窗口、管道输出）。
 /// ENABLE_TOOL_SEARCH=false 是关键：禁用 ToolSearch 延迟加载，
 /// 否则 MCP 工具在 headless 会话中不可见。
-fn cli_command(bin_path: &str, work_dir: &Path) -> Command {
+pub(crate) fn cli_command(bin_path: &str, work_dir: &Path) -> Command {
     let mut cmd = Command::new(bin_path);
     cmd.env("ENABLE_TOOL_SEARCH", "false")
         .current_dir(work_dir)
@@ -268,23 +281,13 @@ fn ensure_mcp_registered(
     Ok(())
 }
 
-fn build_report_prompt(date: &str) -> String {
+fn build_report_prompt(persona: &str, evolution: &str, role: &str, date: &str) -> String {
     format!(
-        "你是我的工作陪伴 agent。请完成「{date}」的工作日报，严格按以下步骤执行：\n\
-         1. 调用 get_activity_summary（date 参数传 \"{date}\"）获取当日的电脑使用聚合\n\
-         2. 调用 search_clipboard（limit 设 15）了解近期复制过的内容主题\n\
-         3. 调用 get_habit_patterns 查看已学到的习惯模式\n\
-         4. 如果第 1 步返回没有活动记录，直接回复\"当日无数据\"并结束，不要编造内容\n\
-         5. 基于以上真实数据写一份简洁的中文日报（Markdown），包含：\n\
-            - 当日工作主题（从窗口标题和剪贴板内容推断，一句话）\n\
-            - 时间分配（各应用时长）\n\
-            - 值得注意的点（亮点或问题，一两句）\n\
-            - 次日建议（一两句）\n\
-         6. 调用 write_note 把日报写入笔记，filename 用 \"{date}\"\n\
-         7. 如果你从数据中发现了一个此前没有的、稳定的工作习惯（比如固定的应用组合），\n\
-            调用 create_suggestion 告诉我；没有发现就跳过\n\
-         8. 最后用一句话回复日报的核心结论\n\
-         注意：所有内容必须基于工具返回的真实数据，不要臆造。",
+        "{persona}\n\n---\n\n{evolution}\n\n---\n\n{role}\n\n---\n\n\
+         以上是贾维斯的身份设定、经验本与日报工作手册。请完成「{date}」的工作日报。",
+        persona = persona,
+        evolution = evolution,
+        role = role,
         date = date
     )
 }

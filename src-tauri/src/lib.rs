@@ -356,6 +356,7 @@ pub fn run() {
                 };
                 let companion_state = companion::start(app.handle(), companion_db_path, flags);
                 app.manage(companion_state);
+                app.manage(companion::chat::JarvisChatChild::default());
             }
 
             log::info!("Application setup completed");
@@ -470,6 +471,11 @@ pub fn run() {
             commands::companion::set_companion_paused,
             commands::companion::set_companion_retention_days,
             commands::companion::set_companion_long_work_minutes,
+            companion::chat::jarvis_chat_send,
+            companion::chat::jarvis_chat_cancel,
+            companion::chat::jarvis_chat_reset,
+            companion::chat::jarvis_agent_available,
+            companion::chat::jarvis_chat_system,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

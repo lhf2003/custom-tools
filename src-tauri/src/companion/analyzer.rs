@@ -73,11 +73,23 @@ pub fn run_scheduler(app_handle: AppHandle, db_path: PathBuf, flags: Arc<RwLock<
                     Ok(msg) => log::info!("Companion 每日模式挖掘: {}", msg),
                     Err(e) => log::warn!("Companion 每日模式挖掘失败: {}", e),
                 }
-                // Claude Code 开启时额外跑日报 agent（失败仅告警，挖掘已跑过）
+                // Claude Code 开启时跑 agent 日报；未开启回退场景模型版日报（失败均仅告警）
                 if cc_enabled {
                     match super::run_agent_with_settings(&app, &db, &date) {
                         Ok(msg) => log::info!("Companion 日报 agent: {}", msg),
                         Err(e) => log::warn!("Companion 日报 agent 失败: {}", e),
+                    }
+                } else {
+                    match crate::notes::get_default_notes_dir() {
+                        Ok(notes_dir) => {
+                            match tauri::async_runtime::block_on(run_scene_report(
+                                &app, &db, &notes_dir, &date,
+                            )) {
+                                Ok(msg) => log::info!("Companion 场景版日报: {}", msg),
+                                Err(e) => log::warn!("Companion 场景版日报失败: {}", e),
+                            }
+                        }
+                        Err(e) => log::warn!("Companion 场景版日报获取笔记目录失败: {}", e),
                     }
                 }
             });
@@ -160,8 +172,15 @@ fn maybe_backfill_report(
     let app = app_handle.clone();
     let db = db_path.clone();
     let date = yesterday.clone();
+    let cc_enabled = super::claude_code_enabled(app_handle);
     std::thread::spawn(move || {
-        match super::run_agent_with_settings(&app, &db, &date) {
+        // Claude Code 开启 → agent 补跑；未开启 → 场景模型版补跑
+        let result = if cc_enabled {
+            super::run_agent_with_settings(&app, &db, &date)
+        } else {
+            tauri::async_runtime::block_on(run_scene_report(&app, &db, &notes_dir, &date))
+        };
+        match result {
             Ok(msg) => {
                 log::info!("补跑日报完成: {}", msg);
                 // 只有笔记真的落盘才标记已补——agent 跑完但没写笔记时，下次启动重试
@@ -245,7 +264,7 @@ fn graduation_gate(
             let _ = crate::db::app_usage::record_launch(conn, &app.path, &app.name);
         }
         let body = format!(
-            "「{}」你已接受 {} 次，以后直接为你准备。",
+            "「{}」你已经点头 {} 次了，以后我直接帮你开好。",
             pattern.description, accepted
         );
         if let Ok(sid) = suggester::push_suggestion(
@@ -355,7 +374,7 @@ fn match_work_suite(app_handle: &AppHandle, db_path: &PathBuf, now_ts: i64) -> R
             suggester::TYPE_WORK_SUITE,
             "开启工作模式？",
             Some(&format!(
-                "{}。要一键启动 {} 吗？",
+                "{}。要不要我把 {} 都开好？",
                 pattern.description,
                 names.join("、")
             )),
@@ -559,7 +578,20 @@ pub async fn run_daily_analysis(
 
     // 本地预聚合：原始流水可能有上千条，先压缩成会话级摘要再送 LLM
     let aggregate_text = aggregate_activities(&activities);
-    let prompt = build_analysis_prompt(&aggregate_text);
+    let app_data = app_handle.path().app_data_dir().ok();
+    let persona = app_data
+        .as_ref()
+        .map(|dir| super::persona::load(dir))
+        .unwrap_or_default();
+    let evolution = app_data
+        .as_ref()
+        .map(|dir| super::persona::load_evolution(dir))
+        .unwrap_or_default();
+    let role = app_data
+        .as_ref()
+        .map(|dir| super::persona::load_role(dir, "analyst"))
+        .unwrap_or_default();
+    let prompt = build_analysis_prompt(&persona, &evolution, &role, &aggregate_text);
 
     let reply = call_companion_llm(app_handle, db_path, prompt).await?;
     let parsed = parse_llm_patterns(&reply)?;
@@ -738,30 +770,15 @@ pub(crate) fn aggregate_day(conn: &Connection, day_label: &str) -> Result<String
     ))
 }
 
-fn build_analysis_prompt(aggregate_text: &str) -> String {
+fn build_analysis_prompt(persona: &str, evolution: &str, role: &str, aggregate_text: &str) -> String {
     format!(
-        "以下是某位用户昨天电脑使用情况的聚合摘要（进程名 + 窗口标题 + 时段）。\n\
-         请完成两项任务：\n\n\
-         【任务一：挖掘行为模式】\n\
-         1. app_combo：用户在某个时间窗内先后打开的应用组合（>=2 个）\n\
-         2. startup_sequence：一天开始工作时的固定启动序列（开机后最先打开的一串应用）\n\
-         3. context_routine：每天大约同一时间会做的小事（如下午打开音乐、午饭后刷视频）\n\n\
-         【任务二：沉淀关于用户的事实】\n\
-         从窗口标题和活动中推断关于用户本人的持久事实（同事称呼、项目名、偏好等），\n\
-         每条一句话，最多 3 条。不确定的不要写。\n\n\
-         只输出 JSON，不要任何其他文字。格式：\n\
-         {{\"patterns\":[\n\
-           {{\"type\":\"app_combo\",\"apps\":[\"Code.exe\",\"chrome.exe\"],\"time_window\":\"09:00-09:45\",\"description\":\"一句话\",\"confidence\":0.7}},\n\
-           {{\"type\":\"startup_sequence\",\"apps\":[\"Weixin.exe\",\"idea64.exe\"],\"description\":\"开机先开微信再开 IDEA\",\"confidence\":0.8}},\n\
-           {{\"type\":\"context_routine\",\"app\":\"cloudmusic.exe\",\"time\":\"15:00\",\"tolerance_minutes\":45,\"description\":\"下午三点工作时听音乐\",\"confidence\":0.6}}\n\
-         ],\n\
-         \"facts\":[{{\"fact\":\"张三可能是前端同事\",\"category\":\"person\"}}]}}\n\n\
-         规则：\n\
-         1. apps/app 必须使用摘要中的进程名原文。time/time_window 必须是 \"HH:MM\" / \"HH:MM-HH:MM\"。\n\
-         2. 只保留置信度 >= 0.5 的；每种 type 最多 2 个；没有可靠模式就返回空数组。\n\
-         3. facts 的 category 从 person/project/preference/general 中选。\n\n\
-         摘要如下：\n{}",
-        aggregate_text
+        "{persona}\n\n---\n\n{evolution}\n\n---\n\n{role}\n\n---\n\n\
+         以上是贾维斯的身份设定、经验本与分析工作手册。\n\
+         以下是他昨天电脑使用情况的聚合摘要（进程名 + 窗口标题 + 时段）：\n\n{aggregate_text}",
+        persona = persona,
+        evolution = evolution,
+        role = role,
+        aggregate_text = aggregate_text
     )
 }
 
@@ -904,6 +921,58 @@ pub async fn parse_intent_triggers(
     triggers.keywords.truncate(3);
 
     Ok(triggers)
+}
+
+/// 场景模型版日报（Claude Code 未开启时的回退）：
+/// 数据本地预聚合后内联给模型，单次调用成文，不经 agent/MCP。
+/// 调用方需放在 blocking 线程（内部 LLM 路由与文件写入为阻塞操作）。
+pub(crate) async fn run_scene_report(
+    app_handle: &AppHandle,
+    db_path: &PathBuf,
+    notes_dir: &PathBuf,
+    date: &str,
+) -> Result<String, String> {
+    let conn = Connection::open(db_path).map_err(|e| format!("打开数据库失败: {}", e))?;
+    let aggregate = aggregate_day(&conn, date)?;
+
+    let app_data = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+    let persona = super::persona::load(&app_data);
+    let evolution = super::persona::load_evolution(&app_data);
+    let role = super::persona::load_role(&app_data, "reporter");
+    let prompt = format!(
+        "{persona}\n\n---\n\n{evolution}\n\n---\n\n{role}\n\n---\n\n\
+         以上是贾维斯的身份设定、经验本与日报工作手册。\n\
+         注意：你现在没有数据工具——他昨天的电脑使用聚合已直接给你（见末尾），\n\
+         跳过流程中的工具调用步骤，直接完成「写日报」那一步。\n\
+         如果内容显示没有活动记录，只回复「当日无数据」。\n\n{aggregate}"
+    );
+
+    let report = call_companion_llm(app_handle, db_path, prompt).await?;
+    if report.contains("当日无数据") {
+        return Ok("当日无数据，未生成日报".to_string());
+    }
+
+    let relative = format!("{}/{}.md", super::mcp::NOTE_DIR_PREFIX, date);
+    let manager = crate::notes::NotesManager::new(notes_dir.clone());
+    manager
+        .write_note(&relative, &report)
+        .map_err(|e| format!("写入笔记失败: {}", e))?;
+
+    if let Ok(conn2) = Connection::open(db_path) {
+        let preview: String = report.chars().take(200).collect();
+        let _ = super::suggester::push_suggestion(
+            &conn2,
+            app_handle,
+            "daily_report",
+            &format!("{} 日报已生成", date),
+            Some(&preview),
+            None,
+        );
+    }
+    Ok(format!("日报已生成（场景模型）: {}", relative))
 }
 
 /// 陪伴统一 LLM 路由：全局 Claude Code 开启 → claude CLI 单次问答
