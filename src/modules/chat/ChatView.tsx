@@ -7,8 +7,7 @@ import {
   X,
   Copy,
   Check,
-  MessageCircle,
-  BookOpen,
+  Sparkles,
   Languages,
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
@@ -21,7 +20,7 @@ import { WINDOW_SIZE } from '@/constants/window';
 // Types
 // ─────────────────────────────────────────────
 
-type ChatMode = 'chat' | 'qa' | 'translate';
+type ChatMode = 'chat' | 'translate';
 
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
@@ -50,21 +49,13 @@ const MODES: Record<
   }
 > = {
   chat: {
-    label: '闲聊',
-    placeholder: 'Hi，你想聊些什么？',
-    icon: MessageCircle,
-    tagColor: 'bg-blue-500/10 text-blue-300 border-blue-500/30',
-    focusBorder: 'border-blue-500/50',
-    system: '你是一个友好、轻松的聊天助手。用中文回答，语气自然亲切。',
-  },
-  qa: {
-    label: '问答',
-    placeholder: '请输入你需要解答的问题...',
-    icon: BookOpen,
-    tagColor: 'bg-violet-500/10 text-violet-300 border-violet-500/30',
-    focusBorder: 'border-violet-500/50',
-    system:
-      '你是一个专业的知识助手。请用简洁、准确的中文回答问题，优先给出核心答案，再做适当补充。',
+    label: '贾维斯',
+    placeholder: '聊点什么？你的数据他也知道…',
+    icon: Sparkles,
+    tagColor: 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30',
+    focusBorder: 'border-indigo-500/50',
+    // 闲聊走贾维斯 agent 通道（claude CLI + MCP 数据工具），系统提示由后端 persona 体系组装
+    system: '',
   },
   translate: {
     label: '翻译',
@@ -77,7 +68,7 @@ const MODES: Record<
   },
 };
 
-const MODE_ORDER: ChatMode[] = ['chat', 'qa', 'translate'];
+const MODE_ORDER: ChatMode[] = ['chat', 'translate'];
 
 // ─────────────────────────────────────────────
 // ChatView
@@ -96,6 +87,8 @@ export function ChatView() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [sessionId, setSessionId] = useState<number | null>(null);
+  // 贾维斯 agent 的工具活动提示（「贾维斯在翻数据…」）
+  const [agentStatus, setAgentStatus] = useState<string | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const streamTextRef = useRef('');
@@ -108,7 +101,7 @@ export function ChatView() {
     if (chatPrefill) {
       setInput(`请分析以下错误日志的原因和解决方案：\n\n${chatPrefill}`);
       setChatPrefill(null);
-      setMode('qa');
+      setMode('chat');
       // 等视图切换渲染完成后聚焦
       setTimeout(() => textareaRef.current?.focus(), 100);
     }
@@ -218,11 +211,61 @@ export function ChatView() {
         streamTextRef.current = '';
       });
 
+      // 贾维斯 agent 通道（claude CLI 流式协议）
+      const u4 = await listen<string>('jarvis:chunk', (event) => {
+        if (isCancelledRef.current) return;
+        setStreamText((prev) => {
+          const next = prev + event.payload;
+          streamTextRef.current = next;
+          return next;
+        });
+      });
+      const u5 = await listen<number>('jarvis:done', async () => {
+        if (isCancelledRef.current) {
+          isCancelledRef.current = false;
+          setIsLoading(false);
+          return;
+        }
+        const finalText = streamTextRef.current;
+        setMessages((prev) => [
+          ...prev,
+          { role: 'assistant' as const, content: finalText },
+        ]);
+        setStreamText('');
+        streamTextRef.current = '';
+        setIsLoading(false);
+        setAgentStatus(null);
+
+        const sid = sessionIdRef.current;
+        if (sid !== null && finalText) {
+          try {
+            await invoke('save_chat_message', {
+              sessionId: sid,
+              role: 'assistant',
+              content: finalText,
+            });
+          } catch (e) {
+            console.error('Failed to save assistant message:', e);
+          }
+        }
+      });
+      const u6 = await listen<string>('jarvis:error', (event) => {
+        isCancelledRef.current = false;
+        setAgentStatus(null);
+        setError(event.payload);
+        setIsLoading(false);
+        setStreamText('');
+        streamTextRef.current = '';
+      });
+      const u7 = await listen<string>('jarvis:status', (event) => {
+        if (!isCancelledRef.current) setAgentStatus(event.payload);
+      });
+
       if (!active) {
-        u1(); u2(); u3();
+        u1(); u2(); u3(); u4(); u5(); u6(); u7();
         return;
       }
-      unlistenFns = [u1, u2, u3];
+      unlistenFns = [u1, u2, u3, u4, u5, u6, u7];
     };
 
     setupListeners();
@@ -271,16 +314,39 @@ export function ChatView() {
     }
 
     try {
-      // 从场景配置获取思考模式设置
-      const sceneConfig = sceneConfigs[mode];
-      const thinkingMode = sceneConfig?.thinking_mode ?? false;
-
-      // 使用场景调用命令，根据当前模式选择对应的提供商和模型
-      await invoke('call_llm_stream_by_scene', {
-        scene: mode,
-        messages: newMessages,
-        thinkingMode,
-      });
+      if (mode === 'chat') {
+        setAgentStatus(null);
+        const agentAvailable = await invoke<boolean>('jarvis_agent_available');
+        if (agentAvailable) {
+          // 贾维斯 agent 通道：claude CLI + MCP 数据工具，流式事件 jarvis:*
+          await invoke('jarvis_chat_send', { text: userMessage.content });
+        } else {
+          // Claude Code 未开启：回退场景模型流式（陪伴绑定模型），
+          // 系统提示走 persona 体系（无数据工具版）
+          const system = await invoke<string>('jarvis_chat_system', {
+            withTools: false,
+          });
+          const sceneMessages = [
+            { role: 'system' as const, content: system },
+            ...newMessages.filter((m) => m.role !== 'system'),
+          ];
+          const sceneConfig = sceneConfigs['chat'];
+          await invoke('call_llm_stream_by_scene', {
+            scene: 'chat',
+            messages: sceneMessages,
+            thinkingMode: sceneConfig?.thinking_mode ?? false,
+          });
+        }
+      } else {
+        // 工具型通道：场景模型流式
+        const sceneConfig = sceneConfigs[mode];
+        const thinkingMode = sceneConfig?.thinking_mode ?? false;
+        await invoke('call_llm_stream_by_scene', {
+          scene: mode,
+          messages: newMessages,
+          thinkingMode,
+        });
+      }
     } catch (err) {
       setIsLoading(false);
       setError(typeof err === 'string' ? err : '发送失败，请检查 AI 模型设置');
@@ -335,12 +401,20 @@ export function ChatView() {
   }, [mode]);
 
   // ── Cancel streaming ──────────────────────────────────────────────
-  const handleCancel = useCallback(() => {
+  const handleCancel = useCallback(async () => {
     isCancelledRef.current = true;
     setIsLoading(false);
     setStreamText('');
     streamTextRef.current = '';
-  }, []);
+    setAgentStatus(null);
+    if (mode === 'chat') {
+      try {
+        await invoke('jarvis_chat_cancel');
+      } catch (e) {
+        console.error('Failed to cancel jarvis chat:', e);
+      }
+    }
+  }, [mode]);
 
   // ── Copy response ─────────────────────────────────────────────────
   const handleCopy = useCallback(() => {
@@ -362,7 +436,17 @@ export function ChatView() {
     setHasResponse(false);
     setError(null);
     setIsLoading(false);
+    setAgentStatus(null);
     debouncedResize(WINDOW_SIZE.CHAT.collapsed, WINDOW_SIZE.CHAT.width);
+
+    // 贾维斯通道：同时清掉 claude 侧会话上下文
+    if (mode === 'chat') {
+      try {
+        await invoke('jarvis_chat_reset');
+      } catch (e) {
+        console.error('Failed to reset jarvis session:', e);
+      }
+    }
 
     try {
       const id = await invoke<number>('create_chat_session', { mode });
@@ -399,9 +483,7 @@ export function ChatView() {
   const visibleMessages = messages.filter((m) => m.role !== 'system');
   const showCursor = isLoading && streamText.length > 0;
   const statusText = isLoading
-    ? streamText.length > 0
-      ? '正在输出...'
-      : '正在思考...'
+    ? (agentStatus ?? (streamText.length > 0 ? '正在输出...' : '正在思考...'))
     : error
       ? '发生错误'
       : '生成完成';
@@ -436,7 +518,7 @@ export function ChatView() {
             aria-label="切换模式"
           >
             {modeConfig.label}
-            <span className="ml-1 opacity-40 font-mono text-[9px]">Tab</span>
+            <span className="ml-1 opacity-40 font-mono text-[10px]">Tab</span>
           </button>
 
           {/* Cancel button (only while loading) */}
@@ -553,15 +635,15 @@ export function ChatView() {
             {isLoading && streamText.length === 0 && (
               <div className="flex items-center gap-1.5 py-2 px-1">
                 <span
-                  className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-bounce"
+                  className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-pulse"
                   style={{ animationDelay: '0ms' }}
                 />
                 <span
-                  className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-bounce"
+                  className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-pulse"
                   style={{ animationDelay: '150ms' }}
                 />
                 <span
-                  className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-bounce"
+                  className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-pulse"
                   style={{ animationDelay: '300ms' }}
                 />
               </div>
