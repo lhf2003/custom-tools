@@ -32,7 +32,7 @@ import { ChangelogDialog } from '@/components/ChangelogDialog';
 import { AboutDialog } from '@/components/AboutDialog';
 import { ToastContainer } from '@/components/Toast';
 import type { VersionCheckResult } from '@/components/ChangelogDialog';
-import type { ViewMode, MenuItem } from '@/types';
+import type { ViewMode, MenuItem, OpenViewDetail } from '@/types';
 
 // Map backend module id to frontend ViewMode — static, no runtime dependencies
 const MODULE_VIEW_MAP: Record<string, ViewMode> = {
@@ -42,6 +42,19 @@ const MODULE_VIEW_MAP: Record<string, ViewMode> = {
   settings: 'settings',
   everything: 'everything',
 };
+
+// Runtime guard for `app:open-view` custom event targets (detail 来自 dispatch 方，不受类型约束)。
+// 注意：ViewMode 新增视图时需同步补充此列表，否则新视图会被静默拒绝。
+const OPEN_VIEW_TARGETS: readonly ViewMode[] = [
+  'launcher',
+  'clipboard',
+  'markdown',
+  'password',
+  'settings',
+  'everything',
+  'json_formatter',
+  'chat',
+];
 
 function App() {
   const { activeView, setActiveView, toggleWindow } = useAppStore();
@@ -339,6 +352,20 @@ function App() {
         console.error('Failed to cleanup companion:analyze listener:', err);
       });
     };
+  }, [setActiveView]);
+
+  // Listen for in-app view switch requests (e.g. 陪伴设置「在笔记中查看」→ 笔记视图)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<OpenViewDetail>).detail;
+      if (!detail || !OPEN_VIEW_TARGETS.includes(detail.view)) return;
+      if (detail.view === 'markdown' && detail.notePath) {
+        useAppStore.getState().setPendingOpenNotePath(detail.notePath);
+      }
+      setActiveView(detail.view);
+    };
+    window.addEventListener('app:open-view', handler);
+    return () => window.removeEventListener('app:open-view', handler);
   }, [setActiveView]);
 
   // Reset launcher search state every time the window is shown:

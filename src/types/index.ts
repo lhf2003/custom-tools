@@ -1,6 +1,13 @@
 // View modes
 type ViewMode = 'launcher' | 'clipboard' | 'markdown' | 'password' | 'settings' | 'everything' | 'json_formatter' | 'chat';
 
+// `app:open-view` custom event 的 detail：请求切换到指定视图，可携带定位参数
+export interface OpenViewDetail {
+  view: ViewMode;
+  /** 可选：打开笔记视图后定位到该笔记（相对路径，如「陪伴日报/备忘.md」） */
+  notePath?: string;
+}
+
 // Navigation menu item
 export interface MenuItem {
   id: string;

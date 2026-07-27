@@ -12,6 +12,7 @@ import type { MenuItem } from './components/ContextMenu';
 import { THEME } from '@/constants/theme';
 import { WINDOW_SIZE } from '@/constants/window';
 import { immediateResize } from '@/utils/tauri';
+import { useAppStore } from '@/stores/appStore';
 
 // Count notes contained in a tree item (recursive for folders)
 function countFolderNotes(item: NoteItemData): number {
@@ -40,9 +41,26 @@ export function MarkdownView() {
     contentError,
     loadNoteContent,
     expandedFolders,
+    setExpandedFolders,
     loadNoteTree,
     toggleFolder,
   } = useNotes();
+
+  // 打开外部指定的笔记（如陪伴设置「在笔记中查看」→ 陪伴日报/备忘.md）
+  const pendingOpenNotePath = useAppStore((s) => s.pendingOpenNotePath);
+  useEffect(() => {
+    if (!pendingOpenNotePath) return;
+    useAppStore.getState().setPendingOpenNotePath(null);
+    const parent = pendingOpenNotePath.split('/').slice(0, -1).join('/');
+    if (parent) {
+      setExpandedFolders((prev) => {
+        const next = new Set(prev);
+        next.add(parent);
+        return next;
+      });
+    }
+    setSelectedNote(pendingOpenNotePath);
+  }, [pendingOpenNotePath, setSelectedNote, setExpandedFolders]);
 
   // Modal states
   const [showCreateModal, setShowCreateModal] = useState(false);

@@ -25,6 +25,10 @@ interface AppState {
   chatPrefill: string | null;
   setChatPrefill: (data: string | null) => void;
 
+  // Pending note to open (set via app:open-view with notePath, consumed by MarkdownView)
+  pendingOpenNotePath: string | null;
+  setPendingOpenNotePath: (path: string | null) => void;
+
   // Loading states
   isLoading: boolean;
   setLoading: (loading: boolean) => void;
@@ -61,6 +65,10 @@ export const useAppStore = create<AppState>((set) => ({
   // Chat prefill
   chatPrefill: null,
   setChatPrefill: (data) => set({ chatPrefill: data }),
+
+  // Pending note to open
+  pendingOpenNotePath: null,
+  setPendingOpenNotePath: (path) => set({ pendingOpenNotePath: path }),
 
   // Loading
   isLoading: false,

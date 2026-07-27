@@ -6,17 +6,14 @@ import {
   Clock,
   Trash2,
   RefreshCw,
-  History,
   Activity,
   Eraser,
   Bot,
-  Pin,
-  Check,
-  X,
 } from 'lucide-react';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useToastStore } from '@/stores/toastStore';
 import { SettingCard, Toggle } from '../components/SettingCard';
+import type { OpenViewDetail } from '@/types';
 
 interface HabitPattern {
   id: number;
@@ -29,18 +26,6 @@ interface HabitPattern {
   status: string;
   first_seen: number;
   last_seen: number;
-}
-
-interface Suggestion {
-  id: number;
-  suggestion_type: string;
-  title: string;
-  body: string | null;
-  status: string;
-  created_at: number;
-  trigger_data?: string | null;
-  due_date?: string | null;
-  source?: string | null;
 }
 
 interface MemoryFact {
@@ -58,61 +43,23 @@ const CATEGORY_LABEL: Record<string, string> = {
   general: '📌 其他',
 };
 
-interface IntentTriggers {
-  due?: string | null;
-  person?: string | null;
-  channel?: string | null;
-  keywords?: string[];
-}
-
-function parseTriggers(triggerData: string | null | undefined): IntentTriggers | null {
-  if (!triggerData) return null;
-  try {
-    return JSON.parse(triggerData) as IntentTriggers;
-  } catch {
-    return null;
-  }
-}
-
-function formatTriggers(t: IntentTriggers | null): string {
-  if (!t) return '触发器解析中…';
-  const parts: string[] = [];
-  if (t.due) parts.push(`📅 ${t.due}`);
-  if (t.person) parts.push(`👤 ${t.person}`);
-  if (t.channel) parts.push(`💬 ${t.channel}`);
-  if (t.keywords && t.keywords.length > 0) parts.push(`🔑 ${t.keywords.join('、')}`);
-  return parts.length > 0 ? parts.join('  ') : '仅晨间汇总提醒';
-}
-
-const SUGGESTION_TYPE_LABEL: Record<string, string> = {
-  error_analysis: '错误分析',
-  long_work_break: '休息提醒',
-  work_suite: '工作套装',
-  intent: '备忘',
-  daily_digest: '晨间汇总',
-  agent_insight: 'agent 洞察',
-  context_routine: '情境联动',
-  auto_executed: '自动执行',
-};
-
 const STATUS_LABEL: Record<string, { text: string; color: string }> = {
-  pending: { text: '待处理', color: 'text-amber-400' },
-  accepted: { text: '已接受', color: 'text-emerald-400' },
   dismissed: { text: '已忽略', color: 'text-white/30' },
   learning: { text: '学习中', color: 'text-amber-400' },
   confirmed: { text: '已确认', color: 'text-emerald-400' },
 };
-
-function formatTime(ts: number): string {
-  const d = new Date(ts * 1000);
-  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-}
 
 function formatDuration(secs: number): string {
   if (secs < 60) return `${secs}s`;
   if (secs < 3600) return `${Math.round(secs / 60)}min`;
   return `${(secs / 3600).toFixed(1)}h`;
 }
+
+/** 学习概览各子区默认展示条数，超出「查看全部」inline 展开 */
+const PREVIEW_COUNT = 3;
+
+/** 备忘笔记的相对路径（与后端 commands/companion.rs 的 INTENT_NOTE_RELATIVE 对应） */
+const MEMO_NOTE_PATH = '陪伴日报/备忘.md';
 
 export function CompanionSettings() {
   const {
@@ -130,25 +77,21 @@ export function CompanionSettings() {
 
   const [todaySummary, setTodaySummary] = useState<[string, number][]>([]);
   const [patterns, setPatterns] = useState<HabitPattern[]>([]);
-  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
-  const [intents, setIntents] = useState<Suggestion[]>([]);
   const [memoryFacts, setMemoryFacts] = useState<MemoryFact[]>([]);
   const [analyzing, setAnalyzing] = useState(false);
   const [agentRunning, setAgentRunning] = useState(false);
+  const [expandPatterns, setExpandPatterns] = useState(false);
+  const [expandFacts, setExpandFacts] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
-      const [summary, patternList, suggestionList, intentList, facts] = await Promise.all([
+      const [summary, patternList, facts] = await Promise.all([
         invoke<[string, number][]>('get_companion_today_summary'),
         invoke<HabitPattern[]>('get_companion_patterns'),
-        invoke<Suggestion[]>('get_companion_suggestions', { limit: 20 }),
-        invoke<Suggestion[]>('get_companion_intents', { limit: 50 }),
         invoke<MemoryFact[]>('get_companion_memory_facts'),
       ]);
       setTodaySummary(summary);
       setPatterns(patternList);
-      setSuggestions(suggestionList);
-      setIntents(intentList);
       setMemoryFacts(facts);
     } catch (err) {
       console.error('Failed to load companion data:', err);
@@ -219,28 +162,6 @@ export function CompanionSettings() {
     }
   };
 
-  const handleActSuggestion = async (id: number) => {
-    try {
-      await invoke('act_on_companion_suggestion', { id });
-      await loadData();
-    } catch (err) {
-      addToast({
-        type: 'error',
-        title: '操作失败',
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
-  };
-
-  const handleDismissSuggestion = async (id: number) => {
-    try {
-      await invoke('dismiss_companion_suggestion', { id });
-      await loadData();
-    } catch (err) {
-      console.error('Failed to dismiss suggestion:', err);
-    }
-  };
-
   const handleDeleteFact = async (id: number) => {
     try {
       await invoke('delete_companion_memory_fact', { id });
@@ -248,6 +169,22 @@ export function CompanionSettings() {
     } catch (err) {
       console.error('Failed to delete memory fact:', err);
     }
+  };
+
+  const handleOpenNotes = async () => {
+    // 备忘文件在首次「记 xxx」后才生成；不存在时只打开笔记视图
+    let notePath: string | undefined;
+    try {
+      await invoke('read_note', { path: MEMO_NOTE_PATH });
+      notePath = MEMO_NOTE_PATH;
+    } catch {
+      // 还没有备忘文件
+    }
+    window.dispatchEvent(
+      new CustomEvent<OpenViewDetail>('app:open-view', {
+        detail: { view: 'markdown', notePath },
+      })
+    );
   };
 
   const retentionOptions = [
@@ -274,6 +211,8 @@ export function CompanionSettings() {
   } as const;
 
   const maxTotal = todaySummary.length > 0 ? todaySummary[0][1] : 1;
+  const visiblePatterns = expandPatterns ? patterns : patterns.slice(0, PREVIEW_COUNT);
+  const visibleFacts = expandFacts ? memoryFacts : memoryFacts.slice(0, PREVIEW_COUNT);
 
   return (
     <>
@@ -357,230 +296,156 @@ export function CompanionSettings() {
           )}
         </SettingCard>
 
-        {/* 分组：今日 */}
-        <div className="flex items-center gap-2 pt-3">
-          <span className="text-white/40 text-xs font-medium">今日</span>
-          <div className="flex-1 h-px bg-white/5" />
-        </div>
+        <SettingCard
+          title="我的备忘"
+          description="启动器输入「记 xxx」回车记录；备忘写入笔记，随日报一起沉淀"
+        >
+          <button
+            onClick={handleOpenNotes}
+            className="px-2.5 py-1.5 rounded-lg text-white/50 text-xs hover:bg-white/10 hover:text-white transition-colors cursor-pointer"
+          >
+            在笔记中查看
+          </button>
+        </SettingCard>
 
-        {/* 使用概览 */}
-        <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <Activity size={16} className="text-white/40" />
-            <span className="text-white text-sm font-medium">使用概览</span>
-          </div>
-          {todaySummary.length === 0 ? (
-            <p className="text-white/30 text-xs">今天还没有采集到数据</p>
-          ) : (
-            <div className="space-y-1.5">
-              {todaySummary.slice(0, 8).map(([proc, secs]) => (
-                <div key={proc} className="flex items-center gap-2 text-xs">
-                  <span className="text-white/60 w-32 truncate">{proc}</span>
-                  <div className="flex-1 h-1.5 rounded-full bg-white/10 overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-app-brand-primary/70"
-                      style={{ width: `${Math.max(2, (secs / maxTotal) * 100)}%` }}
-                    />
-                  </div>
-                  <span className="text-white/40 w-14 text-right tabular-nums">
-                    {formatDuration(secs)}
-                  </span>
+        {/* 学习概览：未启用陪伴时隐藏（没有数据可学） */}
+        {companion_enabled && (
+          <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 space-y-5">
+            {/* 今日使用 */}
+            <section>
+              <div className="flex items-center gap-2 mb-2">
+                <Activity size={13} className="text-white/40" />
+                <span className="text-white/50 text-xs font-medium">今日使用</span>
+              </div>
+              {todaySummary.length === 0 ? (
+                <p className="text-white/30 text-xs">今天还没有采集到数据</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {todaySummary.slice(0, PREVIEW_COUNT).map(([proc, secs]) => (
+                    <div key={proc} className="flex items-center gap-2 text-xs">
+                      <span className="text-white/60 w-32 truncate">{proc}</span>
+                      <div className="flex-1 h-1.5 rounded-full bg-white/10 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-app-brand-primary/70"
+                          style={{ width: `${Math.max(2, (secs / maxTotal) * 100)}%` }}
+                        />
+                      </div>
+                      <span className="text-white/40 w-14 text-right tabular-nums">
+                        {formatDuration(secs)}
+                      </span>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
+              )}
+            </section>
 
-        {/* 我的备忘（意图暂存） */}
-        <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <Pin size={16} className="text-white/40" />
-              <span className="text-white text-sm font-medium">我的备忘</span>
-            </div>
-            <span className="text-white/30 text-xs">启动器输入「记 xxx」回车即可记下</span>
-          </div>
-          {intents.length === 0 ? (
-            <p className="text-white/30 text-xs">
-              还没有备忘。试试：Alt+Space → 输入「记 明天在微信与张三对接接口」→ 回车
-            </p>
-          ) : (
-            <div className="divide-y divide-white/5">
-              {intents.map((it) => {
-                const status = STATUS_LABEL[it.status] ?? STATUS_LABEL.pending;
-                const triggers = parseTriggers(it.trigger_data);
-                return (
-                  <div
-                    key={it.id}
-                    className={`rounded-lg px-3 py-2 transition-colors ${
-                      it.status === 'pending'
-                        ? 'bg-white/5 hover:bg-white/10'
-                        : 'opacity-60 hover:bg-white/5'
-                    }`}
-                  >
-                    <div className="flex items-start gap-2">
-                      <div className="flex-1 min-w-0">
-                        <div className="text-white/85 text-xs leading-relaxed">{it.body}</div>
-                        <div className="text-white/30 text-xs mt-1">
-                          {formatTriggers(triggers)} · {formatTime(it.created_at)} ·{' '}
-                          <span className={status.color}>{status.text}</span>
-                        </div>
-                      </div>
-                      {it.status === 'pending' && (
-                        <div className="flex items-center gap-1 shrink-0">
-                          <button
-                            onClick={() => handleActSuggestion(it.id)}
-                            className="p-1.5 rounded-md text-emerald-400/70 hover:text-emerald-400 hover:bg-emerald-500/15 transition-colors cursor-pointer"
-                            title="完成"
-                          >
-                            <Check size={13} />
-                          </button>
-                          <button
-                            onClick={() => handleDismissSuggestion(it.id)}
-                            className="p-1.5 rounded-md text-white/30 hover:text-red-400 hover:bg-red-500/15 transition-colors cursor-pointer"
-                            title="忽略"
-                          >
-                            <X size={13} />
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* 分组：学习 */}
-        <div className="flex items-center gap-2 pt-3">
-          <span className="text-white/40 text-xs font-medium">学习</span>
-          <div className="flex-1 h-px bg-white/5" />
-        </div>
-
-        {/* 学习到的模式 */}
-        <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <Brain size={16} className="text-white/40" />
-              <span className="text-white text-sm font-medium">学到的习惯模式</span>
-            </div>
-            <button
-              onClick={handleAnalyzeNow}
-              disabled={analyzing || !companion_enabled}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-500/20 text-blue-300 text-xs border border-blue-500/30 hover:bg-blue-500/30 transition-colors cursor-pointer disabled:opacity-50"
-            >
-              <RefreshCw size={12} className={analyzing ? 'animate-spin' : ''} />
-              {analyzing ? '分析中…' : '立即分析'}
-            </button>
-          </div>
-          {patterns.length === 0 ? (
-            <p className="text-white/30 text-xs">
-              还没有学到模式。积累一天数据后，每晚 21 点自动分析，或点「立即分析」。
-            </p>
-          ) : (
-            <div className="divide-y divide-white/5">
-              {patterns.map((p) => {
-                const status = STATUS_LABEL[p.status] ?? STATUS_LABEL.learning;
-                return (
-                  <div
-                    key={p.id}
-                    className="flex items-start gap-2 rounded-lg px-3 py-2 hover:bg-white/5 transition-colors"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="text-white/80 text-xs">{p.description}</div>
-                      <div className="text-white/30 text-xs mt-1">
-                        置信度 {Math.round(p.confidence * 100)}% · 观察到 {p.occurrences} 次 ·{' '}
-                        <span className={status.color}>{status.text}</span>
-                      </div>
-                    </div>
-                    {p.status !== 'dismissed' && (
-                      <button
-                        onClick={() => handleDismissPattern(p.id)}
-                        className="text-white/30 hover:text-red-400 transition-colors cursor-pointer shrink-0"
-                        title="不再使用此模式"
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* 记忆（关于我的事实） */}
-        <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <Sparkles size={16} className="text-white/40" />
-            <span className="text-white text-sm font-medium">它记住的你</span>
-            <span className="text-white/30 text-xs">每日分析自动沉淀，日报会参考</span>
-          </div>
-          {memoryFacts.length === 0 ? (
-            <p className="text-white/30 text-xs">还没有沉淀事实，今晚 21 点分析后可能出现</p>
-          ) : (
-            <div className="divide-y divide-white/5">
-              {memoryFacts.map((f) => (
-                <div
-                  key={f.id}
-                  className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs hover:bg-white/5 transition-colors"
+            {/* 习惯模式 */}
+            <section>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <Brain size={13} className="text-white/40" />
+                  <span className="text-white/50 text-xs font-medium">学到的习惯模式</span>
+                </div>
+                <button
+                  onClick={handleAnalyzeNow}
+                  disabled={analyzing}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-500/20 text-blue-300 text-xs border border-blue-500/30 hover:bg-blue-500/30 transition-colors cursor-pointer disabled:opacity-50"
                 >
-                  <span className="text-white/40 shrink-0 w-16">
-                    {CATEGORY_LABEL[f.category] ?? CATEGORY_LABEL.general}
-                  </span>
-                  <span className="text-white/80 flex-1">{f.fact}</span>
-                  <span className="text-white/30 shrink-0">×{f.confirmations}</span>
-                  <button
-                    onClick={() => handleDeleteFact(f.id)}
-                    className="text-white/30 hover:text-red-400 transition-colors cursor-pointer shrink-0"
-                    title="删除这条记忆"
-                  >
-                    <Trash2 size={12} />
-                  </button>
+                  <RefreshCw size={12} className={analyzing ? 'animate-spin' : ''} />
+                  {analyzing ? '分析中…' : '立即分析'}
+                </button>
+              </div>
+              {patterns.length === 0 ? (
+                <p className="text-white/30 text-xs">
+                  还没有学到模式——积累一天数据后每晚 21 点自动分析，也可点「立即分析」
+                </p>
+              ) : (
+                <div>
+                  {visiblePatterns.map((p) => {
+                    const status = STATUS_LABEL[p.status] ?? STATUS_LABEL.learning;
+                    return (
+                      <div
+                        key={p.id}
+                        className="flex items-center gap-2 rounded-lg px-2 py-1.5 -mx-2 hover:bg-white/5 transition-colors"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="text-white/80 text-xs truncate" title={p.description}>
+                            {p.description}
+                          </div>
+                          <div className="text-white/30 text-xs mt-0.5">
+                            置信度 {Math.round(p.confidence * 100)}% · 观察到 {p.occurrences} 次 ·{' '}
+                            <span className={status.color}>{status.text}</span>
+                          </div>
+                        </div>
+                        {p.status !== 'dismissed' && (
+                          <button
+                            onClick={() => handleDismissPattern(p.id)}
+                            className="text-white/30 hover:text-red-400 transition-colors cursor-pointer shrink-0"
+                            title="不再使用此模式"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {patterns.length > PREVIEW_COUNT && (
+                    <button
+                      onClick={() => setExpandPatterns(!expandPatterns)}
+                      className="mt-1 px-2 text-white/40 hover:text-white/70 text-xs transition-colors cursor-pointer"
+                    >
+                      {expandPatterns ? '收起' : `查看全部 (${patterns.length})`}
+                    </button>
+                  )}
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
+              )}
+            </section>
 
-        {/* 建议历史 */}
-        <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <History size={16} className="text-white/40" />
-            <span className="text-white text-sm font-medium">建议历史</span>
+            {/* 记住的你 */}
+            <section>
+              <div className="flex items-center gap-2 mb-2">
+                <Sparkles size={13} className="text-white/40" />
+                <span className="text-white/50 text-xs font-medium">它记住的你</span>
+                <span className="text-white/30 text-xs">日报会参考</span>
+              </div>
+              {memoryFacts.length === 0 ? (
+                <p className="text-white/30 text-xs">还没有沉淀事实，今晚 21 点分析后可能出现</p>
+              ) : (
+                <div>
+                  {visibleFacts.map((f) => (
+                    <div
+                      key={f.id}
+                      className="flex items-center gap-2 rounded-lg px-2 py-1.5 -mx-2 text-xs hover:bg-white/5 transition-colors"
+                    >
+                      <span className="text-white/40 shrink-0 w-16">
+                        {CATEGORY_LABEL[f.category] ?? CATEGORY_LABEL.general}
+                      </span>
+                      <span className="text-white/80 flex-1 truncate" title={f.fact}>
+                        {f.fact}
+                      </span>
+                      <span className="text-white/30 shrink-0">×{f.confirmations}</span>
+                      <button
+                        onClick={() => handleDeleteFact(f.id)}
+                        className="text-white/30 hover:text-red-400 transition-colors cursor-pointer shrink-0"
+                        title="删除这条记忆"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  ))}
+                  {memoryFacts.length > PREVIEW_COUNT && (
+                    <button
+                      onClick={() => setExpandFacts(!expandFacts)}
+                      className="mt-1 px-2 text-white/40 hover:text-white/70 text-xs transition-colors cursor-pointer"
+                    >
+                      {expandFacts ? '收起' : `查看全部 (${memoryFacts.length})`}
+                    </button>
+                  )}
+                </div>
+              )}
+            </section>
           </div>
-          {suggestions.length === 0 ? (
-            <p className="text-white/30 text-xs">还没有收到过建议</p>
-          ) : (
-            <div className="divide-y divide-white/5">
-              {suggestions.map((s) => {
-                const status = STATUS_LABEL[s.status] ?? STATUS_LABEL.pending;
-                return (
-                  <div
-                    key={s.id}
-                    className="flex items-center gap-2 text-xs rounded-lg px-3 py-2 hover:bg-white/5 transition-colors"
-                  >
-                    <span className="text-white/40 shrink-0">
-                      {SUGGESTION_TYPE_LABEL[s.suggestion_type] ?? s.suggestion_type}
-                    </span>
-                    <span className="text-white/70 flex-1 truncate">{s.title}</span>
-                    <span className="text-white/30 shrink-0 tabular-nums">
-                      {formatTime(s.created_at)}
-                    </span>
-                    <span className={`${status.color} shrink-0`}>{status.text}</span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* 分组：数据 */}
-        <div className="flex items-center gap-2 pt-3">
-          <span className="text-white/40 text-xs font-medium">数据</span>
-          <div className="flex-1 h-px bg-white/5" />
-        </div>
+        )}
 
         {/* 隐私 */}
         <div className="rounded-xl border border-red-500/20 bg-red-500/5 p-4">
