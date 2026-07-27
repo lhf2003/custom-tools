@@ -754,7 +754,8 @@ export function ModelSettings() {
         )}
 
         {/* Scene Configuration */}
-        <div className="rounded-xl border border-white/10 bg-white/[0.02] overflow-hidden">
+        {/* 不带 overflow-hidden：末行（陪伴）的下拉框向下展开时会超出卡片，会被裁掉 */}
+        <div className="rounded-xl border border-white/10 bg-white/[0.02]">
           <div className="px-4 py-3 border-b border-white/10">
             <h3 className="text-white/90 text-sm font-medium">场景模型配置</h3>
             <p className="text-white/40 text-xs mt-0.5">为不同场景选择默认使用的模型</p>
