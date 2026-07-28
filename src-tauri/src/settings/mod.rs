@@ -26,6 +26,7 @@ pub struct AppSettings {
     pub companion_paused: bool,
     pub companion_retention_days: i32,
     pub companion_long_work_minutes: i32,
+    pub companion_daily_report: bool,
 }
 
 impl Default for AppSettings {
@@ -50,6 +51,7 @@ impl Default for AppSettings {
             companion_paused: false,
             companion_retention_days: 30,
             companion_long_work_minutes: 90,
+            companion_daily_report: true,
         }
     }
 }
@@ -174,6 +176,11 @@ impl SettingsManager {
                         settings.companion_long_work_minutes = v.clamp(15, 480);
                     }
                 }
+                "companion_daily_report" => {
+                    if let Ok(v) = value.parse::<bool>() {
+                        settings.companion_daily_report = v;
+                    }
+                }
                 _ => {}
             }
         }
@@ -281,6 +288,11 @@ impl SettingsManager {
                 "companion_long_work_minutes" => {
                     if let Ok(v) = value.parse::<i32>() {
                         cache.companion_long_work_minutes = v.clamp(15, 480);
+                    }
+                }
+                "companion_daily_report" => {
+                    if let Ok(v) = value.parse::<bool>() {
+                        cache.companion_daily_report = v;
                     }
                 }
                 _ => {}

@@ -91,7 +91,8 @@ pub fn run_scheduler(app_handle: AppHandle, db_path: PathBuf, flags: Arc<RwLock<
         let throttle_ok = last_report_attempt
             .map(|t| now.timestamp() - t >= REPORT_RETRY_SECS)
             .unwrap_or(true);
-        if now.hour() >= DAILY_ANALYSIS_HOUR && !report_done && throttle_ok {
+        // 日报开关关闭时跳过日报调度（分析与记忆提取不受影响）
+        if now.hour() >= DAILY_ANALYSIS_HOUR && !report_done && throttle_ok && f.daily_report {
             last_report_attempt = Some(now.timestamp());
             let app = app_handle.clone();
             let db = db_path.clone();
@@ -161,7 +162,7 @@ fn maybe_backfill_report(
         .read()
         .map(|f| f.clone())
         .unwrap_or_else(|_| CompanionFlags::default());
-    if !f.enabled {
+    if !f.enabled || !f.daily_report {
         return;
     }
 

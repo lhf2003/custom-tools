@@ -228,7 +228,7 @@ export const useLlmProviderStore = create<LlmProviderState>((set, get) => ({
   loadSceneConfigs: async () => {
     try {
       const configs = await invoke<SceneConfig[]>('get_scene_configs');
-      const sceneConfigs: Record<Scene, SceneConfig | null> = { chat: null, qa: null, translate: null, companion: null };
+      const sceneConfigs: Record<Scene, SceneConfig | null> = { chat: null, qa: null, translate: null, companion: null, memory_extraction: null };
       configs.forEach((config) => {
         sceneConfigs[config.scene] = config;
       });

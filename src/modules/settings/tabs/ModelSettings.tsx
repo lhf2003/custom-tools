@@ -791,23 +791,29 @@ export function ModelSettings() {
                           })),
                       ]}
                       onChange={async (value) => {
-                        const providerId = parseInt(value);
-                        const currentThinkingMode = config?.thinking_mode ?? false;
-                        if (providerId) {
-                          let providerModels = models[providerId];
-                          if (!providerModels) {
-                            providerModels = await loadModels(providerId);
-                          }
-                          const activeModels = providerModels?.filter((m) => m.is_active);
-                          if (activeModels && activeModels.length > 0) {
-                            await setSceneModel(scene, providerId, activeModels[0].model_id, currentThinkingMode);
-                          } else if (providerModels && providerModels.length > 0) {
-                            await setSceneModel(scene, providerId, providerModels[0].model_id, currentThinkingMode);
+                        // 失败必须让用户感知——后端写库被拒（如 CHECK 约束）时
+                        // store 会 throw，不 catch 就是静默失败：下拉回弹、无任何提示
+                        try {
+                          const providerId = parseInt(value);
+                          const currentThinkingMode = config?.thinking_mode ?? false;
+                          if (providerId) {
+                            let providerModels = models[providerId];
+                            if (!providerModels) {
+                              providerModels = await loadModels(providerId);
+                            }
+                            const activeModels = providerModels?.filter((m) => m.is_active);
+                            if (activeModels && activeModels.length > 0) {
+                              await setSceneModel(scene, providerId, activeModels[0].model_id, currentThinkingMode);
+                            } else if (providerModels && providerModels.length > 0) {
+                              await setSceneModel(scene, providerId, providerModels[0].model_id, currentThinkingMode);
+                            } else {
+                              await setSceneModel(scene, providerId, '', currentThinkingMode);
+                            }
                           } else {
-                            await setSceneModel(scene, providerId, '', currentThinkingMode);
+                            await setSceneModel(scene, 0, '', currentThinkingMode);
                           }
-                        } else {
-                          await setSceneModel(scene, 0, '', currentThinkingMode);
+                        } catch (e) {
+                          alert(`应用提供商失败: ${e}`);
                         }
                       }}
                       placeholder="选择提供商"

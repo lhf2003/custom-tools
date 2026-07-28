@@ -23,6 +23,8 @@ pub struct CompanionFlags {
     pub paused: bool,
     pub retention_days: i64,
     pub long_work_minutes: i64,
+    /// 每日日报开关：关闭后 21 点只做分析与记忆提取，不生成日报
+    pub daily_report: bool,
 }
 
 impl Default for CompanionFlags {
@@ -32,6 +34,7 @@ impl Default for CompanionFlags {
             paused: false,
             retention_days: 30,
             long_work_minutes: 90,
+            daily_report: true,
         }
     }
 }

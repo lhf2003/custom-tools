@@ -8,7 +8,6 @@ import {
   RefreshCw,
   Activity,
   Eraser,
-  Bot,
 } from 'lucide-react';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useToastStore } from '@/stores/toastStore';
@@ -28,24 +27,6 @@ interface HabitPattern {
   first_seen: number;
   last_seen: number;
 }
-
-interface MemoryFact {
-  id: number;
-  fact: string;
-  category: string;
-  confirmations: number;
-  last_confirmed: number;
-}
-
-const CATEGORY_LABEL: Record<string, string> = {
-  person: '他是谁',
-  project: '他的项目',
-  workflow: '他怎么做事',
-  voice: '他的表达偏好',
-  expectation: '他对贾维斯的期望',
-};
-
-const categoryLabel = (key: string): string => CATEGORY_LABEL[key] ?? '其他';
 
 const STATUS_LABEL: Record<string, { text: string; color: string }> = {
   dismissed: { text: '已忽略', color: 'text-white/30' },
@@ -71,17 +52,17 @@ export function CompanionSettings() {
     companion_paused,
     companion_retention_days,
     companion_long_work_minutes,
-    claude_code_enabled,
+    companion_daily_report,
     setCompanionEnabled,
     setCompanionPaused,
     setCompanionRetentionDays,
     setCompanionLongWorkMinutes,
+    setCompanionDailyReport,
   } = useSettingsStore();
   const { addToast } = useToastStore();
 
   const [todaySummary, setTodaySummary] = useState<[string, number][]>([]);
   const [patterns, setPatterns] = useState<HabitPattern[]>([]);
-  const [memoryFacts, setMemoryFacts] = useState<MemoryFact[]>([]);
   const [analyzing, setAnalyzing] = useState(false);
   const [agentRunning, setAgentRunning] = useState(false);
   const [expandPatterns, setExpandPatterns] = useState(false);
@@ -89,14 +70,12 @@ export function CompanionSettings() {
 
   const loadData = useCallback(async () => {
     try {
-      const [summary, patternList, facts] = await Promise.all([
+      const [summary, patternList] = await Promise.all([
         invoke<[string, number][]>('get_companion_today_summary'),
         invoke<HabitPattern[]>('get_companion_patterns'),
-        invoke<MemoryFact[]>('get_companion_memory_facts'),
       ]);
       setTodaySummary(summary);
       setPatterns(patternList);
-      setMemoryFacts(facts);
     } catch (err) {
       console.error('Failed to load companion data:', err);
     }
@@ -166,15 +145,6 @@ export function CompanionSettings() {
     }
   };
 
-  const handleDeleteFact = async (id: number) => {
-    try {
-      await invoke('delete_companion_memory_fact', { id });
-      await loadData();
-    } catch (err) {
-      console.error('Failed to delete memory fact:', err);
-    }
-  };
-
   const handleOpenNotes = async () => {
     // 备忘文件在首次「记 xxx」后才生成；不存在时只打开笔记视图
     let notePath: string | undefined;
@@ -216,7 +186,6 @@ export function CompanionSettings() {
 
   const maxTotal = todaySummary.length > 0 ? todaySummary[0][1] : 1;
   const visiblePatterns = expandPatterns ? patterns : patterns.slice(0, PREVIEW_COUNT);
-  const visibleFacts = memoryFacts.slice(0, PREVIEW_COUNT);
 
   // 二级视图：记忆中心
   if (subView === 'memory') {
@@ -284,25 +253,19 @@ export function CompanionSettings() {
         </SettingCard>
 
         <SettingCard
-          title="日报（Claude Code）"
-          description={
-            claude_code_enabled
-              ? '每晚 21 点由 Claude Code 生成日报写入笔记，并同步进行模式挖掘'
-              : '在「设置 → AI 模型」中开启 Claude Code 后，可生成每日日报'
-          }
+          title="日报"
+          description="每晚 21 点生成昨日工作日报写入笔记；AI 模型开启 Claude Code 后用它生成，否则用「场景模型」配置"
         >
-          {claude_code_enabled && (
-            <div className="flex items-center gap-2">
-              <Bot size={16} className="text-white/30" />
-              <button
-                onClick={handleRunAgent}
-                disabled={agentRunning || !companion_enabled}
-                className="px-2.5 py-1.5 rounded-lg bg-blue-500/20 text-blue-300 text-xs border border-blue-500/30 hover:bg-blue-500/30 transition-colors cursor-pointer disabled:opacity-50"
-              >
-                {agentRunning ? '生成中…' : '立即生成日报'}
-              </button>
-            </div>
-          )}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleRunAgent}
+              disabled={agentRunning || !companion_enabled || !companion_daily_report}
+              className="px-2.5 py-1.5 rounded-lg bg-blue-500/20 text-blue-300 text-xs border border-blue-500/30 hover:bg-blue-500/30 transition-colors cursor-pointer disabled:opacity-50"
+            >
+              {agentRunning ? '生成中…' : '立即生成'}
+            </button>
+            <Toggle enabled={companion_daily_report} onToggle={setCompanionDailyReport} />
+          </div>
         </SettingCard>
 
         <SettingCard
@@ -314,6 +277,18 @@ export function CompanionSettings() {
             className="px-2.5 py-1.5 rounded-lg text-white/50 text-xs hover:bg-white/10 hover:text-white transition-colors cursor-pointer"
           >
             在笔记中查看
+          </button>
+        </SettingCard>
+
+        <SettingCard
+          title="记忆中心"
+          description="贾维斯记住的事——五维分组查看、编辑、删除，变更有审计"
+        >
+          <button
+            onClick={() => setSubView('memory')}
+            className="px-2.5 py-1.5 rounded-lg text-white/50 text-xs hover:bg-white/10 hover:text-white transition-colors cursor-pointer"
+          >
+            打开记忆中心
           </button>
         </SettingCard>
 
@@ -404,60 +379,6 @@ export function CompanionSettings() {
                       className="mt-1 px-2 text-white/40 hover:text-white/70 text-xs transition-colors cursor-pointer"
                     >
                       {expandPatterns ? '收起' : `查看全部 (${patterns.length})`}
-                    </button>
-                  )}
-                </div>
-              )}
-            </section>
-
-            {/* 记住的你 */}
-            <section>
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <Sparkles size={13} className="text-white/40" />
-                  <span className="text-white/50 text-xs font-medium">它记住的你</span>
-                  <span className="text-white/30 text-xs">日报会参考</span>
-                </div>
-                <button
-                  onClick={() => setSubView('memory')}
-                  className="px-2.5 py-1 rounded-lg text-white/50 text-xs hover:bg-white/10 hover:text-white transition-colors cursor-pointer"
-                >
-                  记忆中心
-                </button>
-              </div>
-              {memoryFacts.length === 0 ? (
-                <p className="text-white/30 text-xs">
-                  还没有沉淀事实——和贾维斯聊天、每晚 21 点分析都会产生记忆
-                </p>
-              ) : (
-                <div>
-                  {visibleFacts.map((f) => (
-                    <div
-                      key={f.id}
-                      className="flex items-center gap-2 rounded-lg px-2 py-1.5 -mx-2 text-xs hover:bg-white/5 transition-colors"
-                    >
-                      <span className="text-white/40 shrink-0 w-24 truncate">
-                        {categoryLabel(f.category)}
-                      </span>
-                      <span className="text-white/80 flex-1 truncate" title={f.fact}>
-                        {f.fact}
-                      </span>
-                      <span className="text-white/30 shrink-0">×{f.confirmations}</span>
-                      <button
-                        onClick={() => handleDeleteFact(f.id)}
-                        className="text-white/30 hover:text-red-400 transition-colors cursor-pointer shrink-0"
-                        title="删除这条记忆"
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
-                  ))}
-                  {memoryFacts.length > PREVIEW_COUNT && (
-                    <button
-                      onClick={() => setSubView('memory')}
-                      className="mt-1 px-2 text-white/40 hover:text-white/70 text-xs transition-colors cursor-pointer"
-                    >
-                      查看全部 ({memoryFacts.length}) →
                     </button>
                   )}
                 </div>

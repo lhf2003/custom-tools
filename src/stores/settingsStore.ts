@@ -21,6 +21,7 @@ export interface AppSettings {
   companion_paused: boolean;
   companion_retention_days: number;
   companion_long_work_minutes: number;
+  companion_daily_report: boolean;
 }
 
 export interface ShortcutConfig {
@@ -67,6 +68,7 @@ interface SettingsState extends AppSettings {
   setCompanionPaused: (paused: boolean) => Promise<void>;
   setCompanionRetentionDays: (days: number) => Promise<void>;
   setCompanionLongWorkMinutes: (minutes: number) => Promise<void>;
+  setCompanionDailyReport: (enabled: boolean) => Promise<void>;
 
   // Shortcut Actions
   loadShortcuts: () => Promise<void>;
@@ -96,6 +98,7 @@ const defaultSettings: AppSettings = {
   companion_paused: false,
   companion_retention_days: 30,
   companion_long_work_minutes: 90,
+  companion_daily_report: true,
 };
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
@@ -350,6 +353,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       set({ companion_long_work_minutes: minutes });
     } catch (err) {
       console.error('Failed to set companion_long_work_minutes:', err);
+    }
+  },
+
+  setCompanionDailyReport: async (enabled: boolean) => {
+    try {
+      await invoke('set_companion_daily_report', { value: enabled });
+      set({ companion_daily_report: enabled });
+    } catch (err) {
+      console.error('Failed to set companion_daily_report:', err);
     }
   },
 

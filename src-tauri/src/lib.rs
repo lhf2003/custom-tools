@@ -361,6 +361,7 @@ pub fn run() {
                     paused: settings.companion_paused,
                     retention_days: settings.companion_retention_days as i64,
                     long_work_minutes: settings.companion_long_work_minutes as i64,
+                    daily_report: settings.companion_daily_report,
                 };
                 let companion_state = companion::start(app.handle(), companion_db_path, flags);
                 app.manage(companion_state);
@@ -480,6 +481,7 @@ pub fn run() {
             commands::companion::jarvis_recall_poke,
             commands::companion::set_companion_enabled,
             commands::companion::set_companion_paused,
+            commands::companion::set_companion_daily_report,
             commands::companion::set_companion_retention_days,
             commands::companion::set_companion_long_work_minutes,
             companion::chat::jarvis_chat_send,

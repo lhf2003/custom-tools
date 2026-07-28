@@ -387,6 +387,12 @@ macro_rules! companion_flag_command {
 companion_flag_command!(set_companion_enabled, "companion_enabled", enabled, bool);
 companion_flag_command!(set_companion_paused, "companion_paused", paused, bool);
 companion_flag_command!(
+    set_companion_daily_report,
+    "companion_daily_report",
+    daily_report,
+    bool
+);
+companion_flag_command!(
     set_companion_retention_days,
     "companion_retention_days",
     retention_days,

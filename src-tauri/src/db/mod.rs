@@ -246,7 +246,7 @@ impl Database {
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS llm_scene_configs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                scene TEXT NOT NULL UNIQUE CHECK (scene IN ('chat', 'qa', 'translate', 'companion')),
+                scene TEXT NOT NULL UNIQUE CHECK (scene IN ('chat', 'qa', 'translate', 'companion', 'memory_extraction')),
                 provider_id INTEGER REFERENCES llm_providers(id),
                 model_id TEXT,
                 thinking_mode BOOLEAN DEFAULT 0,
@@ -265,7 +265,7 @@ impl Database {
         self.migrate_scene_configs_check()?;
 
         // Insert default scene configs if not exists (provider_id and model_id are NULL initially)
-        let default_scenes = ["chat", "qa", "translate", "companion"];
+        let default_scenes = ["chat", "qa", "translate", "companion", "memory_extraction"];
         for scene in &default_scenes {
             self.conn.execute(
                 "INSERT OR IGNORE INTO llm_scene_configs (scene, provider_id, model_id) VALUES (?1, NULL, NULL)",
@@ -279,9 +279,9 @@ impl Database {
         Ok(())
     }
 
-    /// 老库 llm_scene_configs 的 CHECK 只允许 3 个场景值，SQLite 无法修改 CHECK，
-    /// 需 RENAME → 重建 → 显式列名拷贝 → DROP。失败只记日志，不阻断启动
-    /// （后果仅是 companion 场景行插不进去，用户重新配置即可，不丢老数据）。
+    /// 老库 llm_scene_configs 的 CHECK 场景值列表不全（缺 companion / memory_extraction），
+    /// SQLite 无法修改 CHECK，需 RENAME → 重建 → 显式列名拷贝 → DROP。
+    /// 失败只记日志，不阻断启动（后果仅是新场景行插不进去，不丢老数据）。
     fn migrate_scene_configs_check(&self) -> Result<()> {
         let table_sql: Option<String> = self
             .conn
@@ -293,7 +293,7 @@ impl Database {
             .ok();
 
         let needs_migration = table_sql
-            .map(|sql| !sql.contains("'companion'"))
+            .map(|sql| !sql.contains("'memory_extraction'"))
             .unwrap_or(false);
         if !needs_migration {
             return Ok(());
@@ -305,7 +305,7 @@ impl Database {
                 "ALTER TABLE llm_scene_configs RENAME TO llm_scene_configs_old;
                  CREATE TABLE llm_scene_configs (
                      id INTEGER PRIMARY KEY AUTOINCREMENT,
-                     scene TEXT NOT NULL UNIQUE CHECK (scene IN ('chat', 'qa', 'translate', 'companion')),
+                     scene TEXT NOT NULL UNIQUE CHECK (scene IN ('chat', 'qa', 'translate', 'companion', 'memory_extraction')),
                      provider_id INTEGER REFERENCES llm_providers(id),
                      model_id TEXT,
                      thinking_mode BOOLEAN DEFAULT 0,
@@ -320,7 +320,7 @@ impl Database {
         })();
 
         match result {
-            Ok(_) => log::info!("llm_scene_configs 迁移完成：CHECK 约束已包含 companion"),
+            Ok(_) => log::info!("llm_scene_configs 迁移完成：CHECK 约束已包含 memory_extraction"),
             Err(e) => log::error!("llm_scene_configs 迁移失败（旧约束保留）: {}", e),
         }
         Ok(())
