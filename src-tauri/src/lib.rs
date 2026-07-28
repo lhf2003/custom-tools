@@ -82,7 +82,13 @@ pub fn run() {
     install_panic_hook();
 
     tauri::Builder::default()
-        // 日志插件必须最先注册:托盘/updater 等后续初始化失败时才能留下日志
+        // 单实例插件必须最先注册:第二个实例在插件 init 阶段即被拦截退出,
+        // 避免它再去抢日志文件/数据库。--mcp-server 模式不走 Tauri Builder,不受影响。
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            // 已有实例在跑:唤起其主窗口(用户双击图标就是想打开它)
+            show_main_window(app);
+        }))
+        // 日志插件紧随单实例之后注册:托盘/updater 等后续初始化失败时才能留下日志
         .plugin(build_log_plugin().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -864,8 +870,9 @@ fn setup_system_tray(app_handle: &tauri::AppHandle) -> Result<(), Box<dyn std::e
 }
 
 /// 构建日志插件。日志目录用 TargetKind::LogDir(Tauri 自动解析
-/// app_log_dir,Windows 上为 %APPDATA%\<identifier>\logs),
-/// 插件在 Builder 链首位注册,保证后续所有初始化阶段的日志都能落盘。
+/// app_log_dir,Windows 上为 %LOCALAPPDATA%\<identifier>\logs,
+/// 注意是 Local 不是 Roaming %APPDATA%),
+/// 插件注册在 Builder 链前部,保证后续所有初始化阶段的日志都能落盘。
 fn build_log_plugin() -> tauri_plugin_log::Builder {
     let log_level = if cfg!(debug_assertions) {
         log::LevelFilter::Debug

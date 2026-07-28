@@ -6,13 +6,27 @@ fn main() {
     // 进入 stdio JSON-RPC 模式提供 companion 工具，不启动 GUI
     let args: Vec<String> = std::env::args().collect();
     if args.iter().any(|a| a == "--mcp-server") {
-        let db_path = arg_value(&args, "--db-path").unwrap_or_default();
-        let notes_dir = arg_value(&args, "--notes-dir").unwrap_or_default();
-        if db_path.is_empty() || notes_dir.is_empty() {
-            eprintln!("[companion-mcp] 缺少必需参数 --db-path / --notes-dir");
-            std::process::exit(1);
+        // 参数缺省时按统一数据目录推导默认值,避免外部 MCP 配置里
+        // 写死的旧路径(如 custom-tools.db)在改名后继续复活已废弃文件
+        let data_dir = dirs::data_dir().map(|d| d.join(flowhub_lib::APP_DIR_NAME));
+        let db_path = arg_value(&args, "--db-path")
+            .filter(|p| !p.is_empty())
+            .map(std::path::PathBuf::from)
+            .or_else(|| data_dir.as_ref().map(|d| d.join(flowhub_lib::DB_FILE_NAME)));
+        let notes_dir = arg_value(&args, "--notes-dir")
+            .filter(|p| !p.is_empty())
+            .map(std::path::PathBuf::from)
+            .or_else(|| data_dir.as_ref().map(|d| d.join("notes")));
+
+        match (db_path, notes_dir) {
+            (Some(db), Some(notes)) => {
+                flowhub_lib::companion::mcp::run_mcp_server(db, notes);
+            }
+            _ => {
+                eprintln!("[companion-mcp] 无法确定数据目录(dirs::data_dir 不可用且参数缺失)");
+                std::process::exit(1);
+            }
         }
-        flowhub_lib::companion::mcp::run_mcp_server(db_path.into(), notes_dir.into());
         return;
     }
 
