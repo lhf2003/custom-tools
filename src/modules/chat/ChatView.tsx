@@ -70,6 +70,9 @@ const MODES: Record<
 
 const MODE_ORDER: ChatMode[] = ['chat', 'translate'];
 
+/** 距底部该像素范围内视为「贴底」：贴底时流式输出自动跟随，用户上翻超出后暂停跟随 */
+const STICK_TO_BOTTOM_PX = 48;
+
 /** 把助手文本切成正文段与内心独白段（<aside>…</aside>）。
  *  未闭合的 <aside> 按「到末尾」处理——流式途中标记尚未到达时样式不断裂。 */
 function splitAsides(text: string): { aside: boolean; text: string }[] {
@@ -140,6 +143,8 @@ export function ChatView() {
   const responseBodyRef = useRef<HTMLDivElement>(null);
   const isCancelledRef = useRef(false);
   const sessionIdRef = useRef<number | null>(null);
+  // 用户是否贴在内容区底部（决定流式输出时是否自动跟随滚动）
+  const stickToBottomRef = useRef(true);
 
   // Consume companion prefill: wrap raw error content into an analysis prompt
   useEffect(() => {
@@ -199,11 +204,20 @@ export function ChatView() {
   }, [hasResponse]);
 
   // ── Auto-scroll content area during streaming ─────────────────────
+  // 只在贴底时跟随流式输出；用户上翻后暂停跟随，回到底部自动恢复
   useEffect(() => {
-    if (responseBodyRef.current) {
-      responseBodyRef.current.scrollTop = responseBodyRef.current.scrollHeight;
+    const el = responseBodyRef.current;
+    if (el && stickToBottomRef.current) {
+      el.scrollTop = el.scrollHeight;
     }
   }, [streamText, messages]);
+
+  const handleResponseScroll = useCallback(() => {
+    const el = responseBodyRef.current;
+    if (!el) return;
+    stickToBottomRef.current =
+      el.scrollHeight - el.scrollTop - el.clientHeight < STICK_TO_BOTTOM_PX;
+  }, []);
 
   // ── Tauri event listeners ─────────────────────────────────────────
   // 聊天消息落库后触发记忆提取防抖（后端 10 分钟静默期后提炼用户事实）
@@ -346,6 +360,7 @@ export function ChatView() {
     setInput('');
     setStreamText('');
     streamTextRef.current = '';
+    stickToBottomRef.current = true;
     setIsLoading(true);
     setHasResponse(true);
     setError(null);
@@ -418,6 +433,8 @@ export function ChatView() {
   // ── Restore session when mode changes ────────────────────────────
   useEffect(() => {
     const restoreModeSession = async () => {
+      // 切换会话后内容整体替换，重新贴底
+      stickToBottomRef.current = true;
       try {
         const latest = await invoke<number | null>('get_latest_session', { mode });
         if (latest !== null) {
@@ -487,6 +504,7 @@ export function ChatView() {
     setMessages([]);
     setStreamText('');
     streamTextRef.current = '';
+    stickToBottomRef.current = true;
     setHasResponse(false);
     setError(null);
     setIsLoading(false);
@@ -543,10 +561,7 @@ export function ChatView() {
       : '生成完成';
 
   return (
-    <div
-      className="w-full h-full flex flex-col select-none bg-transparent"
-      data-tauri-drag-region
-    >
+    <div className="w-full h-full flex flex-col select-none bg-transparent">
       {/* ── Input area (single-row) ──────────────────────────────── */}
       <div className="px-3 py-2 shrink-0" data-tauri-drag-region>
         <div className="flex items-center gap-2 px-3 py-2">
@@ -648,6 +663,7 @@ export function ChatView() {
           {/* Content area */}
           <div
             ref={responseBodyRef}
+            onScroll={handleResponseScroll}
             className="px-4 pt-1 pb-4 overflow-y-auto space-y-3"
             style={{ maxHeight: '460px' }}
           >
