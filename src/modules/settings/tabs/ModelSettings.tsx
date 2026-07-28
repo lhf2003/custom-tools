@@ -319,6 +319,7 @@ export function ModelSettings() {
     refreshProviderModels,
     loadModels,
     setModelActive,
+    setModelPrice,
     loadSceneConfigs,
     setSceneModel,
     setSceneThinkingMode,

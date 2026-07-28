@@ -108,8 +108,8 @@ interface LlmProviderState {
 export const useLlmProviderStore = create<LlmProviderState>((set, get) => ({
   providers: [],
   models: {},
-  sceneConfigs: { chat: null, qa: null, translate: null, companion: null },
-  sceneModelInfo: { chat: null, qa: null, translate: null, companion: null },
+  sceneConfigs: { chat: null, qa: null, translate: null, companion: null, memory_extraction: null, diary: null },
+  sceneModelInfo: { chat: null, qa: null, translate: null, companion: null, memory_extraction: null, diary: null },
   isLoading: false,
   error: null,
 
