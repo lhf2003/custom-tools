@@ -94,6 +94,16 @@ pub struct UpdateInfo {
     pub body: Option<String>,
 }
 
+/// Emitted to the frontend when a manual update check finishes without an
+/// available update, so the result is shown in the in-app UI instead of a
+/// Windows system notification.
+#[derive(serde::Serialize, Clone)]
+#[serde(tag = "status", rename_all = "camelCase")]
+pub enum UpdateCheckResult {
+    Latest,
+    Failed,
+}
+
 #[derive(serde::Serialize, Clone)]
 #[serde(tag = "event", content = "data")]
 pub enum DownloadProgress {

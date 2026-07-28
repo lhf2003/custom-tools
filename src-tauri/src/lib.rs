@@ -86,7 +86,6 @@ pub fn run() {
         .plugin(build_log_plugin().build())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
@@ -316,7 +315,7 @@ pub fn run() {
                 }
             });
 
-            // Auto check for updates on startup (if enabled) - using system notification
+            // Auto check for updates on startup (if enabled) - shown in the in-app UI
             {
                 let app_handle = app.handle().clone();
                 let settings_for_update = settings.clone();
@@ -657,63 +656,17 @@ pub(crate) fn toggle_main_window(app_handle: &tauri::AppHandle) {
     }
 }
 
-/// Send system notification with app icon
-#[cfg(target_os = "windows")]
-fn send_notification_with_icon(app_handle: &tauri::AppHandle, title: &str, body: &str) {
-    use tauri_plugin_notification::NotificationExt;
-
-    // Try multiple possible icon locations
-    let icon_paths = [
-        // Production build paths
-        app_handle
-            .path()
-            .resource_dir()
-            .ok()
-            .map(|d| d.join("icons\\icon.ico")),
-        app_handle
-            .path()
-            .resource_dir()
-            .ok()
-            .map(|d| d.join("icons\\128x128.png")),
-        // Development paths (from src-tauri directory)
-        Some(std::path::PathBuf::from("icons\\icon.ico")),
-        Some(std::path::PathBuf::from("icons\\128x128.png")),
-        Some(std::path::PathBuf::from("src-tauri\\icons\\icon.ico")),
-        Some(std::path::PathBuf::from("src-tauri\\icons\\128x128.png")),
-    ];
-
-    let mut builder = app_handle.notification().builder();
-    builder = builder.title(title).body(body);
-
-    // Try to find and use the first existing icon
-    for icon_path in icon_paths.iter().flatten() {
-        if icon_path.exists() {
-            if let Some(path_str) = icon_path.to_str() {
-                log::debug!("Using notification icon: {}", path_str);
-                builder = builder.icon(path_str);
-                break;
-            }
-        }
-    }
-
-    if let Err(e) = builder.show() {
-        log::warn!("Failed to show notification: {}", e);
+/// Emit the manual update-check result to the frontend (shown as in-app feedback)
+fn emit_check_result(
+    app_handle: &tauri::AppHandle,
+    result: commands::updater::UpdateCheckResult,
+) {
+    if let Err(e) = app_handle.emit("update-check-result", result) {
+        log::warn!("Failed to emit update-check-result event: {}", e);
     }
 }
 
-/// Send system notification (non-Windows fallback)
-#[cfg(not(target_os = "windows"))]
-fn send_notification_with_icon(app_handle: &tauri::AppHandle, title: &str, body: &str) {
-    use tauri_plugin_notification::NotificationExt;
-    let _ = app_handle
-        .notification()
-        .builder()
-        .title(title)
-        .body(body)
-        .show();
-}
-
-/// Check for updates from tray menu and show system notification
+/// Check for updates from tray menu — all results are shown in the in-app UI
 async fn check_update_from_tray(app_handle: tauri::AppHandle) {
     let app_version = app_handle.package_info().version.clone();
 
@@ -721,7 +674,8 @@ async fn check_update_from_tray(app_handle: tauri::AppHandle) {
         Ok(u) => u,
         Err(e) => {
             log::error!("Failed to get updater: {}", e);
-            send_notification_with_icon(&app_handle, "检查更新失败", "无法获取更新服务");
+            show_main_window(&app_handle);
+            emit_check_result(&app_handle, commands::updater::UpdateCheckResult::Failed);
             return;
         }
     };
@@ -742,7 +696,7 @@ async fn check_update_from_tray(app_handle: tauri::AppHandle) {
             }
 
             // Show main window so user can see the update UI
-            toggle_main_window(&app_handle);
+            show_main_window(&app_handle);
 
             // Emit event to frontend to show update UI
             let update_info = commands::updater::UpdateInfo {
@@ -753,35 +707,21 @@ async fn check_update_from_tray(app_handle: tauri::AppHandle) {
             if let Err(e) = app_handle.emit("update-available", update_info) {
                 log::warn!("Failed to emit update-available event: {}", e);
             }
-
-            // Also show system notification
-            let body = update.body.as_deref().unwrap_or("点击通知以安装更新");
-            send_notification_with_icon(
-                &app_handle,
-                &format!("发现新版本: {}", update.version),
-                body,
-            );
         }
         Ok(None) => {
             log::info!("No update available (current: {})", app_version);
-            send_notification_with_icon(
-                &app_handle,
-                "已是最新版本",
-                &format!("当前版本: {}", app_version),
-            );
+            show_main_window(&app_handle);
+            emit_check_result(&app_handle, commands::updater::UpdateCheckResult::Latest);
         }
         Err(e) => {
             log::error!("Update check failed: {}", e);
-            send_notification_with_icon(
-                &app_handle,
-                "检查更新失败",
-                "网络连接错误或更新服务器不可用",
-            );
+            show_main_window(&app_handle);
+            emit_check_result(&app_handle, commands::updater::UpdateCheckResult::Failed);
         }
     }
 }
 
-/// Check for updates on startup and show system notification
+/// Check for updates on startup — new versions are shown in the in-app UI
 async fn check_update_on_startup(app_handle: tauri::AppHandle) {
     let app_version = app_handle.package_info().version.clone();
 
@@ -809,7 +749,7 @@ async fn check_update_on_startup(app_handle: tauri::AppHandle) {
             }
 
             // Show main window so user can see the update UI
-            toggle_main_window(&app_handle);
+            show_main_window(&app_handle);
 
             // Emit event to frontend to show update UI
             let update_info = commands::updater::UpdateInfo {
@@ -820,14 +760,6 @@ async fn check_update_on_startup(app_handle: tauri::AppHandle) {
             if let Err(e) = app_handle.emit("update-available", update_info) {
                 log::warn!("Failed to emit update-available event: {}", e);
             }
-
-            // Also show system notification
-            let body = update.body.as_deref().unwrap_or("点击通知以查看更新详情");
-            send_notification_with_icon(
-                &app_handle,
-                &format!("发现新版本: {}", update.version),
-                body,
-            );
         }
         Ok(None) => {
             log::info!("No update available on startup (current: {})", app_version);

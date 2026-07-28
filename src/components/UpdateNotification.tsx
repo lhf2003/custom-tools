@@ -1,13 +1,21 @@
 import { useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { useUpdater } from '@/hooks/useUpdater';
-import { Download, X, RefreshCw } from 'lucide-react';
+import { Download, X, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
 import type { UpdateInfo } from '@/hooks/useUpdater';
+
+interface UpdateCheckResult {
+  status: 'latest' | 'failed';
+}
+
+const RESULT_AUTO_DISMISS_MS = 5000;
 
 export function UpdateNotification() {
   const { updateInfo, isDownloading, downloadProgress, setUpdateInfo, downloadAndInstall } = useUpdater();
   const [showNotification, setShowNotification] = useState(false);
   const [dismissed, setDismissed] = useState(false);
+  const [checkResult, setCheckResult] = useState<UpdateCheckResult | null>(null);
+  const [showResult, setShowResult] = useState(false);
 
   // Listen for update-available event from backend
   useEffect(() => {
@@ -26,6 +34,27 @@ export function UpdateNotification() {
     };
   }, [dismissed, setUpdateInfo]);
 
+  // Listen for manual check results (latest / failed) from backend
+  useEffect(() => {
+    const unlisten = listen('update-check-result', (event) => {
+      setCheckResult(event.payload as UpdateCheckResult);
+      setShowResult(true);
+    });
+
+    return () => {
+      unlisten.then((fn) => fn()).catch((err: unknown) => {
+        console.error('Failed to cleanup check result listener:', err);
+      });
+    };
+  }, []);
+
+  // Auto-dismiss the check result feedback
+  useEffect(() => {
+    if (!showResult) return;
+    const timer = setTimeout(() => setShowResult(false), RESULT_AUTO_DISMISS_MS);
+    return () => clearTimeout(timer);
+  }, [showResult]);
+
   // Show notification when update is found
   useEffect(() => {
     if (updateInfo && !dismissed && !isDownloading) {
@@ -41,6 +70,40 @@ export function UpdateNotification() {
   const handleUpdate = async () => {
     await downloadAndInstall();
   };
+
+  // Check result feedback (latest / failed) — lightweight, auto-dismissing
+  if (showResult && checkResult) {
+    const isLatest = checkResult.status === 'latest';
+    return (
+      <div className="fixed bottom-4 right-4 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
+        <div className="bg-[#2d2d2d] border border-white/10 rounded-xl shadow-2xl p-4 min-w-[280px] max-w-[360px]">
+          <div className="flex items-center gap-3">
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isLatest ? 'bg-green-500/20' : 'bg-red-500/20'}`}>
+              {isLatest ? (
+                <CheckCircle2 className="w-4 h-4 text-green-400" />
+              ) : (
+                <AlertCircle className="w-4 h-4 text-red-400" />
+              )}
+            </div>
+            <div className="flex-1 min-w-0">
+              <h3 className="text-white text-sm font-medium">
+                {isLatest ? '已是最新版本' : '检查更新失败'}
+              </h3>
+              <p className="text-white/50 text-xs">
+                {isLatest ? '当前版本无需更新' : '网络连接错误或更新服务不可用，请稍后重试'}
+              </p>
+            </div>
+            <button
+              onClick={() => setShowResult(false)}
+              className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!showNotification || !updateInfo) return null;
 
