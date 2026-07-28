@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::sync::{mpsc, Arc, RwLock};
 
 use rusqlite::Connection;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 use watcher::ForegroundEvent;
 
@@ -53,6 +53,12 @@ pub fn start(
     db_path: PathBuf,
     initial_flags: CompanionFlags,
 ) -> CompanionState {
+    // 启动即播种全部人格文件（persona/evolution/三本手册）：
+    // 各 load_* 是懒播种，不兜底的话 agents/ 目录在重启后残缺
+    if let Ok(app_data) = app_handle.path().app_data_dir() {
+        persona::seed_all(&app_data);
+    }
+
     let flags = Arc::new(RwLock::new(initial_flags));
 
     let (tx, rx) = mpsc::channel::<ForegroundEvent>();

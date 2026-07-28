@@ -54,3 +54,14 @@ pub fn load_role(app_data_dir: &Path, role: &str) -> String {
         default,
     )
 }
+
+/// 启动时一次性播种全部人格文件（缺失才写，不覆盖用户编辑）。
+/// 各 load_* 是懒播种——文件只在对应功能首次运行时出现，
+/// 导致 agents/ 目录在重启后残缺；统一在陪伴模块启动时兜底。
+pub fn seed_all(app_data_dir: &Path) {
+    let _ = load(app_data_dir);
+    let _ = load_evolution(app_data_dir);
+    for role in ["reporter", "analyst", "recall"] {
+        let _ = load_role(app_data_dir, role);
+    }
+}
