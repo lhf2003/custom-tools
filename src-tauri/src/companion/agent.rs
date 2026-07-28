@@ -24,6 +24,22 @@ struct ClaudeCliResult {
     result: Option<String>,
     total_cost_usd: Option<f64>,
     num_turns: Option<u32>,
+    usage: Option<ClaudeCliUsage>,
+}
+
+/// CLI result JSON 里的 token 用量（字段缺省容错为 0）
+#[derive(Debug, Deserialize)]
+struct ClaudeCliUsage {
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+}
+
+/// 单次问答的计量回执（观测登记用）
+pub struct OneshotReply {
+    pub text: String,
+    pub cost_usd: f64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
 }
 
 /// 运行日报 agent（阻塞式，调用方需放在独立线程）。
@@ -57,13 +73,19 @@ pub fn run_daily_report_agent(
         .map(|dir| super::persona::load_role(dir, "reporter"))
         .unwrap_or_default();
     // 语气两维（表达偏好 + 对贾维斯的期望）注入日报 prompt，让成文贴合他本人
-    let ve_section = rusqlite::Connection::open(db_path)
+    let (ve_section, state_text) = rusqlite::Connection::open(db_path)
         .ok()
-        .map(|conn| super::analyzer::voice_expectation_section(&conn))
+        .map(|conn| {
+            (
+                super::analyzer::voice_expectation_section(&conn),
+                super::state::current_state_sentence(&conn, chrono::Local::now().timestamp()),
+            )
+        })
         .unwrap_or_default();
-    let prompt = build_report_prompt(&persona, &evolution, &role, date, &ve_section);
+    let prompt = build_report_prompt(&persona, &evolution, &role, date, &ve_section, &state_text);
 
     log::info!("Companion 日报 agent 启动: {}", bin_path);
+    let started = std::time::Instant::now();
 
     let mut cmd = cli_command(bin_path, work_dir);
     cmd.arg("-p")
@@ -83,9 +105,10 @@ pub fn run_daily_report_agent(
     })?;
 
     let parsed = parse_cli_output(&output)?;
+    let duration_ms = started.elapsed().as_millis() as u64;
 
     if parsed.is_error == Some(true) {
-        return Err(format!(
+        let reason = format!(
             "agent 执行失败（{}）: {}",
             parsed.subtype.as_deref().unwrap_or("unknown"),
             parsed
@@ -95,13 +118,43 @@ pub fn run_daily_report_agent(
                 .chars()
                 .take(300)
                 .collect::<String>()
-        ));
+        );
+        crate::llm::observe::log_call(db_path, &crate::llm::observe::LlmCallEntry {
+            source: "report",
+            channel: "claude_code",
+            scene: None,
+            model: None,
+            input_tokens: 0,
+            output_tokens: 0,
+            cost_usd: 0.0,
+            duration_ms,
+            status: "error",
+            error: Some(&reason),
+        });
+        return Err(reason);
     }
 
     let cost = parsed.total_cost_usd.unwrap_or(0.0);
     let turns = parsed.num_turns.unwrap_or(0);
     let summary = parsed.result.unwrap_or_else(|| "日报已生成".to_string());
     let summary_preview: String = summary.chars().take(200).collect();
+
+    let (input_tokens, output_tokens) = parsed
+        .usage
+        .map(|u| (u.input_tokens.unwrap_or(0), u.output_tokens.unwrap_or(0)))
+        .unwrap_or((0, 0));
+    crate::llm::observe::log_call(db_path, &crate::llm::observe::LlmCallEntry {
+        source: "report",
+        channel: "claude_code",
+        scene: None,
+        model: None,
+        input_tokens,
+        output_tokens,
+        cost_usd: cost,
+        duration_ms,
+        status: "ok",
+        error: None,
+    });
 
     log::info!("Companion 日报 agent 完成: {} 轮, 成本 ${:.4}", turns, cost);
 
@@ -163,9 +216,9 @@ fn parse_cli_output(output: &std::process::Output) -> Result<ClaudeCliResult, St
     })
 }
 
-/// Claude Code 单次问答：禁工具、单轮，返回 result 文本。
+/// Claude Code 单次问答：禁工具、单轮，返回 result 文本与计量。
 /// 用于陪伴的模式挖掘/意图解析等「一问一答」场景（不做 MCP 注册）。
-pub fn run_oneshot(bin_path: &str, work_dir: &Path, prompt: &str) -> Result<String, String> {
+pub fn run_oneshot(bin_path: &str, work_dir: &Path, prompt: &str) -> Result<OneshotReply, String> {
     let mut cmd = cli_command(bin_path, work_dir);
     cmd.arg("-p")
         .arg(prompt)
@@ -199,9 +252,15 @@ pub fn run_oneshot(bin_path: &str, work_dir: &Path, prompt: &str) -> Result<Stri
         ));
     }
 
-    parsed
-        .result
-        .ok_or_else(|| "claude 未返回结果".to_string())
+    let usage = parsed.usage;
+    Ok(OneshotReply {
+        text: parsed
+            .result
+            .ok_or_else(|| "claude 未返回结果".to_string())?,
+        cost_usd: parsed.total_cost_usd.unwrap_or(0.0),
+        input_tokens: usage.as_ref().and_then(|u| u.input_tokens).unwrap_or(0),
+        output_tokens: usage.and_then(|u| u.output_tokens).unwrap_or(0),
+    })
 }
 
 /// 解析 Claude Code 工作目录：配置了用配置值，否则默认 app_data_dir/companion-agent。
@@ -294,14 +353,15 @@ fn ensure_mcp_registered(
     Ok(())
 }
 
-fn build_report_prompt(persona: &str, evolution: &str, role: &str, date: &str, ve_section: &str) -> String {
+fn build_report_prompt(persona: &str, evolution: &str, role: &str, date: &str, ve_section: &str, state_text: &str) -> String {
     format!(
         "{persona}\n\n---\n\n{evolution}\n\n---\n\n{role}{ve_section}\n\n---\n\n\
-         以上是贾维斯的身份设定、经验本与日报工作手册。请完成「{date}」的工作日报。",
+         以上是贾维斯的身份设定、经验本与日报工作手册。请完成「{date}」的工作日报。\n\n---\n\n# 当下状态\n{state}",
         persona = persona,
         evolution = evolution,
         role = role,
         ve_section = ve_section,
-        date = date
+        date = date,
+        state = state_text
     )
 }

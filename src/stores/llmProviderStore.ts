@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 
 export type ProviderType = 'openai' | 'ollama' | 'deepseek' | 'bailian' | 'custom';
 export type ConnectionStatus = 'unknown' | 'connected' | 'disconnected' | 'error';
-export type Scene = 'chat' | 'qa' | 'translate' | 'companion' | 'memory_extraction';
+export type Scene = 'chat' | 'qa' | 'translate' | 'companion' | 'memory_extraction' | 'diary';
 
 export interface Provider {
   id: number;
@@ -26,6 +26,9 @@ export interface Model {
   name: string;
   description: string | null;
   is_active: boolean;
+  /** 可选单价（美元/百万 token），null = 未配置（成本面板只统计 token） */
+  input_price_per_m: number | null;
+  output_price_per_m: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -93,6 +96,7 @@ interface LlmProviderState {
   // Model actions
   loadModels: (providerId: number) => Promise<Model[]>;
   setModelActive: (modelId: number, isActive: boolean) => Promise<void>;
+  setModelPrice: (modelId: number, inputPrice: number | null, outputPrice: number | null) => Promise<void>;
 
   // Scene actions
   loadSceneConfigs: () => Promise<void>;
@@ -225,10 +229,31 @@ export const useLlmProviderStore = create<LlmProviderState>((set, get) => ({
     }
   },
 
+  setModelPrice: async (modelId, inputPrice, outputPrice) => {
+    try {
+      const model = await invoke<Model>('set_llm_model_price', {
+        modelId,
+        inputPrice,
+        outputPrice,
+      });
+      set((state) => ({
+        models: {
+          ...state.models,
+          [model.provider_id]: state.models[model.provider_id]?.map((m) =>
+            m.id === model.id ? model : m
+          ) || [model],
+        },
+      }));
+    } catch (err) {
+      console.error('Failed to set model price:', err);
+      throw err;
+    }
+  },
+
   loadSceneConfigs: async () => {
     try {
       const configs = await invoke<SceneConfig[]>('get_scene_configs');
-      const sceneConfigs: Record<Scene, SceneConfig | null> = { chat: null, qa: null, translate: null, companion: null, memory_extraction: null };
+      const sceneConfigs: Record<Scene, SceneConfig | null> = { chat: null, qa: null, translate: null, companion: null, memory_extraction: null, diary: null };
       configs.forEach((config) => {
         sceneConfigs[config.scene] = config;
       });

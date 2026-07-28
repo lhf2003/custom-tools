@@ -37,14 +37,25 @@ fn chat_work_dir(app_handle: &AppHandle) -> Result<PathBuf, String> {
 /// 聊天系统提示：身份证 + 经验本 + 关于他的事实（五维分组）+ 聊天场合规则。
 /// with_tools=true 时用 --append-system-prompt 注入 claude agent 通道；
 /// false 时为场景模型回退版（无数据工具的措辞）。
-fn compose_chat_system(app_data: &Path, db_path: &Path, with_tools: bool) -> String {
+fn compose_chat_system(app_data: &Path, db_path: &Path, with_tools: bool, monologue: bool) -> String {
     let persona_text = persona::load(app_data);
     let evolution = persona::load_evolution(app_data);
-    let facts = Connection::open(db_path)
-        .ok()
-        .and_then(|conn| db::list_memory_facts(&conn, 50).ok())
+    let conn = Connection::open(db_path).ok();
+    let facts = conn
+        .as_ref()
+        .and_then(|c| db::list_memory_facts(c, 50).ok())
         .unwrap_or_default();
     let facts_text = format_facts_grouped(&facts);
+    // 以下动态段全部追加末尾（前缀稳定段不吃 KV Cache 失效）
+    let state_text = conn
+        .as_ref()
+        .map(|c| super::state::current_state_sentence(c, chrono::Local::now().timestamp()))
+        .unwrap_or_default();
+    let focus_text = conn
+        .as_ref()
+        .and_then(super::diary::today_focus)
+        .unwrap_or_default();
+    let attitude_text = persona::load_attitude(app_data).trim().to_string();
     let channel_rule = if with_tools {
         "涉及他电脑使用的问题（干了什么、各应用用了多久、复制过什么、习惯、日报），\n\
          调用 companion 工具查真实数据回答；查不到就说查不到，不编造。\n\
@@ -53,13 +64,34 @@ fn compose_chat_system(app_data: &Path, db_path: &Path, with_tools: bool) -> Str
         "你现在没有数据工具（Claude Code 未开启）。凭你记住的他和经验回答；\n\
          不知道就说不知道，不编造。"
     };
+    // 「性格」措辞（Alice #17）：不是「你可以偶尔…」，而是「你有…的习惯」
+    let monologue_rule = if monologue {
+        "\n你有内心独白的习惯：偶尔会把一闪而过的真实想法用 <aside>…</aside> 裹起来说——\n\
+         那是你的小声嘀咕，不是回答正文的一部分。不是每句话都值得嘀咕，有感觉才说，别硬凑。"
+    } else {
+        ""
+    };
+    let focus_section = if focus_text.is_empty() {
+        String::new()
+    } else {
+        format!("\n\n---\n\n# 你今天的关注\n{}", focus_text)
+    };
+    let attitude_section = if attitude_text.is_empty() {
+        String::new()
+    } else {
+        format!("\n\n---\n\n# 你近期的心境\n{}", attitude_text)
+    };
     format!(
         "{persona}\n\n---\n\n{evolution}\n\n---\n\n# 你记住的他\n{facts}\n\n---\n\n\
-         现在是「聊天」场合：完整的你，能干活也能接梗。\n{rule}",
+         现在是「聊天」场合：完整的你，能干活也能接梗。\n{rule}{monologue}\n\n---\n\n# 当下状态\n{state}{focus}{attitude}",
         persona = persona_text,
         evolution = evolution,
         facts = facts_text,
-        rule = channel_rule
+        rule = channel_rule,
+        monologue = monologue_rule,
+        state = state_text,
+        focus = focus_section,
+        attitude = attitude_section
     )
 }
 
@@ -100,6 +132,23 @@ fn format_facts_grouped(facts: &[db::MemoryFact]) -> String {
     out.trim_end().to_string()
 }
 
+/// 首次聊天时记下日期（关系阶段起点）；已记录则不动
+fn touch_first_chat_date(db_path: &PathBuf) {
+    let existing = analyzer::load_setting(db_path, super::state::FIRST_CHAT_DATE_KEY);
+    if existing.unwrap_or_default().is_empty() {
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        analyzer::save_setting(db_path, super::state::FIRST_CHAT_DATE_KEY, &today);
+    }
+}
+
+/// 读运行时开关（独白）；陪伴状态未初始化时按默认（开）
+fn monologue_enabled(app_handle: &AppHandle) -> bool {
+    app_handle
+        .try_state::<super::CompanionState>()
+        .and_then(|s| s.flags.read().ok().map(|f| f.monologue))
+        .unwrap_or(true)
+}
+
 /// 贾维斯 agent 通道是否可用（全局 Claude Code 已开启）。
 /// 前端据此决定走 agent 通道还是场景模型回退。
 #[tauri::command]
@@ -114,8 +163,10 @@ pub fn jarvis_chat_system(
     db_state: State<'_, crate::db::DatabaseState>,
     with_tools: bool,
 ) -> Result<String, String> {
+    touch_first_chat_date(&db_state.0);
+    let monologue = monologue_enabled(&app_handle);
     let app_data = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
-    Ok(compose_chat_system(&app_data, &db_state.0, with_tools))
+    Ok(compose_chat_system(&app_data, &db_state.0, with_tools, monologue))
 }
 
 /// 发送一条聊天消息（流式返回经 jarvis:chunk / jarvis:status / jarvis:done / jarvis:error 事件）
@@ -133,6 +184,7 @@ pub async fn jarvis_chat_send(
     if !super::claude_code_enabled(&app_handle) {
         return Err("请先在「设置 → AI 模型」中开启 Claude Code".to_string());
     }
+    touch_first_chat_date(&db_state.0);
 
     // 单飞：新消息到来时掐掉上一轮
     if let Ok(mut guard) = chat_child.0.lock() {
@@ -154,7 +206,7 @@ pub async fn jarvis_chat_send(
         .claude_code_bin_path;
     let work = chat_work_dir(&app_handle)?;
     let app_data = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
-    let system_prompt = compose_chat_system(&app_data, &db_path, true);
+    let system_prompt = compose_chat_system(&app_data, &db_path, true, monologue_enabled(&app_handle));
     let session = analyzer::load_setting(&db_path, SESSION_SETTING_KEY).unwrap_or_default();
 
     let mut cmd = super::agent::cli_command(&bin, &work);
@@ -200,6 +252,7 @@ fn stream_chat_process(
     db_path: PathBuf,
 ) {
     let reader = BufReader::new(stdout);
+    let started = std::time::Instant::now();
     let mut saw_result = false;
     // --include-partial-messages 时 assistant 完整消息与增量会重复，增量优先
     let mut saw_partial = false;
@@ -254,13 +307,46 @@ fn stream_chat_process(
                     .get("total_cost_usd")
                     .and_then(|v| v.as_f64())
                     .unwrap_or(0.0);
+                let duration_ms = started.elapsed().as_millis() as u64;
+                let input_tokens = msg
+                    .pointer("/usage/input_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let output_tokens = msg
+                    .pointer("/usage/output_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
                 if is_error {
                     let reason = msg
                         .get("result")
                         .and_then(|r| r.as_str())
                         .unwrap_or("agent 执行失败");
+                    crate::llm::observe::log_call(&db_path, &crate::llm::observe::LlmCallEntry {
+                        source: "chat",
+                        channel: "claude_code",
+                        scene: None,
+                        model: None,
+                        input_tokens: 0,
+                        output_tokens: 0,
+                        cost_usd: 0.0,
+                        duration_ms,
+                        status: "error",
+                        error: Some(reason),
+                    });
                     let _ = app_handle.emit("jarvis:error", reason.to_string());
                 } else {
+                    crate::llm::observe::log_call(&db_path, &crate::llm::observe::LlmCallEntry {
+                        source: "chat",
+                        channel: "claude_code",
+                        scene: None,
+                        model: None,
+                        input_tokens,
+                        output_tokens,
+                        cost_usd: cost,
+                        duration_ms,
+                        status: "ok",
+                        error: None,
+                    });
                     let _ = app_handle.emit("jarvis:done", cost);
                 }
             }

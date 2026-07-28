@@ -1,5 +1,6 @@
 use crate::commands::settings::SettingsState;
 use crate::db::DatabaseState;
+use crate::llm::observe::{log_call, LlmCallEntry, SourceStat};
 use crate::llm::ChatMessage;
 use crate::llm_provider::crypto::decrypt;
 use crate::llm_provider::db::LlmProviderDb;
@@ -8,7 +9,10 @@ use tauri::{Manager, State};
 
 /// 测试大模型连接（使用旧版设置）
 #[tauri::command]
-pub async fn test_llm_connection(state: State<'_, SettingsState>) -> Result<String, String> {
+pub async fn test_llm_connection(
+    state: State<'_, SettingsState>,
+    db_state: State<'_, DatabaseState>,
+) -> Result<String, String> {
     let (base_url, api_key, model, thinking_mode) = {
         let manager = state.0.lock().map_err(|e| e.to_string())?;
         let s = manager.get_settings();
@@ -33,7 +37,8 @@ pub async fn test_llm_connection(state: State<'_, SettingsState>) -> Result<Stri
         "openai"
     };
 
-    crate::llm::call_llm(
+    let started = std::time::Instant::now();
+    let result = crate::llm::call_llm(
         &base_url,
         &api_key,
         &model,
@@ -41,7 +46,41 @@ pub async fn test_llm_connection(state: State<'_, SettingsState>) -> Result<Stri
         messages,
         thinking_mode,
     )
-    .await
+    .await;
+    let duration_ms = started.elapsed().as_millis() as u64;
+
+    match result {
+        Ok(reply) => {
+            log_call(&db_state.0, &LlmCallEntry {
+                source: "test",
+                channel: "scene_model",
+                scene: None,
+                model: Some(&model),
+                input_tokens: reply.input_tokens,
+                output_tokens: reply.output_tokens,
+                cost_usd: 0.0,
+                duration_ms,
+                status: "ok",
+                error: None,
+            });
+            Ok(reply.content)
+        }
+        Err(e) => {
+            log_call(&db_state.0, &LlmCallEntry {
+                source: "test",
+                channel: "scene_model",
+                scene: None,
+                model: Some(&model),
+                input_tokens: 0,
+                output_tokens: 0,
+                cost_usd: 0.0,
+                duration_ms,
+                status: "error",
+                error: Some(&e),
+            });
+            Err(e)
+        }
+    }
 }
 
 /// 根据场景流式调用大模型接口
@@ -97,7 +136,10 @@ pub async fn call_llm_stream_by_scene(
         )
     };
 
-    crate::llm::call_llm_stream(
+    let started = std::time::Instant::now();
+    let scene_str = scene_enum.to_string();
+    let model_for_log = model.clone();
+    let result = crate::llm::call_llm_stream(
         &base_url,
         &api_key,
         &model,
@@ -106,5 +148,66 @@ pub async fn call_llm_stream_by_scene(
         thinking_mode,
         &app_handle,
     )
-    .await
+    .await;
+    let duration_ms = started.elapsed().as_millis() as u64;
+
+    // 流式通道无法从响应拿 token 用量（OpenAI 流式 usage 需额外协商，兼容性风险），
+    // 只登记次数/耗时——诚实的降级，面板按来源分组时该来源 token 显示为 0
+    match &result {
+        Ok(()) => {
+            log_call(&db_state.0, &LlmCallEntry {
+                source: &scene_str,
+                channel: "scene_model",
+                scene: Some(&scene_str),
+                model: Some(&model_for_log),
+                input_tokens: 0,
+                output_tokens: 0,
+                cost_usd: 0.0,
+                duration_ms,
+                status: "ok",
+                error: None,
+            });
+        }
+        Err(e) => {
+            log_call(&db_state.0, &LlmCallEntry {
+                source: &scene_str,
+                channel: "scene_model",
+                scene: Some(&scene_str),
+                model: Some(&model_for_log),
+                input_tokens: 0,
+                output_tokens: 0,
+                cost_usd: 0.0,
+                duration_ms,
+                status: "error",
+                error: Some(e),
+            });
+        }
+    }
+    result
+}
+
+/// 调用观测面板：按来源聚合的统计（range: today | yesterday | week）
+#[tauri::command]
+pub fn get_llm_call_stats(
+    db_state: State<'_, DatabaseState>,
+    range: String,
+) -> Result<Vec<SourceStat>, String> {
+    let now = chrono::Local::now();
+    let today_start = now
+        .date_naive()
+        .and_hms_opt(0, 0, 0)
+        .ok_or("无法计算今日起点")?
+        .and_local_timezone(chrono::Local)
+        .single()
+        .ok_or("无法计算今日起点时区")?
+        .timestamp();
+
+    let (since, until) = match range.as_str() {
+        "today" => (today_start, now.timestamp()),
+        "yesterday" => (today_start - 86400, today_start),
+        "week" => (today_start - 6 * 86400, now.timestamp()),
+        _ => return Err(format!("未知统计范围: {}", range)),
+    };
+
+    crate::llm::observe::summarize(&db_state.0, since, until)
 }

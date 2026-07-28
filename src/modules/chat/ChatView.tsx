@@ -70,6 +70,51 @@ const MODES: Record<
 
 const MODE_ORDER: ChatMode[] = ['chat', 'translate'];
 
+/** 把助手文本切成正文段与内心独白段（<aside>…</aside>）。
+ *  未闭合的 <aside> 按「到末尾」处理——流式途中标记尚未到达时样式不断裂。 */
+function splitAsides(text: string): { aside: boolean; text: string }[] {
+  const parts: { aside: boolean; text: string }[] = [];
+  let rest = text;
+  while (rest.length > 0) {
+    const start = rest.indexOf('<aside>');
+    if (start === -1) {
+      parts.push({ aside: false, text: rest });
+      break;
+    }
+    if (start > 0) parts.push({ aside: false, text: rest.slice(0, start) });
+    const end = rest.indexOf('</aside>', start + 7);
+    if (end === -1) {
+      parts.push({ aside: true, text: rest.slice(start + 7) });
+      break;
+    }
+    parts.push({ aside: true, text: rest.slice(start + 7, end) });
+    rest = rest.slice(end + 8);
+  }
+  return parts.filter((p) => p.text.length > 0);
+}
+
+/** 助手消息渲染：正文走 Markdown，独白段（心声）渲染为灰小斜体 */
+function AssistantContent({ text }: { text: string }) {
+  return (
+    <>
+      {splitAsides(text).map((p, i) =>
+        p.aside ? (
+          <div
+            key={i}
+            className="my-1.5 pl-3 border-l-2 border-white/10 text-white/35 text-xs italic whitespace-pre-wrap"
+          >
+            {p.text}
+          </div>
+        ) : (
+          <ReactMarkdown key={i} remarkPlugins={[remarkGfm]}>
+            {p.text}
+          </ReactMarkdown>
+        ),
+      )}
+    </>
+  );
+}
+
 // ─────────────────────────────────────────────
 // ChatView
 // ─────────────────────────────────────────────
@@ -632,9 +677,7 @@ export function ChatView() {
                   </div>
                 ) : (
                   <div className="max-w-[90%] prose prose-invert prose-sm max-w-none prose-p:my-1.5 prose-headings:mt-3 prose-headings:mb-1.5 prose-pre:bg-zinc-800 prose-pre:border prose-pre:border-zinc-700 prose-code:text-emerald-300 prose-code:bg-zinc-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-a:text-blue-400 prose-strong:text-zinc-200">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {msg.content}
-                    </ReactMarkdown>
+                    <AssistantContent text={msg.content} />
                   </div>
                 )}
               </div>
@@ -662,9 +705,7 @@ export function ChatView() {
             {streamText.length > 0 && (
               <div className="flex justify-start">
                 <div className="max-w-[90%] prose prose-invert prose-sm max-w-none prose-p:my-1.5 prose-headings:mt-3 prose-headings:mb-1.5 prose-pre:bg-zinc-800 prose-pre:border prose-pre:border-zinc-700 prose-code:text-emerald-300 prose-code:bg-zinc-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-a:text-blue-400 prose-strong:text-zinc-200">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {streamText}
-                  </ReactMarkdown>
+                  <AssistantContent text={streamText} />
                   {showCursor && (
                     <span className="inline-block w-0.5 h-4 bg-zinc-400 animate-pulse ml-0.5 align-middle" />
                   )}

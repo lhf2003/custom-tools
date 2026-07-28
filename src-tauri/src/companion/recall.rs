@@ -126,7 +126,7 @@ pub async fn run_recall(app_handle: &AppHandle, db_path: &PathBuf) -> Result<Str
     );
 
     let reply =
-        analyzer::call_llm_with_scene(app_handle, db_path, prompt, Scene::MemoryExtraction).await?;
+        analyzer::call_llm_with_scene(app_handle, db_path, prompt, Scene::MemoryExtraction, "recall").await?;
     let ops = parse_recall_ops(&reply)?;
 
     let now = chrono::Local::now().timestamp();

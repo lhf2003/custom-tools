@@ -53,11 +53,13 @@ export function CompanionSettings() {
     companion_retention_days,
     companion_long_work_minutes,
     companion_daily_report,
+    companion_monologue,
     setCompanionEnabled,
     setCompanionPaused,
     setCompanionRetentionDays,
     setCompanionLongWorkMinutes,
     setCompanionDailyReport,
+    setCompanionMonologue,
   } = useSettingsStore();
   const { addToast } = useToastStore();
 
@@ -266,6 +268,13 @@ export function CompanionSettings() {
             </button>
             <Toggle enabled={companion_daily_report} onToggle={setCompanionDailyReport} />
           </div>
+        </SettingCard>
+
+        <SettingCard
+          title="内心独白"
+          description="聊天时贾维斯偶尔说出灰字「小声嘀咕」的真实想法；关闭后回答只剩正文"
+        >
+          <Toggle enabled={companion_monologue} onToggle={setCompanionMonologue} />
         </SettingCard>
 
         <SettingCard

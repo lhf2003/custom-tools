@@ -1,6 +1,16 @@
 use serde::{Deserialize, Serialize};
 use tauri::Emitter;
 
+pub mod observe;
+
+/// 非流式调用的计量回执：content 之外带回 token 用量（观测登记用）
+#[derive(Debug, Clone)]
+pub struct LlmReply {
+    pub content: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: String,
@@ -38,15 +48,26 @@ struct ChatChoice {
     message: ChatMessage,
 }
 
+/// OpenAI usage 字段（部分中转端点可能缺省，容错为 0）
+#[derive(Debug, Deserialize, Default)]
+struct OpenAiUsage {
+    prompt_tokens: Option<u64>,
+    completion_tokens: Option<u64>,
+}
+
 #[derive(Debug, Deserialize)]
 struct OpenAiResponse {
     choices: Vec<ChatChoice>,
+    usage: Option<OpenAiUsage>,
 }
 
 // Ollama 原生 /api/chat 格式响应（非流式）
 #[derive(Debug, Deserialize)]
 struct OllamaResponse {
     message: ChatMessage,
+    /// Ollama 的 token 计量字段（缺省容错为 0）
+    prompt_eval_count: Option<u64>,
+    eval_count: Option<u64>,
 }
 
 // OpenAI streaming chunk 结构
@@ -79,7 +100,7 @@ pub async fn call_llm(
     provider_type: &str,
     messages: Vec<ChatMessage>,
     thinking_mode: bool,
-) -> Result<String, String> {
+) -> Result<LlmReply, String> {
     if model.is_empty() {
         return Err("模型名称未配置".to_string());
     }
@@ -163,16 +184,25 @@ pub async fn call_llm(
             .json()
             .await
             .map_err(|e| format!("解析响应失败: {}", e))?;
-        Ok(resp.message.content)
+        Ok(LlmReply {
+            content: resp.message.content,
+            input_tokens: resp.prompt_eval_count.unwrap_or(0),
+            output_tokens: resp.eval_count.unwrap_or(0),
+        })
     } else {
         let resp: OpenAiResponse = response
             .json()
             .await
             .map_err(|e| format!("解析响应失败: {}", e))?;
+        let usage = resp.usage.unwrap_or_default();
         resp.choices
             .into_iter()
             .next()
-            .map(|c| c.message.content)
+            .map(|c| LlmReply {
+                content: c.message.content,
+                input_tokens: usage.prompt_tokens.unwrap_or(0),
+                output_tokens: usage.completion_tokens.unwrap_or(0),
+            })
             .ok_or_else(|| "LLM 返回了空响应".to_string())
     }
 }

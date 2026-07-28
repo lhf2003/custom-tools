@@ -246,7 +246,7 @@ impl Database {
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS llm_scene_configs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                scene TEXT NOT NULL UNIQUE CHECK (scene IN ('chat', 'qa', 'translate', 'companion', 'memory_extraction')),
+                scene TEXT NOT NULL UNIQUE CHECK (scene IN ('chat', 'qa', 'translate', 'companion', 'memory_extraction', 'diary')),
                 provider_id INTEGER REFERENCES llm_providers(id),
                 model_id TEXT,
                 thinking_mode BOOLEAN DEFAULT 0,
@@ -261,11 +261,42 @@ impl Database {
             [],
         );
 
+        // Migration: 模型单价（每百万 token 美元，可选；填了成本面板才算金额）
+        let _ = self
+            .conn
+            .execute("ALTER TABLE llm_models ADD COLUMN input_price_per_m REAL", []);
+        let _ = self
+            .conn
+            .execute("ALTER TABLE llm_models ADD COLUMN output_price_per_m REAL", []);
+
+        // LLM 调用观测日志：每次调用登记来源/通道/token/耗时/成本（成本面板数据源）
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS llm_call_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source TEXT NOT NULL,
+                channel TEXT NOT NULL,
+                scene TEXT,
+                model TEXT,
+                input_tokens INTEGER DEFAULT 0,
+                output_tokens INTEGER DEFAULT 0,
+                cost_usd REAL DEFAULT 0,
+                duration_ms INTEGER DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'ok' CHECK (status IN ('ok', 'error')),
+                error TEXT,
+                created_at INTEGER NOT NULL
+            )",
+            [],
+        )?;
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_llm_call_logs_created ON llm_call_logs(created_at)",
+            [],
+        )?;
+
         // Migration: 老库的 CHECK 约束不含 'companion'，SQLite 无法改 CHECK，需重建表
         self.migrate_scene_configs_check()?;
 
         // Insert default scene configs if not exists (provider_id and model_id are NULL initially)
-        let default_scenes = ["chat", "qa", "translate", "companion", "memory_extraction"];
+        let default_scenes = ["chat", "qa", "translate", "companion", "memory_extraction", "diary"];
         for scene in &default_scenes {
             self.conn.execute(
                 "INSERT OR IGNORE INTO llm_scene_configs (scene, provider_id, model_id) VALUES (?1, NULL, NULL)",
@@ -293,7 +324,7 @@ impl Database {
             .ok();
 
         let needs_migration = table_sql
-            .map(|sql| !sql.contains("'memory_extraction'"))
+            .map(|sql| !sql.contains("'diary'"))
             .unwrap_or(false);
         if !needs_migration {
             return Ok(());
@@ -305,7 +336,7 @@ impl Database {
                 "ALTER TABLE llm_scene_configs RENAME TO llm_scene_configs_old;
                  CREATE TABLE llm_scene_configs (
                      id INTEGER PRIMARY KEY AUTOINCREMENT,
-                     scene TEXT NOT NULL UNIQUE CHECK (scene IN ('chat', 'qa', 'translate', 'companion', 'memory_extraction')),
+                     scene TEXT NOT NULL UNIQUE CHECK (scene IN ('chat', 'qa', 'translate', 'companion', 'memory_extraction', 'diary')),
                      provider_id INTEGER REFERENCES llm_providers(id),
                      model_id TEXT,
                      thinking_mode BOOLEAN DEFAULT 0,
@@ -320,7 +351,7 @@ impl Database {
         })();
 
         match result {
-            Ok(_) => log::info!("llm_scene_configs 迁移完成：CHECK 约束已包含 memory_extraction"),
+            Ok(_) => log::info!("llm_scene_configs 迁移完成：CHECK 约束已包含 diary"),
             Err(e) => log::error!("llm_scene_configs 迁移失败（旧约束保留）: {}", e),
         }
         Ok(())

@@ -68,6 +68,7 @@ pub fn run_scheduler(app_handle: AppHandle, db_path: PathBuf, flags: Arc<RwLock<
             save_setting(&db_path, "companion_last_analysis_date", &today);
             let app = app_handle.clone();
             let db = db_path.clone();
+            let date = today.clone();
             // agent 调用是阻塞式 subprocess，放独立线程而非 async runtime
             std::thread::spawn(move || {
                 // 模式挖掘每晚固定执行（内部经 call_companion_llm 路由）
@@ -79,6 +80,15 @@ pub fn run_scheduler(app_handle: AppHandle, db_path: PathBuf, flags: Arc<RwLock<
                 match super::recall::run_recall_blocking(&app, &db) {
                     Ok(msg) => log::info!("Companion 记忆提取兜底: {}", msg),
                     Err(e) => log::warn!("Companion 记忆提取兜底失败: {}", e),
+                }
+                // 情感日记（私有）与明日关注预规划——独立于日报开关，失败不阻塞链路
+                match super::diary::run_diary_blocking(&app, &db, &date) {
+                    Ok(msg) => log::info!("Companion 情感日记: {}", msg),
+                    Err(e) => log::warn!("Companion 情感日记失败: {}", e),
+                }
+                match super::diary::run_focus_blocking(&app, &db) {
+                    Ok(msg) => log::info!("Companion 明日关注: {}", msg),
+                    Err(e) => log::warn!("Companion 明日关注生成失败: {}", e),
                 }
             });
         }
@@ -632,7 +642,7 @@ pub async fn run_daily_analysis(
     let ve_section = voice_expectation_section(&conn);
     let prompt = build_analysis_prompt(&persona, &evolution, &role, &aggregate_text, &ve_section);
 
-    let reply = call_companion_llm(app_handle, db_path, prompt).await?;
+    let reply = call_companion_llm(app_handle, db_path, prompt, "analysis").await?;
     let parsed = parse_llm_patterns(&reply)?;
 
     let now_ts = chrono::Local::now().timestamp();
@@ -963,7 +973,7 @@ pub async fn parse_intent_triggers(
         text = text
     );
 
-    let reply = call_companion_llm(app_handle, db_path, prompt).await?;
+    let reply = call_companion_llm(app_handle, db_path, prompt, "intent_parse").await?;
 
     let start = reply.find('{').ok_or("解析响应中没有 JSON")?;
     let end = reply.rfind('}').ok_or("解析响应中没有 JSON")?;
@@ -1005,15 +1015,16 @@ pub(crate) async fn run_scene_report(
     let evolution = super::persona::load_evolution(&app_data);
     let role = super::persona::load_role(&app_data, "reporter");
     let ve_section = voice_expectation_section(&conn);
+    let state_text = super::state::current_state_sentence(&conn, chrono::Local::now().timestamp());
     let prompt = format!(
         "{persona}\n\n---\n\n{evolution}\n\n---\n\n{role}\n\n---\n\n\
          以上是贾维斯的身份设定、经验本与日报工作手册。\n\
          注意：你现在没有数据工具——他昨天的电脑使用聚合已直接给你（见末尾），\n\
          跳过流程中的工具调用步骤，直接完成「写日报」那一步。\n\
-         如果内容显示没有活动记录，只回复「当日无数据」。\n\n{aggregate}{ve_section}"
+         如果内容显示没有活动记录，只回复「当日无数据」。\n\n{aggregate}{ve_section}\n\n---\n\n# 当下状态\n{state_text}"
     );
 
-    let report = call_companion_llm(app_handle, db_path, prompt).await?;
+    let report = call_companion_llm(app_handle, db_path, prompt, "report").await?;
     if report.contains("当日无数据") {
         return Ok("当日无数据，未生成日报".to_string());
     }
@@ -1040,12 +1051,15 @@ pub(crate) async fn run_scene_report(
 
 /// 陪伴统一 LLM 路由（陪伴场景）:全局 Claude Code 开启 → claude CLI 单次问答
 /// （失败自动回退场景模型）；未开启 → 直接用场景模型。
+/// `source` 为观测来源标记（analysis/report/recall/diary/intent_parse…），
+/// 所有调用统一登记 llm_call_logs（原则：新增调用点必须带着观测出生）。
 pub(crate) async fn call_companion_llm(
     app_handle: &AppHandle,
     db_path: &PathBuf,
     prompt: String,
+    source: &str,
 ) -> Result<String, String> {
-    call_llm_with_scene(app_handle, db_path, prompt, Scene::Companion).await
+    call_llm_with_scene(app_handle, db_path, prompt, Scene::Companion, source).await
 }
 
 /// 带场景的 LLM 路由：记忆提取等场景有独立模型配置（缺省回退陪伴场景）。
@@ -1054,14 +1068,44 @@ pub(crate) async fn call_llm_with_scene(
     db_path: &PathBuf,
     prompt: String,
     scene: Scene,
+    source: &str,
 ) -> Result<String, String> {
     if super::claude_code_enabled(app_handle) {
+        let started = std::time::Instant::now();
         let cc_result = run_claude_code_oneshot(app_handle, &prompt).await;
+        let duration_ms = started.elapsed().as_millis() as u64;
         match cc_result {
-            Ok(reply) => return Ok(reply),
+            Ok(reply) => {
+                crate::llm::observe::log_call(db_path, &crate::llm::observe::LlmCallEntry {
+                    source,
+                    channel: "claude_code",
+                    scene: None,
+                    model: None,
+                    input_tokens: reply.input_tokens,
+                    output_tokens: reply.output_tokens,
+                    cost_usd: reply.cost_usd,
+                    duration_ms,
+                    status: "ok",
+                    error: None,
+                });
+                return Ok(reply.text);
+            }
             Err(cc_err) => {
+                // CC 失败也登记——「Claude Code 挂了多少次」在面板可见
+                crate::llm::observe::log_call(db_path, &crate::llm::observe::LlmCallEntry {
+                    source,
+                    channel: "claude_code",
+                    scene: None,
+                    model: None,
+                    input_tokens: 0,
+                    output_tokens: 0,
+                    cost_usd: 0.0,
+                    duration_ms,
+                    status: "error",
+                    error: Some(&cc_err),
+                });
                 log::warn!("Claude Code 调用失败，回退场景模型: {}", cc_err);
-                return call_scene_model_llm(app_handle, db_path, prompt, scene)
+                return call_scene_model_llm(app_handle, db_path, prompt, scene, source)
                     .await
                     .map_err(|scene_err| {
                         format!(
@@ -1073,11 +1117,14 @@ pub(crate) async fn call_llm_with_scene(
         }
     }
 
-    call_scene_model_llm(app_handle, db_path, prompt, scene).await
+    call_scene_model_llm(app_handle, db_path, prompt, scene, source).await
 }
 
 /// 在 blocking 线程里跑 claude CLI 单次问答（子进程是阻塞 IO，不能占 async runtime）
-async fn run_claude_code_oneshot(app_handle: &AppHandle, prompt: &str) -> Result<String, String> {
+async fn run_claude_code_oneshot(
+    app_handle: &AppHandle,
+    prompt: &str,
+) -> Result<super::agent::OneshotReply, String> {
     use tauri::Manager;
 
     let settings = app_handle
@@ -1101,12 +1148,15 @@ async fn run_claude_code_oneshot(app_handle: &AppHandle, prompt: &str) -> Result
 
 /// 按场景配置调用场景模型。非陪伴场景未单独配置时，
 /// 回退陪伴场景配置（缺省跟随，用户可在模型设置里改绑）。
+/// 调用结果（含 token 计量与单价估算）统一登记 llm_call_logs。
 pub(crate) async fn call_scene_model_llm(
     app_handle: &AppHandle,
     db_path: &PathBuf,
     prompt: String,
     scene: Scene,
+    source: &str,
 ) -> Result<String, String> {
+    let started = std::time::Instant::now();
     let conn = Connection::open(db_path).map_err(|e| format!("打开数据库失败: {}", e))?;
 
     let provider_db = LlmProviderDb;
@@ -1130,7 +1180,7 @@ pub(crate) async fn call_scene_model_llm(
     })?;
 
     let thinking_mode = provider_db
-        .get_scene_thinking_mode(&conn, used_scene)
+        .get_scene_thinking_mode(&conn, used_scene.clone())
         .unwrap_or(false);
 
     let api_key = match &provider.api_key_encrypted {
@@ -1147,7 +1197,8 @@ pub(crate) async fn call_scene_model_llm(
         images: None,
     }];
 
-    crate::llm::call_llm(
+    let scene_str = used_scene.to_string();
+    let result = crate::llm::call_llm(
         &provider.base_url,
         &api_key,
         &model.model_id,
@@ -1155,5 +1206,42 @@ pub(crate) async fn call_scene_model_llm(
         messages,
         thinking_mode,
     )
-    .await
+    .await;
+    let duration_ms = started.elapsed().as_millis() as u64;
+
+    match result {
+        Ok(reply) => {
+            // 单价为可选配置：填了才估算金额，未填 cost 记 0（面板只显示 token）
+            let cost = reply.input_tokens as f64 / 1e6 * model.input_price_per_m.unwrap_or(0.0)
+                + reply.output_tokens as f64 / 1e6 * model.output_price_per_m.unwrap_or(0.0);
+            crate::llm::observe::log_call(db_path, &crate::llm::observe::LlmCallEntry {
+                source,
+                channel: "scene_model",
+                scene: Some(&scene_str),
+                model: Some(&model.model_id),
+                input_tokens: reply.input_tokens,
+                output_tokens: reply.output_tokens,
+                cost_usd: cost,
+                duration_ms,
+                status: "ok",
+                error: None,
+            });
+            Ok(reply.content)
+        }
+        Err(e) => {
+            crate::llm::observe::log_call(db_path, &crate::llm::observe::LlmCallEntry {
+                source,
+                channel: "scene_model",
+                scene: Some(&scene_str),
+                model: Some(&model.model_id),
+                input_tokens: 0,
+                output_tokens: 0,
+                cost_usd: 0.0,
+                duration_ms,
+                status: "error",
+                error: Some(&e),
+            });
+            Err(e)
+        }
+    }
 }

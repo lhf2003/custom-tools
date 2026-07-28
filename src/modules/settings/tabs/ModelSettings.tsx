@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import {
   Bot,
   Plus,
@@ -18,6 +19,7 @@ import {
   HelpCircle,
   Languages,
   Brain,
+  BookHeart,
   FolderOpen,
 } from 'lucide-react';
 import { Tooltip } from '@/components/Tooltip';
@@ -236,7 +238,58 @@ const SCENE_LABELS: Record<Scene, { label: string; icon: typeof MessageSquare; d
   translate: { label: '翻译', icon: Languages, description: '翻译场景' },
   companion: { label: '陪伴', icon: Bot, description: '陪伴功能（模式挖掘、意图解析）' },
   memory_extraction: { label: '记忆提取', icon: Brain, description: '聊天记忆提炼（缺省跟随陪伴场景）' },
+  diary: { label: '情感日记', icon: BookHeart, description: '贾维斯的私有日记（缺省跟随陪伴场景）' },
 };
+
+// ===== 调用观测面板 =====
+
+interface SourceStat {
+  source: string;
+  calls: number;
+  errors: number;
+  input_tokens: number;
+  output_tokens: number;
+  cost_usd: number;
+  total_duration_ms: number;
+}
+
+const SOURCE_LABELS: Record<string, string> = {
+  chat: '聊天',
+  analysis: '每日分析',
+  report: '日报',
+  recall: '记忆提取',
+  intent_parse: '意图解析',
+  translate: '翻译',
+  qa: '问答',
+  test: '连接测试',
+  diary: '情感日记',
+  focus: '今日关注',
+};
+
+type StatsRange = 'today' | 'yesterday' | 'week';
+const STATS_RANGES: { value: StatsRange; label: string }[] = [
+  { value: 'today', label: '今日' },
+  { value: 'yesterday', label: '昨日' },
+  { value: 'week', label: '近 7 天' },
+];
+
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
+
+function fmtDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${(ms / 60_000).toFixed(1)}min`;
+}
+
+function fmtCost(usd: number): string {
+  if (usd === 0) return '—';
+  if (usd < 0.0001) return '<$0.0001';
+  return `$${usd.toFixed(4)}`;
+}
 
 // Connection status badge
 const getConnectionStatusBadge = (status: string) => {
@@ -276,6 +329,21 @@ export function ModelSettings() {
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
   const [testingProvider, setTestingProvider] = useState<number | null>(null);
   const [refreshingProvider, setRefreshingProvider] = useState<number | null>(null);
+
+  // 调用观测面板
+  const [statsRange, setStatsRange] = useState<StatsRange>('today');
+  const [callStats, setCallStats] = useState<SourceStat[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    invoke<SourceStat[]>('get_llm_call_stats', { range: statsRange })
+      .then((rows) => {
+        if (!cancelled) setCallStats(rows);
+      })
+      .catch((err) => console.error('Failed to load LLM call stats:', err));
+    return () => {
+      cancelled = true;
+    };
+  }, [statsRange]);
 
   // Claude Code 全局配置（文本输入本地编辑，onBlur 提交）
   const {
@@ -456,6 +524,24 @@ export function ModelSettings() {
     await setModelActive(model.id, !model.is_active);
   };
 
+  // 单价输入（非受控 defaultValue + 失焦提交；空串 = 清除，非法输入不落库）
+  const handlePriceBlur = async (model: Model, field: 'input' | 'output', raw: string) => {
+    const trimmed = raw.trim();
+    const value = trimmed === '' ? null : Number(trimmed);
+    if (value !== null && (!Number.isFinite(value) || value < 0)) return;
+    const current = field === 'input' ? model.input_price_per_m : model.output_price_per_m;
+    if (value === current) return;
+    try {
+      await setModelPrice(
+        model.id,
+        field === 'input' ? value : model.input_price_per_m,
+        field === 'output' ? value : model.output_price_per_m,
+      );
+    } catch (e) {
+      alert(`保存单价失败: ${e}`);
+    }
+  };
+
   // Handle scene model selection
   const handleSceneModelChange = async (scene: Scene, providerId: number, modelId: string) => {
     // Ensure models are loaded before setting scene model
@@ -611,6 +697,29 @@ export function ModelSettings() {
                                       {model.description}
                                     </div>
                                   )}
+                                </div>
+                                <div
+                                  className="flex items-center gap-1 mr-1"
+                                  title="单价（美元/百万 token），成本面板据此估算金额；留空只统计 token"
+                                >
+                                  <input
+                                    key={`in-${model.id}-${model.input_price_per_m ?? ''}`}
+                                    type="text"
+                                    inputMode="decimal"
+                                    defaultValue={model.input_price_per_m ?? ''}
+                                    placeholder="入$/M"
+                                    onBlur={(e) => handlePriceBlur(model, 'input', e.target.value)}
+                                    className="w-16 bg-zinc-800 text-white/70 text-xs rounded px-1.5 py-1 outline-none border border-zinc-700 focus:border-white/25 placeholder:text-white/20"
+                                  />
+                                  <input
+                                    key={`out-${model.id}-${model.output_price_per_m ?? ''}`}
+                                    type="text"
+                                    inputMode="decimal"
+                                    defaultValue={model.output_price_per_m ?? ''}
+                                    placeholder="出$/M"
+                                    onBlur={(e) => handlePriceBlur(model, 'output', e.target.value)}
+                                    className="w-16 bg-zinc-800 text-white/70 text-xs rounded px-1.5 py-1 outline-none border border-zinc-700 focus:border-white/25 placeholder:text-white/20"
+                                  />
                                 </div>
                                 <label className="flex items-center gap-2 cursor-pointer">
                                   <input
@@ -925,6 +1034,70 @@ export function ModelSettings() {
               </div>
             </div>
           )}
+        </div>
+
+        {/* 调用观测 */}
+        <div className="rounded-xl border border-white/10 bg-white/[0.02] overflow-hidden">
+          <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between gap-4">
+            <div>
+              <h3 className="text-white/90 text-sm font-medium">调用观测</h3>
+              <p className="text-white/40 text-xs mt-0.5">各功能的 LLM 调用次数、token 与成本</p>
+            </div>
+            <div className="flex gap-1">
+              {STATS_RANGES.map((r) => (
+                <button
+                  key={r.value}
+                  onClick={() => setStatsRange(r.value)}
+                  className={`px-2.5 py-1 rounded-lg text-xs border transition-all cursor-pointer ${
+                    statsRange === r.value
+                      ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
+                      : 'bg-white/5 text-white/40 border-white/10 hover:bg-white/10'
+                  }`}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="px-4 py-3">
+            {callStats.length === 0 ? (
+              <p className="text-white/30 text-xs">该时段还没有调用记录</p>
+            ) : (
+              <div className="space-y-1">
+                <div className="grid grid-cols-[1fr_70px_100px_80px_90px] gap-2 px-2 text-white/30 text-xs">
+                  <span>来源</span>
+                  <span className="text-right">次数</span>
+                  <span className="text-right">token 入/出</span>
+                  <span className="text-right">总耗时</span>
+                  <span className="text-right">成本</span>
+                </div>
+                {callStats.map((s) => (
+                  <div
+                    key={s.source}
+                    className="grid grid-cols-[1fr_70px_100px_80px_90px] gap-2 items-center px-2 py-1.5 rounded-lg bg-white/[0.03] text-xs"
+                  >
+                    <span className="text-white/70">{SOURCE_LABELS[s.source] ?? s.source}</span>
+                    <span className="text-right text-white/60 tabular-nums">
+                      {s.calls}
+                      {s.errors > 0 && <span className="text-red-400 ml-1">({s.errors}错)</span>}
+                    </span>
+                    <span className="text-right text-white/50 tabular-nums">
+                      {fmtTokens(s.input_tokens)}/{fmtTokens(s.output_tokens)}
+                    </span>
+                    <span className="text-right text-white/50 tabular-nums">
+                      {fmtDuration(s.total_duration_ms)}
+                    </span>
+                    <span className="text-right text-white/60 tabular-nums">{fmtCost(s.cost_usd)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="text-white/25 text-xs mt-2.5">
+              成本 = token × 模型单价（在上方模型列表中配置）；未配单价的模型只统计 token。
+              流式调用（翻译/问答）暂不计 token。
+            </p>
+          </div>
         </div>
       </div>
     </>

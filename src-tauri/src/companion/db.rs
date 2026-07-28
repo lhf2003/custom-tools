@@ -245,6 +245,17 @@ pub fn close_activity(conn: &Connection, id: i64, ended_at: i64) -> rusqlite::Re
     Ok(())
 }
 
+/// 当前未闭合的活动段（进程名, 开始时间）；无则 None（AFK 或未采集）
+pub fn current_open_activity(conn: &Connection) -> rusqlite::Result<Option<(String, i64)>> {
+    conn.query_row(
+        "SELECT process_name, started_at FROM activity_log
+         WHERE ended_at IS NULL ORDER BY started_at DESC LIMIT 1",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )
+    .optional()
+}
+
 /// 查询某时间范围内的活动记录（按开始时间升序）
 pub fn activities_between(
     conn: &Connection,

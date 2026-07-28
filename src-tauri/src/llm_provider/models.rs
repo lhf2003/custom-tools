@@ -96,6 +96,9 @@ pub struct Model {
     pub name: String,
     pub description: Option<String>,
     pub is_active: bool,
+    /// 可选单价（美元/百万 token）：填了成本面板才估算金额，缺省只统计 token
+    pub input_price_per_m: Option<f64>,
+    pub output_price_per_m: Option<f64>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -119,6 +122,7 @@ pub enum Scene {
     Translate,
     Companion,
     MemoryExtraction,
+    Diary,
 }
 
 impl std::fmt::Display for Scene {
@@ -129,6 +133,7 @@ impl std::fmt::Display for Scene {
             Scene::Translate => write!(f, "translate"),
             Scene::Companion => write!(f, "companion"),
             Scene::MemoryExtraction => write!(f, "memory_extraction"),
+            Scene::Diary => write!(f, "diary"),
         }
     }
 }
@@ -143,6 +148,7 @@ impl std::str::FromStr for Scene {
             "translate" | "翻译" => Ok(Scene::Translate),
             "companion" | "陪伴" => Ok(Scene::Companion),
             "memory_extraction" | "记忆提取" => Ok(Scene::MemoryExtraction),
+            "diary" | "情感日记" => Ok(Scene::Diary),
             _ => Err(format!("Unknown scene: {}", s)),
         }
     }

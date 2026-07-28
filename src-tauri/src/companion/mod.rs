@@ -2,9 +2,11 @@ pub mod agent;
 pub mod analyzer;
 pub mod chat;
 pub mod db;
+pub mod diary;
 pub mod mcp;
 pub mod persona;
 pub mod recall;
+pub mod state;
 pub mod suggester;
 pub mod watcher;
 
@@ -25,6 +27,8 @@ pub struct CompanionFlags {
     pub long_work_minutes: i64,
     /// 每日日报开关：关闭后 21 点只做分析与记忆提取，不生成日报
     pub daily_report: bool,
+    /// 内心独白开关：关闭后聊天 prompt 不再带 <aside> 独白段
+    pub monologue: bool,
 }
 
 impl Default for CompanionFlags {
@@ -35,6 +39,7 @@ impl Default for CompanionFlags {
             retention_days: 30,
             long_work_minutes: 90,
             daily_report: true,
+            monologue: true,
         }
     }
 }
@@ -432,12 +437,22 @@ fn check_morning_digest(
     } else {
         String::new()
     };
-    let body = format!(
-        "今天有 {} 条备忘待办：\n{}{}",
-        active.len(),
-        titles.join("\n"),
-        suffix
-    );
+    // 今日关注（昨夜预规划）有效时，晨间卡从纯备忘清单升级为「关注+备忘」
+    let body = match diary::today_focus(conn) {
+        Some(focus) => format!(
+            "今日关注：\n{}\n\n备忘待办 {} 条：\n{}{}",
+            focus,
+            active.len(),
+            titles.join("\n"),
+            suffix
+        ),
+        None => format!(
+            "今天有 {} 条备忘待办：\n{}{}",
+            active.len(),
+            titles.join("\n"),
+            suffix
+        ),
+    };
 
     let _ = suggester::push_suggestion(
         conn,

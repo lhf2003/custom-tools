@@ -393,6 +393,12 @@ companion_flag_command!(
     bool
 );
 companion_flag_command!(
+    set_companion_monologue,
+    "companion_monologue",
+    monologue,
+    bool
+);
+companion_flag_command!(
     set_companion_retention_days,
     "companion_retention_days",
     retention_days,
