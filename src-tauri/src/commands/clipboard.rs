@@ -517,7 +517,7 @@ fn handle_pasted_image_file(db_state: State<DatabaseState>, path: &str) -> Resul
     // Save to app data directory
     let app_dir = dirs::data_dir()
         .ok_or("Failed to get data dir")?
-        .join("custom-tools")
+        .join(crate::APP_DIR_NAME)
         .join("clipboard-images");
     std::fs::create_dir_all(&app_dir).map_err(|e| e.to_string())?;
 
@@ -830,7 +830,7 @@ unsafe fn read_dib_data_and_save(ptr: *mut std::ffi::c_void) -> Result<String, S
     // Save to app data directory
     let app_dir = dirs::data_dir()
         .ok_or("Failed to get data dir")?
-        .join("custom-tools")
+        .join(crate::APP_DIR_NAME)
         .join("clipboard-images");
     std::fs::create_dir_all(&app_dir).map_err(|e| e.to_string())?;
 

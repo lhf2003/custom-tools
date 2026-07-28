@@ -161,6 +161,11 @@ export function ChatView() {
   }, [streamText, messages]);
 
   // ── Tauri event listeners ─────────────────────────────────────────
+  // 聊天消息落库后触发记忆提取防抖（后端 10 分钟静默期后提炼用户事实）
+  const pokeRecall = () => {
+    invoke('jarvis_recall_poke').catch(() => {});
+  };
+
   useEffect(() => {
     let active = true;
     let unlistenFns: Array<() => void> = [];
@@ -202,6 +207,7 @@ export function ChatView() {
             console.error('Failed to save assistant message:', e);
           }
         }
+        pokeRecall();
       });
       const u3 = await listen<string>('llm:error', (event) => {
         isCancelledRef.current = false;
@@ -248,6 +254,7 @@ export function ChatView() {
             console.error('Failed to save assistant message:', e);
           }
         }
+        pokeRecall();
       });
       const u6 = await listen<string>('jarvis:error', (event) => {
         isCancelledRef.current = false;
@@ -312,6 +319,8 @@ export function ChatView() {
         console.error('Failed to save user message:', e);
       }
     }
+    // 记忆提取只看闲聊通道，工具型模式（翻译等）不触发
+    if (mode === 'chat') pokeRecall();
 
     try {
       if (mode === 'chat') {

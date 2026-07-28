@@ -16,7 +16,9 @@ struct ChatRequest<'a> {
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     reasoning_effort: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// 百炼扩展参数（enable_thinking 等）。必须 flatten 到请求体顶层——
+    /// extra_body 嵌套是 OpenAI Python SDK 的写法，百炼 HTTP API 不认该字段。
+    #[serde(flatten)]
     extra_body: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
@@ -115,9 +117,15 @@ pub async fn call_llm(
         // OpenAI 兼容格式
         // 检测是否为百炼平台
         let is_bailian = base_url.contains("bailian") || base_url.contains("aliyun");
-        let extra_body = if is_bailian && thinking_mode {
+        // 百炼 qwen3.x 默认开启思考（实测：不传参也产生 reasoning tokens），
+        // 必须显式传递开关状态——关闭时传 false 压制默认思考，
+        // 避免日报/分析等长 prompt 场景耗时与费用翻倍
+        let extra_body = if is_bailian {
             let mut body = serde_json::Map::new();
-            body.insert("enable_thinking".to_string(), serde_json::json!(true));
+            body.insert(
+                "enable_thinking".to_string(),
+                serde_json::json!(thinking_mode),
+            );
             Some(body)
         } else {
             None
@@ -220,9 +228,13 @@ pub async fn call_llm_stream(
         // OpenAI 兼容格式
         // 检测是否为百炼平台
         let is_bailian = base_url.contains("bailian") || base_url.contains("aliyun");
-        let extra_body = if is_bailian && thinking_mode {
+        // 同 call_llm：百炼默认思考需显式压制/开启，参数经 flatten 到顶层
+        let extra_body = if is_bailian {
             let mut body = serde_json::Map::new();
-            body.insert("enable_thinking".to_string(), serde_json::json!(true));
+            body.insert(
+                "enable_thinking".to_string(),
+                serde_json::json!(thinking_mode),
+            );
             Some(body)
         } else {
             None

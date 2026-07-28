@@ -34,7 +34,7 @@ fn chat_work_dir(app_handle: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-/// 聊天系统提示：身份证 + 经验本 + 关于他的事实 + 聊天场合规则。
+/// 聊天系统提示：身份证 + 经验本 + 关于他的事实（五维分组）+ 聊天场合规则。
 /// with_tools=true 时用 --append-system-prompt 注入 claude agent 通道；
 /// false 时为场景模型回退版（无数据工具的措辞）。
 fn compose_chat_system(app_data: &Path, db_path: &Path, with_tools: bool) -> String {
@@ -44,18 +44,11 @@ fn compose_chat_system(app_data: &Path, db_path: &Path, with_tools: bool) -> Str
         .ok()
         .and_then(|conn| db::list_memory_facts(&conn, 50).ok())
         .unwrap_or_default();
-    let facts_text = if facts.is_empty() {
-        "（还没有沉淀关于他的事实）".to_string()
-    } else {
-        facts
-            .iter()
-            .map(|f| format!("- {}", f.fact))
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
+    let facts_text = format_facts_grouped(&facts);
     let channel_rule = if with_tools {
         "涉及他电脑使用的问题（干了什么、各应用用了多久、复制过什么、习惯、日报），\n\
-         调用 companion 工具查真实数据回答；查不到就说查不到，不编造。"
+         调用 companion 工具查真实数据回答；查不到就说查不到，不编造。\n\
+         他说「记住…」用 remember_fact 立即记；说「忘掉…」用 forget_fact 删。"
     } else {
         "你现在没有数据工具（Claude Code 未开启）。凭你记住的他和经验回答；\n\
          不知道就说不知道，不编造。"
@@ -68,6 +61,43 @@ fn compose_chat_system(app_data: &Path, db_path: &Path, with_tools: bool) -> Str
         facts = facts_text,
         rule = channel_rule
     )
+}
+
+/// 记忆按五维分组排版：模型按维度使用，而不是面对一堵无结构的列表。
+/// 未知类别归入「其他」（DB 不硬校验分类，鲁棒优先）。
+fn format_facts_grouped(facts: &[db::MemoryFact]) -> String {
+    const GROUPS: [(&str, &str); 5] = [
+        ("person", "他是谁"),
+        ("project", "他的项目"),
+        ("workflow", "他怎么做事"),
+        ("voice", "他的表达偏好"),
+        ("expectation", "他对你的期望"),
+    ];
+    if facts.is_empty() {
+        return "（还没有沉淀关于他的事实）".to_string();
+    }
+    let mut out = String::new();
+    for (key, label) in GROUPS {
+        let items: Vec<&db::MemoryFact> = facts.iter().filter(|f| f.category == key).collect();
+        if items.is_empty() {
+            continue;
+        }
+        out.push_str(&format!("## {}\n", label));
+        for f in items {
+            out.push_str(&format!("- {}\n", f.fact));
+        }
+    }
+    let others: Vec<&db::MemoryFact> = facts
+        .iter()
+        .filter(|f| !GROUPS.iter().any(|(key, _)| f.category == *key))
+        .collect();
+    if !others.is_empty() {
+        out.push_str("## 其他\n");
+        for f in others {
+            out.push_str(&format!("- {}\n", f.fact));
+        }
+    }
+    out.trim_end().to_string()
 }
 
 /// 贾维斯 agent 通道是否可用（全局 Claude Code 已开启）。

@@ -160,6 +160,38 @@ fn tools_list() -> Value {
                 "inputSchema": { "type": "object", "properties": {} }
             },
             {
+                "name": "remember_fact",
+                "description": "把一条关于用户的事实立即写入长期记忆。\n\n适用场景：用户明确说「记住…」「以后…」「我喜欢/我不喜欢…」等值得长期记住的信息。\n不适用：可从电脑使用数据直接查到的、临时任务状态、隐私细节（密码/密钥）。\n\ncategory 五选一：person（他是谁/他认识的人）| project（项目/技术栈）| workflow（做事方式/作息节奏）| voice（表达偏好/语言风格）| expectation（他希望贾维斯怎么做）。",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "fact": {
+                            "type": "string",
+                            "description": "一句话事实，不超过 100 字"
+                        },
+                        "category": {
+                            "type": "string",
+                            "description": "五选一：person | project | workflow | voice | expectation"
+                        }
+                    },
+                    "required": ["fact", "category"]
+                }
+            },
+            {
+                "name": "forget_fact",
+                "description": "按关键词删除关于用户的事实记忆。\n\n适用场景：用户明确说「忘掉…」「别记…」「删除关于…的记忆」。\n单次最多删 5 条；匹配过多时先返回匹配清单，请用户缩小范围。",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "keyword": {
+                            "type": "string",
+                            "description": "要删除的事实里包含的关键词"
+                        }
+                    },
+                    "required": ["keyword"]
+                }
+            },
+            {
                 "name": "write_note",
                 "description": format!(
                     "把内容写入笔记模块的「{}」目录（自动加 .md 后缀）。filename 只给名字，不要带路径。",
@@ -232,6 +264,8 @@ impl McpServer {
             "search_clipboard" => self.tool_search_clipboard(&args),
             "get_habit_patterns" => self.tool_habit_patterns(),
             "get_memory_facts" => self.tool_memory_facts(),
+            "remember_fact" => self.tool_remember_fact(&args),
+            "forget_fact" => self.tool_forget_fact(&args),
             "write_note" => self.tool_write_note(&args),
             "create_suggestion" => self.tool_create_suggestion(&args),
             "append_evolution" => self.tool_append_evolution(&args),
@@ -363,6 +397,82 @@ impl McpServer {
             })
             .collect();
         serde_json::to_string_pretty(&items).map_err(|e| e.to_string())
+    }
+
+    /// 显式记忆：用户说「记住X」时立即落库（source=explicit，写审计）
+    fn tool_remember_fact(&self, args: &Value) -> Result<String, String> {
+        let fact = args
+            .get("fact")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or("缺少参数 fact")?;
+        if fact.chars().count() > 100 {
+            return Err("fact 过长（不超过 100 字）".to_string());
+        }
+        let category = args
+            .get("category")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or("缺少参数 category")?;
+        const CATEGORIES: [&str; 5] = ["person", "project", "workflow", "voice", "expectation"];
+        if !CATEGORIES.contains(&category) {
+            return Err(format!(
+                "未知分类「{}」，可选：{}",
+                category,
+                CATEGORIES.join(" / ")
+            ));
+        }
+
+        let conn = self.open_db()?;
+        let now = chrono::Local::now().timestamp();
+        db::upsert_memory_fact(&conn, fact, category, "explicit", now)
+            .map_err(|e| format!("写入记忆失败: {}", e))?;
+        Ok(format!("已记住（{}）：{}", category, fact))
+    }
+
+    /// 按关键词删除记忆：单次最多 5 条，逐条写审计；过多时先给清单
+    fn tool_forget_fact(&self, args: &Value) -> Result<String, String> {
+        let keyword = args
+            .get("keyword")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or("缺少参数 keyword")?;
+
+        let conn = self.open_db()?;
+        let matches = db::find_memory_facts_by_keyword(&conn, keyword, 20)
+            .map_err(|e| format!("查询记忆失败: {}", e))?;
+        if matches.is_empty() {
+            return Ok(format!("没有找到包含「{}」的记忆", keyword));
+        }
+        if matches.len() > 5 {
+            let list = matches
+                .iter()
+                .map(|f| format!("- {}", f.fact))
+                .collect::<Vec<_>>()
+                .join("\n");
+            return Ok(format!(
+                "包含「{}」的记忆有 {} 条，超过单次删除上限。请先与用户确认范围：\n{}",
+                keyword,
+                matches.len(),
+                list
+            ));
+        }
+
+        let now = chrono::Local::now().timestamp();
+        let mut forgotten = Vec::new();
+        for f in &matches {
+            db::delete_memory_fact_audited(&conn, f.id, "explicit", now)
+                .map_err(|e| format!("删除记忆失败: {}", e))?;
+            forgotten.push(format!("- {}", f.fact));
+        }
+        Ok(format!(
+            "已忘掉 {} 条：\n{}",
+            forgotten.len(),
+            forgotten.join("\n")
+        ))
     }
 
     fn tool_write_note(&self, args: &Value) -> Result<String, String> {

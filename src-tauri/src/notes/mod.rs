@@ -358,5 +358,5 @@ impl NotesManager {
 pub fn get_default_notes_dir() -> anyhow::Result<PathBuf> {
     let data_dir =
         dirs::data_dir().ok_or_else(|| anyhow::anyhow!("Failed to get data directory"))?;
-    Ok(data_dir.join("custom-tools").join("notes"))
+    Ok(data_dir.join(crate::APP_DIR_NAME).join("notes"))
 }

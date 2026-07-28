@@ -118,6 +118,7 @@ pub enum Scene {
     Qa,
     Translate,
     Companion,
+    MemoryExtraction,
 }
 
 impl std::fmt::Display for Scene {
@@ -127,6 +128,7 @@ impl std::fmt::Display for Scene {
             Scene::Qa => write!(f, "qa"),
             Scene::Translate => write!(f, "translate"),
             Scene::Companion => write!(f, "companion"),
+            Scene::MemoryExtraction => write!(f, "memory_extraction"),
         }
     }
 }
@@ -140,6 +142,7 @@ impl std::str::FromStr for Scene {
             "qa" | "问答" => Ok(Scene::Qa),
             "translate" | "翻译" => Ok(Scene::Translate),
             "companion" | "陪伴" => Ok(Scene::Companion),
+            "memory_extraction" | "记忆提取" => Ok(Scene::MemoryExtraction),
             _ => Err(format!("Unknown scene: {}", s)),
         }
     }

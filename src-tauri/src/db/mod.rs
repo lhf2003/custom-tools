@@ -336,7 +336,7 @@ pub fn init(app_handle: &tauri::AppHandle) -> Result<()> {
         )
     })?;
 
-    let db_path = app_dir.join("custom-tools.db");
+    let db_path = app_dir.join(crate::DB_FILE_NAME);
     let conn = Connection::open(&db_path)?;
 
     let db = Database::new(conn);

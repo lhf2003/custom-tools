@@ -20,7 +20,7 @@ static MEMORY_CACHE: Lazy<Mutex<LruCache<(u64, u64), String>>> =
 fn get_cache_dir() -> Result<PathBuf> {
     let app_data = dirs::data_local_dir()
         .ok_or_else(|| anyhow!("Failed to get local data dir"))?
-        .join("custom-tools")
+        .join(crate::APP_DIR_NAME)
         .join("icon-cache");
 
     if !app_data.exists() {

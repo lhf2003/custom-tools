@@ -4,6 +4,7 @@ pub mod chat;
 pub mod db;
 pub mod mcp;
 pub mod persona;
+pub mod recall;
 pub mod suggester;
 pub mod watcher;
 

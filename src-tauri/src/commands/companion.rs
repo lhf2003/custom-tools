@@ -149,23 +149,45 @@ pub async fn run_companion_agent_now(
 ) -> Result<String, String> {
     let db_path = db_state.0.clone();
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-    if !crate::companion::claude_code_enabled(&app_handle) {
+    let cc_off = !crate::companion::claude_code_enabled(&app_handle);
+    let db_for_task = db_path.clone();
+    let date = today.clone();
+    let result = if cc_off {
         // Claude Code 未开启：回退场景模型版日报（陪伴绑定模型）
-        return tauri::async_runtime::spawn_blocking(move || {
+        tauri::async_runtime::spawn_blocking(move || {
             let notes_dir = crate::notes::get_default_notes_dir()
                 .map_err(|e| format!("获取笔记目录失败: {}", e))?;
             tauri::async_runtime::block_on(crate::companion::analyzer::run_scene_report(
-                &app_handle, &db_path, &notes_dir, &today,
+                &app_handle, &db_for_task, &notes_dir, &date,
             ))
         })
         .await
-        .map_err(|e| format!("agent 线程异常: {}", e))?;
+        .map_err(|e| format!("agent 线程异常: {}", e))?
+    } else {
+        tauri::async_runtime::spawn_blocking(move || {
+            crate::companion::run_agent_with_settings(&app_handle, &db_for_task, &date)
+        })
+        .await
+        .map_err(|e| format!("agent 线程异常: {}", e))?
+    };
+    // 手动生成成功且笔记落盘 → 标记今日日报完成，避免 21 点调度重复生成
+    if result.is_ok() {
+        let note_written = crate::notes::get_default_notes_dir()
+            .map(|d| {
+                d.join(crate::companion::mcp::NOTE_DIR_PREFIX)
+                    .join(format!("{}.md", today))
+                    .exists()
+            })
+            .unwrap_or(false);
+        if note_written {
+            crate::companion::analyzer::save_setting(
+                &db_path,
+                "companion_last_report_date",
+                &today,
+            );
+        }
     }
-    tauri::async_runtime::spawn_blocking(move || {
-        crate::companion::run_agent_with_settings(&app_handle, &db_path, &today)
-    })
-    .await
-    .map_err(|e| format!("agent 线程异常: {}", e))?
+    result
 }
 
 // ── 意图（「记」）─────────────────────────────────────────────
@@ -278,13 +300,31 @@ pub fn get_companion_intents(
 
 // ── 记忆层 ───────────────────────────────────────────────────
 
-/// 列出关于用户的事实记忆（设置页「记忆」区）
+/// 列出关于用户的事实记忆（记忆中心全量列表）
 #[tauri::command]
 pub fn get_companion_memory_facts(
     db_state: State<DatabaseState>,
 ) -> Result<Vec<db::MemoryFact>, String> {
     let conn = open_conn(&db_state)?;
-    db::list_memory_facts(&conn, 50).map_err(|e| format!("查询记忆失败: {}", e))
+    db::list_memory_facts(&conn, 500).map_err(|e| format!("查询记忆失败: {}", e))
+}
+
+/// 编辑一条事实的文本与分类（记忆中心，写审计）
+#[tauri::command]
+pub fn update_companion_memory_fact(
+    db_state: State<DatabaseState>,
+    id: i64,
+    fact: String,
+    category: String,
+) -> Result<(), String> {
+    let fact = fact.trim().to_string();
+    if fact.is_empty() {
+        return Err("事实内容不能为空".to_string());
+    }
+    let conn = open_conn(&db_state)?;
+    let now = chrono::Local::now().timestamp();
+    db::update_memory_fact(&conn, id, &fact, &category, "user", now)
+        .map_err(|e| format!("更新记忆失败: {}", e))
 }
 
 #[tauri::command]
@@ -293,7 +333,31 @@ pub fn delete_companion_memory_fact(
     id: i64,
 ) -> Result<(), String> {
     let conn = open_conn(&db_state)?;
-    db::delete_memory_fact(&conn, id).map_err(|e| format!("删除记忆失败: {}", e))
+    let now = chrono::Local::now().timestamp();
+    db::delete_memory_fact_audited(&conn, id, "user", now)
+        .map_err(|e| format!("删除记忆失败: {}", e))
+}
+
+/// 记忆变更审计（记忆中心：单条历史 / 全局最近动态）
+#[tauri::command]
+pub fn get_companion_memory_fact_events(
+    db_state: State<DatabaseState>,
+    fact_id: Option<i64>,
+    limit: Option<i64>,
+) -> Result<Vec<db::MemoryFactEvent>, String> {
+    let conn = open_conn(&db_state)?;
+    db::list_memory_fact_events(&conn, fact_id, limit.unwrap_or(50))
+        .map_err(|e| format!("查询记忆历史失败: {}", e))
+}
+
+/// 聊天消息落库后的提取防抖触发（前端每条消息后调用）
+#[tauri::command]
+pub fn jarvis_recall_poke(
+    app_handle: tauri::AppHandle,
+    db_state: State<DatabaseState>,
+) -> Result<(), String> {
+    crate::companion::recall::poke(app_handle, db_state.0.clone());
+    Ok(())
 }
 
 // ── 开关（持久化 + 运行时镜像同步）─────────────────────────────

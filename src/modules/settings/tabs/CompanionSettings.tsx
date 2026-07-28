@@ -13,6 +13,7 @@ import {
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useToastStore } from '@/stores/toastStore';
 import { SettingCard, Toggle } from '../components/SettingCard';
+import { MemoryCenter } from './MemoryCenter';
 import type { OpenViewDetail } from '@/types';
 
 interface HabitPattern {
@@ -37,11 +38,14 @@ interface MemoryFact {
 }
 
 const CATEGORY_LABEL: Record<string, string> = {
-  person: '👤 人',
-  project: '📁 项目',
-  preference: '⭐ 偏好',
-  general: '📌 其他',
+  person: '他是谁',
+  project: '他的项目',
+  workflow: '他怎么做事',
+  voice: '他的表达偏好',
+  expectation: '他对贾维斯的期望',
 };
+
+const categoryLabel = (key: string): string => CATEGORY_LABEL[key] ?? '其他';
 
 const STATUS_LABEL: Record<string, { text: string; color: string }> = {
   dismissed: { text: '已忽略', color: 'text-white/30' },
@@ -81,7 +85,7 @@ export function CompanionSettings() {
   const [analyzing, setAnalyzing] = useState(false);
   const [agentRunning, setAgentRunning] = useState(false);
   const [expandPatterns, setExpandPatterns] = useState(false);
-  const [expandFacts, setExpandFacts] = useState(false);
+  const [subView, setSubView] = useState<'main' | 'memory'>('main');
 
   const loadData = useCallback(async () => {
     try {
@@ -212,7 +216,12 @@ export function CompanionSettings() {
 
   const maxTotal = todaySummary.length > 0 ? todaySummary[0][1] : 1;
   const visiblePatterns = expandPatterns ? patterns : patterns.slice(0, PREVIEW_COUNT);
-  const visibleFacts = expandFacts ? memoryFacts : memoryFacts.slice(0, PREVIEW_COUNT);
+  const visibleFacts = memoryFacts.slice(0, PREVIEW_COUNT);
+
+  // 二级视图：记忆中心
+  if (subView === 'memory') {
+    return <MemoryCenter onBack={() => setSubView('main')} />;
+  }
 
   return (
     <>
@@ -403,13 +412,23 @@ export function CompanionSettings() {
 
             {/* 记住的你 */}
             <section>
-              <div className="flex items-center gap-2 mb-2">
-                <Sparkles size={13} className="text-white/40" />
-                <span className="text-white/50 text-xs font-medium">它记住的你</span>
-                <span className="text-white/30 text-xs">日报会参考</span>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <Sparkles size={13} className="text-white/40" />
+                  <span className="text-white/50 text-xs font-medium">它记住的你</span>
+                  <span className="text-white/30 text-xs">日报会参考</span>
+                </div>
+                <button
+                  onClick={() => setSubView('memory')}
+                  className="px-2.5 py-1 rounded-lg text-white/50 text-xs hover:bg-white/10 hover:text-white transition-colors cursor-pointer"
+                >
+                  记忆中心
+                </button>
               </div>
               {memoryFacts.length === 0 ? (
-                <p className="text-white/30 text-xs">还没有沉淀事实，今晚 21 点分析后可能出现</p>
+                <p className="text-white/30 text-xs">
+                  还没有沉淀事实——和贾维斯聊天、每晚 21 点分析都会产生记忆
+                </p>
               ) : (
                 <div>
                   {visibleFacts.map((f) => (
@@ -417,8 +436,8 @@ export function CompanionSettings() {
                       key={f.id}
                       className="flex items-center gap-2 rounded-lg px-2 py-1.5 -mx-2 text-xs hover:bg-white/5 transition-colors"
                     >
-                      <span className="text-white/40 shrink-0 w-16">
-                        {CATEGORY_LABEL[f.category] ?? CATEGORY_LABEL.general}
+                      <span className="text-white/40 shrink-0 w-24 truncate">
+                        {categoryLabel(f.category)}
                       </span>
                       <span className="text-white/80 flex-1 truncate" title={f.fact}>
                         {f.fact}
@@ -435,10 +454,10 @@ export function CompanionSettings() {
                   ))}
                   {memoryFacts.length > PREVIEW_COUNT && (
                     <button
-                      onClick={() => setExpandFacts(!expandFacts)}
+                      onClick={() => setSubView('memory')}
                       className="mt-1 px-2 text-white/40 hover:text-white/70 text-xs transition-colors cursor-pointer"
                     >
-                      {expandFacts ? '收起' : `查看全部 (${memoryFacts.length})`}
+                      查看全部 ({memoryFacts.length}) →
                     </button>
                   )}
                 </div>

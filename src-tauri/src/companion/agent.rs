@@ -56,7 +56,12 @@ pub fn run_daily_report_agent(
         .as_ref()
         .map(|dir| super::persona::load_role(dir, "reporter"))
         .unwrap_or_default();
-    let prompt = build_report_prompt(&persona, &evolution, &role, date);
+    // 语气两维（表达偏好 + 对贾维斯的期望）注入日报 prompt，让成文贴合他本人
+    let ve_section = rusqlite::Connection::open(db_path)
+        .ok()
+        .map(|conn| super::analyzer::voice_expectation_section(&conn))
+        .unwrap_or_default();
+    let prompt = build_report_prompt(&persona, &evolution, &role, date, &ve_section);
 
     log::info!("Companion 日报 agent 启动: {}", bin_path);
 
@@ -237,14 +242,22 @@ fn ensure_mcp_registered(
 
     let list_stdout = String::from_utf8_lossy(&list_output.stdout);
     let exe_str = exe.to_string_lossy().replace('\\', "/");
+    let db_str = db_path.to_string_lossy().replace('\\', "/");
+    let notes_str = notes_dir.to_string_lossy().replace('\\', "/");
     let existing = list_stdout
         .lines()
         .find(|l| l.starts_with(&format!("{}:", MCP_SERVER_NAME)));
 
     match existing {
-        // 已注册且指向当前 exe → 直接用
-        Some(line) if line.contains(&exe_str) => return Ok(()),
-        // 已注册但路径过期（dev/prod 切换）→ 先移除再重新注册
+        // 已注册且 exe 与数据参数都指向当前路径 → 直接用
+        Some(line)
+            if line.contains(&exe_str)
+                && line.contains(&db_str)
+                && line.contains(&notes_str) =>
+        {
+            return Ok(())
+        }
+        // 已注册但路径过期（dev/prod 切换、数据目录迁移）→ 先移除再重新注册
         Some(_) => {
             log::info!("companion MCP 注册路径过期，重新注册");
             let _ = Command::new(bin_path)
@@ -281,13 +294,14 @@ fn ensure_mcp_registered(
     Ok(())
 }
 
-fn build_report_prompt(persona: &str, evolution: &str, role: &str, date: &str) -> String {
+fn build_report_prompt(persona: &str, evolution: &str, role: &str, date: &str, ve_section: &str) -> String {
     format!(
-        "{persona}\n\n---\n\n{evolution}\n\n---\n\n{role}\n\n---\n\n\
+        "{persona}\n\n---\n\n{evolution}\n\n---\n\n{role}{ve_section}\n\n---\n\n\
          以上是贾维斯的身份设定、经验本与日报工作手册。请完成「{date}」的工作日报。",
         persona = persona,
         evolution = evolution,
         role = role,
+        ve_section = ve_section,
         date = date
     )
 }

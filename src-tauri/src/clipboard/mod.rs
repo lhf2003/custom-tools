@@ -165,7 +165,7 @@ impl ClipboardManager {
                 // Store image reference (actual image stored in file system)
                 let app_dir = dirs::data_dir()
                     .ok_or_else(|| anyhow::anyhow!("Failed to get data dir"))?
-                    .join("custom-tools")
+                    .join(crate::APP_DIR_NAME)
                     .join("clipboard-images");
                 std::fs::create_dir_all(&app_dir)?;
 

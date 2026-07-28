@@ -11,6 +11,7 @@ const DEFAULT_EVOLUTION: &str = include_str!("evolution.md");
 /// 内嵌领域工作手册（贾维斯各项日常工作的任务规则，非分身人格）
 const DEFAULT_REPORTER: &str = include_str!("agents/reporter.md");
 const DEFAULT_ANALYST: &str = include_str!("agents/analyst.md");
+const DEFAULT_RECALL: &str = include_str!("agents/recall.md");
 
 /// 播种（不存在时）并读取运行时副本；失败回退内嵌默认版——人格与经验不能丢。
 fn seed_and_load(path: PathBuf, default: &str) -> String {
@@ -40,11 +41,12 @@ pub fn load_evolution(app_data_dir: &Path) -> String {
     )
 }
 
-/// 加载领域工作手册（reporter 日报 / analyst 分析），同款播种机制
+/// 加载领域工作手册（reporter 日报 / analyst 分析 / recall 记忆提取），同款播种机制
 pub fn load_role(app_data_dir: &Path, role: &str) -> String {
     let (filename, default) = match role {
         "reporter" => ("reporter.md", DEFAULT_REPORTER),
         "analyst" => ("analyst.md", DEFAULT_ANALYST),
+        "recall" => ("recall.md", DEFAULT_RECALL),
         _ => return String::new(),
     };
     seed_and_load(

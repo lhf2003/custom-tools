@@ -7,6 +7,14 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_updater::UpdaterExt;
 
+/// 应用数据目录名（必须与 tauri.conf.json 的 identifier 保持一致）。
+/// 没有 AppHandle 的模块（watcher 回调、MCP server、panic hook 等）
+/// 用 dirs::data_dir().join(APP_DIR_NAME) 推导数据目录，不要散落字面量。
+pub const APP_DIR_NAME: &str = "com.flowhub.app";
+
+/// 主数据库文件名
+pub const DB_FILE_NAME: &str = "flowhub.db";
+
 /// 获取当前鼠标位置（Windows API）
 #[cfg(target_os = "windows")]
 pub fn get_cursor_pos() -> Option<(i32, i32)> {
@@ -235,7 +243,7 @@ pub fn run() {
             // 后台线程执行——扫描会触达文件系统/注册表/外部进程,在慢速或不可达
             // 环境(网络盘、EDR 拦截)可能长时间阻塞,同步跑在主事件循环线程会导致
             // 窗口不显示、托盘菜单不弹、快捷键无响应(整个 UI 消息泵停摆)。
-            let db_path = app.path().app_data_dir().unwrap().join("custom-tools.db");
+            let db_path = app.path().app_data_dir().unwrap().join(DB_FILE_NAME);
             let db_state = Arc::new(db::DatabaseState(db_path));
 
             let search_index = search::SearchIndex::with_db(db_state.clone());
@@ -347,7 +355,7 @@ pub fn run() {
 
             // 启动陪伴模块（窗口活动采集 + 情境建议 + LLM 习惯分析）
             {
-                let companion_db_path = app.path().app_data_dir().unwrap().join("custom-tools.db");
+                let companion_db_path = app.path().app_data_dir().unwrap().join(DB_FILE_NAME);
                 let flags = companion::CompanionFlags {
                     enabled: settings.companion_enabled,
                     paused: settings.companion_paused,
@@ -466,7 +474,10 @@ pub fn run() {
             commands::companion::create_companion_intent,
             commands::companion::get_companion_intents,
             commands::companion::get_companion_memory_facts,
+            commands::companion::update_companion_memory_fact,
             commands::companion::delete_companion_memory_fact,
+            commands::companion::get_companion_memory_fact_events,
+            commands::companion::jarvis_recall_poke,
             commands::companion::set_companion_enabled,
             commands::companion::set_companion_paused,
             commands::companion::set_companion_retention_days,
@@ -954,9 +965,8 @@ fn install_panic_hook() {
         log::error!("PANIC: {}", msg);
 
         // 兜底:logger 可能尚未初始化或已失效,直接追加写文件。
-        // 注意:此 identifier 需与 tauri.conf.json 的 identifier 保持一致。
         if let Some(data_dir) = dirs::data_dir() {
-            let logs_dir = data_dir.join("com.flowhub.app").join("logs");
+            let logs_dir = data_dir.join(APP_DIR_NAME).join("logs");
             if std::fs::create_dir_all(&logs_dir).is_ok() {
                 use std::io::Write;
                 if let Ok(mut file) = std::fs::OpenOptions::new()

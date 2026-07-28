@@ -184,6 +184,37 @@ pub fn init_tables(conn: &Connection) -> rusqlite::Result<()> {
         [],
     )?;
 
+    // 记忆变更审计：每条事实的创建/确认/覆盖/删除都留痕（记忆中心可追溯）
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS memory_fact_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fact_id INTEGER,
+            action TEXT NOT NULL CHECK (action IN ('add','confirm','update','delete')),
+            old_text TEXT,
+            new_text TEXT,
+            category TEXT,
+            source TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_memory_fact_events_fact
+         ON memory_fact_events(fact_id, id DESC)",
+        [],
+    )?;
+
+    // 记忆分类五维迁移（幂等，每次启动跑、首次后空转）：
+    // person/project 保持不变，旧标签归并到新五维
+    conn.execute(
+        "UPDATE memory_facts SET category = 'workflow' WHERE category = 'general'",
+        [],
+    )?;
+    conn.execute(
+        "UPDATE memory_facts SET category = 'voice' WHERE category = 'preference'",
+        [],
+    )?;
+
     Ok(())
 }
 
@@ -409,7 +440,49 @@ pub struct MemoryFact {
     pub last_confirmed: i64,
 }
 
-/// 幂等写入事实：已存在则累计确认次数
+/// 一条记忆变更审计事件
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryFactEvent {
+    pub id: i64,
+    pub fact_id: Option<i64>,
+    pub action: String,
+    pub old_text: Option<String>,
+    pub new_text: Option<String>,
+    pub category: Option<String>,
+    pub source: String,
+    pub created_at: i64,
+}
+
+/// 一条待写入的记忆审计事件（log_fact_event 的参数包，避免超长参数列表）
+struct FactEvent<'a> {
+    fact_id: Option<i64>,
+    action: &'a str,
+    old_text: Option<&'a str>,
+    new_text: Option<&'a str>,
+    category: Option<&'a str>,
+    source: &'a str,
+    now: i64,
+}
+
+/// 写一条记忆审计事件（内部工具，所有记忆写路径共用）
+fn log_fact_event(conn: &Connection, event: FactEvent) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO memory_fact_events (fact_id, action, old_text, new_text, category, source, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            event.fact_id,
+            event.action,
+            event.old_text,
+            event.new_text,
+            event.category,
+            event.source,
+            event.now
+        ],
+    )?;
+    Ok(())
+}
+
+/// 幂等写入事实：已存在则累计确认次数。新增/确认都写审计事件。
 pub fn upsert_memory_fact(
     conn: &Connection,
     fact: &str,
@@ -417,14 +490,125 @@ pub fn upsert_memory_fact(
     source: &str,
     now: i64,
 ) -> rusqlite::Result<()> {
+    let existing: Option<i64> = conn
+        .query_row(
+            "SELECT id FROM memory_facts WHERE fact = ?1",
+            params![fact],
+            |row| row.get(0),
+        )
+        .optional()?;
+
+    match existing {
+        Some(id) => {
+            conn.execute(
+                "UPDATE memory_facts SET confirmations = confirmations + 1, last_confirmed = ?2
+                 WHERE id = ?1",
+                params![id, now],
+            )?;
+            log_fact_event(
+                conn,
+                FactEvent {
+                    fact_id: Some(id),
+                    action: "confirm",
+                    old_text: None,
+                    new_text: Some(fact),
+                    category: Some(category),
+                    source,
+                    now,
+                },
+            )?;
+        }
+        None => {
+            conn.execute(
+                "INSERT INTO memory_facts (fact, category, source, confirmations, created_at, last_confirmed)
+                 VALUES (?1, ?2, ?3, 1, ?4, ?4)",
+                params![fact, category, source, now],
+            )?;
+            let id = conn.last_insert_rowid();
+            log_fact_event(
+                conn,
+                FactEvent {
+                    fact_id: Some(id),
+                    action: "add",
+                    old_text: None,
+                    new_text: Some(fact),
+                    category: Some(category),
+                    source,
+                    now,
+                },
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// 覆盖一条事实的文本与分类（提取管道 update 动作 / 用户编辑），confirmations 保留
+pub fn update_memory_fact(
+    conn: &Connection,
+    id: i64,
+    new_fact: &str,
+    new_category: &str,
+    source: &str,
+    now: i64,
+) -> rusqlite::Result<()> {
+    let old: Option<(String, String)> = conn
+        .query_row(
+            "SELECT fact, category FROM memory_facts WHERE id = ?1",
+            params![id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    let Some((old_fact, _old_category)) = old else {
+        return Ok(());
+    };
     conn.execute(
-        "INSERT INTO memory_facts (fact, category, source, confirmations, created_at, last_confirmed)
-         VALUES (?1, ?2, ?3, 1, ?4, ?4)
-         ON CONFLICT(fact) DO UPDATE SET
-            confirmations = memory_facts.confirmations + 1,
-            last_confirmed = excluded.last_confirmed",
-        params![fact, category, source, now],
+        "UPDATE memory_facts SET fact = ?2, category = ?3, last_confirmed = ?4 WHERE id = ?1",
+        params![id, new_fact, new_category, now],
     )?;
+    log_fact_event(
+        conn,
+        FactEvent {
+            fact_id: Some(id),
+            action: "update",
+            old_text: Some(&old_fact),
+            new_text: Some(new_fact),
+            category: Some(new_category),
+            source,
+            now,
+        },
+    )?;
+    Ok(())
+}
+
+/// 删除一条事实并写审计（事件存文本快照，历史不随删除丢失）
+pub fn delete_memory_fact_audited(
+    conn: &Connection,
+    id: i64,
+    source: &str,
+    now: i64,
+) -> rusqlite::Result<()> {
+    let old: Option<(String, String)> = conn
+        .query_row(
+            "SELECT fact, category FROM memory_facts WHERE id = ?1",
+            params![id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    if let Some((old_fact, old_category)) = old {
+        conn.execute("DELETE FROM memory_facts WHERE id = ?1", params![id])?;
+        log_fact_event(
+            conn,
+            FactEvent {
+                fact_id: Some(id),
+                action: "delete",
+                old_text: Some(&old_fact),
+                new_text: None,
+                category: Some(&old_category),
+                source,
+                now,
+            },
+        )?;
+    }
     Ok(())
 }
 
@@ -449,9 +633,115 @@ pub fn list_memory_facts(conn: &Connection, limit: i64) -> rusqlite::Result<Vec<
     rows.collect()
 }
 
-pub fn delete_memory_fact(conn: &Connection, id: i64) -> rusqlite::Result<()> {
-    conn.execute("DELETE FROM memory_facts WHERE id = ?1", params![id])?;
-    Ok(())
+/// 按分类维度取事实（日报/分析选维注入用），按确认度降序
+pub fn list_memory_facts_by_categories(
+    conn: &Connection,
+    categories: &[&str],
+    limit: i64,
+) -> rusqlite::Result<Vec<MemoryFact>> {
+    if categories.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = categories
+        .iter()
+        .enumerate()
+        .map(|(i, _)| format!("?{}", i + 2))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "SELECT id, fact, category, source, confirmations, created_at, last_confirmed
+         FROM memory_facts
+         WHERE category IN ({})
+         ORDER BY confirmations DESC, last_confirmed DESC
+         LIMIT ?1",
+        placeholders
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(limit)];
+    for c in categories {
+        params_vec.push(Box::new(c.to_string()));
+    }
+    let param_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
+    let rows = stmt.query_map(&param_refs[..], |row| {
+        Ok(MemoryFact {
+            id: row.get(0)?,
+            fact: row.get(1)?,
+            category: row.get(2)?,
+            source: row.get(3)?,
+            confirmations: row.get(4)?,
+            created_at: row.get(5)?,
+            last_confirmed: row.get(6)?,
+        })
+    })?;
+    rows.collect()
+}
+
+/// 关键词匹配的事实 id 列表（forget_fact 工具用），按确认度降序
+pub fn find_memory_facts_by_keyword(
+    conn: &Connection,
+    keyword: &str,
+    limit: i64,
+) -> rusqlite::Result<Vec<MemoryFact>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, fact, category, source, confirmations, created_at, last_confirmed
+         FROM memory_facts
+         WHERE fact LIKE ?1
+         ORDER BY confirmations DESC, last_confirmed DESC
+         LIMIT ?2",
+    )?;
+    let rows = stmt.query_map(params![format!("%{}%", keyword), limit], |row| {
+        Ok(MemoryFact {
+            id: row.get(0)?,
+            fact: row.get(1)?,
+            category: row.get(2)?,
+            source: row.get(3)?,
+            confirmations: row.get(4)?,
+            created_at: row.get(5)?,
+            last_confirmed: row.get(6)?,
+        })
+    })?;
+    rows.collect()
+}
+
+/// 查询记忆审计事件；fact_id 为 None 时取全局最近事件
+pub fn list_memory_fact_events(
+    conn: &Connection,
+    fact_id: Option<i64>,
+    limit: i64,
+) -> rusqlite::Result<Vec<MemoryFactEvent>> {
+    let map_row = |row: &rusqlite::Row| {
+        Ok(MemoryFactEvent {
+            id: row.get(0)?,
+            fact_id: row.get(1)?,
+            action: row.get(2)?,
+            old_text: row.get(3)?,
+            new_text: row.get(4)?,
+            category: row.get(5)?,
+            source: row.get(6)?,
+            created_at: row.get(7)?,
+        })
+    };
+    match fact_id {
+        Some(fid) => {
+            let mut stmt = conn.prepare(
+                "SELECT id, fact_id, action, old_text, new_text, category, source, created_at
+                 FROM memory_fact_events
+                 WHERE fact_id = ?1
+                 ORDER BY id DESC LIMIT ?2",
+            )?;
+            let rows = stmt.query_map(params![fid, limit], map_row)?;
+            rows.collect()
+        }
+        None => {
+            let mut stmt = conn.prepare(
+                "SELECT id, fact_id, action, old_text, new_text, category, source, created_at
+                 FROM memory_fact_events
+                 ORDER BY id DESC LIMIT ?1",
+            )?;
+            let rows = stmt.query_map(params![limit], map_row)?;
+            rows.collect()
+        }
+    }
 }
 
 pub fn get_suggestion(conn: &Connection, id: i64) -> rusqlite::Result<Option<Suggestion>> {

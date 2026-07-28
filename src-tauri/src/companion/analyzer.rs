@@ -17,6 +17,8 @@ use crate::llm_provider::models::Scene;
 
 /// 每日 LLM 分析的触发小时（21 点后执行当日分析）
 const DAILY_ANALYSIS_HOUR: u32 = 21;
+/// 日报生成失败后的重试间隔（秒）：21 点后每 30 分钟重试一次，直到笔记落盘
+const REPORT_RETRY_SECS: i64 = 1800;
 /// 过期数据清理的触发小时（凌晨 3 点后）
 const CLEANUP_HOUR: u32 = 3;
 /// 会话聚合：相邻同进程记录间隔小于该值则合并
@@ -32,6 +34,8 @@ pub fn run_scheduler(app_handle: AppHandle, db_path: PathBuf, flags: Arc<RwLock<
     let mut last_analysis_date: Option<String> =
         load_setting(&db_path, "companion_last_analysis_date");
     let mut last_cleanup_date: Option<String> = None;
+    // 日报上次尝试时间（节流用；成功标记每轮从 DB 现读，不做内存缓存）
+    let mut last_report_attempt: Option<i64> = None;
 
     // 启动时检查昨日日报是否缺报（昨天 21 点时 app 未运行），缺则补跑
     maybe_backfill_report(&app_handle, &db_path, &flags);
@@ -64,8 +68,6 @@ pub fn run_scheduler(app_handle: AppHandle, db_path: PathBuf, flags: Arc<RwLock<
             save_setting(&db_path, "companion_last_analysis_date", &today);
             let app = app_handle.clone();
             let db = db_path.clone();
-            let date = today.clone();
-            let cc_enabled = super::claude_code_enabled(&app_handle);
             // agent 调用是阻塞式 subprocess，放独立线程而非 async runtime
             std::thread::spawn(move || {
                 // 模式挖掘每晚固定执行（内部经 call_companion_llm 路由）
@@ -73,24 +75,59 @@ pub fn run_scheduler(app_handle: AppHandle, db_path: PathBuf, flags: Arc<RwLock<
                     Ok(msg) => log::info!("Companion 每日模式挖掘: {}", msg),
                     Err(e) => log::warn!("Companion 每日模式挖掘失败: {}", e),
                 }
-                // Claude Code 开启时跑 agent 日报；未开启回退场景模型版日报（失败均仅告警）
-                if cc_enabled {
-                    match super::run_agent_with_settings(&app, &db, &date) {
-                        Ok(msg) => log::info!("Companion 日报 agent: {}", msg),
-                        Err(e) => log::warn!("Companion 日报 agent 失败: {}", e),
-                    }
+                // 聊天记忆提取兜底（防抖通道之外的保险，水位已最新则空转）
+                match super::recall::run_recall_blocking(&app, &db) {
+                    Ok(msg) => log::info!("Companion 记忆提取兜底: {}", msg),
+                    Err(e) => log::warn!("Companion 记忆提取兜底失败: {}", e),
+                }
+            });
+        }
+
+        // 日报独立调度：companion_last_report_date 只在笔记落盘后才写，
+        // 失败按 REPORT_RETRY_SECS 节流重试；用户删掉笔记不会重生成（标记仍在）。
+        // 每轮从 DB 读标记（成功写入发生在子线程，内存缓存会丢更新）
+        let report_done =
+            load_setting(&db_path, "companion_last_report_date").as_deref() == Some(&today);
+        let throttle_ok = last_report_attempt
+            .map(|t| now.timestamp() - t >= REPORT_RETRY_SECS)
+            .unwrap_or(true);
+        if now.hour() >= DAILY_ANALYSIS_HOUR && !report_done && throttle_ok {
+            last_report_attempt = Some(now.timestamp());
+            let app = app_handle.clone();
+            let db = db_path.clone();
+            let date = today.clone();
+            let cc_enabled = super::claude_code_enabled(&app_handle);
+            // agent 调用是阻塞式 subprocess，放独立线程而非 async runtime
+            std::thread::spawn(move || {
+                // Claude Code 开启时跑 agent 日报；未开启回退场景模型版日报
+                let result = if cc_enabled {
+                    super::run_agent_with_settings(&app, &db, &date)
                 } else {
                     match crate::notes::get_default_notes_dir() {
-                        Ok(notes_dir) => {
-                            match tauri::async_runtime::block_on(run_scene_report(
-                                &app, &db, &notes_dir, &date,
-                            )) {
-                                Ok(msg) => log::info!("Companion 场景版日报: {}", msg),
-                                Err(e) => log::warn!("Companion 场景版日报失败: {}", e),
-                            }
-                        }
-                        Err(e) => log::warn!("Companion 场景版日报获取笔记目录失败: {}", e),
+                        Ok(notes_dir) => tauri::async_runtime::block_on(run_scene_report(
+                            &app, &db, &notes_dir, &date,
+                        )),
+                        Err(e) => Err(format!("获取笔记目录失败: {}", e)),
                     }
+                };
+                match result {
+                    Ok(msg) => {
+                        // 成功判定：笔记真的落盘，或明确「当日无数据」（无需重试的终态）
+                        let note_written = crate::notes::get_default_notes_dir()
+                            .map(|d| {
+                                d.join(super::mcp::NOTE_DIR_PREFIX)
+                                    .join(format!("{}.md", date))
+                                    .exists()
+                            })
+                            .unwrap_or(false);
+                        if note_written || msg.contains("无数据") {
+                            save_setting(&db, "companion_last_report_date", &date);
+                            log::info!("Companion 日报完成: {}", msg);
+                        } else {
+                            log::warn!("Companion 日报返回成功但笔记未落盘，稍后重试: {}", msg);
+                        }
+                    }
+                    Err(e) => log::warn!("Companion 日报失败（30 分钟后重试）: {}", e),
                 }
             });
         }
@@ -112,9 +149,9 @@ pub fn run_scheduler(app_handle: AppHandle, db_path: PathBuf, flags: Arc<RwLock<
 
 // ── 缺报补跑 ─────────────────────────────────────────────
 
-/// 补跑昨日日报：昨天 21 点时 app 未运行导致缺报时，启动后补一次。
-/// 条件：agent 模式开启 + 昨日有活动数据 + 昨日笔记不存在 + 今天没补过。
-/// 只补昨天一天；非 agent 路径不写日报笔记，无需补。
+/// 补跑昨日日报：昨天 21 点时 app 未运行（或运行但生成失败）导致缺报时，启动后补一次。
+/// 条件：陪伴开启 + 昨日有活动数据 + 昨日笔记不存在 + 今天没补过。
+/// 只补昨天一天；Claude Code 开启走 agent，未开启走场景模型版（两者都写日报笔记）。
 fn maybe_backfill_report(
     app_handle: &AppHandle,
     db_path: &PathBuf,
@@ -124,15 +161,15 @@ fn maybe_backfill_report(
         .read()
         .map(|f| f.clone())
         .unwrap_or_else(|_| CompanionFlags::default());
-    if !f.enabled || !super::claude_code_enabled(app_handle) {
+    if !f.enabled {
         return;
     }
 
     let yesterday_dt = chrono::Local::now() - chrono::Duration::days(1);
     let yesterday = yesterday_dt.format("%Y-%m-%d").to_string();
 
-    // 今天已补过（或笔记确认落盘过）则跳过——用户删掉笔记也不会被重新生成
-    if load_setting(db_path, "companion_last_backfill_date").as_deref() == Some(&yesterday) {
+    // 昨日日报已成功过则跳过——标记在即使笔记被用户删掉也不重新生成
+    if load_setting(db_path, "companion_last_report_date").as_deref() == Some(&yesterday) {
         return;
     }
 
@@ -183,9 +220,9 @@ fn maybe_backfill_report(
         match result {
             Ok(msg) => {
                 log::info!("补跑日报完成: {}", msg);
-                // 只有笔记真的落盘才标记已补——agent 跑完但没写笔记时，下次启动重试
+                // 只有笔记真的落盘才标记成功——agent 跑完但没写笔记时，下次启动重试
                 if note_path.exists() {
-                    save_setting(&db, "companion_last_backfill_date", &date);
+                    save_setting(&db, "companion_last_report_date", &date);
                 }
             }
             Err(e) => log::warn!("补跑日报失败（下次启动重试）: {}", e),
@@ -522,7 +559,7 @@ fn day_start_ts(ts: i64) -> i64 {
         .unwrap_or(ts - ts % 86400)
 }
 
-/// 读写 settings 键值表（custom-tools.db 内的通用 KV，与模块自己的状态共存）
+/// 读写 settings 键值表（flowhub.db 内的通用 KV，与模块自己的状态共存）
 pub(crate) fn load_setting(db_path: &PathBuf, key: &str) -> Option<String> {
     let conn = Connection::open(db_path).ok()?;
     conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| {
@@ -591,7 +628,8 @@ pub async fn run_daily_analysis(
         .as_ref()
         .map(|dir| super::persona::load_role(dir, "analyst"))
         .unwrap_or_default();
-    let prompt = build_analysis_prompt(&persona, &evolution, &role, &aggregate_text);
+    let ve_section = voice_expectation_section(&conn);
+    let prompt = build_analysis_prompt(&persona, &evolution, &role, &aggregate_text, &ve_section);
 
     let reply = call_companion_llm(app_handle, db_path, prompt).await?;
     let parsed = parse_llm_patterns(&reply)?;
@@ -770,15 +808,38 @@ pub(crate) fn aggregate_day(conn: &Connection, day_label: &str) -> Result<String
     ))
 }
 
-fn build_analysis_prompt(persona: &str, evolution: &str, role: &str, aggregate_text: &str) -> String {
+/// 语气相关两维记忆（voice 表达偏好 + expectation 对贾维斯的期望），
+/// 追加在日报/分析等产出型 prompt 末尾，让输出贴合他的偏好。无则返回空串。
+pub(crate) fn voice_expectation_section(conn: &Connection) -> String {
+    let facts = db::list_memory_facts_by_categories(conn, &["voice", "expectation"], 20)
+        .unwrap_or_default();
+    if facts.is_empty() {
+        return String::new();
+    }
+    let lines = facts
+        .iter()
+        .map(|f| format!("- ({}) {}", f.category, f.fact))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("\n\n---\n\n# 他的表达偏好与对你的期望\n{}", lines)
+}
+
+fn build_analysis_prompt(
+    persona: &str,
+    evolution: &str,
+    role: &str,
+    aggregate_text: &str,
+    ve_section: &str,
+) -> String {
     format!(
         "{persona}\n\n---\n\n{evolution}\n\n---\n\n{role}\n\n---\n\n\
          以上是贾维斯的身份设定、经验本与分析工作手册。\n\
-         以下是他昨天电脑使用情况的聚合摘要（进程名 + 窗口标题 + 时段）：\n\n{aggregate_text}",
+         以下是他昨天电脑使用情况的聚合摘要（进程名 + 窗口标题 + 时段）：\n\n{aggregate_text}{ve_section}",
         persona = persona,
         evolution = evolution,
         role = role,
-        aggregate_text = aggregate_text
+        aggregate_text = aggregate_text,
+        ve_section = ve_section
     )
 }
 
@@ -942,12 +1003,13 @@ pub(crate) async fn run_scene_report(
     let persona = super::persona::load(&app_data);
     let evolution = super::persona::load_evolution(&app_data);
     let role = super::persona::load_role(&app_data, "reporter");
+    let ve_section = voice_expectation_section(&conn);
     let prompt = format!(
         "{persona}\n\n---\n\n{evolution}\n\n---\n\n{role}\n\n---\n\n\
          以上是贾维斯的身份设定、经验本与日报工作手册。\n\
          注意：你现在没有数据工具——他昨天的电脑使用聚合已直接给你（见末尾），\n\
          跳过流程中的工具调用步骤，直接完成「写日报」那一步。\n\
-         如果内容显示没有活动记录，只回复「当日无数据」。\n\n{aggregate}"
+         如果内容显示没有活动记录，只回复「当日无数据」。\n\n{aggregate}{ve_section}"
     );
 
     let report = call_companion_llm(app_handle, db_path, prompt).await?;
@@ -975,24 +1037,34 @@ pub(crate) async fn run_scene_report(
     Ok(format!("日报已生成（场景模型）: {}", relative))
 }
 
-/// 陪伴统一 LLM 路由：全局 Claude Code 开启 → claude CLI 单次问答
-/// （失败自动回退「陪伴」场景模型）；未开启 → 直接用「陪伴」场景模型。
+/// 陪伴统一 LLM 路由（陪伴场景）:全局 Claude Code 开启 → claude CLI 单次问答
+/// （失败自动回退场景模型）；未开启 → 直接用场景模型。
 pub(crate) async fn call_companion_llm(
     app_handle: &AppHandle,
     db_path: &PathBuf,
     prompt: String,
+) -> Result<String, String> {
+    call_llm_with_scene(app_handle, db_path, prompt, Scene::Companion).await
+}
+
+/// 带场景的 LLM 路由：记忆提取等场景有独立模型配置（缺省回退陪伴场景）。
+pub(crate) async fn call_llm_with_scene(
+    app_handle: &AppHandle,
+    db_path: &PathBuf,
+    prompt: String,
+    scene: Scene,
 ) -> Result<String, String> {
     if super::claude_code_enabled(app_handle) {
         let cc_result = run_claude_code_oneshot(app_handle, &prompt).await;
         match cc_result {
             Ok(reply) => return Ok(reply),
             Err(cc_err) => {
-                log::warn!("Claude Code 调用失败，回退陪伴场景模型: {}", cc_err);
-                return call_scene_model_llm(app_handle, db_path, prompt)
+                log::warn!("Claude Code 调用失败，回退场景模型: {}", cc_err);
+                return call_scene_model_llm(app_handle, db_path, prompt, scene)
                     .await
                     .map_err(|scene_err| {
                         format!(
-                            "Claude Code 失败（{}）；陪伴场景模型也不可用（{}）",
+                            "Claude Code 失败（{}）；场景模型也不可用（{}）",
                             cc_err, scene_err
                         )
                     });
@@ -1000,7 +1072,7 @@ pub(crate) async fn call_companion_llm(
         }
     }
 
-    call_scene_model_llm(app_handle, db_path, prompt).await
+    call_scene_model_llm(app_handle, db_path, prompt, scene).await
 }
 
 /// 在 blocking 线程里跑 claude CLI 单次问答（子进程是阻塞 IO，不能占 async runtime）
@@ -1026,24 +1098,38 @@ async fn run_claude_code_oneshot(app_handle: &AppHandle, prompt: &str) -> Result
     .map_err(|e| format!("claude 线程异常: {}", e))?
 }
 
-/// 复用「陪伴」场景的模型配置调用 LLM
+/// 按场景配置调用场景模型。非陪伴场景未单独配置时，
+/// 回退陪伴场景配置（缺省跟随，用户可在模型设置里改绑）。
 pub(crate) async fn call_scene_model_llm(
     app_handle: &AppHandle,
     db_path: &PathBuf,
     prompt: String,
+    scene: Scene,
 ) -> Result<String, String> {
     let conn = Connection::open(db_path).map_err(|e| format!("打开数据库失败: {}", e))?;
 
     let provider_db = LlmProviderDb;
-    let (provider, model) = provider_db
-        .get_scene_model(&conn, Scene::Companion)
+    let resolved = provider_db
+        .get_scene_model(&conn, scene.clone())
         .map_err(|e| format!("获取场景模型失败: {}", e))?
-        .ok_or_else(|| {
-            "尚未配置 AI 模型，请先在「设置 → AI 模型」中为陪伴场景选择模型".to_string()
-        })?;
+        .map(|(p, m)| (p, m, scene.clone()))
+        .or_else(|| {
+            if scene == Scene::Companion {
+                return None;
+            }
+            log::info!("场景 {} 未配置模型，回退陪伴场景", scene);
+            provider_db
+                .get_scene_model(&conn, Scene::Companion)
+                .ok()
+                .flatten()
+                .map(|(p, m)| (p, m, Scene::Companion))
+        });
+    let (provider, model, used_scene) = resolved.ok_or_else(|| {
+        "尚未配置 AI 模型，请先在「设置 → AI 模型」中为陪伴场景选择模型".to_string()
+    })?;
 
     let thinking_mode = provider_db
-        .get_scene_thinking_mode(&conn, Scene::Companion)
+        .get_scene_thinking_mode(&conn, used_scene)
         .unwrap_or(false);
 
     let api_key = match &provider.api_key_encrypted {

@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 
 export type ProviderType = 'openai' | 'ollama' | 'deepseek' | 'bailian' | 'custom';
 export type ConnectionStatus = 'unknown' | 'connected' | 'disconnected' | 'error';
-export type Scene = 'chat' | 'qa' | 'translate' | 'companion';
+export type Scene = 'chat' | 'qa' | 'translate' | 'companion' | 'memory_extraction';
 
 export interface Provider {
   id: number;
