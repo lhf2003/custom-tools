@@ -520,6 +520,18 @@ fn setup_window_handlers(app_handle: &tauri::AppHandle) {
                     return;
                 }
 
+                // 拖拽窗口期间（左键按住）OS 会产生焦点抖动，这不是真实失焦。
+                // 按住左键时用户不可能在点别的窗口，直接跳过，避免窗口被拖没。
+                #[cfg(windows)]
+                {
+                    use windows::Win32::UI::Input::KeyboardAndMouse::{
+                        GetAsyncKeyState, VK_LBUTTON,
+                    };
+                    if unsafe { GetAsyncKeyState(VK_LBUTTON.0 as i32) } < 0 {
+                        return;
+                    }
+                }
+
                 // Check settings and hide if configured
                 if let Some(settings_state) =
                     app_handle_clone.try_state::<commands::settings::SettingsState>()
