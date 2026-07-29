@@ -28,13 +28,17 @@ pub fn tool_definitions() -> Vec<ToolDef> {
     vec![
         ToolDef {
             name: "get_activity_summary",
-            description: "获取某天的电脑使用聚合摘要（各应用时长 Top 和时间线）。不传 date 默认为今天。".to_string(),
+            description: "获取某段时间的电脑使用聚合摘要（各应用时长 Top 和时间线）。start/end 支持 YYYY-MM-DD 或 YYYY-MM-DD HH:MM 两种格式；都不传默认为今天。".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "date": {
+                    "start": {
                         "type": "string",
-                        "description": "日期，格式 YYYY-MM-DD，默认今天"
+                        "description": "起始时间，YYYY-MM-DD 或 YYYY-MM-DD HH:MM，默认今天 00:00"
+                    },
+                    "end": {
+                        "type": "string",
+                        "description": "结束时间，格式同 start，默认 min(现在, start+24h)"
                     }
                 }
             }),
@@ -252,14 +256,27 @@ fn open_db(db_path: &Path) -> Result<Connection, String> {
 }
 
 fn tool_activity_summary(db_path: &Path, args: &Value) -> Result<String, String> {
-    let date = args
-        .get("date")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%d").to_string());
+    let now = chrono::Local::now();
+    let start_ts = match args.get("start").and_then(|v| v.as_str()) {
+        Some(s) => analyzer::parse_flexible_datetime(s, false)?,
+        None => now
+            .date_naive()
+            .and_hms_opt(0, 0, 0)
+            .and_then(|d| d.and_local_timezone(chrono::Local).single())
+            .ok_or("无法计算当日起点")?
+            .timestamp(),
+    };
+    // end 缺省 = min(现在, start+24h)：查历史日期得全天，查今天/近期时段得「至今」
+    let end_ts = match args.get("end").and_then(|v| v.as_str()) {
+        Some(s) => analyzer::parse_flexible_datetime(s, true)?,
+        None => (start_ts + 86400).min(now.timestamp()),
+    };
+    if end_ts <= start_ts {
+        return Err("结束时间必须晚于起始时间".to_string());
+    }
 
     let conn = open_db(db_path)?;
-    analyzer::aggregate_day(&conn, &date)
+    analyzer::aggregate_range(&conn, start_ts, end_ts)
 }
 
 fn tool_search_clipboard(db_path: &Path, args: &Value) -> Result<String, String> {

@@ -610,7 +610,7 @@ pub async fn run_daily_analysis(
     }
 
     // 本地预聚合：原始流水可能有上千条，先压缩成会话级摘要再送 LLM
-    let aggregate_text = aggregate_activities(&activities);
+    let aggregate_text = aggregate_activities(&activities, false, AGGREGATE_TEXT_CAP);
     let app_data = app_handle.path().app_data_dir().ok();
     let persona = app_data
         .as_ref()
@@ -700,7 +700,11 @@ pub async fn run_daily_analysis(
 }
 
 /// 把原始活动流水压缩成会话级摘要文本
-pub(crate) fn aggregate_activities(activities: &[ActivityLog]) -> String {
+pub(crate) fn aggregate_activities(
+    activities: &[ActivityLog],
+    multi_day: bool,
+    text_cap: usize,
+) -> String {
     struct Session {
         process: String,
         title: String,
@@ -745,10 +749,19 @@ pub(crate) fn aggregate_activities(activities: &[ActivityLog]) -> String {
     }
 
     text.push_str("\n【时间线】\n");
+    let mut current_day = String::new();
     for s in &sessions {
         // 短于 60s 的会话视为路过，不进时间线
         if s.end - s.start < 60 {
             continue;
+        }
+        // 跨天查询按天分节，只有 HH:MM 时分不清是哪天
+        if multi_day {
+            let day = fmt_local(s.start, "%m-%d");
+            if day != current_day {
+                text.push_str(&format!("【{}】\n", day));
+                current_day = day;
+            }
         }
         let title: String = s.title.chars().take(40).collect();
         text.push_str(&format!(
@@ -758,7 +771,7 @@ pub(crate) fn aggregate_activities(activities: &[ActivityLog]) -> String {
             s.process,
             title
         ));
-        if text.len() > AGGREGATE_TEXT_CAP {
+        if text.len() > text_cap {
             text.push_str("...(截断)\n");
             break;
         }
@@ -768,12 +781,12 @@ pub(crate) fn aggregate_activities(activities: &[ActivityLog]) -> String {
 }
 
 fn fmt_hm(ts: i64) -> String {
+    fmt_local(ts, "%H:%M")
+}
+
+fn fmt_local(ts: i64, fmt: &str) -> String {
     chrono::DateTime::from_timestamp(ts, 0)
-        .map(|utc| {
-            utc.with_timezone(&chrono::Local)
-                .format("%H:%M")
-                .to_string()
-        })
+        .map(|utc| utc.with_timezone(&chrono::Local).format(fmt).to_string())
         .unwrap_or_default()
 }
 
@@ -800,7 +813,67 @@ pub(crate) fn aggregate_day(conn: &Connection, day_label: &str) -> Result<String
         "【{} 活动聚合，共 {} 段】\n{}",
         day_label,
         activities.len(),
-        aggregate_activities(&activities)
+        aggregate_activities(&activities, false, AGGREGATE_TEXT_CAP)
+    ))
+}
+
+/// 解析工具传入的时间参数，支持两种格式：
+/// - 「YYYY-MM-DD」：is_end=false 取当天 00:00，is_end=true 取次日 00:00（即当天结束）
+/// - 「YYYY-MM-DD HH:MM」：取该时刻
+///
+/// 返回本地时区时间戳；格式非法时返回错误文本，让模型自我纠正。
+pub(crate) fn parse_flexible_datetime(s: &str, is_end: bool) -> Result<i64, String> {
+    let s = s.trim();
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M") {
+        return dt
+            .and_local_timezone(chrono::Local)
+            .single()
+            .map(|d| d.timestamp())
+            .ok_or_else(|| format!("无法换算本地时间: {}", s));
+    }
+    if let Ok(d) = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d") {
+        let d = if is_end {
+            d + chrono::Duration::days(1)
+        } else {
+            d
+        };
+        return d
+            .and_hms_opt(0, 0, 0)
+            .and_then(|t| t.and_local_timezone(chrono::Local).single())
+            .map(|t| t.timestamp())
+            .ok_or_else(|| format!("无法换算本地时间: {}", s));
+    }
+    Err(format!(
+        "时间格式错误（应为 YYYY-MM-DD 或 YYYY-MM-DD HH:MM）: {}",
+        s
+    ))
+}
+
+/// 聚合任意时间窗的活动为摘要文本（供 MCP 工具 get_activity_summary 使用）。
+/// 跨天时时间线按天分节；文本上限随天数放大，封顶 7 天份。
+pub(crate) fn aggregate_range(conn: &Connection, start: i64, end: i64) -> Result<String, String> {
+    let label = format!(
+        "{} ~ {}",
+        fmt_local(start, "%Y-%m-%d %H:%M"),
+        fmt_local(end, "%Y-%m-%d %H:%M")
+    );
+
+    let activities =
+        db::activities_between(conn, start, end).map_err(|e| format!("读取活动失败: {}", e))?;
+
+    if activities.is_empty() {
+        return Ok(format!("{} 没有采集到活动记录", label));
+    }
+
+    // 起止落在不同本地日期才算跨天（「昨天 23:00 ~ 今天 01:00」不足 24h 也是跨天）
+    let multi_day = fmt_local(start, "%Y-%m-%d") != fmt_local(end - 1, "%Y-%m-%d");
+    let day_count = ((end - start + 86399) / 86400).clamp(1, 7) as usize;
+
+    Ok(format!(
+        "【{} 活动聚合，共 {} 段】\n{}",
+        label,
+        activities.len(),
+        aggregate_activities(&activities, multi_day, AGGREGATE_TEXT_CAP * day_count)
     ))
 }
 
@@ -1304,5 +1377,67 @@ pub(crate) async fn call_scene_model_llm(
             });
             Err(e)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn log(id: i64, process: &str, start: i64, secs: i64) -> ActivityLog {
+        ActivityLog {
+            id,
+            process_name: process.to_string(),
+            window_title: "窗口".to_string(),
+            started_at: start,
+            ended_at: Some(start + secs),
+            duration_secs: Some(secs),
+        }
+    }
+
+    #[test]
+    fn parse_date_as_start_is_midnight() {
+        let ts = parse_flexible_datetime("2026-07-29", false).unwrap();
+        assert_eq!(fmt_local(ts, "%Y-%m-%d %H:%M"), "2026-07-29 00:00");
+    }
+
+    #[test]
+    fn parse_date_as_end_is_next_midnight() {
+        let ts = parse_flexible_datetime("2026-07-29", true).unwrap();
+        assert_eq!(fmt_local(ts, "%Y-%m-%d %H:%M"), "2026-07-30 00:00");
+    }
+
+    #[test]
+    fn parse_datetime_with_minutes() {
+        let ts = parse_flexible_datetime("2026-07-29 14:30", false).unwrap();
+        assert_eq!(fmt_local(ts, "%Y-%m-%d %H:%M"), "2026-07-29 14:30");
+    }
+
+    #[test]
+    fn parse_rejects_invalid_input() {
+        assert!(parse_flexible_datetime("昨天下午", false).is_err());
+        assert!(parse_flexible_datetime("2026-07-29 25:00", false).is_err());
+        assert!(parse_flexible_datetime("2026-13-01", false).is_err());
+    }
+
+    #[test]
+    fn timeline_groups_by_day_when_multi_day() {
+        let d1 = parse_flexible_datetime("2026-07-28 23:00", false).unwrap();
+        let d2 = parse_flexible_datetime("2026-07-29 09:00", false).unwrap();
+        let acts = vec![
+            log(1, "code.exe", d1, 1800),
+            log(2, "chrome.exe", d2, 1800),
+        ];
+        let text = aggregate_activities(&acts, true, AGGREGATE_TEXT_CAP);
+        assert!(text.contains("【07-28】"), "缺第一天分节: {}", text);
+        assert!(text.contains("【07-29】"), "缺第二天分节: {}", text);
+    }
+
+    #[test]
+    fn timeline_has_no_day_headers_when_single_day() {
+        let d = parse_flexible_datetime("2026-07-29 09:00", false).unwrap();
+        let acts = vec![log(1, "code.exe", d, 1800)];
+        let text = aggregate_activities(&acts, false, AGGREGATE_TEXT_CAP);
+        assert!(!text.contains("【07-29】"), "单天不应有日期分节: {}", text);
     }
 }
