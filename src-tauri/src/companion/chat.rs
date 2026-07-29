@@ -83,6 +83,7 @@ pub(crate) fn compose_chat_system(app_data: &Path, db_path: &Path, with_tools: b
     let channel_rule = if with_tools {
         "涉及他电脑使用的问题（干了什么、各应用用了多久、复制过什么、习惯、日报），\n\
          调用 companion 工具查真实数据回答；查不到就说查不到，不编造。\n\
+         问备忘/待办用 list_memos 查（已划掉的不会出现），不要凭记忆列旧项。\n\
          他说「记住…」用 remember_fact 立即记；说「忘掉…」用 forget_fact 删。"
     } else {
         "你现在没有数据工具（Claude Code 未开启）。凭你记住的他和经验回答；\n\

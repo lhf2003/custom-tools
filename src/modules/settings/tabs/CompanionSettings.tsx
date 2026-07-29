@@ -14,6 +14,7 @@ import { useToastStore } from '@/stores/toastStore';
 import { SettingCard, Toggle } from '../components/SettingCard';
 import { MemoryCenter } from './MemoryCenter';
 import { SuggestionCenter } from './SuggestionCenter';
+import { MEMO_VIEW_PATH } from '../../markdown/components/MemosView';
 import type { OpenViewDetail } from '@/types';
 
 interface HabitPattern {
@@ -45,7 +46,6 @@ function formatDuration(secs: number): string {
 const PREVIEW_COUNT = 3;
 
 /** 备忘笔记的相对路径（与后端 commands/companion.rs 的 INTENT_NOTE_RELATIVE 对应） */
-const MEMO_NOTE_PATH = '陪伴日报/备忘.md';
 
 export function CompanionSettings() {
   const {
@@ -149,17 +149,10 @@ export function CompanionSettings() {
   };
 
   const handleOpenNotes = async () => {
-    // 备忘文件在首次「记 xxx」后才生成；不存在时只打开笔记视图
-    let notePath: string | undefined;
-    try {
-      await invoke('read_note', { path: MEMO_NOTE_PATH });
-      notePath = MEMO_NOTE_PATH;
-    } catch {
-      // 还没有备忘文件
-    }
+    // 备忘已迁 memos 表（DB 唯一真源）：打开笔记模块的备忘视图而非旧 md 文件
     window.dispatchEvent(
       new CustomEvent<OpenViewDetail>('app:open-view', {
-        detail: { view: 'markdown', notePath },
+        detail: { view: 'markdown', notePath: MEMO_VIEW_PATH },
       })
     );
   };

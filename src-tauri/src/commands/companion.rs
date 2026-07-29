@@ -190,10 +190,11 @@ pub async fn run_companion_agent_now(
     result
 }
 
-// ── 意图（「记」）─────────────────────────────────────────────
+// ── 备忘（「记」）─────────────────────────────────────────────
 
-/// 创建一条用户意图（launcher「记 xxx」入口）。
-/// 原文立即落库（保真），触发器由 LLM 异步解析写回——解析失败不影响原文。
+/// 创建一条备忘（launcher「记 xxx」入口），落 memos 表（唯一真源）。
+/// 原文立即落库（保真，content 先等于原文），LLM 异步解析后写回
+/// 重构正文 + 触发器——解析失败正文兜底为原文，不影响主流程。
 #[tauri::command]
 pub fn create_companion_intent(
     db_state: State<DatabaseState>,
@@ -207,95 +208,44 @@ pub fn create_companion_intent(
 
     let conn = open_conn(&db_state)?;
     let now = chrono::Local::now().timestamp();
-    let intent =
-        db::create_intent(&conn, &text, now).map_err(|e| format!("保存备忘失败: {}", e))?;
-    let id = intent.id;
+    let memo = db::create_memo(&conn, &text, now).map_err(|e| format!("保存备忘失败: {}", e))?;
+    let id = memo.id;
 
-    // 同步追加到笔记「陪伴日报/备忘.md」，随日报一起沉淀（失败不影响主流程）
-    if let Err(e) = append_intent_to_note(&text, now) {
-        log::warn!("备忘同步写入笔记失败: {}", e);
-    }
-
-    // 异步解析触发器（不阻塞 launcher 返回）
+    // 异步解析（重构正文 + 触发器），不阻塞 launcher 返回
     let db_path = db_state.0.clone();
     tauri::async_runtime::spawn(async move {
         if let Err(e) = analyzer::parse_and_store_triggers(&app_handle, &db_path, id, &text).await {
-            log::warn!("意图 #{} 触发器解析失败（保留原文兜底）: {}", id, e);
+            log::warn!("备忘 #{} 解析失败（保留原文兜底）: {}", id, e);
         }
     });
 
     Ok(id)
 }
 
-/// 备忘在笔记中的落点：与日报同目录（见 companion::mcp::NOTE_DIR_PREFIX），单文件按日期分组沉淀
-const INTENT_NOTE_RELATIVE: &str = "陪伴日报/备忘.md";
-
-/// 把「记 xxx」备忘追加到笔记「陪伴日报/备忘.md」。
-/// 笔记是查看与归档面；SQLite 仍是提醒触发的数据源（v1 单向写入，状态不回写）。
-fn append_intent_to_note(text: &str, now: i64) -> Result<(), String> {
-    let notes_dir = crate::notes::get_default_notes_dir().map_err(|e| e.to_string())?;
-    let note_exists = notes_dir.join(INTENT_NOTE_RELATIVE).exists();
-    let manager = crate::notes::NotesManager::new(notes_dir);
-
-    let dt = chrono::DateTime::from_timestamp(now, 0)
-        .ok_or_else(|| "备忘时间戳无效".to_string())?
-        .with_timezone(&chrono::Local);
-    let heading = format!("## {}", dt.format("%Y-%m-%d"));
-    let entry = format!("- [ ] {} {}", dt.format("%H:%M"), text);
-
-    let content = if note_exists {
-        // 文件存在但读取失败（编码错误、被占用等）：向上报错，绝不覆盖原文件
-        let note = manager
-            .read_note(INTENT_NOTE_RELATIVE)
-            .map_err(|e| format!("读取备忘笔记失败（原文件未改动）: {}", e))?;
-        insert_note_entry(&note.content, &heading, &entry)
-    } else {
-        format!("# 备忘\n\n{}\n{}\n", heading, entry)
-    };
-    manager
-        .write_note(INTENT_NOTE_RELATIVE, &content)
-        .map_err(|e| format!("写入备忘笔记失败: {}", e))
-}
-
-/// 将一条备忘插入既有内容：今天的分组已存在则插到组内最前（最新在前），
-/// 否则在「# 备忘」标题后新开日期分组（最新日期在最上）。
-/// 容忍 UTF-8 BOM 与空文件（视为全新文件）。
-fn insert_note_entry(content: &str, heading: &str, entry: &str) -> String {
-    let content = content.trim_start_matches('\u{feff}');
-    if content.trim().is_empty() {
-        return format!("# 备忘\n\n{}\n{}\n", heading, entry);
-    }
-
-    let mut lines: Vec<&str> = content.lines().collect();
-
-    if let Some(idx) = lines.iter().position(|l| l.trim() == heading) {
-        lines.insert(idx + 1, entry);
-    } else {
-        let insert_at = lines
-            .iter()
-            .position(|l| l.starts_with("# "))
-            .map(|i| i + 1)
-            .unwrap_or(0);
-        lines.insert(insert_at, entry);
-        lines.insert(insert_at, heading);
-        lines.insert(insert_at, "");
-    }
-
-    let mut result = lines.join("\n");
-    if !result.ends_with('\n') {
-        result.push('\n');
-    }
-    result
-}
-
-/// 列出用户意图（备忘的查看/归档面已迁至笔记，此命令保留给后续消费方）
+/// 笔记视图：列出备忘（pending 在前，已处置在后）
 #[tauri::command]
-pub fn get_companion_intents(
+pub fn list_memos(
     db_state: State<DatabaseState>,
     limit: Option<i64>,
-) -> Result<Vec<db::Suggestion>, String> {
+) -> Result<Vec<db::Memo>, String> {
     let conn = open_conn(&db_state)?;
-    db::list_intents(&conn, limit.unwrap_or(100)).map_err(|e| format!("查询备忘失败: {}", e))
+    db::list_memos_for_view(&conn, limit.unwrap_or(200))
+        .map_err(|e| format!("查询备忘失败: {}", e))
+}
+
+/// 笔记视图：处置备忘（done / dismissed / 取消勾回 pending）
+#[tauri::command]
+pub fn set_memo_status(
+    db_state: State<DatabaseState>,
+    id: i64,
+    status: String,
+) -> Result<(), String> {
+    if !["pending", "done", "dismissed"].contains(&status.as_str()) {
+        return Err(format!("非法备忘状态: {}", status));
+    }
+    let conn = open_conn(&db_state)?;
+    let now = chrono::Local::now().timestamp();
+    db::set_memo_status(&conn, id, &status, now).map_err(|e| format!("更新备忘状态失败: {}", e))
 }
 
 // ── 记忆层 ───────────────────────────────────────────────────
@@ -410,54 +360,3 @@ companion_flag_command!(
     long_work_minutes,
     i64
 );
-
-#[cfg(test)]
-mod tests {
-    use super::insert_note_entry;
-
-    #[test]
-    fn insert_into_existing_day_group_puts_newest_first() {
-        let content = "# 备忘\n\n## 2026-07-27\n- [ ] 09:00 早前的备忘\n";
-        let result = insert_note_entry(content, "## 2026-07-27", "- [ ] 14:30 新备忘");
-        assert_eq!(
-            result,
-            "# 备忘\n\n## 2026-07-27\n- [ ] 14:30 新备忘\n- [ ] 09:00 早前的备忘\n"
-        );
-    }
-
-    #[test]
-    fn insert_new_day_group_after_title() {
-        let content = "# 备忘\n\n## 2026-07-26\n- [ ] 18:00 昨天的备忘\n";
-        let result = insert_note_entry(content, "## 2026-07-27", "- [ ] 08:15 今天的备忘");
-        assert_eq!(
-            result,
-            "# 备忘\n\n## 2026-07-27\n- [ ] 08:15 今天的备忘\n\n## 2026-07-26\n- [ ] 18:00 昨天的备忘\n"
-        );
-    }
-
-    #[test]
-    fn insert_without_title_prepends_group() {
-        let content = "一些用户自己写的内容\n";
-        let result = insert_note_entry(content, "## 2026-07-27", "- [ ] 08:15 备忘");
-        assert_eq!(
-            result,
-            "\n## 2026-07-27\n- [ ] 08:15 备忘\n一些用户自己写的内容\n"
-        );
-    }
-
-    #[test]
-    fn insert_strips_utf8_bom_before_matching_title() {
-        let content = "\u{feff}# 备忘\n\n## 2026-07-26\n- [ ] 18:00 昨天的备忘\n";
-        let result = insert_note_entry(content, "## 2026-07-27", "- [ ] 08:15 今天的备忘");
-        assert_eq!(
-            result,
-            "# 备忘\n\n## 2026-07-27\n- [ ] 08:15 今天的备忘\n\n## 2026-07-26\n- [ ] 18:00 昨天的备忘\n"
-        );
-    }
-
-    #[test]
-    fn insert_into_empty_file_uses_fresh_template() {
-        let result = insert_note_entry("  \n", "## 2026-07-27", "- [ ] 08:15 备忘");
-        assert_eq!(result, "# 备忘\n\n## 2026-07-27\n- [ ] 08:15 备忘\n");
-    }
-}

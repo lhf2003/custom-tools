@@ -899,37 +899,49 @@ fn parse_llm_patterns(reply: &str) -> Result<LlmPatternsResponse, String> {
     Ok(parsed)
 }
 
-// ── 意图触发器解析（B2）──────────────────────────────────────
+// ── 备忘解析（触发器 + 重构正文）──────────────────────────────
 
-/// 解析意图触发器并写回数据库（创建和重试共用的完整链路）
+/// 解析结果：重构正文（展示面）+ 触发器（情境匹配索引）
+pub struct ParsedMemo {
+    pub refined: Option<String>,
+    pub triggers: db::IntentTriggers,
+}
+
+/// 解析备忘并写回数据库（创建和重试共用的完整链路）。
+/// 无论有没有触发器都写回——重构正文本身就是产出；解析失败正文兜底原文。
 pub async fn parse_and_store_triggers(
     app_handle: &AppHandle,
     db_path: &PathBuf,
-    intent_id: i64,
+    memo_id: i64,
     text: &str,
 ) -> Result<(), String> {
-    let triggers = parse_intent_triggers(app_handle, db_path, text).await?;
-    let has_triggers =
-        triggers.due.is_some() || triggers.person.is_some() || !triggers.keywords.is_empty();
-    if !has_triggers {
-        return Ok(());
-    }
-    let json = serde_json::to_string(&triggers).map_err(|e| e.to_string())?;
+    let parsed = parse_memo(app_handle, db_path, text).await?;
+    let refined = parsed
+        .refined
+        .filter(|r| !r.trim().is_empty())
+        .unwrap_or_else(|| text.to_string());
+    let t = &parsed.triggers;
+    let has_triggers = t.due.is_some() || t.person.is_some() || !t.keywords.is_empty();
+    let json = if has_triggers {
+        Some(serde_json::to_string(t).map_err(|e| e.to_string())?)
+    } else {
+        None
+    };
     let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
-    db::update_intent_triggers(&conn, intent_id, &json, triggers.due.as_deref())
-        .map_err(|e| format!("写回触发器失败: {}", e))?;
-    log::info!("意图 #{} 触发器解析成功", intent_id);
+    db::update_memo_parse(&conn, memo_id, &refined, json.as_deref(), t.due.as_deref())
+        .map_err(|e| format!("写回解析结果失败: {}", e))?;
+    log::info!("备忘 #{} 解析成功", memo_id);
     Ok(())
 }
 
-/// 用 LLM 从意图原文解析触发器 {due, person, channel, keywords}。
+/// 用 LLM 解析备忘原文：重构正文（剥时间词/元话、保留人物）+ 触发条件。
 /// 失败不致命——调用方保留原文，靠晨间汇总兜底。
 /// prompt 注入记忆层事实（如"刘光俊=前端同事"），让解析更懂用户语境。
-pub async fn parse_intent_triggers(
+pub async fn parse_memo(
     app_handle: &AppHandle,
     db_path: &PathBuf,
     text: &str,
-) -> Result<db::IntentTriggers, String> {
+) -> Result<ParsedMemo, String> {
     let today = chrono::Local::now().format("%Y-%m-%d");
 
     // 注入记忆层事实（最多 10 条，控制 prompt 长度）
@@ -944,10 +956,15 @@ pub async fn parse_intent_triggers(
         .unwrap_or_default();
 
     let prompt = format!(
-        "从下面这句话中提取触发条件，用于在正确的时机提醒用户。\n\
+        "分析下面这条快速记下的备忘，输出重构正文和触发条件。\n\
          只输出 JSON，不要任何其他文字。格式：\n\
-         {{\"due\":\"YYYY-MM-DD 或 null\",\"person\":\"联系人名 或 null\",\"channel\":\"沟通渠道（微信/钉钉/飞书/QQ 等）或 null\",\"keywords\":[\"窗口标题里可能出现的关键词，最多3个\"]}}\n\
-         规则：\n\
+         {{\"refined\":\"重构后的备忘正文\",\"due\":\"YYYY-MM-DD 或 null\",\"person\":\"联系人名 或 null\",\"channel\":\"沟通渠道（微信/钉钉/飞书/QQ 等）或 null\",\"keywords\":[\"窗口标题里可能出现的关键词，最多3个\"]}}\n\
+         重构规则（refined）：\n\
+         1. 用户是快速输入，正文要重构成「要做的事」的最小完整表述：动词+对象+事项。\n\
+         2. 删掉时间词（明天/周五/下午等，已进 due）、删掉「提醒我/记得/需要」这类元话。\n\
+         3. 保留人物和具体事项——「报价单发了吗」这种剥到看不懂是禁止的。\n\
+         4. 例：「明天下午提醒我问张三报价单发了吗」→「问张三报价单发了吗」。原文已足够精炼则原样保留。\n\
+         触发规则：\n\
          1. 今天是 {today}。\"明天\"=\"今天+1天\"，\"周五\"=最近的周五，\"下周X\"=下周的星期X。没有明确时间则 due 为 null。\n\
          2. person 只提取明确的人名/称呼（如\"张三\"\"前端小李\"），没有则为 null。\n\
          3. channel 只在明确提到沟通软件时填写。\n\
@@ -962,22 +979,35 @@ pub async fn parse_intent_triggers(
 
     let start = reply.find('{').ok_or("解析响应中没有 JSON")?;
     let end = reply.rfind('}').ok_or("解析响应中没有 JSON")?;
-    let mut triggers: db::IntentTriggers = serde_json::from_str(&reply[start..=end])
-        .map_err(|e| format!("解析触发器 JSON 失败: {}", e))?;
+    let mut parsed: ParsedMemoJson = serde_json::from_str(&reply[start..=end])
+        .map_err(|e| format!("解析备忘 JSON 失败: {}", e))?;
 
     // 校验 due 格式，非法则丢弃（不影响其他字段）
-    if let Some(due) = &triggers.due {
+    if let Some(due) = &parsed.triggers.due {
         if chrono::NaiveDate::parse_from_str(due, "%Y-%m-%d").is_err() {
-            triggers.due = None;
+            parsed.triggers.due = None;
         }
     }
     // 清理空串和无效关键词
-    triggers.person = triggers.person.filter(|p| !p.trim().is_empty());
-    triggers.channel = triggers.channel.filter(|c| !c.trim().is_empty());
-    triggers.keywords.retain(|k| !k.trim().is_empty());
-    triggers.keywords.truncate(3);
+    parsed.triggers.person = parsed.triggers.person.filter(|p| !p.trim().is_empty());
+    parsed.triggers.channel = parsed.triggers.channel.filter(|c| !c.trim().is_empty());
+    parsed.triggers.keywords.retain(|k| !k.trim().is_empty());
+    parsed.triggers.keywords.truncate(3);
+    // refined 与原文逐字相同则视为无重构（省一次无意义写回的判断留给调用方，这里只归一化）
+    parsed.refined = parsed.refined.map(|r| r.trim().to_string());
 
-    Ok(triggers)
+    Ok(ParsedMemo {
+        refined: parsed.refined,
+        triggers: parsed.triggers,
+    })
+}
+
+#[derive(Debug, Deserialize)]
+struct ParsedMemoJson {
+    #[serde(default)]
+    refined: Option<String>,
+    #[serde(flatten)]
+    triggers: db::IntentTriggers,
 }
 
 /// 日报执行（含降级）：CC 开启走 agent，agent 失败就地回退场景模型版——

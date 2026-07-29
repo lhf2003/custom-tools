@@ -61,6 +61,29 @@ pub struct IntentTriggers {
     pub keywords: Vec<String>,
 }
 
+/// 一条备忘（memos 表——备忘唯一真源；suggestions 表只装系统建议/通知流）
+///
+/// 设计裁决（2026-07-29 拷问定稿）：
+/// - 双文本：content_raw 原文保真永不动；content 是 LLM 重构的展示文本
+///   （剥时间词/「提醒我」元话、保留人物，解析失败兜底=原文）
+/// - 三态状态机：pending → done（完成）/ dismissed（忽略），acted_at 记处置时间
+/// - 7 天未动降级是查询时逻辑（created_at 判断），不进状态机
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Memo {
+    pub id: i64,
+    pub content: String,
+    pub content_raw: String,
+    pub status: String,
+    pub acted_at: Option<i64>,
+    /// 到期日 YYYY-MM-DD（到期前不进主动面）
+    pub due_date: Option<String>,
+    /// 触发器 JSON（IntentTriggers），LLM 异步写回
+    pub trigger_data: Option<String>,
+    /// 上次情境触发时间（同日不重复弹）
+    pub last_triggered_at: Option<i64>,
+    pub created_at: i64,
+}
+
 /// 建议动作负载：批量启动应用（工作套装）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LaunchAppsPayload {
@@ -164,6 +187,29 @@ pub fn init_tables(conn: &Connection) -> rusqlite::Result<()> {
         conn,
         "ALTER TABLE suggestions ADD COLUMN last_triggered_at INTEGER",
     )?;
+
+    // memos：备忘唯一真源（2026-07-29 重构，从 suggestions.intent 分家）
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS memos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            content TEXT NOT NULL,
+            content_raw TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending', 'done', 'dismissed')),
+            acted_at INTEGER,
+            due_date TEXT,
+            trigger_data TEXT,
+            last_triggered_at INTEGER,
+            created_at INTEGER NOT NULL
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_memos_status ON memos(status, created_at DESC)",
+        [],
+    )?;
+    // 分家迁移：suggestions 回归纯系统建议，存量 intent 直接删（裁决：不迁移）
+    conn.execute("DELETE FROM suggestions WHERE suggestion_type = 'intent'", [])?;
     // Migrations: 场景联动投票关联（B3）
     add_column_if_missing(
         conn,
@@ -366,60 +412,110 @@ pub fn create_suggestion(
     })
 }
 
-/// 创建用户意图（「记」入口）。触发器随后由 LLM 异步解析写回。
-pub fn create_intent(conn: &Connection, text: &str, now: i64) -> rusqlite::Result<Suggestion> {
-    let title: String = text.chars().take(40).collect();
-    conn.execute(
-        "INSERT INTO suggestions (suggestion_type, title, body, source, created_at)
-         VALUES ('intent', ?1, ?2, 'user', ?3)",
-        params![title, text, now],
-    )?;
-    Ok(Suggestion {
-        id: conn.last_insert_rowid(),
-        suggestion_type: "intent".to_string(),
-        title,
-        body: Some(text.to_string()),
-        action_payload: None,
-        status: "pending".to_string(),
-        created_at: now,
-        acted_at: None,
-        source: Some("user".to_string()),
-        trigger_data: None,
-        due_date: None,
-        last_triggered_at: None,
+// ── memos（备忘唯一真源）─────────────────────────────────────
+
+const MEMO_COLS: &str =
+    "id, content, content_raw, status, acted_at, due_date, trigger_data, last_triggered_at, created_at";
+
+fn map_memo(row: &rusqlite::Row) -> rusqlite::Result<Memo> {
+    Ok(Memo {
+        id: row.get(0)?,
+        content: row.get(1)?,
+        content_raw: row.get(2)?,
+        status: row.get(3)?,
+        acted_at: row.get(4)?,
+        due_date: row.get(5)?,
+        trigger_data: row.get(6)?,
+        last_triggered_at: row.get(7)?,
+        created_at: row.get(8)?,
     })
 }
 
-/// LLM 解析完成后写回触发器
-pub fn update_intent_triggers(
+/// 创建备忘：content 先等于原文，LLM 解析成功后写回重构文本（失败兜底=原文）
+pub fn create_memo(conn: &Connection, raw: &str, now: i64) -> rusqlite::Result<Memo> {
+    conn.execute(
+        "INSERT INTO memos (content, content_raw, created_at) VALUES (?1, ?2, ?3)",
+        params![raw, raw, now],
+    )?;
+    Ok(Memo {
+        id: conn.last_insert_rowid(),
+        content: raw.to_string(),
+        content_raw: raw.to_string(),
+        status: "pending".to_string(),
+        acted_at: None,
+        due_date: None,
+        trigger_data: None,
+        last_triggered_at: None,
+        created_at: now,
+    })
+}
+
+/// LLM 解析完成写回：重构正文 + 触发器 + 到期日（一次写全，避免半更新状态）
+pub fn update_memo_parse(
     conn: &Connection,
     id: i64,
-    trigger_data: &str,
+    content: &str,
+    trigger_data: Option<&str>,
     due_date: Option<&str>,
 ) -> rusqlite::Result<()> {
     conn.execute(
-        "UPDATE suggestions SET trigger_data = ?2, due_date = ?3 WHERE id = ?1",
-        params![id, trigger_data, due_date],
+        "UPDATE memos SET content = ?2, trigger_data = ?3, due_date = ?4 WHERE id = ?1",
+        params![id, content, trigger_data, due_date],
     )?;
     Ok(())
 }
 
-/// 待触发的用户意图（情境匹配用）
-pub fn pending_intents(conn: &Connection) -> rusqlite::Result<Vec<Suggestion>> {
+/// 处置备忘（done / dismissed / 回 pending），acted_at 仅处置态落时间
+pub fn set_memo_status(conn: &Connection, id: i64, status: &str, now: i64) -> rusqlite::Result<()> {
+    let acted: Option<i64> = if status == "pending" { None } else { Some(now) };
+    conn.execute(
+        "UPDATE memos SET status = ?2, acted_at = ?3 WHERE id = ?1",
+        params![id, status, acted],
+    )?;
+    Ok(())
+}
+
+/// 主动面用的待处理备忘（晨间汇总/情境触发/list_memos 工具共用）。
+/// 7 天降级与 due 过滤在调用方做（与展示面「全部 pending」口径区分）
+pub fn list_memos_active(conn: &Connection) -> rusqlite::Result<Vec<Memo>> {
     let sql = format!(
-        "SELECT {} FROM suggestions
-         WHERE suggestion_type = 'intent' AND source = 'user' AND status = 'pending'
-         ORDER BY created_at ASC",
-        SUGGESTION_COLS
+        "SELECT {} FROM memos WHERE status = 'pending' ORDER BY created_at ASC",
+        MEMO_COLS
     );
     let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map([], map_suggestion)?;
+    let rows = stmt.query_map([], map_memo)?;
     rows.collect()
 }
 
-pub fn touch_triggered(conn: &Connection, id: i64, now: i64) -> rusqlite::Result<()> {
+/// 笔记视图用：pending 在前（旧→新），已处置在后（新处置在前），封顶 limit
+pub fn list_memos_for_view(conn: &Connection, limit: i64) -> rusqlite::Result<Vec<Memo>> {
+    let sql = format!(
+        "SELECT {} FROM memos
+         ORDER BY CASE WHEN status = 'pending' THEN 0 ELSE 1 END,
+                  CASE WHEN status = 'pending' THEN created_at ELSE -created_at END
+         LIMIT ?1",
+        MEMO_COLS
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params![limit], map_memo)?;
+    rows.collect()
+}
+
+/// 触发器尚未解析的 pending 备忘（重试补解析用）
+pub fn list_memos_unparsed(conn: &Connection, limit: i64) -> rusqlite::Result<Vec<Memo>> {
+    let sql = format!(
+        "SELECT {} FROM memos WHERE status = 'pending' AND trigger_data IS NULL
+         ORDER BY created_at ASC LIMIT ?1",
+        MEMO_COLS
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params![limit], map_memo)?;
+    rows.collect()
+}
+
+pub fn touch_memo_triggered(conn: &Connection, id: i64, now: i64) -> rusqlite::Result<()> {
     conn.execute(
-        "UPDATE suggestions SET last_triggered_at = ?2 WHERE id = ?1",
+        "UPDATE memos SET last_triggered_at = ?2 WHERE id = ?1",
         params![id, now],
     )?;
     Ok(())
@@ -875,18 +971,6 @@ pub fn list_suggestions(
     let param_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(&param_refs[..], map_suggestion)?;
-    rows.collect()
-}
-
-/// 列出用户意图（SQL 层过滤 suggestion_type，limit 语义准确）
-pub fn list_intents(conn: &Connection, limit: i64) -> rusqlite::Result<Vec<Suggestion>> {
-    let sql = format!(
-        "SELECT {} FROM suggestions WHERE suggestion_type = 'intent'
-         ORDER BY created_at DESC LIMIT ?1",
-        SUGGESTION_COLS
-    );
-    let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(params![limit], map_suggestion)?;
     rows.collect()
 }
 

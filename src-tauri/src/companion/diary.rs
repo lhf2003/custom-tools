@@ -114,14 +114,14 @@ async fn run_focus(app_handle: &AppHandle, db_path: &PathBuf) -> Result<String, 
             .join("\n")
     };
 
-    let intents = db::pending_intents(&conn).unwrap_or_default();
+    let intents = db::list_memos_active(&conn).unwrap_or_default();
     let intents_text = if intents.is_empty() {
         "（没有活跃备忘）".to_string()
     } else {
         intents
             .iter()
             .take(8)
-            .map(|i| format!("- {}", i.title))
+            .map(|i| format!("- {}", i.content))
             .collect::<Vec<_>>()
             .join("\n")
     };

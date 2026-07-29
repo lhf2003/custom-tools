@@ -62,6 +62,11 @@ pub fn tool_definitions() -> Vec<ToolDef> {
             input_schema: json!({ "type": "object", "properties": {} }),
         },
         ToolDef {
+            name: "list_memos",
+            description: "获取备忘清单：用户在启动器用「记 xxx」暂存的待办事项，只含仍待处理的——\n已完成/已忽略的不会出现。回答「我有什么备忘/待办」前必须调用，凭记忆回答会拿出已完成的旧项。".to_string(),
+            input_schema: json!({ "type": "object", "properties": {} }),
+        },
+        ToolDef {
             name: "get_memory_facts",
             description: "获取关于用户的持久事实记忆（同事称呼、项目、偏好等）。写日报或给建议前应该参考，让内容更贴合用户本人。".to_string(),
             input_schema: json!({ "type": "object", "properties": {} }),
@@ -231,6 +236,7 @@ pub fn execute_tool(
         "get_activity_summary" => tool_activity_summary(db_path, args),
         "search_clipboard" => tool_search_clipboard(db_path, args),
         "get_habit_patterns" => tool_habit_patterns(db_path),
+        "list_memos" => tool_list_memos(db_path),
         "get_memory_facts" => tool_memory_facts(db_path),
         "remember_fact" => tool_remember_fact(db_path, args),
         "forget_fact" => tool_forget_fact(db_path, args),
@@ -335,8 +341,27 @@ fn tool_habit_patterns(db_path: &Path) -> Result<String, String> {
     serde_json::to_string_pretty(&active).map_err(|e| e.to_string())
 }
 
-fn tool_memory_facts(db_path: &Path) -> Result<String, String> {
+/// 备忘清单：与建议中心弹窗、晨间汇总同一数据源（memos 表，唯一真源），
+/// 天然排除已处置项（done/dismissed 不进结果）
+fn tool_list_memos(db_path: &Path) -> Result<String, String> {
     let conn = open_db(db_path)?;
+    let memos = db::list_memos_active(&conn).map_err(|e| format!("查询备忘失败: {}", e))?;
+    if memos.is_empty() {
+        return Ok("当前没有待处理的备忘".to_string());
+    }
+    let items: Vec<Value> = memos
+        .iter()
+        .map(|m| {
+            json!({
+                "content": m.content,
+                "due_date": m.due_date,
+            })
+        })
+        .collect();
+    serde_json::to_string_pretty(&items).map_err(|e| e.to_string())
+}
+
+fn tool_memory_facts(db_path: &Path) -> Result<String, String> {    let conn = open_db(db_path)?;
     let facts = db::list_memory_facts(&conn, 30).map_err(|e| format!("查询记忆失败: {}", e))?;
 
     if facts.is_empty() {

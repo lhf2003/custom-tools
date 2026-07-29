@@ -1,3 +1,4 @@
+pub mod a2ui;
 pub mod agent;
 pub mod analyzer;
 pub mod chat;
@@ -175,12 +176,12 @@ fn fmt_date(ts: i64) -> String {
         .unwrap_or_default()
 }
 
-/// 意图是否处于活跃期（未过期、已到 due 日期）
-fn intent_is_active(intent: &db::Suggestion, today: &str, now: i64) -> bool {
-    if intent.created_at + INTENT_EXPIRE_SECS < now {
+/// 备忘是否处于活跃期（未过期、已到 due 日期）
+fn memo_is_active(memo: &db::Memo, today: &str, now: i64) -> bool {
+    if memo.created_at + INTENT_EXPIRE_SECS < now {
         return false;
     }
-    if let Some(due) = &intent.due_date {
+    if let Some(due) = &memo.due_date {
         if due.as_str() > today {
             return false;
         }
@@ -420,12 +421,12 @@ fn check_morning_digest(
         return;
     }
 
-    let intents = db::pending_intents(conn).unwrap_or_default();
-    let active: Vec<&db::Suggestion> = intents
+    let memos = db::list_memos_active(conn).unwrap_or_default();
+    let active: Vec<&db::Memo> = memos
         .iter()
-        .filter(|i| intent_is_active(i, &today, now))
+        .filter(|m| memo_is_active(m, &today, now))
         .collect();
-    // 没有活跃意图时不消耗今日额度——稍后记下第一条的当天仍能收到汇总
+    // 没有活跃备忘时不消耗今日额度——稍后记下第一条的当天仍能收到汇总
     if active.is_empty() {
         return;
     }
@@ -433,7 +434,7 @@ fn check_morning_digest(
     *last_digest_date = today.clone();
     analyzer::save_setting(db_path, "companion_last_digest_date", &today);
 
-    let titles: Vec<String> = active.iter().take(3).map(|i| i.title.clone()).collect();
+    let titles: Vec<String> = active.iter().take(3).map(|m| m.content.clone()).collect();
     let suffix = if active.len() > 3 {
         format!("\n…以及另外 {} 条", active.len() - 3)
     } else {
@@ -466,23 +467,18 @@ fn check_morning_digest(
     );
 }
 
-/// 触发器解析重试：LLM 暂时不可达（如断网/VPN 未连）导致解析失败的意图，
+/// 触发器解析重试：LLM 暂时不可达（如断网/VPN 未连）导致解析失败的备忘，
 /// 每小时补试一次（每次最多 2 条，避免风暴）
 fn retry_intent_parse(conn: &Connection, app_handle: &AppHandle, db_path: &PathBuf) {
-    let pending: Vec<db::Suggestion> = db::pending_intents(conn)
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|i| i.trigger_data.is_none())
-        .take(2)
-        .collect();
+    let pending = db::list_memos_unparsed(conn, 2).unwrap_or_default();
 
-    for intent in pending {
-        let text = intent.body.clone().unwrap_or_else(|| intent.title.clone());
+    for memo in pending {
+        let text = memo.content_raw.clone();
         let app = app_handle.clone();
         let db = db_path.clone();
         tauri::async_runtime::spawn(async move {
-            if let Err(e) = analyzer::parse_and_store_triggers(&app, &db, intent.id, &text).await {
-                log::warn!("意图 #{} 重试解析仍失败: {}", intent.id, e);
+            if let Err(e) = analyzer::parse_and_store_triggers(&app, &db, memo.id, &text).await {
+                log::warn!("备忘 #{} 重试解析仍失败: {}", memo.id, e);
             }
         });
     }
@@ -491,8 +487,8 @@ fn retry_intent_parse(conn: &Connection, app_handle: &AppHandle, db_path: &PathB
 /// 情境触发匹配：窗口标题命中关键词（②）或 IM 窗口命中联系人（③）
 /// 一次事件最多弹一条，同日同条不重复
 fn check_intent_triggers(conn: &Connection, app_handle: &AppHandle, event: &ForegroundEvent) {
-    let intents = db::pending_intents(conn).unwrap_or_default();
-    if intents.is_empty() {
+    let memos = db::list_memos_active(conn).unwrap_or_default();
+    if memos.is_empty() {
         return;
     }
 
@@ -501,19 +497,19 @@ fn check_intent_triggers(conn: &Connection, app_handle: &AppHandle, event: &Fore
     let proc_lower = event.process_name.to_lowercase();
     let is_im = IM_PROCESS_HINTS.iter().any(|h| proc_lower.contains(h));
 
-    for intent in &intents {
-        if !intent_is_active(intent, &today, event.timestamp) {
+    for memo in &memos {
+        if !memo_is_active(memo, &today, event.timestamp) {
             continue;
         }
         // 同日已触发过不重复
-        if intent
+        if memo
             .last_triggered_at
             .map(|t| fmt_date(t) == today)
             .unwrap_or(false)
         {
             continue;
         }
-        let Some(trigger_data) = &intent.trigger_data else {
+        let Some(trigger_data) = &memo.trigger_data else {
             continue;
         };
         let Ok(triggers) = serde_json::from_str::<db::IntentTriggers>(trigger_data) else {
@@ -535,16 +531,25 @@ fn check_intent_triggers(conn: &Connection, app_handle: &AppHandle, event: &Fore
 
         if keyword_hit || contact_hit {
             log::info!(
-                "意图 #{} 情境触发（{}）",
-                intent.id,
+                "备忘 #{} 情境触发（{}）",
+                memo.id,
                 if keyword_hit {
                     "关键词"
                 } else {
                     "联系人/渠道"
                 }
             );
-            suggester::show_existing_suggestion(app_handle, intent);
-            let _ = db::touch_triggered(conn, intent.id, event.timestamp);
+            // 弹窗走系统建议流（intent_reminder）：忽略弹窗 ≠ 处置备忘，
+            // memos 状态只有用户在笔记视图明确勾选才变
+            let _ = suggester::push_suggestion(
+                conn,
+                app_handle,
+                "intent_reminder",
+                &memo.content,
+                None,
+                None,
+            );
+            let _ = db::touch_memo_triggered(conn, memo.id, event.timestamp);
             break;
         }
     }
