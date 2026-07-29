@@ -33,6 +33,19 @@ pub struct JarvisSceneChatState {
     pub queue: Arc<Mutex<VecDeque<(i64, String)>>>,
 }
 
+/// 在飞标记复位守卫：任务 panic 或提前返回都保证释放 FIFO。
+/// 没有它，一次异常会把后续所有消息永久滞留在队列里（表现为
+/// 「第一条回复正常，之后既不回显也不落库」）。
+struct FlightReset(Arc<Mutex<bool>>);
+
+impl Drop for FlightReset {
+    fn drop(&mut self) {
+        if let Ok(mut f) = self.0.lock() {
+            *f = false;
+        }
+    }
+}
+
 /// 发送一条聊天消息（场景模型回退通道）。
 /// 事件契约与 agent 通道一致：jarvis:start / jarvis:status（工具活动）→
 /// jarvis:chunk（全文）→ jarvis:done（成本）。
@@ -71,6 +84,8 @@ pub async fn jarvis_chat_send_scene(
     let app = app_handle.clone();
     let db_path = db_state.0.clone();
     tauri::async_runtime::spawn(async move {
+        // 守卫在任务结束（含 panic 展开）时统一复位 in_flight
+        let _flight_reset = FlightReset(state.in_flight.clone());
         let mut current = (session_id, text);
         loop {
             if let Err(e) = run_scene_chat(&app, &db_path, current.0, current.1).await {
@@ -85,9 +100,6 @@ pub async fn jarvis_chat_send_scene(
                 Some(m) => current = m,
                 None => break,
             }
-        }
-        if let Ok(mut f) = state.in_flight.lock() {
-            *f = false;
         }
     });
     Ok(())

@@ -9,6 +9,7 @@ import {
   Check,
   Sparkles,
   Languages,
+  History,
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { useLlmProviderStore } from '@/stores/llmProviderStore';
@@ -31,6 +32,32 @@ interface ChatHistoryMessage {
   id: number;
   role: 'user' | 'assistant';
   content: string;
+}
+
+interface ChatSessionSummary {
+  id: number;
+  preview: string;
+  updated_at: string;
+}
+
+/** 摘要单行化并截断（历史列表条目用） */
+function previewText(text: string): string {
+  const oneLine = text.replace(/\s+/g, ' ').trim();
+  return oneLine.length > 60 ? oneLine.slice(0, 60) + '…' : oneLine;
+}
+
+/** chat 表时间列为本地时间（datetime('now','localtime')），按本地解析转相对时间 */
+function formatRelativeTime(localTime: string): string {
+  const t = new Date(localTime.replace(' ', 'T'));
+  if (Number.isNaN(t.getTime())) return '';
+  const diffMin = Math.floor((Date.now() - t.getTime()) / 60000);
+  if (diffMin < 1) return '刚刚';
+  if (diffMin < 60) return `${diffMin} 分钟前`;
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return `${diffHour} 小时前`;
+  const diffDay = Math.floor(diffHour / 24);
+  if (diffDay < 7) return `${diffDay} 天前`;
+  return `${t.getMonth() + 1}月${t.getDate()}日`;
 }
 
 // ─────────────────────────────────────────────
@@ -137,6 +164,13 @@ export function ChatView() {
   const [sessionId, setSessionId] = useState<number | null>(null);
   // 贾维斯 agent 的工具活动提示（「贾维斯在翻数据…」）
   const [agentStatus, setAgentStatus] = useState<string | null>(null);
+  // 会话历史浮层
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyVisible, setHistoryVisible] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
+  const [historyIdx, setHistoryIdx] = useState(0);
+  const [historyPos, setHistoryPos] = useState({ top: 0, right: 0 });
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const streamTextRef = useRef('');
@@ -145,6 +179,8 @@ export function ChatView() {
   const sessionIdRef = useRef<number | null>(null);
   // 用户是否贴在内容区底部（决定流式输出时是否自动跟随滚动）
   const stickToBottomRef = useRef(true);
+  const historyBtnRef = useRef<HTMLButtonElement>(null);
+  const historyPanelRef = useRef<HTMLDivElement>(null);
 
   // Consume companion prefill: wrap raw error content into an analysis prompt
   useEffect(() => {
@@ -232,11 +268,10 @@ export function ChatView() {
     const setupListeners = async () => {
       const u1 = await listen<string>('llm:chunk', (event) => {
         if (isCancelledRef.current) return;
-        setStreamText((prev) => {
-          const next = prev + event.payload;
-          streamTextRef.current = next;
-          return next;
-        });
+        // ref 同步更新（真值源）：state updater 是异步的，chunk 与 done
+        // 背靠背到达时 done 会读到旧 ref，把回复弄丢（空消息+不落库）
+        streamTextRef.current += event.payload;
+        setStreamText(streamTextRef.current);
       });
       const u2 = await listen<void>('llm:done', async () => {
         if (isCancelledRef.current) {
@@ -279,11 +314,10 @@ export function ChatView() {
       // 贾维斯 agent 通道（claude CLI 流式协议）
       const u4 = await listen<string>('jarvis:chunk', (event) => {
         if (isCancelledRef.current) return;
-        setStreamText((prev) => {
-          const next = prev + event.payload;
-          streamTextRef.current = next;
-          return next;
-        });
+        // 同 llm:chunk：ref 必须同步累加，否则 done 读不到（场景回退通道
+        // 非流式，chunk 与 done 仅差 1ms，必现此坑）
+        streamTextRef.current += event.payload;
+        setStreamText(streamTextRef.current);
       });
       const u5 = await listen<number>('jarvis:done', async () => {
         if (isCancelledRef.current) {
@@ -353,6 +387,9 @@ export function ChatView() {
   const handleSend = useCallback(async () => {
     // 贾维斯通道在飞时允许继续发送（后端 FIFO 排队）；工具型模式保持单飞拦截
     if (!input.trim() || (isLoading && mode !== 'chat')) return;
+    // 复位取消标记：清空/取消/切换会话会置 true，若不复位，
+    // 本轮回复的 chunk 会被监听器全部丢弃，最终消息既不回显也不入库
+    isCancelledRef.current = false;
 
     const userMessage: ChatMessage = { role: 'user', content: input.trim() };
     const systemMessage: ChatMessage = {
@@ -431,8 +468,9 @@ export function ChatView() {
   // ── Restore session when mode changes ────────────────────────────
   useEffect(() => {
     const restoreModeSession = async () => {
-      // 切换会话后内容整体替换，重新贴底
+      // 切换会话后内容整体替换，重新贴底；历史浮层随模式切换关闭
       stickToBottomRef.current = true;
+      setHistoryOpen(false);
       try {
         const latest = await invoke<number | null>('get_latest_session', { mode });
         if (latest !== null) {
@@ -496,8 +534,9 @@ export function ChatView() {
     });
   }, [messages, streamText]);
 
-  // ── Clear conversation — create new session ────────────────────────
-  const handleClear = useCallback(async () => {
+  // ── New session ──────────────────────────────────────────────────
+  const handleNewSession = useCallback(async () => {
+    setHistoryOpen(false);
     isCancelledRef.current = true;
     setMessages([]);
     setStreamText('');
@@ -525,6 +564,145 @@ export function ChatView() {
       console.error('Failed to create new session:', e);
     }
   }, [mode]);
+
+  // ── Session history dropdown ──────────────────────────────────────
+  const toggleHistory = useCallback(async () => {
+    if (historyOpen) {
+      setHistoryOpen(false);
+      return;
+    }
+    const rect = historyBtnRef.current?.getBoundingClientRect();
+    if (rect) {
+      setHistoryPos({
+        top: rect.bottom + 4,
+        right: window.innerWidth - rect.right,
+      });
+    }
+    setHistoryOpen(true);
+    setHistoryIdx(0);
+    setHistoryLoading(true);
+    try {
+      const list = await invoke<ChatSessionSummary[]>('list_chat_sessions', { mode });
+      setSessions(list);
+    } catch (e) {
+      console.error('Failed to list sessions:', e);
+      setSessions([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [historyOpen, mode]);
+
+  const switchSession = useCallback(
+    async (id: number) => {
+      if (id === sessionIdRef.current) {
+        setHistoryOpen(false);
+        return;
+      }
+      setHistoryOpen(false);
+      // 停掉在飞流式，整体替换内容
+      isCancelledRef.current = true;
+      setIsLoading(false);
+      setStreamText('');
+      streamTextRef.current = '';
+      setAgentStatus(null);
+      setError(null);
+      stickToBottomRef.current = true;
+      try {
+        const msgs = await invoke<ChatHistoryMessage[]>('get_session_messages', {
+          sessionId: id,
+        });
+        const systemMsg: ChatMessage = { role: 'system', content: MODES[mode].system };
+        setMessages([
+          systemMsg,
+          ...msgs.map((m) => ({ role: m.role, content: m.content })),
+        ]);
+        setHasResponse(msgs.length > 0);
+        setSessionId(id);
+        // 贾维斯 agent 上下文无法随历史会话复原，按新话题重置
+        if (mode === 'chat') {
+          await invoke('jarvis_chat_reset').catch(() => {});
+        }
+      } catch (e) {
+        console.error('Failed to switch session:', e);
+        setError('切换会话失败');
+      }
+    },
+    [mode],
+  );
+
+  const deleteSession = useCallback(
+    async (id: number) => {
+      // 乐观移除，失败仅记日志（下次打开浮层会重新拉取对齐）
+      setSessions((prev) => prev.filter((s) => s.id !== id));
+      setHistoryIdx(0);
+      try {
+        await invoke('delete_chat_session', { sessionId: id });
+      } catch (e) {
+        console.error('Failed to delete session:', e);
+      }
+      if (id === sessionIdRef.current) {
+        handleNewSession();
+      }
+    },
+    [handleNewSession],
+  );
+
+  const handleHistoryKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setHistoryOpen(false);
+        return;
+      }
+      if (sessions.length === 0) return;
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setHistoryIdx((i) => Math.min(i + 1, sessions.length - 1));
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setHistoryIdx((i) => Math.max(i - 1, 0));
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        const s = sessions[historyIdx];
+        if (s) switchSession(s.id);
+      }
+    },
+    [sessions, historyIdx, switchSession],
+  );
+
+  // 浮层开合动效（reduced-motion 由 motion-reduce 变体降级）
+  useEffect(() => {
+    if (historyOpen) {
+      const raf = requestAnimationFrame(() => setHistoryVisible(true));
+      return () => cancelAnimationFrame(raf);
+    }
+    setHistoryVisible(false);
+  }, [historyOpen]);
+
+  // 打开后聚焦面板以接收键盘导航
+  useEffect(() => {
+    if (historyOpen && !historyLoading) historyPanelRef.current?.focus();
+  }, [historyOpen, historyLoading]);
+
+  // 点击浮层外部关闭
+  useEffect(() => {
+    if (!historyOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (historyPanelRef.current?.contains(t) || historyBtnRef.current?.contains(t)) return;
+      setHistoryOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [historyOpen]);
+
+  // 键盘导航时保持高亮条目可见
+  useEffect(() => {
+    if (!historyOpen) return;
+    historyPanelRef.current
+      ?.querySelectorAll('li')
+      [historyIdx]?.scrollIntoView({ block: 'nearest' });
+  }, [historyIdx, historyOpen]);
 
   // ── Keyboard handler ──────────────────────────────────────────────
   const handleKeyDown = useCallback(
@@ -647,13 +825,25 @@ export function ChatView() {
                 </button>
               )}
               {!isLoading && (
-                <button
-                  onClick={handleClear}
-                  className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors cursor-pointer"
-                  aria-label="清空对话"
-                >
-                  清空
-                </button>
+                <>
+                  <button
+                    onClick={handleNewSession}
+                    className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors cursor-pointer"
+                    aria-label="开启新会话"
+                  >
+                    新会话
+                  </button>
+                  <button
+                    ref={historyBtnRef}
+                    onClick={toggleHistory}
+                    className={`flex items-center transition-colors cursor-pointer ${
+                      historyOpen ? 'text-zinc-300' : 'text-zinc-500 hover:text-zinc-300'
+                    }`}
+                    aria-label="会话历史"
+                  >
+                    <History className="w-3.5 h-3.5" />
+                  </button>
+                </>
               )}
             </div>
           </div>
@@ -729,6 +919,67 @@ export function ChatView() {
           </div>
         </div>
       </div>
+
+      {/* ── Session history dropdown (fixed，绕开外层 overflow-hidden 裁剪) ── */}
+      {historyOpen && (
+        <div
+          ref={historyPanelRef}
+          tabIndex={-1}
+          onKeyDown={handleHistoryKeyDown}
+          className={`fixed z-50 w-80 max-h-80 overflow-y-auto rounded-lg border border-zinc-700/60 bg-zinc-800 shadow-xl shadow-black/40 outline-none transition-all duration-150 ease-out motion-reduce:transition-none ${
+            historyVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-1'
+          }`}
+          style={{ top: historyPos.top, right: historyPos.right }}
+        >
+          {historyLoading ? (
+            <div className="p-3 space-y-2">
+              <div className="h-4 rounded bg-zinc-700/60 animate-pulse" />
+              <div className="h-4 rounded bg-zinc-700/40 animate-pulse w-3/4" />
+            </div>
+          ) : sessions.length === 0 ? (
+            <div className="px-3 py-4 text-center text-xs text-zinc-500">
+              还没有历史会话
+            </div>
+          ) : (
+            <ul className="py-1">
+              {sessions.map((s, i) => (
+                <li key={s.id}>
+                  <div
+                    role="button"
+                    tabIndex={-1}
+                    onClick={() => switchSession(s.id)}
+                    onMouseEnter={() => setHistoryIdx(i)}
+                    className={`group relative flex items-center gap-2 px-3 py-2 cursor-pointer ${
+                      i === historyIdx ? 'bg-white/5' : ''
+                    }`}
+                  >
+                    {s.id === sessionId && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 shrink-0" />
+                    )}
+                    <span className="flex-1 truncate text-xs text-zinc-300">
+                      {previewText(s.preview)}
+                    </span>
+                    <span className="shrink-0 text-[10px] text-zinc-500 group-hover:invisible">
+                      {formatRelativeTime(s.updated_at)}
+                    </span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteSession(s.id);
+                      }}
+                      className="absolute right-2 hidden group-hover:flex w-5 h-5 items-center justify-center rounded text-zinc-500 hover:text-red-400 hover:bg-white/10 cursor-pointer"
+                      aria-label="删除会话"
+                      tabIndex={-1}
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   );
 }

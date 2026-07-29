@@ -3,6 +3,16 @@ use tauri::Emitter;
 
 pub mod observe;
 
+/// LLM HTTP 客户端：必须显式带超时——reqwest 默认无超时，
+/// 一次挂起的请求会把场景聊天 FIFO 的 in_flight 永久卡住（后续消息全部滞留队列）
+fn http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
+
 /// 非流式调用的计量回执：content 之外带回 token 用量（观测登记用）
 #[derive(Debug, Clone)]
 pub struct LlmReply {
@@ -146,7 +156,7 @@ pub async fn call_llm_with_tools(
         format!("{}/chat/completions", trimmed)
     };
 
-    let client = reqwest::Client::new();
+    let client = http_client();
 
     let mut body = serde_json::json!({
         "model": model,
@@ -368,7 +378,7 @@ pub async fn call_llm(
         format!("{}/chat/completions", trimmed)
     };
 
-    let client = reqwest::Client::new();
+    let client = http_client();
 
     let mut req_builder = if is_ollama_native {
         // Ollama 使用原生格式
@@ -484,7 +494,7 @@ pub async fn call_llm_stream(
         format!("{}/chat/completions", trimmed)
     };
 
-    let client = reqwest::Client::new();
+    let client = http_client();
 
     let req_builder = if is_ollama_native {
         // Ollama 使用原生格式

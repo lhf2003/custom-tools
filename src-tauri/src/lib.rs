@@ -458,6 +458,8 @@ pub fn run() {
             commands::chat::save_chat_message,
             commands::chat::get_session_messages,
             commands::chat::get_latest_session,
+            commands::chat::list_chat_sessions,
+            commands::chat::delete_chat_session,
             // LLM Provider commands
             llm_provider::commands::get_llm_providers,
             llm_provider::commands::create_llm_provider,
