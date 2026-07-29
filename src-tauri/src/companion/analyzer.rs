@@ -110,17 +110,7 @@ pub fn run_scheduler(app_handle: AppHandle, db_path: PathBuf, flags: Arc<RwLock<
             let cc_enabled = super::claude_code_enabled(&app_handle);
             // agent 调用是阻塞式 subprocess，放独立线程而非 async runtime
             std::thread::spawn(move || {
-                // Claude Code 开启时跑 agent 日报；未开启回退场景模型版日报
-                let result = if cc_enabled {
-                    super::run_agent_with_settings(&app, &db, &date)
-                } else {
-                    match crate::notes::get_default_notes_dir() {
-                        Ok(notes_dir) => tauri::async_runtime::block_on(run_scene_report(
-                            &app, &db, &notes_dir, &date,
-                        )),
-                        Err(e) => Err(format!("获取笔记目录失败: {}", e)),
-                    }
-                };
+                let result = run_report_with_fallback(&app, &db, &date, cc_enabled);
                 match result {
                     Ok(msg) => {
                         // 成功判定：笔记真的落盘，或明确「当日无数据」（无需重试的终态）
@@ -222,12 +212,7 @@ fn maybe_backfill_report(
     let date = yesterday.clone();
     let cc_enabled = super::claude_code_enabled(app_handle);
     std::thread::spawn(move || {
-        // Claude Code 开启 → agent 补跑；未开启 → 场景模型版补跑
-        let result = if cc_enabled {
-            super::run_agent_with_settings(&app, &db, &date)
-        } else {
-            tauri::async_runtime::block_on(run_scene_report(&app, &db, &notes_dir, &date))
-        };
+        let result = run_report_with_fallback(&app, &db, &date, cc_enabled);
         match result {
             Ok(msg) => {
                 log::info!("补跑日报完成: {}", msg);
@@ -995,6 +980,30 @@ pub async fn parse_intent_triggers(
     Ok(triggers)
 }
 
+/// 日报执行（含降级）：CC 开启走 agent，agent 失败就地回退场景模型版——
+/// 降级 = 质量下降（无工具、单次成文），不是当天缺报（#4）。
+fn run_report_with_fallback(
+    app: &AppHandle,
+    db: &PathBuf,
+    date: &str,
+    cc_enabled: bool,
+) -> Result<String, String> {
+    if cc_enabled {
+        match super::run_agent_with_settings(app, db, date) {
+            Ok(msg) => return Ok(msg),
+            Err(agent_err) => {
+                log::warn!("日报 agent 失败，回退场景模型版: {}", agent_err);
+            }
+        }
+    }
+    match crate::notes::get_default_notes_dir() {
+        Ok(notes_dir) => {
+            tauri::async_runtime::block_on(run_scene_report(app, db, &notes_dir, date))
+        }
+        Err(e) => Err(format!("获取笔记目录失败: {}", e)),
+    }
+}
+
 /// 场景模型版日报（Claude Code 未开启时的回退）：
 /// 数据本地预聚合后内联给模型，单次调用成文，不经 agent/MCP。
 /// 调用方需放在 blocking 线程（内部 LLM 路由与文件写入为阻塞操作）。
@@ -1146,6 +1155,57 @@ async fn run_claude_code_oneshot(
     .map_err(|e| format!("claude 线程异常: {}", e))?
 }
 
+/// 解析场景模型配置：provider + model + thinking_mode + 解密后的 api_key + 实际场景。
+/// 非陪伴场景未单独配置时回退陪伴场景配置（缺省跟随，用户可在模型设置里改绑）。
+pub(crate) fn resolve_scene_provider(
+    app_handle: &AppHandle,
+    conn: &Connection,
+    scene: Scene,
+) -> Result<
+    (
+        crate::llm_provider::models::Provider,
+        crate::llm_provider::models::Model,
+        bool,
+        String,
+        Scene,
+    ),
+    String,
+> {
+    let provider_db = LlmProviderDb;
+    let resolved = provider_db
+        .get_scene_model(conn, scene.clone())
+        .map_err(|e| format!("获取场景模型失败: {}", e))?
+        .map(|(p, m)| (p, m, scene.clone()))
+        .or_else(|| {
+            if scene == Scene::Companion {
+                return None;
+            }
+            log::info!("场景 {} 未配置模型，回退陪伴场景", scene);
+            provider_db
+                .get_scene_model(conn, Scene::Companion)
+                .ok()
+                .flatten()
+                .map(|(p, m)| (p, m, Scene::Companion))
+        });
+    let (provider, model, used_scene) = resolved.ok_or_else(|| {
+        "尚未配置 AI 模型，请先在「设置 → AI 模型」中为陪伴场景选择模型".to_string()
+    })?;
+
+    let thinking_mode = provider_db
+        .get_scene_thinking_mode(conn, used_scene.clone())
+        .unwrap_or(false);
+
+    let api_key = match &provider.api_key_encrypted {
+        Some(encrypted) if !encrypted.is_empty() => {
+            let app_data_dir = app_handle.path().app_data_dir().unwrap_or_default();
+            decrypt(encrypted, &app_data_dir).map_err(|e| format!("解密 API Key 失败: {}", e))?
+        }
+        _ => String::new(),
+    };
+
+    Ok((provider, model, thinking_mode, api_key, used_scene))
+}
+
 /// 按场景配置调用场景模型。非陪伴场景未单独配置时，
 /// 回退陪伴场景配置（缺省跟随，用户可在模型设置里改绑）。
 /// 调用结果（含 token 计量与单价估算）统一登记 llm_call_logs。
@@ -1159,37 +1219,8 @@ pub(crate) async fn call_scene_model_llm(
     let started = std::time::Instant::now();
     let conn = Connection::open(db_path).map_err(|e| format!("打开数据库失败: {}", e))?;
 
-    let provider_db = LlmProviderDb;
-    let resolved = provider_db
-        .get_scene_model(&conn, scene.clone())
-        .map_err(|e| format!("获取场景模型失败: {}", e))?
-        .map(|(p, m)| (p, m, scene.clone()))
-        .or_else(|| {
-            if scene == Scene::Companion {
-                return None;
-            }
-            log::info!("场景 {} 未配置模型，回退陪伴场景", scene);
-            provider_db
-                .get_scene_model(&conn, Scene::Companion)
-                .ok()
-                .flatten()
-                .map(|(p, m)| (p, m, Scene::Companion))
-        });
-    let (provider, model, used_scene) = resolved.ok_or_else(|| {
-        "尚未配置 AI 模型，请先在「设置 → AI 模型」中为陪伴场景选择模型".to_string()
-    })?;
-
-    let thinking_mode = provider_db
-        .get_scene_thinking_mode(&conn, used_scene.clone())
-        .unwrap_or(false);
-
-    let api_key = match &provider.api_key_encrypted {
-        Some(encrypted) if !encrypted.is_empty() => {
-            let app_data_dir = app_handle.path().app_data_dir().unwrap_or_default();
-            decrypt(encrypted, &app_data_dir).map_err(|e| format!("解密 API Key 失败: {}", e))?
-        }
-        _ => String::new(),
-    };
+    let (provider, model, thinking_mode, api_key, used_scene) =
+        resolve_scene_provider(app_handle, &conn, scene)?;
 
     let messages = vec![ChatMessage {
         role: "user".to_string(),

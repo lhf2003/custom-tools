@@ -372,6 +372,7 @@ pub fn run() {
                 let companion_state = companion::start(app.handle(), companion_db_path, flags);
                 app.manage(companion_state);
                 app.manage(companion::chat::JarvisChatChild::default());
+                app.manage(companion::scene_chat::JarvisSceneChatState::default());
             }
 
             log::info!("Application setup completed");
@@ -437,6 +438,7 @@ pub fn run() {
             commands::settings::reset_all_shortcuts,
             commands::settings::check_shortcut_conflict,
             commands::settings::toggle_auto_update,
+            commands::settings::validate_claude_cli,
             commands::settings::get_custom_scan_dirs,
             commands::settings::set_custom_scan_dirs,
             commands::system::open_external_url,
@@ -494,6 +496,7 @@ pub fn run() {
             commands::companion::set_companion_retention_days,
             commands::companion::set_companion_long_work_minutes,
             companion::chat::jarvis_chat_send,
+            companion::scene_chat::jarvis_chat_send_scene,
             companion::chat::jarvis_chat_cancel,
             companion::chat::jarvis_chat_reset,
             companion::chat::jarvis_agent_available,

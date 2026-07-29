@@ -25,6 +25,40 @@ pub struct WindowWatcher {
 
 const POLL_INTERVAL: Duration = Duration::from_secs(3);
 
+/// 脱敏占位文本（命中敏感规则时整条标题替换，不留原文片段）
+const REDACTED: &str = "(已脱敏)";
+
+/// 标题敏感关键词（内置表，四期裁决）：命中即脱敏。
+/// 覆盖密码/支付/系统凭据场景；宁宽勿窄——标题进了 DB 就会进 LLM 上下文。
+const SENSITIVE_TITLE_KEYWORDS: &[&str] = &[
+    "密码", "password", "passwd", "口令", "密钥", "secret", "凭据",
+    "银行", "网银", "bank", "支付宝", "微信支付", "转账", "验证码",
+    "用户帐户控制", "用户账户控制",
+];
+
+/// 密码管理器类进程：窗口标题（数据库名/条目名）本身就是敏感信息，整窗脱敏
+const SENSITIVE_PROCESS_KEYWORDS: &[&str] =
+    &["keepass", "1password", "bitwarden", "lastpass", "enpass"];
+
+/// 窗口标题入库前脱敏（采集源头完成，下游聚合/MCP 工具/LLM 上下文都接触不到原文）
+fn sanitize_window_title(process_name: &str, title: &str) -> String {
+    let proc_lower = process_name.to_lowercase();
+    if SENSITIVE_PROCESS_KEYWORDS
+        .iter()
+        .any(|k| proc_lower.contains(k))
+    {
+        return REDACTED.to_string();
+    }
+    let title_lower = title.to_lowercase();
+    if SENSITIVE_TITLE_KEYWORDS
+        .iter()
+        .any(|k| title_lower.contains(k))
+    {
+        return REDACTED.to_string();
+    }
+    title.to_string()
+}
+
 impl WindowWatcher {
     pub fn new(sender: Sender<ForegroundEvent>) -> Self {
         Self { sender }
@@ -64,7 +98,7 @@ fn poll_foreground() -> Option<ForegroundEvent> {
     }
 
     let process_name = get_process_name(pid).unwrap_or_else(|| "unknown".to_string());
-    let window_title = get_window_title(hwnd);
+    let window_title = sanitize_window_title(&process_name, &get_window_title(hwnd));
     let idle_secs = get_idle_secs();
 
     Some(ForegroundEvent {
@@ -189,5 +223,42 @@ fn get_idle_secs() -> u32 {
         } else {
             0
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize_window_title;
+
+    #[test]
+    fn redacts_password_manager_process() {
+        assert_eq!(
+            sanitize_window_title("KeePass.exe", "私人库.kdbx - KeePass"),
+            "(已脱敏)"
+        );
+    }
+
+    #[test]
+    fn redacts_sensitive_title() {
+        assert_eq!(
+            sanitize_window_title("chrome.exe", "修改密码 - 账号中心"),
+            "(已脱敏)"
+        );
+        assert_eq!(
+            sanitize_window_title("chrome.exe", "招商银行 - 网银登录"),
+            "(已脱敏)"
+        );
+        assert_eq!(
+            sanitize_window_title("explorer.exe", "请输入验证码"),
+            "(已脱敏)"
+        );
+    }
+
+    #[test]
+    fn keeps_normal_title() {
+        assert_eq!(
+            sanitize_window_title("Code.exe", "main.rs - custom-tools - Visual Studio Code"),
+            "main.rs - custom-tools - Visual Studio Code"
+        );
     }
 }

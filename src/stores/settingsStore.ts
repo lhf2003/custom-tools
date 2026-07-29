@@ -61,7 +61,7 @@ interface SettingsState extends AppSettings {
   testLlmConnection: () => Promise<string>;
 
   setClaudeCodeEnabled: (enabled: boolean) => Promise<void>;
-  setClaudeCodeBinPath: (path: string) => Promise<void>;
+  setClaudeCodeBinPath: (path: string) => Promise<string | undefined>;
   setClaudeCodeWorkDir: (dir: string) => Promise<void>;
 
   // Companion Actions
@@ -302,12 +302,20 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   setClaudeCodeBinPath: async (path: string) => {
+    // 保存时校验可执行（四期加固）：失败仅警告不阻断
+    let warning: string | undefined;
+    try {
+      await invoke<string>('validate_claude_cli', { path });
+    } catch (err) {
+      warning = String(err);
+    }
     try {
       await invoke('set_setting', { key: 'claude_code_bin_path', value: path });
       set({ claude_code_bin_path: path });
     } catch (err) {
       console.error('Failed to set claude_code_bin_path:', err);
     }
+    return warning;
   },
 
   setClaudeCodeWorkDir: async (dir: string) => {

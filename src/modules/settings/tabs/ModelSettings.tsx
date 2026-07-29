@@ -264,6 +264,7 @@ const SOURCE_LABELS: Record<string, string> = {
   test: '连接测试',
   diary: '情感日记',
   focus: '今日关注',
+  chat_summary: '聊天摘要',
 };
 
 type StatsRange = 'today' | 'yesterday' | 'week';
@@ -356,6 +357,7 @@ export function ModelSettings() {
     setClaudeCodeWorkDir,
   } = useSettingsStore();
   const [binPathInput, setBinPathInput] = useState(claude_code_bin_path);
+  const [binPathWarning, setBinPathWarning] = useState<string | null>(null);
   const [workDirInput, setWorkDirInput] = useState(claude_code_work_dir);
   useEffect(() => setBinPathInput(claude_code_bin_path), [claude_code_bin_path]);
   useEffect(() => setWorkDirInput(claude_code_work_dir), [claude_code_work_dir]);
@@ -997,11 +999,18 @@ export function ModelSettings() {
                   type="text"
                   value={binPathInput}
                   onChange={(e) => setBinPathInput(e.target.value)}
-                  onBlur={() => setClaudeCodeBinPath(binPathInput.trim() || 'claude')}
+                  onBlur={async () => {
+                    const warning = await setClaudeCodeBinPath(binPathInput.trim() || 'claude');
+                    setBinPathWarning(warning ?? null);
+                  }}
                   placeholder="claude"
                   className="w-full bg-zinc-800 text-white text-sm rounded-lg px-3 py-2 outline-none border border-zinc-700 focus:border-white/25 transition-colors placeholder:text-white/20"
                 />
-                <p className="text-white/30 text-xs mt-1.5">claude CLI 可执行文件路径，默认从 PATH 查找</p>
+                {binPathWarning ? (
+                  <p className="text-amber-400/80 text-xs mt-1.5">⚠ {binPathWarning}（路径已保存，但 Claude Code 功能可能不可用）</p>
+                ) : (
+                  <p className="text-white/30 text-xs mt-1.5">claude CLI 可执行文件路径，默认从 PATH 查找</p>
+                )}
               </div>
 
               <div className="px-4 py-3">

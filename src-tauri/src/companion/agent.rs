@@ -285,7 +285,31 @@ pub fn resolve_work_dir(app_handle: &AppHandle, configured: &str) -> Result<Path
 /// 检查 claude 用户配置中是否已有 companion MCP server，没有则注册。
 /// 注册是一次性副作用（写入 ~/.claude.json），之后所有 claude 会话
 /// （包括交互式）都能使用 companion 工具。
+/// 加固：注册失败（CLI 冷启动、~/.claude.json 文件锁等）重试 3 次再放弃。
 fn ensure_mcp_registered(
+    bin_path: &str,
+    exe: &Path,
+    db_path: &Path,
+    notes_dir: &Path,
+) -> Result<(), String> {
+    let mut last_err = String::new();
+    for attempt in 1..=3 {
+        match ensure_mcp_registered_once(bin_path, exe, db_path, notes_dir) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                last_err = e;
+                log::warn!("companion MCP 注册第 {} 次失败: {}", attempt, last_err);
+                if attempt < 3 {
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                }
+            }
+        }
+    }
+    Err(format!("MCP 注册重试 3 次均失败: {}", last_err))
+}
+
+/// ensure_mcp_registered 的单次尝试（list 检查 → 过期移除 → add）
+fn ensure_mcp_registered_once(
     bin_path: &str,
     exe: &Path,
     db_path: &Path,

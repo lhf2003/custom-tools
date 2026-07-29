@@ -269,6 +269,17 @@ impl Database {
             .conn
             .execute("ALTER TABLE llm_models ADD COLUMN output_price_per_m REAL", []);
 
+        // Migration: 聊天历史增量摘要（回退通道上下文组装用）——
+        // summary = 已压缩的历史摘要；summarized_up_to = 摘要覆盖到的消息 id 水位
+        let _ = self.conn.execute(
+            "ALTER TABLE chat_sessions ADD COLUMN summary TEXT NOT NULL DEFAULT ''",
+            [],
+        );
+        let _ = self.conn.execute(
+            "ALTER TABLE chat_sessions ADD COLUMN summarized_up_to INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+
         // LLM 调用观测日志：每次调用登记来源/通道/token/耗时/成本（成本面板数据源）
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS llm_call_logs (

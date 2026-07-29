@@ -326,12 +326,19 @@ export function ChatView() {
       const u7 = await listen<string>('jarvis:status', (event) => {
         if (!isCancelledRef.current) setAgentStatus(event.payload);
       });
+      // 新一轮回复开始（首条与队列续发统一信号）：复位流式状态
+      const u8 = await listen<void>('jarvis:start', () => {
+        setIsLoading(true);
+        setError(null);
+        setStreamText('');
+        streamTextRef.current = '';
+      });
 
       if (!active) {
-        u1(); u2(); u3(); u4(); u5(); u6(); u7();
+        u1(); u2(); u3(); u4(); u5(); u6(); u7(); u8();
         return;
       }
-      unlistenFns = [u1, u2, u3, u4, u5, u6, u7];
+      unlistenFns = [u1, u2, u3, u4, u5, u6, u7, u8];
     };
 
     setupListeners();
@@ -344,7 +351,8 @@ export function ChatView() {
 
   // ── Send message ──────────────────────────────────────────────────
   const handleSend = useCallback(async () => {
-    if (!input.trim() || isLoading) return;
+    // 贾维斯通道在飞时允许继续发送（后端 FIFO 排队）；工具型模式保持单飞拦截
+    if (!input.trim() || (isLoading && mode !== 'chat')) return;
 
     const userMessage: ChatMessage = { role: 'user', content: input.trim() };
     const systemMessage: ChatMessage = {
@@ -390,21 +398,11 @@ export function ChatView() {
           // 贾维斯 agent 通道：claude CLI + MCP 数据工具，流式事件 jarvis:*
           await invoke('jarvis_chat_send', { text: userMessage.content });
         } else {
-          // Claude Code 未开启：回退场景模型流式（陪伴绑定模型），
-          // 系统提示走 persona 体系（无数据工具版）
-          const system = await invoke<string>('jarvis_chat_system', {
-            withTools: false,
-          });
-          const sceneMessages = [
-            { role: 'system' as const, content: system },
-            ...newMessages.filter((m) => m.role !== 'system'),
-          ];
-          const sceneConfig = sceneConfigs['chat'];
-          await invoke('call_llm_stream_by_scene', {
-            scene: 'chat',
-            messages: sceneMessages,
-            thinkingMode: sceneConfig?.thinking_mode ?? false,
-          });
+          // Claude Code 未开启：场景模型回退通道（tool-use 循环在后端，
+          // 事件契约与 agent 通道一致：jarvis:status / chunk / done / error）
+          const sid = sessionIdRef.current;
+          if (sid === null) throw new Error('会话未就绪，请稍候再试');
+          await invoke('jarvis_chat_send_scene', { sessionId: sid, text: userMessage.content });
         }
       } else {
         // 工具型通道：场景模型流式
@@ -601,12 +599,12 @@ export function ChatView() {
             </button>
           )}
 
-          {/* Send button */}
+          {/* Send button（贾维斯通道在飞时可排队发送） */}
           <button
             onClick={handleSend}
-            disabled={!input.trim() || isLoading}
+            disabled={!input.trim() || (isLoading && mode !== 'chat')}
             className={`shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
-              input.trim() && !isLoading
+              input.trim() && (!isLoading || mode === 'chat')
                 ? 'text-zinc-200 hover:bg-zinc-700/60 cursor-pointer'
                 : 'text-zinc-600 cursor-not-allowed'
             }`}

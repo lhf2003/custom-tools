@@ -2,6 +2,7 @@
 //! 每条用户消息 spawn 一次 claude 进程，--resume 串起多轮上下文；
 //! 助理文本经 jarvis:chunk 流式推给前端，工具活动经 jarvis:status 提示。
 
+use std::collections::VecDeque;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::Child;
@@ -19,9 +20,13 @@ const MAX_TURNS: &str = "8";
 /// claude 会话 id 的持久化 key（跨消息/跨重启续接上下文）
 const SESSION_SETTING_KEY: &str = "companion_chat_claude_session";
 
-/// 在飞的聊天子进程（单飞：新消息到来或用户取消时 kill）
+/// 在飞的聊天状态：子进程句柄 + 待发送队列。
+/// FIFO 排队（四期裁决）：在飞时新消息入队不打断，答完自动发下一条。
 #[derive(Clone, Default)]
-pub struct JarvisChatChild(pub Arc<Mutex<Option<Child>>>);
+pub struct JarvisChatChild {
+    pub child: Arc<Mutex<Option<Child>>>,
+    pub queue: Arc<Mutex<VecDeque<String>>>,
+}
 
 /// 聊天工作区（与日报 agent 共用隔离目录：无 CLAUDE.md、无 hooks 注入）
 fn chat_work_dir(app_handle: &AppHandle) -> Result<PathBuf, String> {
@@ -35,9 +40,9 @@ fn chat_work_dir(app_handle: &AppHandle) -> Result<PathBuf, String> {
 }
 
 /// 聊天系统提示：身份证 + 经验本 + 关于他的事实（五维分组）+ 聊天场合规则。
-/// with_tools=true 时用 --append-system-prompt 注入 claude agent 通道；
-/// false 时为场景模型回退版（无数据工具的措辞）。
-fn compose_chat_system(app_data: &Path, db_path: &Path, with_tools: bool, monologue: bool) -> String {
+/// with_tools=true 时用 --append-system-prompt 注入 claude agent 通道，
+/// 或场景模型回退通道（有数据工具版）；false 为无工具降级措辞。
+pub(crate) fn compose_chat_system(app_data: &Path, db_path: &Path, with_tools: bool, monologue: bool) -> String {
     let persona_text = persona::load(app_data);
     let evolution = persona::load_evolution(app_data);
     let conn = Connection::open(db_path).ok();
@@ -133,7 +138,7 @@ fn format_facts_grouped(facts: &[db::MemoryFact]) -> String {
 }
 
 /// 首次聊天时记下日期（关系阶段起点）；已记录则不动
-fn touch_first_chat_date(db_path: &PathBuf) {
+pub(crate) fn touch_first_chat_date(db_path: &PathBuf) {
     let existing = analyzer::load_setting(db_path, super::state::FIRST_CHAT_DATE_KEY);
     if existing.unwrap_or_default().is_empty() {
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
@@ -142,7 +147,7 @@ fn touch_first_chat_date(db_path: &PathBuf) {
 }
 
 /// 读运行时开关（独白）；陪伴状态未初始化时按默认（开）
-fn monologue_enabled(app_handle: &AppHandle) -> bool {
+pub(crate) fn monologue_enabled(app_handle: &AppHandle) -> bool {
     app_handle
         .try_state::<super::CompanionState>()
         .and_then(|s| s.flags.read().ok().map(|f| f.monologue))
@@ -186,15 +191,31 @@ pub async fn jarvis_chat_send(
     }
     touch_first_chat_date(&db_state.0);
 
-    // 单飞：新消息到来时掐掉上一轮
-    if let Ok(mut guard) = chat_child.0.lock() {
-        if let Some(mut prev) = guard.take() {
-            let _ = prev.kill();
-            let _ = prev.wait();
+    // FIFO 排队（四期裁决）：在飞时新消息入队，答完由收尾逻辑自动发下一条
+    let in_flight = chat_child
+        .child
+        .lock()
+        .map(|g| g.is_some())
+        .unwrap_or(false);
+    if in_flight {
+        if let Ok(mut q) = chat_child.queue.lock() {
+            q.push_back(text);
         }
+        let _ = app_handle.emit("jarvis:status", "已排队，等上一条答完…");
+        return Ok(());
     }
 
-    let db_path = db_state.0.clone();
+    spawn_chat(&app_handle, &chat_child, &db_state.0, text)
+}
+
+/// 启动一条聊天子进程（首条与队列续发共用）。
+/// 系统提示在发送时现算——排队消息发出时状态/关注/心境都是最新的。
+fn spawn_chat(
+    app_handle: &AppHandle,
+    chat_child: &JarvisChatChild,
+    db_path: &PathBuf,
+    text: String,
+) -> Result<(), String> {
     let settings_state = app_handle
         .try_state::<crate::commands::settings::SettingsState>()
         .ok_or("设置模块未初始化")?;
@@ -204,10 +225,10 @@ pub async fn jarvis_chat_send(
         .map_err(|e| e.to_string())?
         .get_settings()
         .claude_code_bin_path;
-    let work = chat_work_dir(&app_handle)?;
+    let work = chat_work_dir(app_handle)?;
     let app_data = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
-    let system_prompt = compose_chat_system(&app_data, &db_path, true, monologue_enabled(&app_handle));
-    let session = analyzer::load_setting(&db_path, SESSION_SETTING_KEY).unwrap_or_default();
+    let system_prompt = compose_chat_system(app_data.as_path(), db_path, true, monologue_enabled(app_handle));
+    let session = analyzer::load_setting(db_path, SESSION_SETTING_KEY).unwrap_or_default();
 
     let mut cmd = super::agent::cli_command(&bin, &work);
     cmd.arg("-p")
@@ -233,13 +254,18 @@ pub async fn jarvis_chat_send(
         .stdout
         .take()
         .ok_or("无法获取 claude CLI 输出管道")?;
-    let child_slot = chat_child.0.clone();
-    if let Ok(mut guard) = child_slot.lock() {
+    if let Ok(mut guard) = chat_child.child.lock() {
         *guard = Some(child);
     }
 
+    // 通知前端新一轮开始（首条与队列续发统一信号，前端据此复位流式状态）
+    let _ = app_handle.emit("jarvis:start", ());
+
+    let app_handle2 = app_handle.clone();
+    let chat_child2 = chat_child.clone();
+    let db_path2 = db_path.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        stream_chat_process(app_handle, stdout, child_slot, db_path);
+        stream_chat_process(app_handle2, stdout, chat_child2, db_path2);
     });
     Ok(())
 }
@@ -248,7 +274,7 @@ pub async fn jarvis_chat_send(
 fn stream_chat_process(
     app_handle: AppHandle,
     stdout: std::process::ChildStdout,
-    child_slot: Arc<Mutex<Option<Child>>>,
+    chat_child: JarvisChatChild,
     db_path: PathBuf,
 ) {
     let reader = BufReader::new(stdout);
@@ -355,7 +381,7 @@ fn stream_chat_process(
     }
 
     // 收尾：清掉在飞句柄；异常退出（没收到 result）时给前端一个明确信号
-    if let Ok(mut guard) = child_slot.lock() {
+    if let Ok(mut guard) = chat_child.child.lock() {
         if let Some(mut child) = guard.take() {
             let _ = child.wait();
         }
@@ -363,12 +389,27 @@ fn stream_chat_process(
     if !saw_result {
         let _ = app_handle.emit("jarvis:error", "agent 异常结束，请重试");
     }
+
+    // FIFO 续发：队列里有等待的消息就自动发下一条（一条失败不堵死队列）
+    let next = chat_child
+        .queue
+        .lock()
+        .ok()
+        .and_then(|mut q| q.pop_front());
+    if let Some(next_text) = next {
+        if let Err(e) = spawn_chat(&app_handle, &chat_child, &db_path, next_text) {
+            let _ = app_handle.emit("jarvis:error", format!("发送排队消息失败: {}", e));
+        }
+    }
 }
 
-/// 取消当前在飞的聊天回复
+/// 取消当前在飞的聊天回复（同时清空排队消息）
 #[tauri::command]
 pub fn jarvis_chat_cancel(chat_child: State<'_, JarvisChatChild>) -> Result<(), String> {
-    if let Ok(mut guard) = chat_child.0.lock() {
+    if let Ok(mut q) = chat_child.queue.lock() {
+        q.clear();
+    }
+    if let Ok(mut guard) = chat_child.child.lock() {
         if let Some(mut prev) = guard.take() {
             let _ = prev.kill();
             let _ = prev.wait();

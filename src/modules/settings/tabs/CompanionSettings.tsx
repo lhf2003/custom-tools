@@ -13,6 +13,7 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import { useToastStore } from '@/stores/toastStore';
 import { SettingCard, Toggle } from '../components/SettingCard';
 import { MemoryCenter } from './MemoryCenter';
+import { SuggestionCenter } from './SuggestionCenter';
 import type { OpenViewDetail } from '@/types';
 
 interface HabitPattern {
@@ -68,7 +69,7 @@ export function CompanionSettings() {
   const [analyzing, setAnalyzing] = useState(false);
   const [agentRunning, setAgentRunning] = useState(false);
   const [expandPatterns, setExpandPatterns] = useState(false);
-  const [subView, setSubView] = useState<'main' | 'memory'>('main');
+  const [subView, setSubView] = useState<'main' | 'memory' | 'suggestions'>('main');
 
   const loadData = useCallback(async () => {
     try {
@@ -189,9 +190,12 @@ export function CompanionSettings() {
   const maxTotal = todaySummary.length > 0 ? todaySummary[0][1] : 1;
   const visiblePatterns = expandPatterns ? patterns : patterns.slice(0, PREVIEW_COUNT);
 
-  // 二级视图：记忆中心
+  // 二级视图：记忆中心 / 建议中心
   if (subView === 'memory') {
     return <MemoryCenter onBack={() => setSubView('main')} />;
+  }
+  if (subView === 'suggestions') {
+    return <SuggestionCenter onBack={() => setSubView('main')} />;
   }
 
   return (
@@ -298,6 +302,18 @@ export function CompanionSettings() {
             className="px-2.5 py-1.5 rounded-lg text-white/50 text-xs hover:bg-white/10 hover:text-white transition-colors cursor-pointer"
           >
             打开记忆中心
+          </button>
+        </SettingCard>
+
+        <SettingCard
+          title="建议中心"
+          description="贾维斯的建议历史——接受/忽略全程可查，待处理可补操作"
+        >
+          <button
+            onClick={() => setSubView('suggestions')}
+            className="px-2.5 py-1.5 rounded-lg text-white/50 text-xs hover:bg-white/10 hover:text-white transition-colors cursor-pointer"
+          >
+            打开建议中心
           </button>
         </SettingCard>
 

@@ -19,6 +19,260 @@ pub struct ChatMessage {
     pub images: Option<Vec<String>>,
 }
 
+// ── function calling（tool-use 循环）─────────────────────────
+
+/// 统一的工具调用请求（OpenAI/Ollama 双格式解析后归一到这里）
+#[derive(Debug, Clone)]
+pub struct ToolCall {
+    /// OpenAI 原生 id；Ollama 没有 id，解析时按序号生成（回显消息要用）
+    pub id: String,
+    pub name: String,
+    /// 解析后的参数对象（OpenAI 给的是 JSON 字符串，已 parse；失败为空对象）
+    pub arguments: serde_json::Value,
+}
+
+/// 带工具的非流式调用回执：content 与 tool_calls 可能同时存在（边想边调）
+#[derive(Debug, Clone)]
+pub struct ToolReply {
+    pub content: String,
+    pub tool_calls: Vec<ToolCall>,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiToolCall {
+    id: String,
+    function: OpenAiFunctionCall,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiFunctionCall {
+    name: String,
+    /// OpenAI 格式的参数是 JSON 字符串
+    arguments: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct OllamaToolCall {
+    function: OllamaFunctionCall,
+}
+
+#[derive(Debug, Deserialize)]
+struct OllamaFunctionCall {
+    name: String,
+    /// Ollama 格式的参数直接是对象
+    arguments: serde_json::Value,
+}
+
+/// 组装 assistant 的 tool_calls 回显消息（下一轮请求要带上，格式按通道分）
+pub fn assistant_tool_message(provider_type: &str, reply: &ToolReply) -> serde_json::Value {
+    if provider_type == "ollama" {
+        let calls: Vec<serde_json::Value> = reply
+            .tool_calls
+            .iter()
+            .map(|c| {
+                serde_json::json!({
+                    "function": { "name": c.name, "arguments": c.arguments }
+                })
+            })
+            .collect();
+        serde_json::json!({
+            "role": "assistant",
+            "content": reply.content,
+            "tool_calls": calls,
+        })
+    } else {
+        let calls: Vec<serde_json::Value> = reply
+            .tool_calls
+            .iter()
+            .map(|c| {
+                serde_json::json!({
+                    "id": c.id,
+                    "type": "function",
+                    "function": {
+                        "name": c.name,
+                        "arguments": c.arguments.to_string(),
+                    }
+                })
+            })
+            .collect();
+        serde_json::json!({
+            "role": "assistant",
+            "content": if reply.content.is_empty() { serde_json::Value::Null } else { serde_json::json!(reply.content) },
+            "tool_calls": calls,
+        })
+    }
+}
+
+/// 组装 tool 结果消息（OpenAI 用 tool_call_id 配对，Ollama 用 name）
+pub fn tool_result_message(provider_type: &str, call: &ToolCall, result: &str) -> serde_json::Value {
+    if provider_type == "ollama" {
+        serde_json::json!({
+            "role": "tool",
+            "name": call.name,
+            "content": result,
+        })
+    } else {
+        serde_json::json!({
+            "role": "tool",
+            "tool_call_id": call.id,
+            "content": result,
+        })
+    }
+}
+
+/// 带工具的非流式调用：messages 由调用方按格式组装（异构消息），
+/// tools 为 OpenAI 格式数组（Ollama 兼容同一格式）。
+/// 模型/API 不支持 function calling 时会以 API 错误返回，由调用方降级。
+pub async fn call_llm_with_tools(
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+    provider_type: &str,
+    messages: Vec<serde_json::Value>,
+    tools: serde_json::Value,
+    thinking_mode: bool,
+) -> Result<ToolReply, String> {
+    if model.is_empty() {
+        return Err("模型名称未配置".to_string());
+    }
+
+    let trimmed = base_url.trim_end_matches('/');
+    let is_ollama_native = provider_type == "ollama";
+    let url = if is_ollama_native {
+        format!("{}/api/chat", trimmed)
+    } else {
+        format!("{}/chat/completions", trimmed)
+    };
+
+    let client = reqwest::Client::new();
+
+    let mut body = serde_json::json!({
+        "model": model,
+        "messages": messages,
+        "stream": false,
+    });
+    // 空工具数组不下发（部分端点对空数组报错；空 = 纯问答强制收尾轮）
+    let has_tools = tools
+        .as_array()
+        .map(|a| !a.is_empty())
+        .unwrap_or(false);
+    if has_tools {
+        body["tools"] = tools;
+    }
+    if is_ollama_native {
+        body["think"] = serde_json::json!(thinking_mode);
+    } else {
+        let is_bailian = base_url.contains("bailian") || base_url.contains("aliyun");
+        if is_bailian {
+            body["enable_thinking"] = serde_json::json!(thinking_mode);
+        } else if thinking_mode {
+            body["reasoning_effort"] = serde_json::json!("medium");
+        }
+    }
+
+    let mut req_builder = client.post(&url).json(&body);
+    if !api_key.is_empty() {
+        req_builder = req_builder.header("Authorization", format!("Bearer {}", api_key));
+    }
+
+    let response = req_builder
+        .send()
+        .await
+        .map_err(|e| format!("请求失败: {}", e))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let resp_body = response.text().await.unwrap_or_default();
+        return Err(format!("API 错误 {}: {}", status, resp_body));
+    }
+
+    let raw: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("解析响应失败: {}", e))?;
+
+    if is_ollama_native {
+        let msg = raw.get("message").cloned().unwrap_or(serde_json::Value::Null);
+        let content = msg
+            .get("content")
+            .and_then(|c| c.as_str())
+            .unwrap_or("")
+            .to_string();
+        let tool_calls = msg
+            .get("tool_calls")
+            .and_then(|t| t.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .enumerate()
+                    .filter_map(|(i, t)| {
+                        serde_json::from_value::<OllamaToolCall>(t.clone())
+                            .ok()
+                            .map(|c| ToolCall {
+                                id: format!("call_{}", i),
+                                name: c.function.name,
+                                arguments: c.function.arguments,
+                            })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        Ok(ToolReply {
+            content,
+            tool_calls,
+            input_tokens: raw
+                .get("prompt_eval_count")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0),
+            output_tokens: raw.get("eval_count").and_then(|v| v.as_u64()).unwrap_or(0),
+        })
+    } else {
+        let choice = raw
+            .get("choices")
+            .and_then(|c| c.as_array())
+            .and_then(|arr| arr.first())
+            .cloned()
+            .ok_or("LLM 返回了空响应")?;
+        let msg = choice.get("message").cloned().unwrap_or(serde_json::Value::Null);
+        let content = msg
+            .get("content")
+            .and_then(|c| c.as_str())
+            .unwrap_or("")
+            .to_string();
+        let tool_calls = msg
+            .get("tool_calls")
+            .and_then(|t| t.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|t| {
+                        serde_json::from_value::<OpenAiToolCall>(t.clone())
+                            .ok()
+                            .map(|c| ToolCall {
+                                id: c.id,
+                                name: c.function.name,
+                                arguments: serde_json::from_str(&c.function.arguments)
+                                    .unwrap_or(serde_json::json!({})),
+                            })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        Ok(ToolReply {
+            content,
+            tool_calls,
+            input_tokens: raw
+                .pointer("/usage/prompt_tokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0),
+            output_tokens: raw
+                .pointer("/usage/completion_tokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0),
+        })
+    }
+}
+
 #[derive(Debug, Serialize)]
 struct ChatRequest<'a> {
     model: &'a str,

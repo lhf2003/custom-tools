@@ -6,8 +6,10 @@ pub mod diary;
 pub mod mcp;
 pub mod persona;
 pub mod recall;
+pub mod scene_chat;
 pub mod state;
 pub mod suggester;
+pub mod tools;
 pub mod watcher;
 
 use std::path::PathBuf;
