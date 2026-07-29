@@ -42,6 +42,10 @@ interface CustomSelectProps {
   disabled?: boolean;
   className?: string;
   icon?: React.ReactNode;
+  /** 选项超过 8 个自动开启搜索（如百炼等模型大户），可显式覆盖 */
+  searchable?: boolean;
+  /** 下拉菜单附加类名，默认与触发按钮同宽（w-full） */
+  menuClassName?: string;
 }
 
 function CustomSelect({
@@ -52,15 +56,43 @@ function CustomSelect({
   disabled = false,
   className = '',
   icon,
+  searchable,
+  menuClassName = 'w-full',
 }: CustomSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const [searchQuery, setSearchQuery] = useState('');
   const [dropdownPosition, setDropdownPosition] = useState<'top' | 'bottom'>('bottom');
   const [dropdownMaxHeight, setDropdownMaxHeight] = useState(192);
   const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const selectedOption = options.find((opt) => opt.value === value);
+  const isSearchable = searchable ?? options.length > 8;
+  const query = searchQuery.trim().toLowerCase();
+  const filteredOptions = query
+    ? options.filter(
+        (opt) =>
+          opt.label.toLowerCase().includes(query) ||
+          opt.value.toLowerCase().includes(query),
+      )
+    : options;
+
+  // 打开时初始化：清空搜索、高亮当前选中项。放在打开动作里而不是 effect 里——
+  // options 每次渲染都是新数组引用，依赖它的 effect 会反复把高亮重置回选中项
+  const openSelect = () => {
+    setSearchQuery('');
+    const selectedIndex = options.findIndex((opt) => opt.value === value);
+    setHighlightedIndex(selectedIndex >= 0 ? selectedIndex : 0);
+    setIsOpen(true);
+  };
+
+  // 打开后聚焦搜索框（键盘优先：展开即可输入）
+  useEffect(() => {
+    if (isOpen && isSearchable) searchInputRef.current?.focus();
+  }, [isOpen, isSearchable]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -72,12 +104,18 @@ function CustomSelect({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // 输入搜索词后，高亮回到第一个匹配项
   useEffect(() => {
-    if (isOpen) {
-      const selectedIndex = options.findIndex((opt) => opt.value === value);
-      setHighlightedIndex(selectedIndex >= 0 ? selectedIndex : 0);
-    }
-  }, [isOpen, options, value]);
+    if (query) setHighlightedIndex(0);
+  }, [query]);
+
+  // 键盘导航时保证高亮项滚入可视区
+  useEffect(() => {
+    if (!isOpen || highlightedIndex < 0) return;
+    listRef.current
+      ?.querySelector(`[data-option-index="${highlightedIndex}"]`)
+      ?.scrollIntoView({ block: 'nearest' });
+  }, [highlightedIndex, isOpen]);
 
   // Calculate dropdown position based on available space
   useEffect(() => {
@@ -103,35 +141,51 @@ function CustomSelect({
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (disabled) return;
+    // 焦点在搜索框时：字母/空格留给输入框，这里只处理导航与确认键
+    const typingInSearch = e.target instanceof HTMLInputElement;
 
     switch (e.key) {
       case 'Enter':
-      case ' ':
         e.preventDefault();
-        if (isOpen && highlightedIndex >= 0) {
-          onChange(options[highlightedIndex].value);
+        if (isOpen && highlightedIndex >= 0 && filteredOptions[highlightedIndex]) {
+          onChange(filteredOptions[highlightedIndex].value);
           setIsOpen(false);
+          triggerRef.current?.focus();
+        } else if (!typingInSearch) {
+          if (isOpen) setIsOpen(false);
+          else openSelect();
+        }
+        break;
+      case ' ':
+        if (typingInSearch) break;
+        e.preventDefault();
+        if (isOpen && highlightedIndex >= 0 && filteredOptions[highlightedIndex]) {
+          onChange(filteredOptions[highlightedIndex].value);
+          setIsOpen(false);
+          triggerRef.current?.focus();
         } else {
-          setIsOpen(!isOpen);
+          if (isOpen) setIsOpen(false);
+          else openSelect();
         }
         break;
       case 'Escape':
         setIsOpen(false);
+        if (typingInSearch) triggerRef.current?.focus();
         break;
       case 'ArrowDown':
         e.preventDefault();
         if (!isOpen) {
-          setIsOpen(true);
+          openSelect();
         } else {
           setHighlightedIndex((prev) =>
-            prev < options.length - 1 ? prev + 1 : prev
+            prev < filteredOptions.length - 1 ? prev + 1 : prev
           );
         }
         break;
       case 'ArrowUp':
         e.preventDefault();
         if (!isOpen) {
-          setIsOpen(true);
+          openSelect();
         } else {
           setHighlightedIndex((prev) => (prev > 0 ? prev - 1 : prev));
         }
@@ -147,8 +201,13 @@ function CustomSelect({
       tabIndex={disabled ? -1 : 0}
     >
       <button
+        ref={triggerRef}
         type="button"
-        onClick={() => !disabled && setIsOpen(!isOpen)}
+        onClick={() => {
+          if (disabled) return;
+          if (isOpen) setIsOpen(false);
+          else openSelect();
+        }}
         disabled={disabled}
         className={`
           w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm
@@ -172,13 +231,12 @@ function CustomSelect({
 
       {/* Dropdown Menu */}
       <div
-        ref={listRef}
-        style={{ maxHeight: dropdownMaxHeight }}
         className={`
-          absolute z-50 w-full py-1 rounded-lg
+          absolute z-50 py-1 rounded-lg overflow-hidden
           bg-gradient-to-b from-zinc-800 to-zinc-900
           border border-zinc-700 shadow-xl shadow-black/50
           transition-all duration-200 ease-out
+          ${menuClassName}
           ${dropdownPosition === 'top'
             ? 'bottom-full mb-1 origin-bottom'
             : 'top-full mt-1 origin-top'
@@ -188,14 +246,33 @@ function CustomSelect({
           ${dropdownPosition === 'bottom' && !isOpen ? '-translate-y-2' : ''}
         `}
       >
-        <div className="overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-600 scrollbar-track-transparent h-full">
-          {options.length === 0 ? (
-            <div className="px-3 py-2 text-white/40 text-sm text-center">暂无选项</div>
+        {isOpen && isSearchable && (
+          <div className="px-2 pb-1.5 mb-1 border-b border-white/10">
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="输入以筛选…"
+              className="w-full bg-transparent text-white/90 text-sm px-1 py-1 outline-none placeholder:text-white/40"
+            />
+          </div>
+        )}
+        <div
+          ref={listRef}
+          style={{ maxHeight: dropdownMaxHeight }}
+          className="overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-600 scrollbar-track-transparent"
+        >
+          {filteredOptions.length === 0 ? (
+            <div className="px-3 py-2 text-white/40 text-sm text-center">
+              {query ? '无匹配结果' : '暂无选项'}
+            </div>
           ) : (
-            options.map((option, index) => (
+            filteredOptions.map((option, index) => (
               <button
                 key={option.value}
                 type="button"
+                data-option-index={index}
                 onClick={() => {
                   onChange(option.value);
                   setIsOpen(false);
@@ -327,6 +404,9 @@ export function ModelSettings() {
   } = useLlmProviderStore();
 
   const [expandedProvider, setExpandedProvider] = useState<number | null>(null);
+  // 展开的提供商模型列表筛选词（切换展开项时清空）
+  const [modelListFilter, setModelListFilter] = useState('');
+  useEffect(() => setModelListFilter(''), [expandedProvider]);
   const [isAddingProvider, setIsAddingProvider] = useState(false);
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
   const [testingProvider, setTestingProvider] = useState<number | null>(null);
@@ -460,10 +540,8 @@ export function ModelSettings() {
 
   // Save provider (create or update)
   const handleSaveProvider = async () => {
-    console.log('[DEBUG] handleSaveProvider called', { formData, editingProvider: !!editingProvider });
     try {
       if (editingProvider) {
-        console.log('[DEBUG] Updating existing provider:', editingProvider.id);
         await updateProvider({
           id: editingProvider.id,
           name: formData.name,
@@ -471,14 +549,7 @@ export function ModelSettings() {
           baseUrl: formData.baseUrl,
           apiKey: formData.apiKey || null,
         });
-        console.log('[DEBUG] Provider updated successfully');
       } else {
-        console.log('[DEBUG] Creating new provider with data:', {
-          name: formData.name,
-          label: formData.label,
-          base_url: formData.baseUrl,
-          providerType: formData.providerType,
-        });
         await createProvider({
           name: formData.name,
           label: formData.label,
@@ -486,12 +557,11 @@ export function ModelSettings() {
           apiKey: formData.apiKey || null,
           providerType: formData.providerType,
         });
-        console.log('[DEBUG] Provider created successfully');
       }
       handleCancelForm();
     } catch (err) {
-      console.error('[DEBUG] handleSaveProvider error:', err);
-      // Error handled in store
+      // 失败必须让用户感知——此前静默 console.error，后端拒绝时用户点保存毫无反馈
+      alert(`保存提供商失败: ${err}`);
     }
   };
 
@@ -571,6 +641,73 @@ export function ModelSettings() {
       </div>
 
       <div className="space-y-4">
+        {/* Claude Code 全局配置 */}
+        <div className="rounded-xl border border-white/10 bg-white/[0.02] overflow-hidden">
+          <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between gap-4">
+            <div>
+              <h3 className="text-white/90 text-sm font-medium">Claude Code</h3>
+              <p className="text-white/40 text-xs mt-0.5">
+                开启后，支持 Claude Code 的功能（如陪伴）将由本地 Claude Code 执行
+              </p>
+            </div>
+            <Toggle enabled={claude_code_enabled} onToggle={setClaudeCodeEnabled} />
+          </div>
+
+          {claude_code_enabled && (
+              <div className="divide-y divide-white/5">
+                <div className="px-4 py-3">
+                  <label className="block text-white/60 text-xs mb-1.5">CLI 路径</label>
+                  <input
+                      type="text"
+                      value={binPathInput}
+                      onChange={(e) => setBinPathInput(e.target.value)}
+                      onBlur={async () => {
+                        const warning = await setClaudeCodeBinPath(binPathInput.trim() || 'claude');
+                        setBinPathWarning(warning ?? null);
+                      }}
+                      placeholder="claude"
+                      className="w-full bg-zinc-800 text-white text-sm rounded-lg px-3 py-2 outline-none border border-zinc-700 focus:border-white/25 transition-colors placeholder:text-white/20"
+                  />
+                  {binPathWarning ? (
+                      <p className="text-amber-400/80 text-xs mt-1.5">⚠ {binPathWarning}（路径已保存，但 Claude Code 功能可能不可用）</p>
+                  ) : (
+                      <p className="text-white/30 text-xs mt-1.5">claude CLI 可执行文件路径，默认从 PATH 查找</p>
+                  )}
+                </div>
+
+                <div className="px-4 py-3">
+                  <label className="block text-white/60 text-xs mb-1.5">工作目录</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                        type="text"
+                        value={workDirInput}
+                        onChange={(e) => setWorkDirInput(e.target.value)}
+                        onBlur={() => setClaudeCodeWorkDir(workDirInput.trim())}
+                        placeholder="留空使用默认目录"
+                        className="flex-1 bg-zinc-800 text-white text-sm rounded-lg px-3 py-2 outline-none border border-zinc-700 focus:border-white/25 transition-colors placeholder:text-white/20"
+                    />
+                    <button
+                        onClick={browseWorkDir}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white/5 text-white/60 text-xs border border-white/10 hover:bg-white/10 transition-colors cursor-pointer"
+                    >
+                      <FolderOpen size={14} />
+                      <span>浏览</span>
+                    </button>
+                    <button
+                        onClick={() => setClaudeCodeWorkDir('')}
+                        className="px-3 py-2 rounded-lg bg-white/5 text-white/60 text-xs border border-white/10 hover:bg-white/10 transition-colors cursor-pointer"
+                    >
+                      恢复默认
+                    </button>
+                  </div>
+                  <p className="text-white/30 text-xs mt-1.5">
+                    Claude Code 执行任务时的工作目录，留空使用默认目录（应用数据目录/companion-agent）
+                  </p>
+                </div>
+              </div>
+          )}
+        </div>
+
         {/* Provider List */}
         <div className="rounded-xl border border-white/10 bg-white/[0.02] overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
@@ -592,7 +729,19 @@ export function ModelSettings() {
             </div>
           ) : (
             <div className="divide-y divide-white/5">
-              {providers.map((provider) => (
+              {providers.map((provider) => {
+                const providerModels = models[provider.id];
+                const modelQuery = modelListFilter.trim().toLowerCase();
+                const visibleModels = providerModels
+                  ? modelQuery
+                    ? providerModels.filter(
+                        (m) =>
+                          m.name.toLowerCase().includes(modelQuery) ||
+                          m.model_id.toLowerCase().includes(modelQuery),
+                      )
+                    : providerModels
+                  : undefined;
+                return (
                 <div key={provider.id} className="group">
                   {/* Provider Header */}
                   <div
@@ -670,25 +819,48 @@ export function ModelSettings() {
                   {/* Expanded Models List */}
                   {expandedProvider === provider.id && (
                     <div className="px-4 pb-4 bg-black/20">
-                      <div className="flex items-center justify-between py-2">
-                        <span className="text-white/60 text-xs">可用模型</span>
-                        <button
-                          onClick={() => handleRefreshModels(provider.id)}
-                          disabled={refreshingProvider === provider.id}
-                          className="flex items-center gap-1 text-white/40 hover:text-white/70 text-xs transition-colors cursor-pointer disabled:opacity-50"
-                        >
-                          <RefreshCw
-                            size={12}
-                            className={refreshingProvider === provider.id ? 'animate-spin' : ''}
-                          />
-                          刷新
-                        </button>
+                      <div className="flex items-center justify-between py-2 gap-2">
+                        <span className="text-white/60 text-xs whitespace-nowrap">
+                          可用模型
+                          {providerModels && (
+                            <span className="text-white/30">
+                              （{modelQuery ? `${visibleModels?.length ?? 0}/` : ''}{providerModels.length}）
+                            </span>
+                          )}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          {providerModels && providerModels.length > 10 && (
+                            <input
+                              type="text"
+                              value={modelListFilter}
+                              onChange={(e) => setModelListFilter(e.target.value)}
+                              placeholder="筛选模型…"
+                              className="w-32 bg-zinc-800 text-white/70 text-xs rounded px-2 py-1 outline-none border border-zinc-700 focus:border-white/25 placeholder:text-white/40"
+                            />
+                          )}
+                          <button
+                            onClick={() => handleRefreshModels(provider.id)}
+                            disabled={refreshingProvider === provider.id}
+                            className="flex items-center gap-1 text-white/40 hover:text-white/70 text-xs transition-colors cursor-pointer disabled:opacity-50"
+                          >
+                            <RefreshCw
+                              size={12}
+                              className={refreshingProvider === provider.id ? 'animate-spin' : ''}
+                            />
+                            刷新
+                          </button>
+                        </div>
                       </div>
 
-                      {models[provider.id] ? (
-                        models[provider.id].length > 0 ? (
+                      {!providerModels ? (
+                        <div className="text-center py-4 text-white/30 text-xs">加载中...</div>
+                      ) : providerModels.length === 0 ? (
+                        <div className="text-center py-4 text-white/30 text-xs">
+                          暂无模型，点击刷新获取
+                        </div>
+                      ) : visibleModels && visibleModels.length > 0 ? (
                           <div className="space-y-1">
-                            {models[provider.id].map((model) => (
+                            {visibleModels.map((model) => (
                               <div
                                 key={model.id}
                                 className="flex items-center justify-between px-3 py-2 rounded-lg bg-white/[0.03] hover:bg-white/[0.05] transition-colors"
@@ -736,18 +908,16 @@ export function ModelSettings() {
                               </div>
                             ))}
                           </div>
-                        ) : (
-                          <div className="text-center py-4 text-white/30 text-xs">
-                            暂无模型，点击刷新获取
-                          </div>
-                        )
                       ) : (
-                        <div className="text-center py-4 text-white/30 text-xs">加载中...</div>
+                        <div className="text-center py-4 text-white/30 text-xs">
+                          无匹配「{modelListFilter.trim()}」的模型
+                        </div>
                       )}
                     </div>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -955,6 +1125,7 @@ export function ModelSettings() {
                       disabled={!config?.provider_id}
                       placeholder="选择模型"
                       className="w-32"
+                      menuClassName="w-72 right-0"
                     />
 
                     {/* Thinking Mode Toggle */}
@@ -977,73 +1148,6 @@ export function ModelSettings() {
               );
             })}
           </div>
-        </div>
-
-        {/* Claude Code 全局配置 */}
-        <div className="rounded-xl border border-white/10 bg-white/[0.02] overflow-hidden">
-          <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between gap-4">
-            <div>
-              <h3 className="text-white/90 text-sm font-medium">Claude Code</h3>
-              <p className="text-white/40 text-xs mt-0.5">
-                开启后，支持 Claude Code 的功能（如陪伴）将由本地 Claude Code 执行
-              </p>
-            </div>
-            <Toggle enabled={claude_code_enabled} onToggle={setClaudeCodeEnabled} />
-          </div>
-
-          {claude_code_enabled && (
-            <div className="divide-y divide-white/5">
-              <div className="px-4 py-3">
-                <label className="block text-white/60 text-xs mb-1.5">CLI 路径</label>
-                <input
-                  type="text"
-                  value={binPathInput}
-                  onChange={(e) => setBinPathInput(e.target.value)}
-                  onBlur={async () => {
-                    const warning = await setClaudeCodeBinPath(binPathInput.trim() || 'claude');
-                    setBinPathWarning(warning ?? null);
-                  }}
-                  placeholder="claude"
-                  className="w-full bg-zinc-800 text-white text-sm rounded-lg px-3 py-2 outline-none border border-zinc-700 focus:border-white/25 transition-colors placeholder:text-white/20"
-                />
-                {binPathWarning ? (
-                  <p className="text-amber-400/80 text-xs mt-1.5">⚠ {binPathWarning}（路径已保存，但 Claude Code 功能可能不可用）</p>
-                ) : (
-                  <p className="text-white/30 text-xs mt-1.5">claude CLI 可执行文件路径，默认从 PATH 查找</p>
-                )}
-              </div>
-
-              <div className="px-4 py-3">
-                <label className="block text-white/60 text-xs mb-1.5">工作目录</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={workDirInput}
-                    onChange={(e) => setWorkDirInput(e.target.value)}
-                    onBlur={() => setClaudeCodeWorkDir(workDirInput.trim())}
-                    placeholder="留空使用默认目录"
-                    className="flex-1 bg-zinc-800 text-white text-sm rounded-lg px-3 py-2 outline-none border border-zinc-700 focus:border-white/25 transition-colors placeholder:text-white/20"
-                  />
-                  <button
-                    onClick={browseWorkDir}
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white/5 text-white/60 text-xs border border-white/10 hover:bg-white/10 transition-colors cursor-pointer"
-                  >
-                    <FolderOpen size={14} />
-                    <span>浏览</span>
-                  </button>
-                  <button
-                    onClick={() => setClaudeCodeWorkDir('')}
-                    className="px-3 py-2 rounded-lg bg-white/5 text-white/60 text-xs border border-white/10 hover:bg-white/10 transition-colors cursor-pointer"
-                  >
-                    恢复默认
-                  </button>
-                </div>
-                <p className="text-white/30 text-xs mt-1.5">
-                  Claude Code 执行任务时的工作目录，留空使用默认目录（应用数据目录/companion-agent）
-                </p>
-              </div>
-            </div>
-          )}
         </div>
 
         {/* 调用观测 */}

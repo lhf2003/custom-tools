@@ -15,8 +15,10 @@ pub struct Provider {
     pub updated_at: String,
 }
 
+// 注意：serde 用 lowercase（OpenAi -> "openai"），与前端 'openai' 字面量一致；
+// 不能用 snake_case，否则 OpenAi 会变成 "open_ai"，Tauri 反序列化直接拒绝整个命令
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "lowercase")]
 pub enum ProviderType {
     #[default]
     OpenAi,
