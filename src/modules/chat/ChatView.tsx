@@ -16,6 +16,7 @@ import { useLlmProviderStore } from '@/stores/llmProviderStore';
 import { invoke } from '@tauri-apps/api/core';
 import { debouncedResize } from '@/utils/tauri';
 import { WINDOW_SIZE } from '@/constants/window';
+import { A2uiSurface } from './a2ui/A2uiSurface';
 
 // ─────────────────────────────────────────────
 // Types
@@ -26,12 +27,15 @@ type ChatMode = 'chat' | 'translate';
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
+  /** a2ui = A2UI 界面卡片（content 为 SurfacePayload JSON）；缺省 markdown */
+  contentType?: 'markdown' | 'a2ui';
 }
 
 interface ChatHistoryMessage {
   id: number;
   role: 'user' | 'assistant';
   content: string;
+  content_type: string;
 }
 
 interface ChatSessionSummary {
@@ -44,6 +48,50 @@ interface ChatSessionSummary {
 function previewText(text: string): string {
   const oneLine = text.replace(/\s+/g, ' ').trim();
   return oneLine.length > 60 ? oneLine.slice(0, 60) + '…' : oneLine;
+}
+
+/**
+ * 合并一条 a2ui 消息进消息列表：同一 surfaceId 的多次 render_ui 调用
+ * （创建 → 增量更新 → 删除）合并为一个气泡，消息数组按序追加（重放语义）。
+ */
+function mergeA2uiRow(list: ChatMessage[], content: string): ChatMessage[] {
+  let payload: { surfaceId?: string; messages?: unknown[] };
+  try {
+    payload = JSON.parse(content);
+  } catch {
+    return list;
+  }
+  if (!payload.surfaceId || !Array.isArray(payload.messages)) return list;
+  const idx = list.findIndex((m) => {
+    if (m.contentType !== 'a2ui') return false;
+    try {
+      return JSON.parse(m.content).surfaceId === payload.surfaceId;
+    } catch {
+      return false;
+    }
+  });
+  if (idx === -1) {
+    return [...list, { role: 'assistant' as const, content, contentType: 'a2ui' as const }];
+  }
+  const prev = JSON.parse(list[idx].content) as { messages: unknown[] };
+  const merged = JSON.stringify({
+    ...prev,
+    messages: [...prev.messages, ...(payload.messages as unknown[])],
+  });
+  return list.map((m, i) => (i === idx ? { ...m, content: merged } : m));
+}
+
+/** 历史行 → 渲染消息：a2ui 行按 surfaceId 合并，其余原样 */
+function historyRowsToMessages(rows: ChatHistoryMessage[]): ChatMessage[] {
+  let out: ChatMessage[] = [];
+  for (const m of rows) {
+    if (m.content_type === 'a2ui') {
+      out = mergeA2uiRow(out, m.content);
+    } else {
+      out.push({ role: m.role, content: m.content });
+    }
+  }
+  return out;
 }
 
 /** chat 表时间列为本地时间（datetime('now','localtime')），按本地解析转相对时间 */
@@ -212,11 +260,7 @@ export function ChatView() {
           });
           if (msgs.length > 0) {
             const systemMsg: ChatMessage = { role: 'system', content: MODES['chat'].system };
-            const restored: ChatMessage[] = msgs.map((m) => ({
-              role: m.role,
-              content: m.content,
-            }));
-            setMessages([systemMsg, ...restored]);
+            setMessages([systemMsg, ...historyRowsToMessages(msgs)]);
             setHasResponse(true);
           }
           setSessionId(latest);
@@ -367,12 +411,24 @@ export function ChatView() {
         setStreamText('');
         streamTextRef.current = '';
       });
+      // A2UI 界面卡片（render_ui 工具，tool 循环中途到达）：同 surface 合并为一个气泡。
+      // 落库由后端在 emit 时完成（前端 done 落库的只是文字回复）
+      const u9 = await listen<{ sessionId: number; surfaceId: string; messages: unknown[] }>(
+        'jarvis:surface',
+        (event) => {
+          if (isCancelledRef.current) return;
+          if (event.payload.sessionId !== sessionIdRef.current) return;
+          setMessages((prev) =>
+            mergeA2uiRow(prev, JSON.stringify(event.payload)),
+          );
+        },
+      );
 
       if (!active) {
-        u1(); u2(); u3(); u4(); u5(); u6(); u7(); u8();
+        u1(); u2(); u3(); u4(); u5(); u6(); u7(); u8(); u9();
         return;
       }
-      unlistenFns = [u1, u2, u3, u4, u5, u6, u7, u8];
+      unlistenFns = [u1, u2, u3, u4, u5, u6, u7, u8, u9];
     };
 
     setupListeners();
@@ -384,14 +440,16 @@ export function ChatView() {
 
 
   // ── Send message ──────────────────────────────────────────────────
-  const handleSend = useCallback(async () => {
+  // overrideText：A2UI 卡片 action 回传时直接代发的文本（不经过输入框）
+  const handleSend = useCallback(async (overrideText?: string) => {
+    const content = (typeof overrideText === 'string' ? overrideText : input).trim();
     // 贾维斯通道在飞时允许继续发送（后端 FIFO 排队）；工具型模式保持单飞拦截
-    if (!input.trim() || (isLoading && mode !== 'chat')) return;
+    if (!content || (isLoading && mode !== 'chat')) return;
     // 复位取消标记：清空/取消/切换会话会置 true，若不复位，
     // 本轮回复的 chunk 会被监听器全部丢弃，最终消息既不回显也不入库
     isCancelledRef.current = false;
 
-    const userMessage: ChatMessage = { role: 'user', content: input.trim() };
+    const userMessage: ChatMessage = { role: 'user', content };
     const systemMessage: ChatMessage = {
       role: 'system',
       content: MODES[mode].system,
@@ -402,7 +460,8 @@ export function ChatView() {
         : [...messages, userMessage];
 
     setMessages(newMessages);
-    setInput('');
+    // 代发不碰输入框草稿；手动发送才清空
+    if (typeof overrideText !== 'string') setInput('');
     setStreamText('');
     streamTextRef.current = '';
     stickToBottomRef.current = true;
@@ -418,7 +477,7 @@ export function ChatView() {
         await invoke('save_chat_message', {
           sessionId: sid,
           role: 'user',
-          content: input.trim(),
+          content,
         });
       } catch (e) {
         console.error('Failed to save user message:', e);
@@ -479,11 +538,7 @@ export function ChatView() {
           });
           if (msgs.length > 0) {
             const systemMsg: ChatMessage = { role: 'system', content: MODES[mode].system };
-            const restored: ChatMessage[] = msgs.map((m) => ({
-              role: m.role,
-              content: m.content,
-            }));
-            setMessages([systemMsg, ...restored]);
+            setMessages([systemMsg, ...historyRowsToMessages(msgs)]);
             setHasResponse(true);
           } else {
             setMessages([]);
@@ -525,7 +580,10 @@ export function ChatView() {
 
   // ── Copy response ─────────────────────────────────────────────────
   const handleCopy = useCallback(() => {
-    const lastAssistant = messages.filter((m) => m.role === 'assistant').at(-1);
+    // 复制最近一条文字回复（a2ui 卡片是协议 JSON，不是给人读的文本）
+    const lastAssistant = messages
+      .filter((m) => m.role === 'assistant' && m.contentType !== 'a2ui')
+      .at(-1);
     const content = lastAssistant?.content ?? streamText;
     if (!content) return;
     navigator.clipboard.writeText(content).then(() => {
@@ -612,10 +670,7 @@ export function ChatView() {
           sessionId: id,
         });
         const systemMsg: ChatMessage = { role: 'system', content: MODES[mode].system };
-        setMessages([
-          systemMsg,
-          ...msgs.map((m) => ({ role: m.role, content: m.content })),
-        ]);
+        setMessages([systemMsg, ...historyRowsToMessages(msgs)]);
         setHasResponse(msgs.length > 0);
         setSessionId(id);
         // 贾维斯 agent 上下文无法随历史会话复原，按新话题重置
@@ -779,7 +834,7 @@ export function ChatView() {
 
           {/* Send button（贾维斯通道在飞时可排队发送） */}
           <button
-            onClick={handleSend}
+            onClick={() => handleSend()}
             disabled={!input.trim() || (isLoading && mode !== 'chat')}
             className={`shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
               input.trim() && (!isLoading || mode === 'chat')
@@ -878,6 +933,13 @@ export function ChatView() {
                 {msg.role === 'user' ? (
                   <div className="max-w-[80%] px-3 py-2 rounded-xl bg-zinc-700/60 text-sm text-zinc-200 break-words">
                     {msg.content}
+                  </div>
+                ) : msg.contentType === 'a2ui' ? (
+                  <div className="max-w-[90%] w-full">
+                    <A2uiSurface
+                      payloadJson={msg.content}
+                      onAction={(text) => handleSend(text)}
+                    />
                   </div>
                 ) : (
                   <div className="max-w-[90%] prose prose-invert prose-sm max-w-none prose-p:my-1.5 prose-headings:mt-3 prose-headings:mb-1.5 prose-pre:bg-zinc-800 prose-pre:border prose-pre:border-zinc-700 prose-code:text-emerald-300 prose-code:bg-zinc-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-a:text-blue-400 prose-strong:text-zinc-200">

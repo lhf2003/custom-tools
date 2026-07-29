@@ -172,10 +172,17 @@ impl Database {
                 session_id INTEGER NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
                 role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
                 content TEXT NOT NULL,
+                content_type TEXT NOT NULL DEFAULT 'markdown',
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )",
             [],
         )?;
+
+        // Migration: A2UI 界面卡片消息（content_type='a2ui' 时 content 为协议 JSON）
+        let _ = self.conn.execute(
+            "ALTER TABLE chat_messages ADD COLUMN content_type TEXT NOT NULL DEFAULT 'markdown'",
+            [],
+        );
 
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id)",

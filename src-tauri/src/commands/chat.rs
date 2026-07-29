@@ -9,6 +9,7 @@ pub struct ChatHistoryMessage {
     pub id: i64,
     pub role: String,
     pub content: String,
+    pub content_type: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -63,7 +64,7 @@ pub fn get_session_messages(
     let conn = Connection::open(&db_state.0).map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare(
-            "SELECT id, role, content FROM chat_messages WHERE session_id = ?1 ORDER BY id ASC",
+            "SELECT id, role, content, content_type FROM chat_messages WHERE session_id = ?1 ORDER BY id ASC",
         )
         .map_err(|e| e.to_string())?;
 
@@ -73,6 +74,7 @@ pub fn get_session_messages(
                 id: row.get(0)?,
                 role: row.get(1)?,
                 content: row.get(2)?,
+                content_type: row.get(3)?,
             })
         })
         .map_err(|e| e.to_string())?;

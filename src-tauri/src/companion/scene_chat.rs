@@ -135,6 +135,15 @@ async fn run_scene_chat(
         true,
         chat::monologue_enabled(app_handle),
     );
+    // render_ui 使用偏好引导（只挂场景通道——agent 通道经 MCP 没有这个工具）。
+    // 工具描述只说了「能做什么」；模型没有明确偏好时倾向纯文本作答（实测验证），
+    // 这里补上硬性规则：数据工具出多条数据 → 必须先卡片后文字
+    system_prompt.push_str(
+        "\n\n【界面卡片规则】调用数据工具（get_activity_summary、search_clipboard、\n\
+         get_habit_patterns、list_memos 等）拿到多条数据后，不要只用文字罗列——必须先调用 render_ui\n\
+         把数据渲染成界面卡片给他看，再用一两句文字总结要点。\n\
+         纯闲聊、一句话问答直接用文字，不用卡片。",
+    );
 
     // 历史上下文：增量摘要（必要时先压缩旧消息）+ 最近原文。
     // 摘要追加到系统提示末尾（动态内容一律追加，前缀稳定不吃 KV Cache 失效）
@@ -153,6 +162,10 @@ async fn run_scene_chat(
     let tools_json = openai_tools_json();
     let mut total_cost = 0.0f64;
     let mut rounds = 0usize;
+    // A2UI：同一轮对话内 render_ui 的 surface 状态（增量更新校验用）与连续失败计数
+    let mut a2ui_surfaces: std::collections::HashMap<String, super::a2ui::SurfaceState> =
+        Default::default();
+    let mut render_ui_failures = 0usize;
 
     let final_text = loop {
         rounds += 1;
@@ -202,15 +215,39 @@ async fn run_scene_chat(
                     .iter()
                     .map(|c| c.name.as_str())
                     .collect();
+                log::info!("场景模型第 {} 轮工具调用: [{}]", rounds, names.join(", "));
                 let _ = app_handle.emit(
                     "jarvis:status",
                     format!("贾维斯在翻数据（{}）…", names.join("、")),
                 );
                 messages.push(crate::llm::assistant_tool_message(&provider_type, &reply));
                 for call in &reply.tool_calls {
-                    let tool_result =
+                    let mut tool_result = if call.name == "render_ui" {
+                        match handle_render_ui(
+                            app_handle,
+                            db_path,
+                            session_id,
+                            &call.arguments,
+                            &mut a2ui_surfaces,
+                            &mut render_ui_failures,
+                        ) {
+                            Ok(ok) => ok,
+                            Err(e) => e,
+                        }
+                    } else {
                         tools::execute_tool(db_path, &notes_dir, &call.name, &call.arguments)
-                            .unwrap_or_else(|e| e);
+                            .unwrap_or_else(|e| e)
+                    };
+                    // 数据工具结果尾部追加卡片提醒：工具结果是模型注意力最高的位置，
+                    // 系统提示里的偏好引导实测会被忽略（软引导失败后的第二道转向）
+                    if matches!(
+                        call.name.as_str(),
+                        "get_activity_summary" | "search_clipboard" | "get_habit_patterns" | "list_memos"
+                    ) {
+                        tool_result.push_str(
+                            "\n\n（系统提醒：以上是多条数据，按【界面卡片规则】应接着调用 render_ui 渲染成卡片，再用文字总结。）",
+                        );
+                    }
                     messages.push(crate::llm::tool_result_message(
                         &provider_type,
                         call,
@@ -326,6 +363,68 @@ async fn run_scene_chat(
     let _ = app_handle.emit("jarvis:chunk", final_text);
     let _ = app_handle.emit("jarvis:done", total_cost);
     Ok(())
+}
+
+/// render_ui 工具（A2UI）：校验 → emit jarvis:surface → 落库 content_type='a2ui'。
+/// 校验失败的原因作为工具结果回喂模型自我纠正；连续失败 2 次后劝退，保文字兜底。
+fn handle_render_ui(
+    app_handle: &AppHandle,
+    db_path: &PathBuf,
+    session_id: i64,
+    arguments: &serde_json::Value,
+    surfaces: &mut std::collections::HashMap<String, super::a2ui::SurfaceState>,
+    failures: &mut usize,
+) -> Result<String, String> {
+    const MAX_RENDER_UI_FAILURES: usize = 2;
+
+    let surface_id = arguments
+        .get("surface_id")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or("缺少参数 surface_id".to_string())?;
+    let msgs = arguments
+        .get("messages")
+        .and_then(|v| v.as_array())
+        .ok_or("缺少参数 messages（应为 A2UI 消息数组）".to_string())?;
+
+    if let Err(e) = super::a2ui::validate_and_apply(msgs, surface_id, surfaces) {
+        *failures += 1;
+        if *failures >= MAX_RENDER_UI_FAILURES {
+            return Err(format!(
+                "界面生成连续失败（{}），请直接用文字回答，不要再调用 render_ui",
+                e
+            ));
+        }
+        return Err(format!("A2UI 校验失败：{}。请修正后重试", e));
+    }
+
+    let _ = app_handle.emit("jarvis:status", "贾维斯在画界面…");
+    let payload = json!({
+        "sessionId": session_id,
+        "surfaceId": surface_id,
+        "messages": msgs,
+    });
+    let _ = app_handle.emit("jarvis:surface", &payload);
+
+    // 后端直接落库（不同于文字回复由前端 done 落库——界面消息在 tool 循环
+    // 中途产生，等 done 时前端已没有上下文判断该存什么）
+    if let Ok(conn) = Connection::open(db_path) {
+        let content = serde_json::to_string(&payload).unwrap_or_default();
+        let _ = conn.execute(
+            "INSERT INTO chat_messages (session_id, role, content, content_type, created_at) VALUES (?1, 'assistant', ?2, 'a2ui', datetime('now','localtime'))",
+            rusqlite::params![session_id, content],
+        );
+        let _ = conn.execute(
+            "UPDATE chat_sessions SET updated_at = datetime('now','localtime') WHERE id = ?1",
+            rusqlite::params![session_id],
+        );
+    }
+
+    Ok(format!(
+        "界面已展示给用户（surface: {}）。用户可能点击其中的按钮或填写表单，届时会以「用户操作」消息的形式回传给你。",
+        surface_id
+    ))
 }
 
 /// 降级纯问答：模型不支持 function calling 时，换无工具措辞的系统提示单次问答。
@@ -447,7 +546,7 @@ async fn load_context(
             .unwrap_or((String::new(), 0));
         let mut stmt = conn
             .prepare(
-                "SELECT id, role, content FROM chat_messages
+                "SELECT id, role, content, content_type FROM chat_messages
                  WHERE session_id = ?1 AND id > ?2 ORDER BY id ASC",
             )
             .map_err(|e| e.to_string())?;
@@ -457,12 +556,23 @@ async fn load_context(
                     row.get::<_, i64>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
                 ))
             })
             .map_err(|e| e.to_string())?;
+        // a2ui 界面消息替换为占位文本：协议 JSON 喂回模型既烧 token 又干扰回答
         let unsummarized: Vec<(i64, String, String)> = rows
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|(id, role, content, content_type)| {
+                if content_type == "a2ui" {
+                    (id, role, "（向用户展示了一张界面卡片）".to_string())
+                } else {
+                    (id, role, content)
+                }
+            })
+            .collect();
         (summary, watermark, unsummarized)
     };
 
@@ -529,9 +639,10 @@ async fn summarize_chunk(
     .await
 }
 
-/// companion 工具声明转 OpenAI function calling 格式（Ollama 兼容同一格式）
+/// companion 工具声明转 OpenAI function calling 格式（Ollama 兼容同一格式）。
+/// 场景通道比 MCP 通道多一个 render_ui（A2UI 界面渲染，MCP 终端无渲染方）。
 fn openai_tools_json() -> serde_json::Value {
-    let arr: Vec<serde_json::Value> = tools::tool_definitions()
+    let arr: Vec<serde_json::Value> = tools::scene_tool_definitions()
         .into_iter()
         .map(|d| {
             json!({

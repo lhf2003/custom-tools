@@ -152,6 +152,74 @@ pub fn tool_definitions() -> Vec<ToolDef> {
     ]
 }
 
+/// 场景模型通道的工具声明 = 数据工具 + render_ui。
+/// render_ui 不进 MCP 通道（那边是 Claude Code 终端，没有 A2UI 渲染方）；
+/// 执行也不在 execute_tool——由 scene_chat 的 tool 循环拦截（要 emit 事件给前端）。
+pub fn scene_tool_definitions() -> Vec<ToolDef> {
+    let mut defs = tool_definitions();
+    defs.push(ToolDef {
+        name: "render_ui",
+        description: r##"把回答渲染成界面卡片展示给用户（A2UI v0.9 协议）。适用：数据统计/对比/清单、需要按钮确认或表单填写的场景；纯聊天、一句话问答不要用。
+
+messages 是消息数组，每条为四种之一：
+1. {"version":"v0.9","createSurface":{"surfaceId":"<surface_id>","catalogId":"basic","theme":{"primaryColor":"#6366F1","agentDisplayName":"贾维斯"}}} —— 首次创建该 surface 时必须包含
+2. {"version":"v0.9","updateComponents":{"surfaceId":"<surface_id>","components":[...]}} —— 组件扁平列表，用 id 互相引用；根组件 id 固定为 "root"
+3. {"version":"v0.9","updateDataModel":{"surfaceId":"<surface_id>","path":"/x","value":...}} —— 设置数据；path 省略则替换整个数据模型
+4. {"version":"v0.9","deleteSurface":{"surfaceId":"<surface_id>"}}
+
+组件（共 18 种，属性名必须严格按下面写）：
+- 布局：Column/Row（children 为子组件 id 数组）、List（children 为 id 数组，或 {"path":"/数组","componentId":"模板id"} 按数据逐项渲染，模板内路径用相对路径如 "name"）、Card（child 为单个 id）、Tabs（tabs:[{"title":"...","child":"id"}]）、Modal（trigger 为按钮 id、content 为内容 id）、Divider
+- 展示：Text（{"text":"静态文本"} 或 {"text":{"path":"/数据/路径"}}，可加 variant: h1|h2|h3|h4|h5|body|caption）、Image（{"url":"..."}）、Icon（{"name":"..."}）、Video（{"url":"..."}）、AudioPlayer（{"url":"..."}）
+- 交互：Button（{"child":"文本组件id","action":{"event":{"name":"动作名","context":{"键":{"path":"/x"}}}}}，可加 variant: primary|borderless；点击时 context 引用的数据回传给你）
+- 表单（value 用 {"path":"/x"} 双向绑定，用户填写后随按钮 action 回传）：TextField（{"label":"...","value":{"path":"/x"}}）、CheckBox、Slider（加 min/max）、ChoicePicker（加 options:[{"label","value"}]）、DateTimeInput（加 enableDate/enableTime）
+- 校验：输入组件和 Button 可加 "checks":[{"call":"required|regex|email","args":{"value":{"path":"/x"}},"message":"失败提示"}]，Button 校验不过会自动禁用
+
+布局要点：
+- 「左名称右数值」的统计行：Row 加 "justify":"spaceBetween"，名称 Text 用 variant: body，数值 Text 用 variant: caption
+- Slider 只用于让用户调数值；展示数据不要用 Slider
+- 数据放在 updateDataModel 里用 path 绑定，还是直接写死静态文本，二选一，不要混用
+
+示例（统计卡片：标题 + 两行「左名称右数值」+ 按钮）：
+[
+  {"version":"v0.9","createSurface":{"surfaceId":"s1","catalogId":"basic"}},
+  {"version":"v0.9","updateComponents":{"surfaceId":"s1","components":[
+    {"id":"root","component":"Card","child":"col"},
+    {"id":"col","component":"Column","children":["t","list","dv","b","bt"]},
+    {"id":"t","component":"Text","text":{"path":"/title"},"variant":"h2"},
+    {"id":"list","component":"List","children":["r1","r2"]},
+    {"id":"r1","component":"Row","justify":"spaceBetween","children":["n1","v1"]},
+    {"id":"n1","component":"Text","text":{"path":"/apps/0/name"},"variant":"body"},
+    {"id":"v1","component":"Text","text":{"path":"/apps/0/time"},"variant":"caption"},
+    {"id":"r2","component":"Row","justify":"spaceBetween","children":["n2","v2"]},
+    {"id":"n2","component":"Text","text":{"path":"/apps/1/name"},"variant":"body"},
+    {"id":"v2","component":"Text","text":{"path":"/apps/1/time"},"variant":"caption"},
+    {"id":"dv","component":"Divider"},
+    {"id":"b","component":"Button","child":"bt","action":{"event":{"name":"view_details","context":{}}}},
+    {"id":"bt","component":"Text","text":"查看详情"}
+  ]}},
+  {"version":"v0.9","updateDataModel":{"surfaceId":"s1","value":{"title":"今日使用统计","apps":[{"name":"VS Code","time":"3.2 小时"},{"name":"Chrome","time":"2.1 小时"}]}}}
+]
+
+同一 surface 可多次调用做增量更新。校验失败会返回具体原因，修正后重试。"##.to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "surface_id": {
+                    "type": "string",
+                    "description": "画布 id（蛇形命名，如 usage_stats）；同一 id 重复调用即增量更新"
+                },
+                "messages": {
+                    "type": "array",
+                    "description": "A2UI v0.9 消息数组（格式见工具描述）",
+                    "items": { "type": "object" }
+                }
+            },
+            "required": ["surface_id", "messages"]
+        }),
+    });
+    defs
+}
+
 /// 按名字执行工具，返回给模型的文本结果（错误也是文本，让模型自我纠正）。
 pub fn execute_tool(
     db_path: &Path,
