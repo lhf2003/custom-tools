@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 use std::process::Child;
 use std::sync::{Arc, Mutex};
 
+use chrono::Datelike;
+
 use rusqlite::Connection;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -52,10 +54,27 @@ pub(crate) fn compose_chat_system(app_data: &Path, db_path: &Path, with_tools: b
         .unwrap_or_default();
     let facts_text = format_facts_grouped(&facts);
     // 以下动态段全部追加末尾（前缀稳定段不吃 KV Cache 失效）
+    let now = chrono::Local::now();
+    // 真实时间进提示词——模型本身没有时钟，不知道「现在几点」
+    let weekday = match now.weekday().num_days_from_monday() {
+        0 => "一",
+        1 => "二",
+        2 => "三",
+        3 => "四",
+        4 => "五",
+        5 => "六",
+        _ => "日",
+    };
+    let time_text = format!("现在是 {} 周{} {}", now.format("%Y-%m-%d"), weekday, now.format("%H:%M"));
     let state_text = conn
         .as_ref()
-        .map(|c| super::state::current_state_sentence(c, chrono::Local::now().timestamp()))
+        .map(|c| super::state::current_state_sentence(c, now.timestamp()))
         .unwrap_or_default();
+    let state_text = if state_text.is_empty() {
+        time_text
+    } else {
+        format!("{}\n{}", time_text, state_text)
+    };
     let focus_text = conn
         .as_ref()
         .and_then(super::diary::today_focus)
