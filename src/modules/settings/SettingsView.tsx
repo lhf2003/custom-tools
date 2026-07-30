@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Command, Settings, Search, Bot, BookOpen, History, Info, Sparkles } from 'lucide-react';
+import { Command, Settings, Search, Bot, BookOpen, History, Info, Sparkles, BarChart3 } from 'lucide-react';
 import { immediateResize } from '@/utils/tauri';
 import { THEME } from '@/constants/theme';
 import { WINDOW_SIZE } from '@/constants/window';
@@ -8,6 +8,7 @@ import { ShortcutsSettings } from './tabs/ShortcutsSettings';
 import { SearchSettings } from './tabs/SearchSettings';
 import { ModelSettings } from './tabs/ModelSettings';
 import { CompanionSettings } from './tabs/CompanionSettings';
+import { StatsSettings } from './tabs/StatsSettings';
 import { ManualSettings } from './tabs/ManualSettings';
 import { ChangelogSettings } from './tabs/ChangelogSettings';
 import { AboutSettings } from './tabs/AboutSettings';
@@ -18,6 +19,7 @@ const SETTING_TABS = [
   { id: 'search', name: '搜索', icon: Search },
   { id: 'model', name: 'AI 模型', icon: Bot },
   { id: 'companion', name: '陪伴', icon: Sparkles },
+  { id: 'stats', name: '统计', icon: BarChart3 },
   { id: 'manual', name: '操作手册', icon: BookOpen },
   { id: 'changelog', name: '更新日志', icon: History },
   { id: 'about', name: '关于我们', icon: Info },
@@ -31,6 +33,7 @@ const TAB_CONTENT: Record<TabId, React.ReactNode> = {
   search: <SearchSettings />,
   model: <ModelSettings />,
   companion: <CompanionSettings />,
+  stats: <StatsSettings />,
   manual: <ManualSettings />,
   changelog: <ChangelogSettings />,
   about: <AboutSettings />,

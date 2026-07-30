@@ -288,6 +288,8 @@ impl Database {
         );
 
         // LLM 调用观测日志：每次调用登记来源/通道/token/耗时/成本（成本面板数据源）
+        // cached_input_tokens = 命中缓存的输入 token（含在 input_tokens 内）；
+        // tool_call_count = 本次响应请求的工具调用次数（工具循环每轮各记一条）
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS llm_call_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -296,9 +298,11 @@ impl Database {
                 scene TEXT,
                 model TEXT,
                 input_tokens INTEGER DEFAULT 0,
+                cached_input_tokens INTEGER DEFAULT 0,
                 output_tokens INTEGER DEFAULT 0,
                 cost_usd REAL DEFAULT 0,
                 duration_ms INTEGER DEFAULT 0,
+                tool_call_count INTEGER DEFAULT 0,
                 status TEXT NOT NULL DEFAULT 'ok' CHECK (status IN ('ok', 'error')),
                 error TEXT,
                 created_at INTEGER NOT NULL
@@ -309,6 +313,16 @@ impl Database {
             "CREATE INDEX IF NOT EXISTS idx_llm_call_logs_created ON llm_call_logs(created_at)",
             [],
         )?;
+
+        // Migration: 统计页观测增强——缓存命中 token 与工具调用次数
+        let _ = self.conn.execute(
+            "ALTER TABLE llm_call_logs ADD COLUMN cached_input_tokens INTEGER DEFAULT 0",
+            [],
+        );
+        let _ = self.conn.execute(
+            "ALTER TABLE llm_call_logs ADD COLUMN tool_call_count INTEGER DEFAULT 0",
+            [],
+        );
 
         // Migration: 老库的 CHECK 约束不含 'companion'，SQLite 无法改 CHECK，需重建表
         self.migrate_scene_configs_check()?;

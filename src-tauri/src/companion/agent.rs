@@ -28,9 +28,10 @@ struct ClaudeCliResult {
 }
 
 /// CLI result JSON 里的 token 用量（字段缺省容错为 0）
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone, Copy)]
 struct ClaudeCliUsage {
     input_tokens: Option<u64>,
+    cache_read_input_tokens: Option<u64>,
     output_tokens: Option<u64>,
 }
 
@@ -39,6 +40,7 @@ pub struct OneshotReply {
     pub text: String,
     pub cost_usd: f64,
     pub input_tokens: u64,
+    pub cached_input_tokens: u64,
     pub output_tokens: u64,
 }
 
@@ -125,9 +127,11 @@ pub fn run_daily_report_agent(
             scene: None,
             model: None,
             input_tokens: 0,
+            cached_input_tokens: 0,
             output_tokens: 0,
             cost_usd: 0.0,
             duration_ms,
+            tool_call_count: 0,
             status: "error",
             error: Some(&reason),
         });
@@ -139,19 +143,27 @@ pub fn run_daily_report_agent(
     let summary = parsed.result.unwrap_or_else(|| "日报已生成".to_string());
     let summary_preview: String = summary.chars().take(200).collect();
 
-    let (input_tokens, output_tokens) = parsed
+    let (input_tokens, cached_input_tokens, output_tokens) = parsed
         .usage
-        .map(|u| (u.input_tokens.unwrap_or(0), u.output_tokens.unwrap_or(0)))
-        .unwrap_or((0, 0));
+        .map(|u| {
+            (
+                u.input_tokens.unwrap_or(0),
+                u.cache_read_input_tokens.unwrap_or(0),
+                u.output_tokens.unwrap_or(0),
+            )
+        })
+        .unwrap_or((0, 0, 0));
     crate::llm::observe::log_call(db_path, &crate::llm::observe::LlmCallEntry {
         source: "report",
         channel: "claude_code",
         scene: None,
         model: None,
         input_tokens,
+        cached_input_tokens,
         output_tokens,
         cost_usd: cost,
         duration_ms,
+        tool_call_count: 0,
         status: "ok",
         error: None,
     });
@@ -259,6 +271,10 @@ pub fn run_oneshot(bin_path: &str, work_dir: &Path, prompt: &str) -> Result<Ones
             .ok_or_else(|| "claude 未返回结果".to_string())?,
         cost_usd: parsed.total_cost_usd.unwrap_or(0.0),
         input_tokens: usage.as_ref().and_then(|u| u.input_tokens).unwrap_or(0),
+        cached_input_tokens: usage
+            .as_ref()
+            .and_then(|u| u.cache_read_input_tokens)
+            .unwrap_or(0),
         output_tokens: usage.and_then(|u| u.output_tokens).unwrap_or(0),
     })
 }

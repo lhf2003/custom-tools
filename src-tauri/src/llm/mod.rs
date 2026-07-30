@@ -18,6 +18,8 @@ fn http_client() -> reqwest::Client {
 pub struct LlmReply {
     pub content: String,
     pub input_tokens: u64,
+    /// 命中缓存的输入 token（含在 input_tokens 内；端点未上报时为 0）
+    pub cached_input_tokens: u64,
     pub output_tokens: u64,
 }
 
@@ -47,6 +49,8 @@ pub struct ToolReply {
     pub content: String,
     pub tool_calls: Vec<ToolCall>,
     pub input_tokens: u64,
+    /// 命中缓存的输入 token（含在 input_tokens 内；端点未上报时为 0）
+    pub cached_input_tokens: u64,
     pub output_tokens: u64,
 }
 
@@ -235,6 +239,7 @@ pub async fn call_llm_with_tools(
                 .get("prompt_eval_count")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0),
+            cached_input_tokens: 0,
             output_tokens: raw.get("eval_count").and_then(|v| v.as_u64()).unwrap_or(0),
         })
     } else {
@@ -268,6 +273,14 @@ pub async fn call_llm_with_tools(
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
+        let cached_input_tokens = raw
+            .pointer("/usage/prompt_tokens_details/cached_tokens")
+            .and_then(|v| v.as_u64())
+            .or_else(|| {
+                raw.pointer("/usage/cache_read_input_tokens")
+                    .and_then(|v| v.as_u64())
+            })
+            .unwrap_or(0);
         Ok(ToolReply {
             content,
             tool_calls,
@@ -275,6 +288,7 @@ pub async fn call_llm_with_tools(
                 .pointer("/usage/prompt_tokens")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0),
+            cached_input_tokens,
             output_tokens: raw
                 .pointer("/usage/completion_tokens")
                 .and_then(|v| v.as_u64())
@@ -317,6 +331,26 @@ struct ChatChoice {
 struct OpenAiUsage {
     prompt_tokens: Option<u64>,
     completion_tokens: Option<u64>,
+    prompt_tokens_details: Option<PromptTokensDetails>,
+    /// Anthropic 风格端点的缓存读计量（OpenAI 风格端点缺省）
+    cache_read_input_tokens: Option<u64>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct PromptTokensDetails {
+    cached_tokens: Option<u64>,
+}
+
+impl OpenAiUsage {
+    /// 命中缓存的输入 token：OpenAI 风格走 prompt_tokens_details，
+    /// Anthropic 风格走 cache_read_input_tokens，均未上报为 0
+    fn cached_tokens(&self) -> u64 {
+        self.prompt_tokens_details
+            .as_ref()
+            .and_then(|d| d.cached_tokens)
+            .or(self.cache_read_input_tokens)
+            .unwrap_or(0)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -451,6 +485,7 @@ pub async fn call_llm(
         Ok(LlmReply {
             content: resp.message.content,
             input_tokens: resp.prompt_eval_count.unwrap_or(0),
+            cached_input_tokens: 0,
             output_tokens: resp.eval_count.unwrap_or(0),
         })
     } else {
@@ -465,6 +500,7 @@ pub async fn call_llm(
             .map(|c| LlmReply {
                 content: c.message.content,
                 input_tokens: usage.prompt_tokens.unwrap_or(0),
+                cached_input_tokens: usage.cached_tokens(),
                 output_tokens: usage.completion_tokens.unwrap_or(0),
             })
             .ok_or_else(|| "LLM 返回了空响应".to_string())

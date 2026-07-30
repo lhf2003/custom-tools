@@ -18,10 +18,14 @@ pub struct LlmCallEntry<'a> {
     /// 模型 id；CC 通道记 None（由用户 CLI 配置决定，面板显示通道即可）
     pub model: Option<&'a str>,
     pub input_tokens: u64,
+    /// 命中缓存的输入 token（含在 input_tokens 内；通道未上报时记 0）
+    pub cached_input_tokens: u64,
     pub output_tokens: u64,
     /// 美元成本：CC 通道为 CLI 实报；场景模型为 token×单价（未配单价记 0）
     pub cost_usd: f64,
     pub duration_ms: u64,
+    /// 本次响应请求的工具调用次数（CC 通道不可观测，记 0）
+    pub tool_call_count: u64,
     /// "ok" | "error"
     pub status: &'a str,
     pub error: Option<&'a str>,
@@ -33,18 +37,20 @@ pub fn log_call(db_path: &Path, entry: &LlmCallEntry) {
     let result = Connection::open(db_path).and_then(|conn| {
         conn.execute(
             "INSERT INTO llm_call_logs
-             (source, channel, scene, model, input_tokens, output_tokens, cost_usd,
-              duration_ms, status, error, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+             (source, channel, scene, model, input_tokens, cached_input_tokens, output_tokens, cost_usd,
+              duration_ms, tool_call_count, status, error, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             rusqlite::params![
                 entry.source,
                 entry.channel,
                 entry.scene,
                 entry.model,
                 entry.input_tokens as i64,
+                entry.cached_input_tokens as i64,
                 entry.output_tokens as i64,
                 entry.cost_usd,
                 entry.duration_ms as i64,
+                entry.tool_call_count as i64,
                 entry.status,
                 entry.error,
                 now,

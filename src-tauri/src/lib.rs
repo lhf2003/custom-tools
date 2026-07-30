@@ -454,6 +454,13 @@ pub fn run() {
             commands::llm::test_llm_connection,
             commands::llm::call_llm_stream_by_scene,
             commands::llm::get_llm_call_stats,
+            // Stats commands（设置页「统计」页签）
+            commands::stats::get_llm_observability,
+            commands::stats::get_llm_call_logs,
+            commands::stats::get_llm_observe_options,
+            commands::stats::get_local_data_stats,
+            commands::stats::cleanup_app_logs,
+            commands::stats::cleanup_icon_cache,
             commands::chat::create_chat_session,
             commands::chat::save_chat_message,
             commands::chat::get_session_messages,

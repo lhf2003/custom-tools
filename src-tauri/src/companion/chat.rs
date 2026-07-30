@@ -362,6 +362,10 @@ fn stream_chat_process(
                     .pointer("/usage/output_tokens")
                     .and_then(|v| v.as_u64())
                     .unwrap_or(0);
+                let cached_input_tokens = msg
+                    .pointer("/usage/cache_read_input_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
                 if is_error {
                     let reason = msg
                         .get("result")
@@ -373,9 +377,11 @@ fn stream_chat_process(
                         scene: None,
                         model: None,
                         input_tokens: 0,
+                        cached_input_tokens: 0,
                         output_tokens: 0,
                         cost_usd: 0.0,
                         duration_ms,
+                        tool_call_count: 0,
                         status: "error",
                         error: Some(reason),
                     });
@@ -387,9 +393,11 @@ fn stream_chat_process(
                         scene: None,
                         model: None,
                         input_tokens,
+                        cached_input_tokens,
                         output_tokens,
                         cost_usd: cost,
                         duration_ms,
+                        tool_call_count: 0,
                         status: "ok",
                         error: None,
                     });
