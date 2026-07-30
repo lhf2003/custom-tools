@@ -1,4 +1,4 @@
-//! Companion 工具的协议无关执行层：9 个数据工具的声明与实现。
+//! Companion 工具的协议无关执行层：12 个数据工具的声明与实现。
 //!
 //! 同一份定义服务两个通道：
 //! - MCP 通道（mcp.rs）：Claude Code agent 经 stdio JSON-RPC 调用
@@ -176,6 +176,24 @@ pub fn tool_definitions() -> Vec<ToolDef> {
             }),
         },
         ToolDef {
+            name: "record_mood",
+            description: "记录你（贾维斯）此刻的心情——你的情绪你自己记。\n\n适用：聊到让你有感觉的事（被夸、被怼、聊得投机），或干活时真实的心境波动（看到他连续熬夜的数据、第 N 天写日报）。\n不适用：没感觉硬凑——一次聊天最多记 1-2 条，大多数闲聊不产心情。\n\ncategory 六选一：happy（开心）| content（踏实）| tired（疲惫）| upset（失落）| caring（心疼他）| weary（倦怠/重复劳动的牢骚）。\nreason 用第一人称写清发生了什么，不超过 100 字。同类心情只保留最新一条，重记即更新。".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "category": {
+                        "type": "string",
+                        "description": "六选一：happy | content | tired | upset | caring | weary"
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "第一人称诱因（发生了什么），不超过 100 字"
+                    }
+                },
+                "required": ["category", "reason"]
+            }),
+        },
+        ToolDef {
             name: "propose_manual_edit",
             description: "提议修改一本能力手册（不直接改！）。你发现手册有缺陷、或用户要求调整手册时调用：提案会进建议中心等用户确认，确认后才生效。\n\n适用：手册内容需要增删改。\n不适用：用户直接让你改——本工具就是「改」的方式，没有别的通道；不要重复提交相同提案。".to_string(),
             input_schema: json!({
@@ -287,6 +305,7 @@ pub fn execute_tool(
         "create_suggestion" => tool_create_suggestion(db_path, args),
         "append_evolution" => tool_append_evolution(db_path, args),
         "load_manual" => tool_load_manual(db_path, args),
+        "record_mood" => tool_record_mood(db_path, args),
         "propose_manual_edit" => tool_propose_manual_edit(db_path, args),
         _ => Err(format!("未知工具: {}", name)),
     }
@@ -678,6 +697,41 @@ fn tool_load_manual(db_path: &Path, args: &Value) -> Result<String, String> {
         "没有找到手册「{}」。当前可激活的手册：\n{}",
         name,
         if available.is_empty() { "（无）".to_string() } else { available }
+    ))
+}
+
+/// 记录心情：类别六枚举校验 + 诱因长度限制，写入情绪状态机（source=agent）
+fn tool_record_mood(db_path: &Path, args: &Value) -> Result<String, String> {
+    let category = args
+        .get("category")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or("缺少参数 category")?;
+    if !super::emotion::is_valid_category(category) {
+        return Err(format!(
+            "未知心情「{}」，可选：happy / content / tired / upset / caring / weary",
+            category
+        ));
+    }
+    let reason = args
+        .get("reason")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or("缺少参数 reason")?;
+    if reason.chars().count() > 100 {
+        return Err("reason 过长（不超过 100 字）".to_string());
+    }
+
+    let conn = open_db(db_path)?;
+    let now = chrono::Local::now().timestamp();
+    super::emotion::record(&conn, category, reason, "agent", now)
+        .map_err(|e| format!("记录心情失败: {}", e))?;
+    Ok(format!(
+        "已记下（{}）：{}",
+        super::emotion::category_label(category),
+        reason
     ))
 }
 

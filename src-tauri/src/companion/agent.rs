@@ -74,17 +74,25 @@ pub fn run_daily_report_agent(
         .as_ref()
         .map(|dir| super::skills::load_skill_body(dir, "reporter"))
         .unwrap_or_default();
-    // 语气两维（表达偏好 + 对贾维斯的期望）注入日报 prompt，让成文贴合他本人
-    let (ve_section, state_text) = rusqlite::Connection::open(db_path)
+    // 语气两维（表达偏好 + 对贾维斯的期望）注入日报 prompt，让成文贴合他本人；
+    // 日内心情（情绪状态机）一并注入——只该影响结尾的「今日蛐蛐」（手册有约束）
+    let (ve_section, state_text, emotion_section) = rusqlite::Connection::open(db_path)
         .ok()
         .map(|conn| {
+            let now = chrono::Local::now().timestamp();
+            let emotion = super::emotion::render_current(&conn, now);
             (
                 super::analyzer::voice_expectation_section(&conn),
-                super::state::current_state_sentence(&conn, chrono::Local::now().timestamp()),
+                super::state::current_state_sentence(&conn, now),
+                if emotion.is_empty() {
+                    String::new()
+                } else {
+                    format!("\n\n---\n\n# 你此刻的心情\n{}", emotion)
+                },
             )
         })
         .unwrap_or_default();
-    let prompt = build_report_prompt(&persona, &evolution, &role, date, &ve_section, &state_text);
+    let prompt = build_report_prompt(&persona, &evolution, &role, date, &ve_section, &state_text, &emotion_section);
 
     log::info!("Companion 日报 agent 启动: {}", bin_path);
     let started = std::time::Instant::now();
@@ -393,15 +401,16 @@ fn ensure_mcp_registered_once(
     Ok(())
 }
 
-fn build_report_prompt(persona: &str, evolution: &str, role: &str, date: &str, ve_section: &str, state_text: &str) -> String {
+fn build_report_prompt(persona: &str, evolution: &str, role: &str, date: &str, ve_section: &str, state_text: &str, emotion_section: &str) -> String {
     format!(
         "{persona}\n\n---\n\n{evolution}\n\n---\n\n{role}{ve_section}\n\n---\n\n\
-         以上是贾维斯的身份设定、经验本与日报工作手册。请完成「{date}」的工作日报。\n\n---\n\n# 当下状态\n{state}",
+         以上是贾维斯的身份设定、经验本与日报工作手册。请完成「{date}」的工作日报。\n\n---\n\n# 当下状态\n{state}{emotion}",
         persona = persona,
         evolution = evolution,
         role = role,
         ve_section = ve_section,
         date = date,
-        state = state_text
+        state = state_text,
+        emotion = emotion_section
     )
 }

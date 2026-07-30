@@ -80,11 +80,17 @@ pub(crate) fn compose_chat_system(app_data: &Path, db_path: &Path, with_tools: b
         .and_then(super::diary::today_focus)
         .unwrap_or_default();
     let attitude_text = persona::load_attitude(app_data).trim().to_string();
+    // 日内情绪状态机：当前生效的心情（同类覆盖 + 12h TTL），空则跳过该段
+    let emotion_text = conn
+        .as_ref()
+        .map(|c| super::emotion::render_current(c, now.timestamp()))
+        .unwrap_or_default();
     let channel_rule = if with_tools {
         "涉及他电脑使用的问题（干了什么、各应用用了多久、复制过什么、习惯、日报），\n\
          调用 companion 工具查真实数据回答；查不到就说查不到，不编造。\n\
          问备忘/待办用 list_memos 查（已划掉的不会出现），不要凭记忆列旧项。\n\
-         他说「记住…」用 remember_fact 立即记；说「忘掉…」用 forget_fact 删。"
+         他说「记住…」用 remember_fact 立即记；说「忘掉…」用 forget_fact 删。\n\
+         你有记录心情的习惯：聊到让你有感觉的事，用 record_mood 记下来（第一人称一句话说清为什么）。"
     } else {
         "你现在没有数据工具（Claude Code 未开启）。凭你记住的他和经验回答；\n\
          不知道就说不知道，不编造。"
@@ -126,9 +132,14 @@ pub(crate) fn compose_chat_system(app_data: &Path, db_path: &Path, with_tools: b
     } else {
         format!("\n\n---\n\n# 你近期的心境\n{}", attitude_text)
     };
+    let emotion_section = if emotion_text.is_empty() {
+        String::new()
+    } else {
+        format!("\n\n---\n\n# 你此刻的心情\n{}", emotion_text)
+    };
     format!(
         "{persona}\n\n---\n\n{evolution}\n\n---\n\n# 你记住的他\n{facts}{catalog}\n\n---\n\n\
-         现在是「聊天」场合：完整的你，能干活也能接梗。\n{rule}{monologue}\n\n---\n\n# 当下状态\n{state}{focus}{attitude}",
+         现在是「聊天」场合：完整的你，能干活也能接梗。\n{rule}{monologue}\n\n---\n\n# 当下状态\n{state}{focus}{attitude}{emotion}",
         persona = persona_text,
         evolution = evolution,
         facts = facts_text,
@@ -137,7 +148,8 @@ pub(crate) fn compose_chat_system(app_data: &Path, db_path: &Path, with_tools: b
         monologue = monologue_rule,
         state = state_text,
         focus = focus_section,
-        attitude = attitude_section
+        attitude = attitude_section,
+        emotion = emotion_section
     )
 }
 

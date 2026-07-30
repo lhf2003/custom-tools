@@ -72,6 +72,7 @@ pub async fn act_on_companion_suggestion(
     let now = chrono::Local::now().timestamp();
     db::set_suggestion_status(&conn, id, "accepted", now)
         .map_err(|e| format!("更新建议状态失败: {}", e))?;
+    crate::companion::emotion::on_suggestion_accepted(&conn, &suggestion.title, now);
 
     suggester::hide_toast_window(&app_handle);
     Ok(())
@@ -87,6 +88,7 @@ pub fn dismiss_companion_suggestion(
     let now = chrono::Local::now().timestamp();
     db::set_suggestion_status(&conn, id, "dismissed", now)
         .map_err(|e| format!("更新建议状态失败: {}", e))?;
+    crate::companion::emotion::on_suggestion_dismissed(&conn, now);
     suggester::hide_toast_window(&app_handle);
     Ok(())
 }
@@ -195,6 +197,13 @@ pub async fn run_companion_agent_now(
                 "companion_last_report_date",
                 &today,
             );
+            if let Ok(conn) = Connection::open(&db_path) {
+                crate::companion::emotion::on_report_done(
+                    &conn,
+                    &today,
+                    chrono::Local::now().timestamp(),
+                );
+            }
         }
     }
     result

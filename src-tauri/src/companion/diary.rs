@@ -32,6 +32,8 @@ pub async fn run_diary(app_handle: &AppHandle, db_path: &PathBuf, date: &str) ->
     let recent_chats = recent_user_messages(&conn, 10);
     let fact_events = today_fact_events(&conn);
     let last_attitude = persona::load_attitude(&app_data);
+    // 当日情绪轨迹（情绪状态机）：日记是它的归档归宿，趋势蒸馏进 attitude
+    let mood_track = super::emotion::render_today(&conn, chrono::Local::now().timestamp());
 
     let chats_text = if recent_chats.is_empty() {
         "（今天没有聊天）".to_string()
@@ -58,6 +60,7 @@ pub async fn run_diary(app_handle: &AppHandle, db_path: &PathBuf, date: &str) ->
          ## 他的电脑使用（{date}）\n{aggregate}\n\n\
          ## 最近他对你说的话\n{chats}\n\n\
          ## 今天你记住/修改的关于他的事\n{events}\n\n\
+         ## 今天你的心情轨迹\n{moods}\n\n\
          ## 你上次写下的态度指引\n{attitude}",
         persona = persona::load(&app_data),
         manual = super::skills::load_skill_body(&app_data, "diary"),
@@ -65,6 +68,7 @@ pub async fn run_diary(app_handle: &AppHandle, db_path: &PathBuf, date: &str) ->
         aggregate = aggregate,
         chats = chats_text,
         events = events_text,
+        moods = mood_track,
         attitude = attitude_text,
     );
 

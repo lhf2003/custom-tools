@@ -5,6 +5,7 @@ pub mod backup;
 pub mod chat;
 pub mod db;
 pub mod diary;
+pub mod emotion;
 pub mod mcp;
 pub mod persona;
 pub mod recall;

@@ -142,6 +142,10 @@ pub fn run_scheduler(app_handle: AppHandle, db_path: PathBuf, flags: Arc<RwLock<
             if let Err(e) = match_context_routines(&app_handle, &db_path, now.timestamp()) {
                 log::warn!("Companion 情境联动匹配失败: {}", e);
             }
+            // 深夜情绪观察：他还在忙时，23 点后记心疼、凌晨记疲惫（内部节流）
+            if let Ok(conn) = Connection::open(&db_path) {
+                super::emotion::on_late_night(&conn, now.timestamp());
+            }
         }
 
         if now.hour() >= DAILY_ANALYSIS_HOUR && last_analysis_date.as_deref() != Some(&today) {
@@ -222,6 +226,13 @@ pub fn run_scheduler(app_handle: AppHandle, db_path: PathBuf, flags: Arc<RwLock<
                             .unwrap_or(false);
                         if note_written || msg.contains("无数据") {
                             save_setting(&db, "companion_last_report_date", &date);
+                            if let Ok(conn) = Connection::open(&db) {
+                                super::emotion::on_report_done(
+                                    &conn,
+                                    &date,
+                                    chrono::Local::now().timestamp(),
+                                );
+                            }
                             log::info!("Companion 日报完成: {}", msg);
                         } else {
                             log::warn!("Companion 日报返回成功但笔记未落盘，稍后重试: {}", msg);
@@ -242,6 +253,9 @@ pub fn run_scheduler(app_handle: AppHandle, db_path: PathBuf, flags: Arc<RwLock<
                     Err(e) => log::warn!("Companion 清理活动记录失败: {}", e),
                 }
                 let _ = db::cleanup_suggestions_older_than(&conn, cutoff);
+                // 情绪 housekeeping：纪念日（踏实）+ 过期条目清理
+                super::emotion::on_milestone(&conn, now.timestamp());
+                let _ = super::emotion::cleanup(&conn, now.timestamp());
             }
         }
     }
@@ -318,6 +332,13 @@ fn maybe_backfill_report(
                 // 只有笔记真的落盘才标记成功——agent 跑完但没写笔记时，下次启动重试
                 if note_path.exists() {
                     save_setting(&db, "companion_last_report_date", &date);
+                    if let Ok(conn) = Connection::open(&db) {
+                        super::emotion::on_report_done(
+                            &conn,
+                            &date,
+                            chrono::Local::now().timestamp(),
+                        );
+                    }
                 }
             }
             Err(e) => log::warn!("补跑日报失败（下次启动重试）: {}", e),
@@ -1226,13 +1247,20 @@ pub(crate) async fn run_scene_report(
     let evolution = super::persona::load_evolution(&app_data);
     let role = super::skills::load_skill_body(&app_data, "reporter");
     let ve_section = voice_expectation_section(&conn);
-    let state_text = super::state::current_state_sentence(&conn, chrono::Local::now().timestamp());
+    let now_ts = chrono::Local::now().timestamp();
+    let state_text = super::state::current_state_sentence(&conn, now_ts);
+    let emotion = super::emotion::render_current(&conn, now_ts);
+    let emotion_section = if emotion.is_empty() {
+        String::new()
+    } else {
+        format!("\n\n---\n\n# 你此刻的心情\n{}", emotion)
+    };
     let prompt = format!(
         "{persona}\n\n---\n\n{evolution}\n\n---\n\n{role}\n\n---\n\n\
          以上是贾维斯的身份设定、经验本与日报工作手册。\n\
          注意：你现在没有数据工具——他昨天的电脑使用聚合已直接给你（见末尾），\n\
          跳过流程中的工具调用步骤，直接完成「写日报」那一步。\n\
-         如果内容显示没有活动记录，只回复「当日无数据」。\n\n{aggregate}{ve_section}\n\n---\n\n# 当下状态\n{state_text}"
+         如果内容显示没有活动记录，只回复「当日无数据」。\n\n{aggregate}{ve_section}\n\n---\n\n# 当下状态\n{state_text}{emotion_section}"
     );
 
     let report = call_companion_llm(app_handle, db_path, prompt, "report").await?;

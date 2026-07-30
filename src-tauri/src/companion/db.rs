@@ -316,6 +316,24 @@ pub fn init_tables(conn: &Connection) -> rusqlite::Result<()> {
         [],
     )?;
 
+    // 日内情绪状态机：贾维斯自己的心情条目（五期）
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS emotion_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            category TEXT NOT NULL
+                CHECK (category IN ('happy','content','tired','upset','caring','weary')),
+            reason TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'agent',
+            created_at INTEGER NOT NULL
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_emotion_entries_created
+         ON emotion_entries(created_at)",
+        [],
+    )?;
+
     // 记忆分类五维迁移（幂等，每次启动跑、首次后空转）：
     // person/project 保持不变，旧标签归并到新五维
     conn.execute(
