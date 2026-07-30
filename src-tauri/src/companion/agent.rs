@@ -72,7 +72,7 @@ pub fn run_daily_report_agent(
         .unwrap_or_default();
     let role = app_data
         .as_ref()
-        .map(|dir| super::persona::load_role(dir, "reporter"))
+        .map(|dir| super::skills::load_skill_body(dir, "reporter"))
         .unwrap_or_default();
     // 语气两维（表达偏好 + 对贾维斯的期望）注入日报 prompt，让成文贴合他本人
     let (ve_section, state_text) = rusqlite::Connection::open(db_path)

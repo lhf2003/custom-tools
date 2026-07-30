@@ -94,7 +94,7 @@ pub async fn run_recall(app_handle: &AppHandle, db_path: &PathBuf) -> Result<Str
     let app_data = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
     let persona_text = persona::load(&app_data);
     let evolution = persona::load_evolution(&app_data);
-    let manual = persona::load_role(&app_data, "recall");
+    let manual = super::skills::load_skill_body(&app_data, "recall");
     let facts = db::list_memory_facts(&conn, RECALL_FACT_LIMIT).unwrap_or_default();
 
     let facts_text = if facts.is_empty() {

@@ -1,6 +1,7 @@
 pub mod a2ui;
 pub mod agent;
 pub mod analyzer;
+pub mod backup;
 pub mod chat;
 pub mod db;
 pub mod diary;
@@ -8,6 +9,7 @@ pub mod mcp;
 pub mod persona;
 pub mod recall;
 pub mod scene_chat;
+pub mod skills;
 pub mod state;
 pub mod suggester;
 pub mod tools;

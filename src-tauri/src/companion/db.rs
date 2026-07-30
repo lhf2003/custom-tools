@@ -104,6 +104,14 @@ pub struct AnalyzePayload {
     pub content: String,
 }
 
+/// 建议动作负载：应用手册修改提案（manual_edit 建议接受时执行）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManualEditPayload {
+    pub action: String, // 固定 "apply_manual_edit"
+    pub name: String,
+    pub new_content: String,
+}
+
 /// 执行 ALTER TABLE ADD COLUMN，仅忽略「列已存在」错误（幂等迁移）
 fn add_column_if_missing(conn: &Connection, sql: &str) -> rusqlite::Result<()> {
     match conn.execute(sql, []) {
@@ -1029,6 +1037,47 @@ pub fn list_suggestions(
     let param_refs: Vec<&dyn rusqlite::ToSql> = params_vec.iter().map(|p| p.as_ref()).collect();
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(&param_refs[..], map_suggestion)?;
+    rows.collect()
+}
+
+/// 一类建议的处置统计（每周自评用）
+#[derive(Debug, Clone, Serialize)]
+pub struct SuggestionTypeStats {
+    pub suggestion_type: String,
+    pub accepted: i64,
+    pub dismissed: i64,
+    pub ignored: i64,
+    pub seen: i64,
+}
+
+/// 统计 since_ts 以来的建议处置，按类型分组。
+/// ignored = 至今仍 pending 且创建早于 ignore_before（挂了 48h 没点=无声的忽略）；
+/// 近 48h 的 pending 不计入（还没来得及处置，不是信号）。
+pub fn suggestion_stats_since(
+    conn: &Connection,
+    since_ts: i64,
+    ignore_before: i64,
+) -> rusqlite::Result<Vec<SuggestionTypeStats>> {
+    let mut stmt = conn.prepare(
+        "SELECT suggestion_type,
+                SUM(CASE WHEN status = 'accepted' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN status = 'dismissed' THEN 1 ELSE 0 END),
+                SUM(CASE WHEN status = 'pending' AND created_at < ?2 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN status = 'seen' THEN 1 ELSE 0 END)
+         FROM suggestions
+         WHERE created_at >= ?1
+         GROUP BY suggestion_type
+         ORDER BY suggestion_type",
+    )?;
+    let rows = stmt.query_map(params![since_ts, ignore_before], |r| {
+        Ok(SuggestionTypeStats {
+            suggestion_type: r.get(0)?,
+            accepted: r.get(1)?,
+            dismissed: r.get(2)?,
+            ignored: r.get(3)?,
+            seen: r.get(4)?,
+        })
+    })?;
     rows.collect()
 }
 

@@ -16,6 +16,9 @@ use super::{analyzer, db};
 /// write_note 工具被限制在该目录前缀下，防止 agent 越权写其他笔记
 pub(crate) const NOTE_DIR_PREFIX: &str = "陪伴日报";
 
+/// 经验本容量提醒阈值（16KB 硬上限前的预警线）
+const EVOLUTION_WARN_BYTES: u64 = 14 * 1024;
+
 /// 工具声明（name + description + inputSchema），与传输格式无关
 pub struct ToolDef {
     pub name: &'static str,
@@ -158,6 +161,42 @@ pub fn tool_definitions() -> Vec<ToolDef> {
                 "required": ["section", "lesson"]
             }),
         },
+        ToolDef {
+            name: "load_manual",
+            description: "读取一本能力手册的全文。聊天系统提示里列出的手册可按需激活：用户的话匹配手册描述时，先调用本工具读全文，然后按手册执行。".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "手册名（能力目录里列出的名字，如 error-analysis）"
+                    }
+                },
+                "required": ["name"]
+            }),
+        },
+        ToolDef {
+            name: "propose_manual_edit",
+            description: "提议修改一本能力手册（不直接改！）。你发现手册有缺陷、或用户要求调整手册时调用：提案会进建议中心等用户确认，确认后才生效。\n\n适用：手册内容需要增删改。\n不适用：用户直接让你改——本工具就是「改」的方式，没有别的通道；不要重复提交相同提案。".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "要修改的手册名"
+                    },
+                    "new_content": {
+                        "type": "string",
+                        "description": "修改后的手册完整新内容（含 frontmatter，全文替换）"
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "修改理由（一句话，说清为什么改）"
+                    }
+                },
+                "required": ["name", "new_content", "reason"]
+            }),
+        },
     ]
 }
 
@@ -247,6 +286,8 @@ pub fn execute_tool(
         "write_note" => tool_write_note(notes_dir, args),
         "create_suggestion" => tool_create_suggestion(db_path, args),
         "append_evolution" => tool_append_evolution(db_path, args),
+        "load_manual" => tool_load_manual(db_path, args),
+        "propose_manual_edit" => tool_propose_manual_edit(db_path, args),
         _ => Err(format!("未知工具: {}", name)),
     }
 }
@@ -573,6 +614,126 @@ fn tool_append_evolution(db_path: &Path, args: &Value) -> Result<String, String>
         .ok_or(format!("经验本中找不到小节「{}」", section))?;
     content.insert_str(pos + heading.len(), &format!("\n- [{}] {}", date, lesson));
 
+    // 写入即快照（三期进化治理；快照失败不阻塞经验记录，告警即可）
+    if let Err(e) = super::backup::backup_file(&app_data, "evolution.md") {
+        log::warn!("经验本快照失败: {}", e);
+    }
     std::fs::write(&path, content).map_err(|e| format!("写入经验本失败: {}", e))?;
+
+    // 接近 16KB 上限时提醒整理（有 pending 同类型不重复推）
+    if let Ok(size) = std::fs::metadata(&path).map(|m| m.len()) {
+        if size > EVOLUTION_WARN_BYTES {
+            if let Ok(conn) = open_db(db_path) {
+                let has_pending =
+                    db::has_pending_suggestion_since(&conn, "evolution_cleanup", 0).unwrap_or(true);
+                if !has_pending {
+                    let now = chrono::Local::now().timestamp();
+                    let _ = db::create_suggestion(
+                        &conn,
+                        "evolution_cleanup",
+                        "经验本快满了，该整理了",
+                        Some("经验本超过 14KB，去「设置 → 陪伴 → 进化治理」一键整理；整理前会自动备份，可回滚。"),
+                        None,
+                        now,
+                    );
+                }
+            }
+        }
+    }
     Ok(format!("已记入经验本「{}」", section))
+}
+
+/// 从 db 路径推导应用数据目录（与 tool_append_evolution 同一约定）
+fn app_data_of(db_path: &Path) -> Result<std::path::PathBuf, String> {
+    db_path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .ok_or_else(|| "无法定位应用数据目录".to_string())
+}
+
+/// 读手册全文：注册表按名查找；找不到时返回可用手册清单，让模型自我纠正
+fn tool_load_manual(db_path: &Path, args: &Value) -> Result<String, String> {
+    let name = args
+        .get("name")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or("缺少参数 name")?;
+
+    let app_data = app_data_of(db_path)?;
+    let skills = super::skills::scan_skills(&app_data);
+    if let Some(skill) = skills.iter().find(|s| s.name == name && s.enabled) {
+        if skill.body.trim().is_empty() {
+            return Err(format!("手册「{}」内容为空", name));
+        }
+        return Ok(skill.body.clone());
+    }
+    let available = skills
+        .iter()
+        .filter(|s| s.enabled && !s.trigger_description.is_empty())
+        .map(|s| format!("- {}: {}", s.name, s.description))
+        .collect::<Vec<_>>()
+        .join("\n");
+    Err(format!(
+        "没有找到手册「{}」。当前可激活的手册：\n{}",
+        name,
+        if available.is_empty() { "（无）".to_string() } else { available }
+    ))
+}
+
+/// 提议修改手册：创建 manual_edit 建议（payload 带全文新内容），
+/// 用户在建议中心接受后才由 apply_manual_edit 应用——本工具只提案不动文件。
+fn tool_propose_manual_edit(db_path: &Path, args: &Value) -> Result<String, String> {
+    let name = args
+        .get("name")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or("缺少参数 name")?;
+    let new_content = args
+        .get("new_content")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or("缺少参数 new_content")?;
+    let reason = args
+        .get("reason")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or("缺少参数 reason")?;
+
+    // 校验目标手册存在（避免提案指向不存在的手册，接受时必失败）
+    let app_data = app_data_of(db_path)?;
+    let exists = super::skills::scan_skills(&app_data)
+        .iter()
+        .any(|s| s.name == name);
+    if !exists {
+        return Err(format!("没有找到手册「{}」，提案未创建", name));
+    }
+    if new_content.len() > 32 * 1024 {
+        return Err("new_content 过长（不超过 32KB）".to_string());
+    }
+
+    let payload = json!({
+        "action": "apply_manual_edit",
+        "name": name,
+        "new_content": new_content,
+    });
+    let conn = open_db(db_path)?;
+    let now = chrono::Local::now().timestamp();
+    let suggestion = db::create_suggestion(
+        &conn,
+        "manual_edit",
+        &format!("贾维斯提议修改「{}」手册", name),
+        Some(reason),
+        Some(&payload.to_string()),
+        now,
+    )
+    .map_err(|e| format!("创建提案失败: {}", e))?;
+
+    Ok(format!(
+        "提案已提交（id: {}），等用户在建议中心确认后生效；生效前手册保持原样",
+        suggestion.id
+    ))
 }

@@ -1,5 +1,5 @@
 use rusqlite::Connection;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::commands::settings::SettingsState;
 use crate::companion::{analyzer, db, suggester, CompanionState};
@@ -55,6 +55,16 @@ pub async fn act_on_companion_suggestion(
                 if let Err(e) = app_handle.emit("companion:analyze", analyze.content) {
                     log::warn!("emit companion:analyze 失败: {}", e);
                 }
+            }
+        } else if let Ok(edit) = serde_json::from_str::<db::ManualEditPayload>(payload_str) {
+            if edit.action == "apply_manual_edit" {
+                // 手册修改门控（三期）：用户点了接受才走到这——校验+快照+写入
+                let app_data = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+                crate::companion::skills::apply_manual_content(
+                    &app_data,
+                    &edit.name,
+                    &edit.new_content,
+                )?;
             }
         }
     }
@@ -360,3 +370,152 @@ companion_flag_command!(
     long_work_minutes,
     i64
 );
+
+// ── 进化治理（三期：手册/经验本/态度指引的快照、回滚、在线编辑）──────────────
+
+/// 治理视图的手册条目（schedule 转回文本直接展示）
+#[derive(Debug, serde::Serialize)]
+pub struct ManualInfo {
+    pub name: String,
+    pub description: String,
+    pub trigger_description: String,
+    pub schedule: Option<String>,
+    pub enabled: bool,
+}
+
+fn format_schedule(s: &crate::companion::skills::Schedule) -> String {
+    const DOW: [&str; 7] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+    match s {
+        crate::companion::skills::Schedule::Daily { hour, minute } => {
+            format!("daily {:02}:{:02}", hour, minute)
+        }
+        crate::companion::skills::Schedule::Weekly {
+            weekday,
+            hour,
+            minute,
+        } => format!(
+            "weekly {} {:02}:{:02}",
+            DOW.get(*weekday as usize).unwrap_or(&"?"),
+            hour,
+            minute
+        ),
+    }
+}
+
+#[tauri::command]
+pub fn list_manuals(app_handle: AppHandle) -> Result<Vec<ManualInfo>, String> {
+    let app_data = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(crate::companion::skills::scan_skills(&app_data)
+        .into_iter()
+        .map(|s| ManualInfo {
+            name: s.name,
+            description: s.description,
+            trigger_description: s.trigger_description,
+            schedule: s.schedule.as_ref().map(format_schedule),
+            enabled: s.enabled,
+        })
+        .collect())
+}
+
+/// 读手册完整原文（含 frontmatter——编辑器里 schedule/enabled 也可改）
+#[tauri::command]
+pub fn get_manual(app_handle: AppHandle, name: String) -> Result<String, String> {
+    let app_data = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    crate::companion::skills::load_skill_raw(&app_data, &name)
+        .ok_or_else(|| format!("手册「{}」不存在", name))
+}
+
+/// 保存手册（内嵌编辑器）：校验 + 快照旧版 + 写入，下一轮扫描生效
+#[tauri::command]
+pub fn save_manual(app_handle: AppHandle, name: String, content: String) -> Result<(), String> {
+    if content.len() > 32 * 1024 {
+        return Err("手册内容过长（不超过 32KB）".to_string());
+    }
+    let app_data = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    crate::companion::skills::apply_manual_content(&app_data, &name, &content)
+}
+
+#[tauri::command]
+pub fn list_evolution_backups(
+    app_handle: AppHandle,
+) -> Result<Vec<crate::companion::backup::BackupEntry>, String> {
+    let app_data = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok(crate::companion::backup::list_backups(&app_data))
+}
+
+/// 回滚到指定备份（回滚前先快照当前版——回滚本身可回滚）
+#[tauri::command]
+pub fn rollback_evolution_backup(
+    app_handle: AppHandle,
+    file: String,
+    stamp: String,
+) -> Result<(), String> {
+    let app_data = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    crate::companion::backup::rollback_backup(&app_data, &file, &stamp)
+}
+
+/// 经验本当前容量（字节；治理视图容量条，硬上限 16KB）
+#[tauri::command]
+pub fn get_evolution_size(app_handle: AppHandle) -> Result<u64, String> {
+    let app_data = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    let path = app_data.join("companion").join("evolution.md");
+    Ok(std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0))
+}
+
+/// 一键整理经验本：场景模型提炼冗余条目（去重/合并/删过时），
+/// 保留四小节结构；快照兜底，登记观测 source=evolution_compact。
+#[tauri::command]
+pub async fn compact_evolution(
+    app_handle: AppHandle,
+    db_state: State<'_, DatabaseState>,
+) -> Result<String, String> {
+    let app_data = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    let evolution = crate::companion::persona::load_evolution(&app_data);
+    if evolution.len() < 14 * 1024 {
+        return Ok("经验本还很空，不需要整理".to_string());
+    }
+    let prompt = format!(
+        "整理这本工作经验本：去重、合并同类条目、删掉已被取代的过时经验，\
+         保留所有仍有指导价值的条目原意。\
+         必须保持原有小节结构（## 标题原样保留），条目格式 - [日期] 内容。\
+         只输出整理后的完整经验本正文，不要任何前后缀。\n\n{}",
+        evolution
+    );
+    let compacted = crate::companion::analyzer::call_scene_model_llm(
+        &app_handle,
+        &db_state.0,
+        prompt,
+        crate::llm_provider::models::Scene::Companion,
+        "evolution_compact",
+    )
+    .await?;
+    // 健全性校验：整理结果必须保留全部既有小节，否则拒绝覆盖
+    let mut missing = Vec::new();
+    for line in evolution.lines() {
+        let line = line.trim_end();
+        if line.starts_with("## ") && !compacted.contains(line) {
+            missing.push(line);
+        }
+    }
+    if compacted.trim().is_empty() || !missing.is_empty() {
+        return Err(format!("整理结果不完整（缺小节: {}），未覆盖原文件", missing.join("、")));
+    }
+    if let Err(e) = crate::companion::backup::backup_file(&app_data, "evolution.md") {
+        log::warn!("经验本整理前快照失败: {}", e);
+    }
+    std::fs::write(app_data.join("companion").join("evolution.md"), &compacted)
+        .map_err(|e| format!("写入经验本失败: {}", e))?;
+    Ok(format!(
+        "整理完成：{} → {}（旧版已备份，可在备份列表回滚）",
+        format_bytes(evolution.len()),
+        format_bytes(compacted.len())
+    ))
+}
+
+fn format_bytes(n: usize) -> String {
+    if n >= 1024 {
+        format!("{:.1}KB", n as f64 / 1024.0)
+    } else {
+        format!("{}B", n)
+    }
+}

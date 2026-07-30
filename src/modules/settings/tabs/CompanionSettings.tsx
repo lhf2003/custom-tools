@@ -14,6 +14,7 @@ import { useToastStore } from '@/stores/toastStore';
 import { SettingCard, Toggle } from '../components/SettingCard';
 import { MemoryCenter } from './MemoryCenter';
 import { SuggestionCenter } from './SuggestionCenter';
+import { EvolutionGovernance } from './EvolutionGovernance';
 import { MEMO_VIEW_PATH } from '../../markdown/components/MemosView';
 import type { OpenViewDetail } from '@/types';
 
@@ -69,7 +70,7 @@ export function CompanionSettings() {
   const [analyzing, setAnalyzing] = useState(false);
   const [agentRunning, setAgentRunning] = useState(false);
   const [expandPatterns, setExpandPatterns] = useState(false);
-  const [subView, setSubView] = useState<'main' | 'memory' | 'suggestions'>('main');
+  const [subView, setSubView] = useState<'main' | 'memory' | 'suggestions' | 'governance'>('main');
 
   const loadData = useCallback(async () => {
     try {
@@ -183,12 +184,15 @@ export function CompanionSettings() {
   const maxTotal = todaySummary.length > 0 ? todaySummary[0][1] : 1;
   const visiblePatterns = expandPatterns ? patterns : patterns.slice(0, PREVIEW_COUNT);
 
-  // 二级视图：记忆中心 / 建议中心
+  // 二级视图：记忆中心 / 建议中心 / 进化治理
   if (subView === 'memory') {
     return <MemoryCenter onBack={() => setSubView('main')} />;
   }
   if (subView === 'suggestions') {
     return <SuggestionCenter onBack={() => setSubView('main')} />;
+  }
+  if (subView === 'governance') {
+    return <EvolutionGovernance onBack={() => setSubView('main')} />;
   }
 
   return (
@@ -307,6 +311,18 @@ export function CompanionSettings() {
             className="px-2.5 py-1.5 rounded-lg text-white/50 text-xs hover:bg-white/10 hover:text-white transition-colors cursor-pointer"
           >
             打开建议中心
+          </button>
+        </SettingCard>
+
+        <SettingCard
+          title="进化治理"
+          description="手册在线编辑（保存即快照）、经验本容量整理、版本备份一键回滚"
+        >
+          <button
+            onClick={() => setSubView('governance')}
+            className="px-2.5 py-1.5 rounded-lg text-white/50 text-xs hover:bg-white/10 hover:text-white transition-colors cursor-pointer"
+          >
+            打开进化治理
           </button>
         </SettingCard>
 

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use chrono::Timelike;
+use chrono::{Datelike, Timelike};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
@@ -25,6 +25,87 @@ const CLEANUP_HOUR: u32 = 3;
 const SESSION_MERGE_GAP_SECS: i64 = 180;
 /// 送给 LLM 的聚合文本长度上限（控制 token 成本）
 const AGGREGATE_TEXT_CAP: usize = 3500;
+
+/// 日报触发时刻：从 reporter.md frontmatter 的 schedule 读（三期调度移交）。
+/// Some((时, 分)) = 按此时刻触发；None = 手册被 enabled:false 禁用，不调度。
+/// 文件丢失/无 schedule 字段回退内置 21:00——手册丢了日报也不能丢。
+fn reporter_schedule(app_handle: &AppHandle) -> Option<(u32, u32)> {
+    const DEFAULT: (u32, u32) = (DAILY_ANALYSIS_HOUR, 0);
+    let Ok(app_data) = app_handle.path().app_data_dir() else {
+        return Some(DEFAULT);
+    };
+    match super::skills::scan_skills(&app_data)
+        .into_iter()
+        .find(|s| s.name == "reporter")
+    {
+        Some(s) if !s.enabled => None,
+        Some(s) => match s.schedule {
+            Some(super::skills::Schedule::Daily { hour, minute }) => Some((hour, minute)),
+            _ => Some(DEFAULT),
+        },
+        None => Some(DEFAULT),
+    }
+}
+
+/// 每周自评（三期建议反馈闭环）：统计近 7 天弹窗处置 → 场景模型提炼 →
+/// 写回经验本「弹窗分寸」节（走 append_evolution 同路径：校验+快照，不门控）。
+/// 登记观测 source=weekly_review；本周无数据/无新经验时跳过不写。
+pub fn run_weekly_review_blocking(app_handle: &AppHandle, db_path: &PathBuf) -> Result<String, String> {
+    tauri::async_runtime::block_on(run_weekly_review(app_handle, db_path))
+}
+
+async fn run_weekly_review(app_handle: &AppHandle, db_path: &PathBuf) -> Result<String, String> {
+    let now = chrono::Local::now().timestamp();
+    let stats = {
+        let conn = Connection::open(db_path).map_err(|e| format!("打开数据库失败: {}", e))?;
+        db::suggestion_stats_since(&conn, now - 7 * 86400, now - 48 * 3600)
+            .map_err(|e| format!("统计建议处置失败: {}", e))?
+    };
+    if stats.is_empty() {
+        return Ok("本周没有建议数据，跳过自评".to_string());
+    }
+    let mut lines = String::new();
+    for s in &stats {
+        lines.push_str(&format!(
+            "- {}: 接受{} 拒绝{} 忽略{} 提示{}\n",
+            s.suggestion_type, s.accepted, s.dismissed, s.ignored, s.seen
+        ));
+    }
+    let prompt = format!(
+        "你是贾维斯。这是你的弹窗建议最近 7 天的处置数据（他对每条弹窗做了什么）：\n{}\n\
+         「忽略」= 弹窗挂了超过 48 小时他没处置；「提示」= 纯通知型不需要处置。\n\
+         复盘这些数字，为你的「弹窗分寸」沉淀经验。规则：\n\
+         1. 单类型样本（接受+拒绝+忽略）少于 5 条只报数不下结论——小样本不出经验\n\
+         2. 接受率高的类型是你的成功案例，也要看见——只盯着被拒绝的会让你越来越保守\n\
+         3. 有值得沉淀的写 1-2 条经验，每条一行、说清做什么和为什么（60 字内）；没有就输出「无」\n\
+         只输出经验条目本身，不要标题、编号和前后缀。",
+        lines
+    );
+    let result =
+        call_scene_model_llm(app_handle, db_path, prompt, Scene::Companion, "weekly_review")
+            .await?;
+    let mut wrote = 0;
+    for line in result.lines().take(3) {
+        let lesson = line
+            .trim()
+            .trim_start_matches(['-', '•', '*', ' '])
+            .trim();
+        if lesson.is_empty() || lesson == "无" {
+            continue;
+        }
+        let args = serde_json::json!({ "section": "弹窗分寸", "lesson": lesson });
+        match super::tools::execute_tool(db_path, std::path::Path::new(""), "append_evolution", &args)
+        {
+            Ok(_) => wrote += 1,
+            Err(e) => log::warn!("每周自评写回经验失败（{}）: {}", lesson, e),
+        }
+    }
+    Ok(if wrote == 0 {
+        "本周无新经验".to_string()
+    } else {
+        format!("写回 {} 条弹窗分寸经验", wrote)
+    })
+}
 
 /// 调度线程：每分钟检查一次
 /// - 晨间工作套装模式匹配
@@ -90,6 +171,19 @@ pub fn run_scheduler(app_handle: AppHandle, db_path: PathBuf, flags: Arc<RwLock<
                     Ok(msg) => log::info!("Companion 明日关注: {}", msg),
                     Err(e) => log::warn!("Companion 明日关注生成失败: {}", e),
                 }
+                // 每周自评（周日；三期建议反馈闭环）：弹窗处置统计 → 写回「弹窗分寸」
+                if chrono::Local::now().weekday() == chrono::Weekday::Sun {
+                    let week_key = chrono::Local::now().format("%G-W%V").to_string();
+                    if load_setting(&db, "companion_last_weekly_review_week").as_deref()
+                        != Some(week_key.as_str())
+                    {
+                        save_setting(&db, "companion_last_weekly_review_week", &week_key);
+                        match run_weekly_review_blocking(&app, &db) {
+                            Ok(msg) => log::info!("Companion 每周自评: {}", msg),
+                            Err(e) => log::warn!("Companion 每周自评失败: {}", e),
+                        }
+                    }
+                }
             });
         }
 
@@ -101,8 +195,13 @@ pub fn run_scheduler(app_handle: AppHandle, db_path: PathBuf, flags: Arc<RwLock<
         let throttle_ok = last_report_attempt
             .map(|t| now.timestamp() - t >= REPORT_RETRY_SECS)
             .unwrap_or(true);
+        // 触发时刻从 reporter.md frontmatter 读（三期调度移交：改时间=改文件一行）；
+        // 手册被 enabled:false 禁用时不调度；文件丢失回退内置 21:00（手册丢了日报不能丢）
+        let report_due = reporter_schedule(&app_handle)
+            .map(|(h, m)| now.hour() > h || (now.hour() == h && now.minute() >= m))
+            .unwrap_or(false);
         // 日报开关关闭时跳过日报调度（分析与记忆提取不受影响）
-        if now.hour() >= DAILY_ANALYSIS_HOUR && !report_done && throttle_ok && f.daily_report {
+        if report_due && !report_done && throttle_ok && f.daily_report {
             last_report_attempt = Some(now.timestamp());
             let app = app_handle.clone();
             let db = db_path.clone();
@@ -622,7 +721,7 @@ pub async fn run_daily_analysis(
         .unwrap_or_default();
     let role = app_data
         .as_ref()
-        .map(|dir| super::persona::load_role(dir, "analyst"))
+        .map(|dir| super::skills::load_skill_body(dir, "analyst"))
         .unwrap_or_default();
     let ve_section = voice_expectation_section(&conn);
     let prompt = build_analysis_prompt(&persona, &evolution, &role, &aggregate_text, &ve_section);
@@ -1125,7 +1224,7 @@ pub(crate) async fn run_scene_report(
         .map_err(|e| e.to_string())?;
     let persona = super::persona::load(&app_data);
     let evolution = super::persona::load_evolution(&app_data);
-    let role = super::persona::load_role(&app_data, "reporter");
+    let role = super::skills::load_skill_body(&app_data, "reporter");
     let ve_section = voice_expectation_section(&conn);
     let state_text = super::state::current_state_sentence(&conn, chrono::Local::now().timestamp());
     let prompt = format!(

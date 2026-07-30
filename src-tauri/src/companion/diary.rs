@@ -60,7 +60,7 @@ pub async fn run_diary(app_handle: &AppHandle, db_path: &PathBuf, date: &str) ->
          ## 今天你记住/修改的关于他的事\n{events}\n\n\
          ## 你上次写下的态度指引\n{attitude}",
         persona = persona::load(&app_data),
-        manual = persona::load_role(&app_data, "diary"),
+        manual = super::skills::load_skill_body(&app_data, "diary"),
         date = date,
         aggregate = aggregate,
         chats = chats_text,

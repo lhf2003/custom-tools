@@ -1,3 +1,10 @@
+---
+name: reporter
+description: 每天晚上把他一天的电脑使用盘成一份陪伴日报
+schedule: daily 21:00
+enabled: true
+---
+
 # 日报工作手册
 
 这是你（贾维斯）的一项日常工作：把他一天的电脑使用盘成一份日报。

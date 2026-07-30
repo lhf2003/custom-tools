@@ -26,6 +26,8 @@ const TYPE_LABEL: Record<string, string> = {
   auto_executed: '自动执行',
   agent_insight: '贾维斯发现',
   intent_reminder: '备忘提醒',
+  manual_edit: '手册修改',
+  evolution_cleanup: '经验本整理',
 };
 
 const STATUS_LABEL: Record<string, string> = {

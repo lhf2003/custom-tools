@@ -96,6 +96,26 @@ pub(crate) fn compose_chat_system(app_data: &Path, db_path: &Path, with_tools: b
     } else {
         ""
     };
+    // 能力目录：有 trigger_description 的手册进聊天提示（每期现扫，改文件当轮生效）。
+    // 纯降级通道（with_tools=false）没有 load_manual 工具，不注入。
+    let catalog_section = if with_tools {
+        let entries: Vec<String> = super::skills::scan_skills(app_data)
+            .into_iter()
+            .filter(|s| s.enabled && !s.trigger_description.is_empty())
+            .map(|s| format!("- {}：{}。{}", s.name, s.description, s.trigger_description))
+            .collect();
+        if entries.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "\n\n---\n\n# 你的能力手册\n\
+                 以下手册可按需激活：他说的话匹配描述时，调用 load_manual 读手册全文，然后按手册执行。\n{}",
+                entries.join("\n")
+            )
+        }
+    } else {
+        String::new()
+    };
     let focus_section = if focus_text.is_empty() {
         String::new()
     } else {
@@ -107,11 +127,12 @@ pub(crate) fn compose_chat_system(app_data: &Path, db_path: &Path, with_tools: b
         format!("\n\n---\n\n# 你近期的心境\n{}", attitude_text)
     };
     format!(
-        "{persona}\n\n---\n\n{evolution}\n\n---\n\n# 你记住的他\n{facts}\n\n---\n\n\
+        "{persona}\n\n---\n\n{evolution}\n\n---\n\n# 你记住的他\n{facts}{catalog}\n\n---\n\n\
          现在是「聊天」场合：完整的你，能干活也能接梗。\n{rule}{monologue}\n\n---\n\n# 当下状态\n{state}{focus}{attitude}",
         persona = persona_text,
         evolution = evolution,
         facts = facts_text,
+        catalog = catalog_section,
         rule = channel_rule,
         monologue = monologue_rule,
         state = state_text,
