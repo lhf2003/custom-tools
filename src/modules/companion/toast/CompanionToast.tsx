@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { AlertTriangle, Coffee, Rocket, X, Sparkles, Pin, Sunrise, Music, Zap } from 'lucide-react';
+import { AlertTriangle, Coffee, Rocket, X, Sparkles, Pin, Sunrise, Music, Zap, FileText } from 'lucide-react';
 
 interface Suggestion {
   id: number;
@@ -15,14 +15,25 @@ interface Suggestion {
   acted_at: number | null;
 }
 
-/** 无操作自动隐藏时间（秒）——仅隐藏，建议在历史中保留可稍后处理 */
+/** 无操作自动隐藏时间（秒） */
 const AUTO_HIDE_SECONDS = 15;
+
+/** 纯提示型（与 Rust suggester::INFO_TYPES 一致）：accept 无后续动作，
+ *  推送即落 seen——卡片只展示，不渲染按钮，关闭只是本地隐藏 */
+const INFO_TYPES = new Set([
+  'long_work_break',
+  'daily_digest',
+  'daily_report',
+  'auto_executed',
+  'intent_reminder',
+]);
 
 interface TypeMeta {
   icon: React.ElementType;
   iconColor: string;
   iconBg: string;
-  acceptLabel: string;
+  /** 仅动作型需要；提示型无按钮，留空 */
+  acceptLabel?: string;
 }
 
 /** 常规建议的统一色彩：Signal Indigo Light（#818cf8，深色表面实测 5.0:1）。
@@ -43,22 +54,23 @@ const TYPE_META: Record<string, TypeMeta> = {
   long_work_break: {
     icon: Coffee,
     ...REGULAR_META,
-    acceptLabel: '好的',
   },
   work_suite: {
     icon: Rocket,
     ...REGULAR_META,
     acceptLabel: '一键启动',
   },
-  intent: {
+  intent_reminder: {
     icon: Pin,
     ...REGULAR_META,
-    acceptLabel: '完成',
   },
   daily_digest: {
     icon: Sunrise,
     ...REGULAR_META,
-    acceptLabel: '知道了',
+  },
+  daily_report: {
+    icon: FileText,
+    ...REGULAR_META,
   },
   agent_insight: {
     icon: Sparkles,
@@ -74,7 +86,6 @@ const TYPE_META: Record<string, TypeMeta> = {
     icon: Zap,
     iconColor: 'text-emerald-400',
     iconBg: 'bg-emerald-500/15',
-    acceptLabel: '好的',
   },
 };
 
@@ -171,11 +182,20 @@ export default function CompanionToast() {
     }
   }, [suggestion, acting, hideWindow]);
 
-  // 键盘快捷键：Esc 忽略全类型直达；Enter 仅确认型直达（动作型防误触）。
+  // 键盘快捷键：提示型 Esc/Enter 都只是本地关闭（状态已落 seen，不回传处置）；
+  // 动作型 Esc 忽略直达、Enter 仅确认型直达（动作型防误触）。
   // 焦点来自 Rust 端 show 后的 set_focus 尝试，或用户点击窗口
   useEffect(() => {
     if (!suggestion) return;
+    const isInfo = INFO_TYPES.has(suggestion.suggestion_type);
     const onKeyDown = (e: KeyboardEvent) => {
+      if (isInfo) {
+        if (e.key === 'Escape' || e.key === 'Enter') {
+          e.preventDefault();
+          hideWindow();
+        }
+        return;
+      }
       if (e.key === 'Escape') {
         e.preventDefault();
         void handleDismiss();
@@ -189,7 +209,7 @@ export default function CompanionToast() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [suggestion, handleAccept, handleDismiss]);
+  }, [suggestion, handleAccept, handleDismiss, hideWindow]);
 
   if (!suggestion) {
     return null;
@@ -198,6 +218,7 @@ export default function CompanionToast() {
   const meta = TYPE_META[suggestion.suggestion_type] ?? DEFAULT_META;
   const Icon = meta.icon;
   const isActionType = ACTION_TYPES.has(suggestion.suggestion_type);
+  const isInfoType = INFO_TYPES.has(suggestion.suggestion_type);
 
   return (
     <div className="w-full h-full flex items-stretch justify-stretch bg-transparent">
@@ -214,44 +235,50 @@ export default function CompanionToast() {
             {suggestion.title}
           </div>
           <button
-            onClick={handleDismiss}
+            onClick={isInfoType ? hideWindow : () => void handleDismiss()}
             className="text-white/40 hover:text-white/80 transition-colors cursor-pointer shrink-0"
-            title="忽略（Esc）"
+            title={isInfoType ? '关闭（Esc）' : '忽略（Esc）'}
           >
             <X size={14} />
           </button>
         </div>
 
-        {/* 正文 */}
+        {/* 正文（提示型去掉了操作区，空间还给正文） */}
         {suggestion.body && (
           <div className="px-3 py-1 flex-1 min-h-0">
-            <p className="text-white/60 text-xs leading-relaxed line-clamp-4 whitespace-pre-wrap">
+            <p
+              className={`text-white/60 text-xs leading-relaxed whitespace-pre-wrap ${
+                isInfoType ? 'line-clamp-6' : 'line-clamp-4'
+              }`}
+            >
               {suggestion.body}
             </p>
           </div>
         )}
 
-        {/* 操作区 */}
-        <div className="flex items-center justify-end gap-2 px-3 pb-2.5 pt-1">
-          <span className="mr-auto text-[10px] font-medium text-white/30 select-none">
-            {isActionType ? 'Esc 忽略' : '⏎ 接受 · Esc 忽略'}
-          </span>
-          <button
-            onClick={handleDismiss}
-            disabled={acting}
-            className="px-3 py-1.5 rounded-lg text-xs text-white/60 hover:text-white hover:bg-white/10 transition-colors cursor-pointer disabled:opacity-50"
-          >
-            忽略
-          </button>
-          <button
-            onClick={handleAccept}
-            disabled={acting}
-            title={isActionType ? '动作型建议需点击确认（防误触）' : '点击或按 Enter'}
-            className="px-3 py-1.5 rounded-lg text-xs bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors cursor-pointer disabled:opacity-50"
-          >
-            {acting ? '执行中…' : meta.acceptLabel}
-          </button>
-        </div>
+        {/* 操作区（仅动作型；提示型看过即终结，无按钮） */}
+        {!isInfoType && (
+          <div className="flex items-center justify-end gap-2 px-3 pb-2.5 pt-1">
+            <span className="mr-auto text-[10px] font-medium text-white/30 select-none">
+              {isActionType ? 'Esc 忽略' : '⏎ 接受 · Esc 忽略'}
+            </span>
+            <button
+              onClick={handleDismiss}
+              disabled={acting}
+              className="px-3 py-1.5 rounded-lg text-xs text-white/60 hover:text-white hover:bg-white/10 transition-colors cursor-pointer disabled:opacity-50"
+            >
+              忽略
+            </button>
+            <button
+              onClick={handleAccept}
+              disabled={acting}
+              title={isActionType ? '动作型建议需点击确认（防误触）' : '点击或按 Enter'}
+              className="px-3 py-1.5 rounded-lg text-xs bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors cursor-pointer disabled:opacity-50"
+            >
+              {acting ? '执行中…' : (meta.acceptLabel ?? '知道了')}
+            </button>
+          </div>
+        )}
 
         {/* 剩余时间细线（替代倒计时数字，降低催促感）；1s 步进靠 CSS 过渡抹平 */}
         <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white/5">

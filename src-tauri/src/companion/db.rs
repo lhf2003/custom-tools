@@ -118,6 +118,51 @@ fn add_column_if_missing(conn: &Connection, sql: &str) -> rusqlite::Result<()> {
     }
 }
 
+/// suggestions 表重建迁移：CHECK 约束加 'seen'。
+/// 幂等——sqlite_master 里的建表 SQL 已含 'seen' 则跳过；必须在所有
+/// ADD COLUMN 迁移之后调用，保证重建带走全部列。
+fn migrate_suggestions_add_seen(conn: &Connection) -> rusqlite::Result<()> {
+    let table_sql: String = conn.query_row(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'suggestions'",
+        [],
+        |row| row.get(0),
+    )?;
+    if table_sql.contains("'seen'") {
+        return Ok(());
+    }
+
+    conn.execute_batch(
+        "BEGIN;
+         CREATE TABLE suggestions_new (
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             suggestion_type TEXT NOT NULL,
+             title TEXT NOT NULL,
+             body TEXT,
+             action_payload TEXT,
+             status TEXT NOT NULL DEFAULT 'pending'
+                 CHECK (status IN ('pending', 'accepted', 'dismissed', 'seen')),
+             created_at INTEGER NOT NULL,
+             acted_at INTEGER,
+             source TEXT DEFAULT 'system',
+             trigger_data TEXT,
+             due_date TEXT,
+             last_triggered_at INTEGER,
+             pattern_id INTEGER
+         );
+         INSERT INTO suggestions_new
+             SELECT id, suggestion_type, title, body, action_payload, status,
+                    created_at, acted_at, source, trigger_data, due_date,
+                    last_triggered_at, pattern_id
+             FROM suggestions;
+         DROP TABLE suggestions;
+         ALTER TABLE suggestions_new RENAME TO suggestions;
+         CREATE INDEX idx_suggestions_status ON suggestions(status, created_at DESC);
+         COMMIT;",
+    )?;
+    log::info!("suggestions 表已重建：status CHECK 加入 seen");
+    Ok(())
+}
+
 pub fn init_tables(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS activity_log (
@@ -164,7 +209,7 @@ pub fn init_tables(conn: &Connection) -> rusqlite::Result<()> {
             body TEXT,
             action_payload TEXT,
             status TEXT NOT NULL DEFAULT 'pending'
-                CHECK (status IN ('pending', 'accepted', 'dismissed')),
+                CHECK (status IN ('pending', 'accepted', 'dismissed', 'seen')),
             created_at INTEGER NOT NULL,
             acted_at INTEGER
         )",
@@ -214,6 +259,19 @@ pub fn init_tables(conn: &Connection) -> rusqlite::Result<()> {
     add_column_if_missing(
         conn,
         "ALTER TABLE suggestions ADD COLUMN pattern_id INTEGER",
+    )?;
+
+    // Migrations: 提示型建议引入 seen 状态（2026-07-30）
+    // CHECK 约束无法 ALTER，已存在的表整体重建；新装走上面的 CREATE 自带 seen
+    migrate_suggestions_add_seen(conn)?;
+    // 存量清扫：纯提示型的 pending 是旧「超时只隐藏」逻辑留下的僵尸，看过即终结扫为 seen
+    // （类型清单与 suggester::INFO_TYPES 保持一致）
+    conn.execute(
+        "UPDATE suggestions SET status = 'seen', acted_at = created_at
+         WHERE status = 'pending' AND suggestion_type IN (
+             'long_work_break', 'daily_digest', 'daily_report', 'auto_executed', 'intent_reminder'
+         )",
+        [],
     )?;
 
     // 个人记忆层：关于用户的持久事实（B3）

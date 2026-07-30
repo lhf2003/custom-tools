@@ -21,16 +21,18 @@ const TYPE_LABEL: Record<string, string> = {
   long_work_break: '休息提醒',
   work_suite: '工作套装',
   context_routine: '情境联动',
+  daily_digest: '今日备忘',
   daily_report: '日报',
   auto_executed: '自动执行',
   agent_insight: '贾维斯发现',
-  intent: '我的备忘',
+  intent_reminder: '备忘提醒',
 };
 
 const STATUS_LABEL: Record<string, string> = {
   pending: '待处理',
   accepted: '已接受',
   dismissed: '已忽略',
+  seen: '已提示',
 };
 
 const FILTERS: { key: string; label: string }[] = [
@@ -38,6 +40,7 @@ const FILTERS: { key: string; label: string }[] = [
   { key: 'pending', label: '待处理' },
   { key: 'accepted', label: '已接受' },
   { key: 'dismissed', label: '已忽略' },
+  { key: 'seen', label: '已提示' },
 ];
 
 function formatTime(ts: number): string {

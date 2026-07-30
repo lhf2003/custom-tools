@@ -333,7 +333,8 @@ fn check_long_work(
     if now - *last_suggest < LONG_WORK_COOLDOWN_SECS {
         return;
     }
-    let already_pending = db::has_pending_suggestion_since(
+    // 提示型推送即落 seen，去重必须不限状态——近期弹过就不再弹（跨重启兜底）
+    let already_pending = db::has_suggestion_since(
         conn,
         suggester::TYPE_LONG_WORK_BREAK,
         now - LONG_WORK_COOLDOWN_SECS,
@@ -460,7 +461,7 @@ fn check_morning_digest(
     let _ = suggester::push_suggestion(
         conn,
         app_handle,
-        "daily_digest",
+        suggester::TYPE_DAILY_DIGEST,
         "今日备忘",
         Some(&body),
         None,
@@ -544,7 +545,7 @@ fn check_intent_triggers(conn: &Connection, app_handle: &AppHandle, event: &Fore
             let _ = suggester::push_suggestion(
                 conn,
                 app_handle,
-                "intent_reminder",
+                suggester::TYPE_INTENT_REMINDER,
                 &memo.content,
                 None,
                 None,

@@ -303,7 +303,7 @@ fn graduation_gate(
         if let Ok(sid) = suggester::push_suggestion(
             conn,
             app_handle,
-            "auto_executed",
+            suggester::TYPE_AUTO_EXECUTED,
             auto_title,
             Some(&body),
             None,
@@ -1152,7 +1152,7 @@ pub(crate) async fn run_scene_report(
         let _ = super::suggester::push_suggestion(
             &conn2,
             app_handle,
-            "daily_report",
+            super::suggester::TYPE_DAILY_REPORT,
             &format!("{} 日报已生成", date),
             Some(&preview),
             None,

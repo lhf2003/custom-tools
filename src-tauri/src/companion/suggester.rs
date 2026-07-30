@@ -9,6 +9,25 @@ pub const TYPE_ERROR_ANALYSIS: &str = "error_analysis";
 pub const TYPE_LONG_WORK_BREAK: &str = "long_work_break";
 /// 建议类型：晨间工作套装（批量启动）
 pub const TYPE_WORK_SUITE: &str = "work_suite";
+/// 建议类型：晨间备忘汇总
+pub const TYPE_DAILY_DIGEST: &str = "daily_digest";
+/// 建议类型：日报已生成通知
+pub const TYPE_DAILY_REPORT: &str = "daily_report";
+/// 建议类型：已毕业模式自动执行通知
+pub const TYPE_AUTO_EXECUTED: &str = "auto_executed";
+/// 建议类型：备忘情境触发提醒（忽略弹窗 ≠ 处置备忘）
+pub const TYPE_INTENT_REMINDER: &str = "intent_reminder";
+
+/// 纯提示型：accept 无后续动作，看过即终结——
+/// 卡片不渲染按钮，推送即落 seen（不依赖前端回调，应用被杀也不留 pending 残渣）。
+/// 与 db.rs 迁移扫描共用这一处定义，新增提示型只改这里。
+pub const INFO_TYPES: &[&str] = &[
+    TYPE_LONG_WORK_BREAK,
+    TYPE_DAILY_DIGEST,
+    TYPE_DAILY_REPORT,
+    TYPE_AUTO_EXECUTED,
+    TYPE_INTENT_REMINDER,
+];
 
 /// Toast 窗口尺寸（与前端卡片尺寸匹配）
 const TOAST_WIDTH: f64 = 400.0;
@@ -27,8 +46,16 @@ pub fn push_suggestion(
     action_payload: Option<&str>,
 ) -> Result<i64, String> {
     let now = chrono::Local::now().timestamp();
-    let suggestion = db::create_suggestion(conn, suggestion_type, title, body, action_payload, now)
+    let mut suggestion = db::create_suggestion(conn, suggestion_type, title, body, action_payload, now)
         .map_err(|e| format!("创建建议失败: {}", e))?;
+
+    // 纯提示型：推送即落 seen，看过即终结（toast 只负责展示，不回传处置）
+    if INFO_TYPES.contains(&suggestion_type) {
+        db::set_suggestion_status(conn, suggestion.id, "seen", now)
+            .map_err(|e| format!("更新建议状态失败: {}", e))?;
+        suggestion.status = "seen".to_string();
+        suggestion.acted_at = Some(now);
+    }
 
     log::info!("Companion 新建议 [{}]: {}", suggestion_type, title);
 

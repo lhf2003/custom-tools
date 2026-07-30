@@ -163,7 +163,7 @@ pub fn run_daily_report_agent(
         let _ = suggester::push_suggestion(
             &conn,
             app_handle,
-            "daily_report",
+            suggester::TYPE_DAILY_REPORT,
             &format!("{} 日报已生成", date),
             Some(&summary_preview),
             None,
