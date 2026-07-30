@@ -372,6 +372,11 @@ export function LauncherView() {
       return;
     }
 
+    // 备忘模式无结果网格：左右键放行给输入框移动光标，不做网格导航
+    if (isNoteMode && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+      return;
+    }
+
     const items = navItems;
     const maxIndex = items.length - 1;
 
