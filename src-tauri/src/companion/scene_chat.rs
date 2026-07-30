@@ -7,12 +7,12 @@
 //! 降级链（#4：质量下降而非功能消失）：
 //!   Claude Code agent → 场景模型+工具 →（模型/API 不支持 tools 时）场景模型纯问答
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use rusqlite::Connection;
-use serde_json::json;
+use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use super::{analyzer, chat, tools};
@@ -25,12 +25,20 @@ const SUMMARY_THRESHOLD: usize = 24;
 /// 摘要后保留的最近原文条数（约 6 轮对话原样进上下文）
 const RECENT_KEEP: usize = 12;
 
+/// A2UI surface 状态表：surface_id → 校验器累积状态（组件 id 集等）
+type SurfaceMap = HashMap<String, super::a2ui::SurfaceState>;
+
 /// 回退通道在飞状态：FIFO 排队（与 agent 通道同一语义——
 /// 在飞时新消息入队不打断，答完自动发下一条）
 #[derive(Clone, Default)]
 pub struct JarvisSceneChatState {
     pub in_flight: Arc<Mutex<bool>>,
     pub queue: Arc<Mutex<VecDeque<(i64, String)>>>,
+    /// A2UI surface 状态按会话保持（session_id → surface 表）：
+    /// 跨消息增量更新的前提——用户点击按钮回传后，模型用同一 surface_id
+    /// 发增量消息（updateComponents/updateDataModel）才不会被校验器拒
+    /// （「首个 render_ui 调用必须包含 createSurface」）。删除会话时随清。
+    pub surfaces: Arc<Mutex<HashMap<i64, SurfaceMap>>>,
 }
 
 /// 在飞标记复位守卫：任务 panic 或提前返回都保证释放 FIFO。
@@ -88,7 +96,9 @@ pub async fn jarvis_chat_send_scene(
         let _flight_reset = FlightReset(state.in_flight.clone());
         let mut current = (session_id, text);
         loop {
-            if let Err(e) = run_scene_chat(&app, &db_path, current.0, current.1).await {
+            if let Err(e) =
+                run_scene_chat(&app, &db_path, &state.surfaces, current.0, current.1).await
+            {
                 log::warn!("场景模型聊天失败: {}", e);
             }
             let next = state
@@ -110,6 +120,7 @@ pub async fn jarvis_chat_send_scene(
 async fn run_scene_chat(
     app_handle: &AppHandle,
     db_path: &PathBuf,
+    surfaces: &Arc<Mutex<HashMap<i64, SurfaceMap>>>,
     session_id: i64,
     text: String,
 ) -> Result<(), String> {
@@ -144,6 +155,17 @@ async fn run_scene_chat(
          把数据渲染成界面卡片给他看，再用一两句文字总结要点。\n\
          纯闲聊、一句话问答直接用文字，不用卡片。",
     );
+    // 「用户操作」回传处理指引：没有这段，模型收到按钮点击回传后无所适从，
+    // 只能复读上下文里的 assistant 句式（实测会原样复述卡片占位文本）
+    system_prompt.push_str(
+        "\n\n【界面操作回传】以「用户操作：」开头的用户消息，是他在你之前展示的界面卡片上的操作\n\
+         （点击按钮或提交表单），不是他手打的文字。action 是操作名，「上下文」是按钮绑定的数据，\n\
+         「界面当前数据」是他填写的表单值。收到后按 action 语义处理：需要数据操作就调对应工具；\n\
+         需要更新界面就用同一 surface_id 再调 render_ui——surface 状态在会话内保持，直接发\n\
+         updateComponents/updateDataModel 增量消息即可，不要重复 createSurface；想展示全新卡片\n\
+         就换一个新的 surface_id。处理完用一两句文字向他确认结果，不要把「用户操作」消息\n\
+         当作闲聊话题，也不要复述「向用户展示了一张界面卡片」这类上下文里的占位文本。",
+    );
 
     // 历史上下文：增量摘要（必要时先压缩旧消息）+ 最近原文。
     // 摘要追加到系统提示末尾（动态内容一律追加，前缀稳定不吃 KV Cache 失效）
@@ -162,9 +184,8 @@ async fn run_scene_chat(
     let tools_json = openai_tools_json();
     let mut total_cost = 0.0f64;
     let mut rounds = 0usize;
-    // A2UI：同一轮对话内 render_ui 的 surface 状态（增量更新校验用）与连续失败计数
-    let mut a2ui_surfaces: std::collections::HashMap<String, super::a2ui::SurfaceState> =
-        Default::default();
+    // A2UI：render_ui 连续失败计数（surface 状态本身按会话存于 state.surfaces，
+    // 跨消息保持——增量更新与「用户操作」回传后的界面刷新都依赖它）
     let mut render_ui_failures = 0usize;
 
     let final_text = loop {
@@ -225,16 +246,23 @@ async fn run_scene_chat(
                 messages.push(crate::llm::assistant_tool_message(&provider_type, &reply));
                 for call in &reply.tool_calls {
                     let mut tool_result = if call.name == "render_ui" {
-                        match handle_render_ui(
-                            app_handle,
-                            db_path,
-                            session_id,
-                            &call.arguments,
-                            &mut a2ui_surfaces,
-                            &mut render_ui_failures,
-                        ) {
-                            Ok(ok) => ok,
-                            Err(e) => e,
+                        // 锁只在同步校验期间持有（纯 CPU、无 await），FIFO 保证无竞争
+                        match surfaces.lock() {
+                            Ok(mut all) => {
+                                let session_surfaces = all.entry(session_id).or_default();
+                                match handle_render_ui(
+                                    app_handle,
+                                    db_path,
+                                    session_id,
+                                    &call.arguments,
+                                    session_surfaces,
+                                    &mut render_ui_failures,
+                                ) {
+                                    Ok(ok) => ok,
+                                    Err(e) => e,
+                                }
+                            }
+                            Err(e) => format!("surface 状态不可用：{}", e),
                         }
                     } else {
                         tools::execute_tool(db_path, &notes_dir, &call.name, &call.arguments)
@@ -375,12 +403,13 @@ async fn run_scene_chat(
 
 /// render_ui 工具（A2UI）：校验 → emit jarvis:surface → 落库 content_type='a2ui'。
 /// 校验失败的原因作为工具结果回喂模型自我纠正；连续失败 2 次后劝退，保文字兜底。
+/// surfaces 来自 state.surfaces（按会话跨消息保持），增量更新因此可行。
 fn handle_render_ui(
     app_handle: &AppHandle,
     db_path: &PathBuf,
     session_id: i64,
     arguments: &serde_json::Value,
-    surfaces: &mut std::collections::HashMap<String, super::a2ui::SurfaceState>,
+    surfaces: &mut SurfaceMap,
     failures: &mut usize,
 ) -> Result<String, String> {
     const MAX_RENDER_UI_FAILURES: usize = 2;
@@ -572,19 +601,54 @@ async fn load_context(
                 ))
             })
             .map_err(|e| e.to_string())?;
-        // a2ui 界面消息替换为占位文本：协议 JSON 喂回模型既烧 token 又干扰回答
-        let unsummarized: Vec<(i64, String, String)> = rows
+        let raw: Vec<(i64, String, String, String)> = rows
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?
-            .into_iter()
-            .map(|(id, role, content, content_type)| {
-                if content_type == "a2ui" {
-                    (id, role, "（向用户展示了一张界面卡片）".to_string())
-                } else {
-                    (id, role, content)
+            .map_err(|e| e.to_string())?;
+        // a2ui 界面消息不喂协议 JSON（烧 token 且干扰回答），但也不再用空占位文本——
+        // 空占位会让模型对卡片内容失忆，收到「用户操作」回传时只能复读占位句式。
+        // 做法：同一 surfaceId 的多行（创建+增量）合并重放，在其最后出现处放语义摘要
+        //（标题/按钮 action/数据），模型由此记得卡片里有什么。
+        let mut surface_acc: HashMap<String, (Vec<Value>, usize)> = HashMap::new();
+        for (idx, (_, _, content, content_type)) in raw.iter().enumerate() {
+            if content_type != "a2ui" {
+                continue;
+            }
+            if let Ok(p) = serde_json::from_str::<Value>(content) {
+                let sid = p
+                    .get("surfaceId")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                let msgs = p
+                    .get("messages")
+                    .and_then(|v| v.as_array())
+                    .cloned()
+                    .unwrap_or_default();
+                let entry = surface_acc.entry(sid).or_insert_with(|| (Vec::new(), idx));
+                entry.0.extend(msgs);
+                entry.1 = idx;
+            }
+        }
+        let mut unsummarized: Vec<(i64, String, String)> = Vec::new();
+        for (idx, (id, role, content, content_type)) in raw.into_iter().enumerate() {
+            if content_type != "a2ui" {
+                unsummarized.push((id, role, content));
+                continue;
+            }
+            let sid = serde_json::from_str::<Value>(&content)
+                .ok()
+                .and_then(|p| p.get("surfaceId").and_then(|v| v.as_str()).map(str::to_string));
+            match sid {
+                // 同 surface 的较早行已并入摘要，丢弃；最后一行位置放摘要
+                Some(s) if surface_acc.get(&s).map(|e| e.1) == Some(idx) => {
+                    let summary = super::a2ui::summarize_surface(&surface_acc[&s].0);
+                    unsummarized.push((id, role, summary));
                 }
-            })
-            .collect();
+                Some(_) => {}
+                // 解析失败的 a2ui 行：回退空占位，不带原始 JSON
+                None => unsummarized.push((id, role, "（向用户展示了一张界面卡片）".to_string())),
+            }
+        }
         (summary, watermark, unsummarized)
     };
 

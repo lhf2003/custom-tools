@@ -140,10 +140,11 @@ pub fn list_chat_sessions(
         .map_err(|e| e.to_string())
 }
 
-/// 删除会话及其全部消息
+/// 删除会话及其全部消息（连带清理内存里的 A2UI surface 状态）
 #[tauri::command]
 pub fn delete_chat_session(
     db_state: State<DatabaseState>,
+    scene_state: State<crate::companion::scene_chat::JarvisSceneChatState>,
     session_id: i64,
 ) -> Result<(), String> {
     let conn = Connection::open(&db_state.0).map_err(|e| e.to_string())?;
@@ -157,5 +158,8 @@ pub fn delete_chat_session(
         params![session_id],
     )
     .map_err(|e| e.to_string())?;
+    if let Ok(mut all) = scene_state.surfaces.lock() {
+        all.remove(&session_id);
+    }
     Ok(())
 }

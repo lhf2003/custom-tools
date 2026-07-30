@@ -10,6 +10,7 @@ import {
   Sparkles,
   Languages,
   History,
+  MousePointerClick,
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { useLlmProviderStore } from '@/stores/llmProviderStore';
@@ -17,6 +18,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { debouncedResize } from '@/utils/tauri';
 import { WINDOW_SIZE } from '@/constants/window';
 import { A2uiSurface } from './a2ui/A2uiSurface';
+import { parseActionMessage } from './a2ui/action';
 
 // ─────────────────────────────────────────────
 // Types
@@ -190,6 +192,25 @@ function AssistantContent({ text }: { text: string }) {
         ),
       )}
     </>
+  );
+}
+
+/** 用户消息气泡：界面操作回传渲染为紧凑胶囊（协议 JSON 不上屏，落库原文不变），
+ *  其余为普通气泡 */
+function UserMessageBubble({ content }: { content: string }) {
+  const action = parseActionMessage(content);
+  if (action) {
+    return (
+      <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-zinc-700/40 border border-zinc-600/40 text-xs text-zinc-400">
+        <MousePointerClick className="w-3 h-3 shrink-0" />
+        点击了「{action.label}」
+      </div>
+    );
+  }
+  return (
+    <div className="max-w-[80%] px-3 py-2 rounded-xl bg-zinc-700/60 text-sm text-zinc-200 break-words">
+      {content}
+    </div>
   );
 }
 
@@ -849,16 +870,18 @@ export function ChatView() {
       </div>
 
       {/* ── Response panel — expands below input ──────────────────── */}
+      {/* flex-1 + minmax(0,1fr)：面板跟随窗口拉伸，内容区高度不再写死 */}
       <div
+        className="flex-1 min-h-0"
         style={{
           display: 'grid',
-          gridTemplateRows: hasResponse ? '1fr' : '0fr',
+          gridTemplateRows: hasResponse ? 'minmax(0, 1fr)' : '0fr',
           transition: 'grid-template-rows 300ms ease',
         }}
       >
-        <div className="overflow-hidden">
+        <div className="overflow-hidden h-full flex flex-col">
           {/* Status bar */}
-          <div className="px-4 py-2 border-t border-zinc-700/30 flex items-center justify-between">
+          <div className="px-4 py-2 border-t border-zinc-700/30 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-1.5">
               {isLoading && (
                 <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse shrink-0" />
@@ -903,12 +926,11 @@ export function ChatView() {
             </div>
           </div>
 
-          {/* Content area */}
+          {/* Content area：弹性占满窗口剩余高度，随手动拉伸变化 */}
           <div
             ref={responseBodyRef}
             onScroll={handleResponseScroll}
-            className="px-4 pt-1 pb-4 overflow-y-auto space-y-3"
-            style={{ maxHeight: '460px' }}
+            className="px-4 pt-1 pb-4 overflow-y-auto space-y-3 flex-1 min-h-0"
           >
             {/* Error state */}
             {error && (
@@ -931,9 +953,7 @@ export function ChatView() {
                 className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 {msg.role === 'user' ? (
-                  <div className="max-w-[80%] px-3 py-2 rounded-xl bg-zinc-700/60 text-sm text-zinc-200 break-words">
-                    {msg.content}
-                  </div>
+                  <UserMessageBubble content={msg.content} />
                 ) : msg.contentType === 'a2ui' ? (
                   <div className="max-w-[90%] w-full">
                     <A2uiSurface

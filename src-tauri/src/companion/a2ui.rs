@@ -6,7 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use serde_json::Value;
+use serde_json::{json, Value};
 
 /// 基础目录全量 18 个组件（与前端渲染器一一对应）
 const ALLOWED_COMPONENTS: [&str; 18] = [
@@ -183,6 +183,144 @@ fn collect_refs(component: &Value, owner: &str, out: &mut Vec<(String, String)>)
     }
 }
 
+/// 从 surface 累积消息提取语义摘要：上下文里替代协议 JSON（占位文本的升级版）。
+/// 模型看到摘要就知道卡片里有什么按钮、各 action 的语义、展示的数据——
+/// 收到「用户操作」回传时不再失忆，也不会复读占位句式。
+pub fn summarize_surface(messages: &[Value]) -> String {
+    // 重放：组件表（保序）+ 数据模型（path 写入 best-effort，失败不阻塞摘要）
+    let mut order: Vec<String> = Vec::new();
+    let mut components: HashMap<String, &Value> = HashMap::new();
+    let mut data_model: Option<Value> = None;
+    for msg in messages {
+        if let Some(uc) = msg.get("updateComponents") {
+            if let Some(list) = uc.get("components").and_then(|v| v.as_array()) {
+                for c in list {
+                    if let Some(id) = c.get("id").and_then(|v| v.as_str()) {
+                        if components.insert(id.to_string(), c).is_none() {
+                            order.push(id.to_string());
+                        }
+                    }
+                }
+            }
+        } else if let Some(ud) = msg.get("updateDataModel") {
+            let path = ud.get("path").and_then(|v| v.as_str());
+            let value = ud.get("value").cloned().unwrap_or(Value::Null);
+            match path {
+                None | Some("") | Some("/") => data_model = Some(value),
+                Some(p) => {
+                    let root = data_model.get_or_insert_with(|| json!({}));
+                    if let Some(slot) = root.pointer_mut(p) {
+                        *slot = value;
+                    }
+                }
+            }
+        }
+    }
+
+    // 组件语义：标题/正文静态文本、按钮 label+action、表单 label
+    let mut headings: Vec<String> = Vec::new();
+    let mut texts: Vec<String> = Vec::new();
+    let mut buttons: Vec<String> = Vec::new();
+    let mut fields: Vec<String> = Vec::new();
+    for id in &order {
+        let c = components[id];
+        match c.get("component").and_then(|v| v.as_str()) {
+            Some("Text") => {
+                if let Some(t) = c.get("text").and_then(|v| v.as_str()) {
+                    let t = truncate_chars(t.trim(), 40);
+                    if t.is_empty() {
+                        continue;
+                    }
+                    match c.get("variant").and_then(|v| v.as_str()) {
+                        Some("h1") | Some("h2") | Some("h3") | Some("h4") | Some("h5") => {
+                            headings.push(t)
+                        }
+                        _ => texts.push(t),
+                    }
+                }
+            }
+            Some("Button") => {
+                let label = c
+                    .get("child")
+                    .and_then(|v| v.as_str())
+                    .and_then(|cid| components.get(cid))
+                    .and_then(|cc| cc.get("text"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| truncate_chars(s.trim(), 20));
+                let action = c.pointer("/action/event/name").and_then(|v| v.as_str());
+                match (label, action) {
+                    (Some(l), Some(a)) if !l.is_empty() => {
+                        buttons.push(format!("「{}」(action: {})", l, a))
+                    }
+                    (Some(l), None) if !l.is_empty() => buttons.push(format!("「{}」", l)),
+                    (_, Some(a)) => buttons.push(format!("(action: {})", a)),
+                    _ => {}
+                }
+            }
+            Some("TextField") | Some("CheckBox") | Some("Slider") | Some("ChoicePicker")
+            | Some("DateTimeInput") => {
+                if let Some(l) = c.get("label").and_then(|v| v.as_str()) {
+                    let l = truncate_chars(l.trim(), 20);
+                    if !l.is_empty() {
+                        fields.push(l);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut parts: Vec<String> = Vec::new();
+    if !headings.is_empty() {
+        parts.push(format!(
+            "标题「{}」",
+            headings
+                .into_iter()
+                .take(2)
+                .collect::<Vec<_>>()
+                .join("」/「")
+        ));
+    }
+    if !texts.is_empty() {
+        parts.push(format!(
+            "正文：{}",
+            texts.into_iter().take(4).collect::<Vec<_>>().join("；")
+        ));
+    }
+    if !buttons.is_empty() {
+        parts.push(format!(
+            "按钮：{}",
+            buttons.into_iter().take(6).collect::<Vec<_>>().join("、")
+        ));
+    }
+    if !fields.is_empty() {
+        parts.push(format!(
+            "表单：{}",
+            fields.into_iter().take(5).collect::<Vec<_>>().join("、")
+        ));
+    }
+    if let Some(dm) = &data_model {
+        if !dm.is_null() {
+            parts.push(format!("数据：{}", truncate_chars(&dm.to_string(), 600)));
+        }
+    }
+
+    if parts.is_empty() {
+        "（向用户展示了一张界面卡片）".to_string()
+    } else {
+        format!("（向用户展示了一张界面卡片——{}）", parts.join("；"))
+    }
+}
+
+/// 按字符数截断（中文多字节安全），超长补省略号
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        format!("{}…", s.chars().take(max).collect::<String>())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -235,5 +373,47 @@ mod tests {
         validate_and_apply(&sample_create(), "s1", &mut surfaces).unwrap();
         let update = vec![json!({"version":"v0.9","updateDataModel":{"surfaceId":"s1","path":"/title","value":"bye"}})];
         assert!(validate_and_apply(&update, "s1", &mut surfaces).is_ok());
+    }
+
+    #[test]
+    fn summarize_extracts_button_action_and_data() {
+        let msgs = vec![
+            json!({"version":"v0.9","createSurface":{"surfaceId":"s1","catalogId":"basic"}}),
+            json!({"version":"v0.9","updateComponents":{"surfaceId":"s1","components":[
+                {"id":"root","component":"Card","child":"col"},
+                {"id":"col","component":"Column","children":["t","b","bt"]},
+                {"id":"t","component":"Text","text":{"path":"/title"},"variant":"h2"},
+                {"id":"b","component":"Button","child":"bt","action":{"event":{"name":"view_details","context":{}}}},
+                {"id":"bt","component":"Text","text":"查看详情"}
+            ]}}),
+            json!({"version":"v0.9","updateDataModel":{"surfaceId":"s1","value":{"title":"今日使用统计"}}}),
+        ];
+        let s = summarize_surface(&msgs);
+        assert!(s.contains("查看详情"), "按钮 label 缺失: {}", s);
+        assert!(s.contains("view_details"), "action 名缺失: {}", s);
+        assert!(s.contains("今日使用统计"), "数据缺失: {}", s);
+    }
+
+    #[test]
+    fn summarize_falls_back_when_no_semantics() {
+        let msgs = vec![
+            json!({"version":"v0.9","createSurface":{"surfaceId":"s1","catalogId":"basic"}}),
+            json!({"version":"v0.9","updateComponents":{"surfaceId":"s1","components":[
+                {"id":"root","component":"Card","child":"col"},
+                {"id":"col","component":"Column","children":[]}
+            ]}}),
+        ];
+        assert_eq!(summarize_surface(&msgs), "（向用户展示了一张界面卡片）");
+    }
+
+    #[test]
+    fn summarize_applies_incremental_data_update() {
+        let mut msgs = vec![
+            json!({"version":"v0.9","updateDataModel":{"surfaceId":"s1","value":{"title":"旧标题","count":1}}}),
+        ];
+        msgs.push(json!({"version":"v0.9","updateDataModel":{"surfaceId":"s1","path":"/count","value":2}}));
+        let s = summarize_surface(&msgs);
+        assert!(s.contains("旧标题"), "整体数据缺失: {}", s);
+        assert!(s.contains("\"count\":2"), "path 增量未生效: {}", s);
     }
 }

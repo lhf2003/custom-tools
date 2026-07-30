@@ -2,6 +2,7 @@
 // 提供渲染上下文；按钮 action 组装成「用户操作」消息回传给聊天链路。
 
 import { useEffect, useMemo, useState } from 'react';
+import { formatActionMessage } from './action';
 import { resolveDynamic } from './functions';
 import { resolvePointer, setPointerImmutable } from './pointer';
 import { A2uiContext, RenderComponent } from './render';
@@ -48,14 +49,7 @@ export function A2uiSurface({ payloadJson, onAction }: A2uiSurfaceProps) {
       for (const [k, spec] of Object.entries(contextSpec ?? {})) {
         resolved[k] = resolveDynamic(spec, evalCtx);
       }
-      const lines = [`用户操作：点击了「${label ?? name}」(action: ${name})`];
-      if (Object.keys(resolved).length > 0) {
-        lines.push(`上下文：${JSON.stringify(resolved, null, 2)}`);
-      }
-      if (surface.sendDataModel) {
-        lines.push(`界面当前数据：${JSON.stringify(data, null, 2)}`);
-      }
-      onAction(lines.join('\n'));
+      onAction(formatActionMessage(label, name, resolved, data, surface.sendDataModel));
     },
   };
 
