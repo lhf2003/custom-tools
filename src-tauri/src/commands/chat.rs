@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection};
+use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -22,7 +22,7 @@ pub struct ChatSessionSummary {
 /// 创建新会话，返回 session_id
 #[tauri::command]
 pub fn create_chat_session(db_state: State<DatabaseState>, mode: String) -> Result<i64, String> {
-    let conn = Connection::open(&db_state.0).map_err(|e| e.to_string())?;
+    let conn = crate::db::open_connection(&db_state.0).map_err(|e| e.to_string())?;
     // 显式写本地时间：SQLite CURRENT_TIMESTAMP 是 UTC，与展示口径（北京时间）差 8 小时
     conn.execute(
         "INSERT INTO chat_sessions (mode, created_at, updated_at) VALUES (?1, datetime('now','localtime'), datetime('now','localtime'))",
@@ -40,7 +40,7 @@ pub fn save_chat_message(
     role: String,
     content: String,
 ) -> Result<(), String> {
-    let conn = Connection::open(&db_state.0).map_err(|e| e.to_string())?;
+    let conn = crate::db::open_connection(&db_state.0).map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO chat_messages (session_id, role, content, created_at) VALUES (?1, ?2, ?3, datetime('now','localtime'))",
         params![session_id, role, content],
@@ -61,7 +61,7 @@ pub fn get_session_messages(
     db_state: State<DatabaseState>,
     session_id: i64,
 ) -> Result<Vec<ChatHistoryMessage>, String> {
-    let conn = Connection::open(&db_state.0).map_err(|e| e.to_string())?;
+    let conn = crate::db::open_connection(&db_state.0).map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare(
             "SELECT id, role, content, content_type FROM chat_messages WHERE session_id = ?1 ORDER BY id ASC",
@@ -89,7 +89,7 @@ pub fn get_latest_session(
     db_state: State<DatabaseState>,
     mode: String,
 ) -> Result<Option<i64>, String> {
-    let conn = Connection::open(&db_state.0).map_err(|e| e.to_string())?;
+    let conn = crate::db::open_connection(&db_state.0).map_err(|e| e.to_string())?;
     let result = conn.query_row(
         "SELECT id FROM chat_sessions WHERE mode = ?1 ORDER BY updated_at DESC LIMIT 1",
         params![mode],
@@ -110,7 +110,7 @@ pub fn list_chat_sessions(
     db_state: State<DatabaseState>,
     mode: String,
 ) -> Result<Vec<ChatSessionSummary>, String> {
-    let conn = Connection::open(&db_state.0).map_err(|e| e.to_string())?;
+    let conn = crate::db::open_connection(&db_state.0).map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare(
             "SELECT s.id,
@@ -140,14 +140,14 @@ pub fn list_chat_sessions(
         .map_err(|e| e.to_string())
 }
 
-/// 删除会话及其全部消息（连带清理内存里的 A2UI surface 状态）
+/// 删除会话及其全部消息（连带清理内存里的 A2UI surface 状态与 FIFO 排队消息）
 #[tauri::command]
 pub fn delete_chat_session(
     db_state: State<DatabaseState>,
     scene_state: State<crate::companion::scene_chat::JarvisSceneChatState>,
     session_id: i64,
 ) -> Result<(), String> {
-    let conn = Connection::open(&db_state.0).map_err(|e| e.to_string())?;
+    let conn = crate::db::open_connection(&db_state.0).map_err(|e| e.to_string())?;
     conn.execute(
         "DELETE FROM chat_messages WHERE session_id = ?1",
         params![session_id],
@@ -160,6 +160,11 @@ pub fn delete_chat_session(
     .map_err(|e| e.to_string())?;
     if let Ok(mut all) = scene_state.surfaces.lock() {
         all.remove(&session_id);
+    }
+    // FIFO 里该会话的排队消息一并清掉：否则删除后仍会继续执行，
+    // 往已删除的 session_id 落库（外键拦截写入失败，但模型调用已白白消耗）
+    if let Ok(mut q) = scene_state.queue.lock() {
+        q.retain(|(sid, _)| *sid != session_id);
     }
     Ok(())
 }

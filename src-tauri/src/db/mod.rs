@@ -1,6 +1,6 @@
 use rusqlite::{Connection, Result};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::Manager;
 
 pub mod app_cache;
@@ -413,10 +413,87 @@ pub fn init(app_handle: &tauri::AppHandle) -> Result<()> {
 
 pub struct DatabaseState(pub PathBuf);
 
+/// 打开主库连接并启用外键约束。
+/// SQLite 默认关闭外键（连接级开关，不持久化到库文件），不开则
+/// `ON DELETE CASCADE` 形同虚设、向已删除父行的孤儿写入也不会被拒绝——
+/// 聊天会话删除后 chat_messages 残留的根因。凡写 chat_sessions/chat_messages
+/// 的路径必须走这里。
+pub fn open_connection(path: &Path) -> rusqlite::Result<Connection> {
+    let conn = Connection::open(path)?;
+    conn.pragma_update(None, "foreign_keys", true)?;
+    Ok(conn)
+}
+
 fn get_app_dir(app_handle: &tauri::AppHandle) -> PathBuf {
     let path = app_handle
         .path()
         .app_data_dir()
         .expect("Failed to get app data dir");
     path
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn setup_chat_tables(conn: &Connection) {
+        conn.execute_batch(
+            "CREATE TABLE chat_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                mode TEXT NOT NULL DEFAULT 'chat',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE chat_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn open_connection_enables_foreign_keys() {
+        let conn = open_connection(Path::new(":memory:")).unwrap();
+        let enabled: bool = conn
+            .pragma_query_value(None, "foreign_keys", |row| row.get(0))
+            .unwrap();
+        assert!(enabled, "open_connection 必须启用外键约束");
+    }
+
+    #[test]
+    fn deleting_session_cascades_messages() {
+        let conn = open_connection(Path::new(":memory:")).unwrap();
+        setup_chat_tables(&conn);
+        conn.execute("INSERT INTO chat_sessions (mode) VALUES ('chat')", [])
+            .unwrap();
+        conn.execute(
+            "INSERT INTO chat_messages (session_id, role, content) VALUES (1, 'user', '你好')",
+            [],
+        )
+        .unwrap();
+
+        conn.execute("DELETE FROM chat_sessions WHERE id = 1", [])
+            .unwrap();
+
+        let remaining: i64 = conn
+            .query_row("SELECT COUNT(*) FROM chat_messages", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(remaining, 0, "删除会话应级联删除其全部消息");
+    }
+
+    #[test]
+    fn orphan_message_insert_is_rejected() {
+        let conn = open_connection(Path::new(":memory:")).unwrap();
+        setup_chat_tables(&conn);
+
+        let result = conn.execute(
+            "INSERT INTO chat_messages (session_id, role, content) VALUES (999, 'user', '幽灵消息')",
+            [],
+        );
+        assert!(result.is_err(), "向已删除/不存在的会话写消息必须被外键拒绝");
+    }
 }

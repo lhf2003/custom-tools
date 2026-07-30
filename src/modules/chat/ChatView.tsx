@@ -708,13 +708,15 @@ export function ChatView() {
 
   const deleteSession = useCallback(
     async (id: number) => {
-      // 乐观移除，失败仅记日志（下次打开浮层会重新拉取对齐）
+      // 乐观移除；失败如实告知（下次打开浮层会重新拉取对齐列表）
       setSessions((prev) => prev.filter((s) => s.id !== id));
       setHistoryIdx(0);
       try {
         await invoke('delete_chat_session', { sessionId: id });
       } catch (e) {
         console.error('Failed to delete session:', e);
+        setError('删除会话失败，请重试');
+        return;
       }
       if (id === sessionIdRef.current) {
         handleNewSession();

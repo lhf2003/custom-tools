@@ -11,7 +11,6 @@ use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use rusqlite::Connection;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -133,7 +132,7 @@ async fn run_scene_chat(
     let notes_dir = crate::notes::get_default_notes_dir().map_err(|e| e.to_string())?;
 
     // 解析陪伴场景模型
-    let conn = Connection::open(db_path).map_err(|e| format!("打开数据库失败: {}", e))?;
+    let conn = crate::db::open_connection(db_path).map_err(|e| format!("打开数据库失败: {}", e))?;
     let (provider, model, thinking_mode, api_key, used_scene) =
         analyzer::resolve_scene_provider(app_handle, &conn, Scene::Companion)?;
     let provider_type = provider.provider_type.to_string();
@@ -446,7 +445,7 @@ fn handle_render_ui(
 
     // 后端直接落库（不同于文字回复由前端 done 落库——界面消息在 tool 循环
     // 中途产生，等 done 时前端已没有上下文判断该存什么）
-    if let Ok(conn) = Connection::open(db_path) {
+    if let Ok(conn) = crate::db::open_connection(db_path) {
         let content = serde_json::to_string(&payload).unwrap_or_default();
         let _ = conn.execute(
             "INSERT INTO chat_messages (session_id, role, content, content_type, created_at) VALUES (?1, 'assistant', ?2, 'a2ui', datetime('now','localtime'))",
@@ -577,7 +576,7 @@ async fn load_context(
     session_id: i64,
 ) -> Result<ChatContext, String> {
     let (summary, watermark, unsummarized) = {
-        let conn = Connection::open(db_path).map_err(|e| format!("打开数据库失败: {}", e))?;
+        let conn = crate::db::open_connection(db_path).map_err(|e| format!("打开数据库失败: {}", e))?;
         let (summary, watermark) = conn
             .query_row(
                 "SELECT summary, summarized_up_to FROM chat_sessions WHERE id = ?1",
@@ -660,7 +659,7 @@ async fn load_context(
         match summarize_chunk(app_handle, db_path, &summary, chunk).await {
             Ok(new_summary) => {
                 let new_watermark = chunk.last().map(|(id, _, _)| *id).unwrap_or(watermark);
-                if let Ok(conn) = Connection::open(db_path) {
+                if let Ok(conn) = crate::db::open_connection(db_path) {
                     let _ = conn.execute(
                         "UPDATE chat_sessions SET summary = ?1, summarized_up_to = ?2 WHERE id = ?3",
                         rusqlite::params![new_summary, new_watermark, session_id],
