@@ -7,13 +7,13 @@ import {
   type SourceStatRow,
 } from '@/stores/statsStore';
 import { CustomSelect } from '../../components/CustomSelect';
+import { DateRangePicker, type DateRangeApply } from '../../components/DateRangePicker';
 import {
   fmtCost,
   fmtDuration,
   fmtTime,
   fmtTokens,
   sourceLabel,
-  toLocalInputValue,
 } from './format';
 
 type SortKey = 'calls' | 'tokens' | 'duration' | 'cost';
@@ -22,15 +22,6 @@ interface SortState {
   key: SortKey;
   dir: 'asc' | 'desc';
 }
-
-type Preset = 'today' | '7d' | '14d' | '30d' | 'custom';
-
-const PRESETS: { key: Exclude<Preset, 'custom'>; label: string; daysBack: number }[] = [
-  { key: 'today', label: '当天', daysBack: 0 },
-  { key: '7d', label: '近 7 天', daysBack: 6 },
-  { key: '14d', label: '近 14 天', daysBack: 13 },
-  { key: '30d', label: '近 30 天', daysBack: 29 },
-];
 
 const MAIN_GRID = 'grid-cols-[20px_1fr_64px_110px_80px_90px]';
 const DETAIL_GRID = 'grid-cols-[1fr_84px_84px_64px_64px_80px_104px]';
@@ -43,12 +34,6 @@ function startOfToday(): number {
 
 function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
-}
-
-/** datetime-local 值 → unix 秒；空值/非法值回退当前时刻 */
-function parseLocalInput(value: string, fallback: number): number {
-  const ms = new Date(value).getTime();
-  return Number.isNaN(ms) ? fallback : Math.floor(ms / 1000);
 }
 
 interface ExpandedState {
@@ -67,11 +52,12 @@ export function LlmObserveSection() {
     loadCallLogs,
   } = useStatsStore();
 
-  const [preset, setPreset] = useState<Preset>('today');
+  const [preset, setPreset] = useState<string | null>('today');
   const [source, setSource] = useState('');
   const [model, setModel] = useState('');
-  const [sinceInput, setSinceInput] = useState(() => toLocalInputValue(startOfToday()));
-  const [untilInput, setUntilInput] = useState(() => toLocalInputValue(nowSeconds()));
+  const [since, setSince] = useState(startOfToday);
+  const [until, setUntil] = useState(nowSeconds);
+  const [followNow, setFollowNow] = useState(true);
   const [sort, setSort] = useState<SortState>({ key: 'calls', dir: 'desc' });
   const [expanded, setExpanded] = useState<Record<string, ExpandedState>>({});
 
@@ -80,30 +66,27 @@ export function LlmObserveSection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 筛选条件（until 取所选分钟末尾，datetime-local 精度到分钟）
-  const filter: ObserveFilter = useMemo(
-    () => ({
-      source: source || null,
-      model: model || null,
-      since: parseLocalInput(sinceInput, startOfToday()),
-      until: parseLocalInput(untilInput, nowSeconds()) + 60,
-    }),
-    [source, model, sinceInput, untilInput],
-  );
+  // 每次调用实时组装筛选条件：followNow 时 until 取此刻，保证「跟随当前时刻」
+  const buildFilter = (sourceOverride?: string): ObserveFilter => ({
+    source: sourceOverride ?? (source || null),
+    model: model || null,
+    since,
+    until: followNow ? nowSeconds() : until,
+  });
 
-  // 筛选变更 → 重新拉取（400ms 防抖，时间输入连续改动合并为一次请求），
-  // 同时收合已展开的明细——旧条件下的日志不应残留
+  // 筛选变更 → 重新拉取（400ms 防抖），同时收合已展开的明细——旧条件下的日志不应残留
   useEffect(() => {
     setExpanded({});
-    const timer = setTimeout(() => loadObservability(filter), 400);
+    const timer = setTimeout(() => loadObservability(buildFilter()), 400);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter]);
+  }, [source, model, since, until, followNow]);
 
-  const applyPreset = (daysBack: number, key: Preset) => {
-    setPreset(key);
-    setSinceInput(toLocalInputValue(startOfToday() - daysBack * 86400));
-    setUntilInput(toLocalInputValue(nowSeconds()));
+  const handleRangeApply = (v: DateRangeApply) => {
+    setPreset(v.preset);
+    setSince(v.since);
+    setUntil(v.until);
+    setFollowNow(v.followNow);
   };
 
   const toggleSort = (key: SortKey) => {
@@ -148,7 +131,7 @@ export function LlmObserveSection() {
       [rowSource]: { loading: true, logs: [], error: null },
     }));
     try {
-      const logs = await loadCallLogs({ ...filter, source: rowSource }, 50);
+      const logs = await loadCallLogs(buildFilter(rowSource), 50);
       setExpanded((prev) => ({
         ...prev,
         [rowSource]: { loading: false, logs, error: null },
@@ -223,53 +206,14 @@ export function LlmObserveSection() {
             className="w-36"
             menuClassName="w-56"
           />
-          <div className="flex gap-1 ml-auto">
-            {PRESETS.map((p) => (
-              <button
-                key={p.key}
-                onClick={() => applyPreset(p.daysBack, p.key)}
-                className={`px-2.5 py-1 rounded-lg text-xs border transition-all cursor-pointer ${
-                  preset === p.key
-                    ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
-                    : 'bg-white/5 text-white/40 border-white/10 hover:bg-white/10'
-                }`}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-          <div className="flex items-center gap-1.5 text-xs text-white/40">
-            <input
-              type="datetime-local"
-              value={sinceInput}
-              onChange={(e) => {
-                setSinceInput(e.target.value);
-                setPreset('custom');
-              }}
-              style={{ colorScheme: 'dark' }}
-              className="bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-xs text-white/80 outline-none focus:border-blue-500/50"
-            />
-            <span>至</span>
-            <input
-              type="datetime-local"
-              value={untilInput}
-              onChange={(e) => {
-                setUntilInput(e.target.value);
-                setPreset('custom');
-              }}
-              style={{ colorScheme: 'dark' }}
-              className="bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-xs text-white/80 outline-none focus:border-blue-500/50"
-            />
-            <button
-              onClick={() => {
-                setUntilInput(toLocalInputValue(nowSeconds()));
-                setPreset('custom');
-              }}
-              className="px-2 py-1 rounded-lg text-xs bg-white/5 text-white/40 border border-white/10 hover:bg-white/10 hover:text-white/70 transition-colors cursor-pointer"
-            >
-              至今
-            </button>
-          </div>
+          <DateRangePicker
+            preset={preset}
+            since={since}
+            until={until}
+            followNow={followNow}
+            onApply={handleRangeApply}
+            className="ml-auto"
+          />
         </div>
 
         {/* 数据看板 */}
