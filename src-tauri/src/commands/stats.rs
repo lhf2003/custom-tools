@@ -433,7 +433,7 @@ fn disk_free_bytes(_dir: &Path) -> Option<u64> {
     None
 }
 
-/// 本地数据空间统计：核心数据库/笔记/陪伴/图标缓存/日志/其他
+/// 本地数据空间统计：核心数据库/剪贴板/笔记/陪伴/图标缓存/日志/其他
 #[tauri::command]
 pub fn get_local_data_stats(app_handle: tauri::AppHandle) -> Result<LocalDataStats, String> {
     let app_data = app_handle
@@ -451,6 +451,9 @@ pub fn get_local_data_stats(app_handle: tauri::AppHandle) -> Result<LocalDataSta
 
     let (db_bytes, db_files) = core_db_size(&app_data);
 
+    // 剪贴板 = 图片附件目录；文本历史在 flowhub.db 内，计入核心数据库
+    let (clip_bytes, clip_files, clip_dirs) = walk_size(&app_data.join("clipboard-images"));
+
     let (notes_bytes, notes_files, notes_dirs) = walk_size(&app_data.join("notes"));
 
     // 陪伴数据 = 人格/配置目录 + Claude Code Agent 工作区
@@ -465,7 +468,7 @@ pub fn get_local_data_stats(app_handle: tauri::AppHandle) -> Result<LocalDataSta
     let mut other_bytes = 0u64;
     let mut other_files = 0u64;
     let mut other_dirs = 0u64;
-    const KNOWN_DIRS: [&str; 3] = ["notes", "companion", "companion-agent"];
+    const KNOWN_DIRS: [&str; 4] = ["notes", "companion", "companion-agent", "clipboard-images"];
     const DB_PREFIXES: [&str; 3] = ["flowhub.db", "settings.db", "shortcuts.db"];
     if let Ok(rd) = std::fs::read_dir(&app_data) {
         for entry in rd.flatten() {
@@ -500,6 +503,15 @@ pub fn get_local_data_stats(app_handle: tauri::AppHandle) -> Result<LocalDataSta
             bytes: db_bytes,
             file_count: db_files,
             dir_count: 0,
+            cleanable: false,
+        },
+        DataCategory {
+            key: "clipboard".to_string(),
+            label: "剪贴板".to_string(),
+            description: "剪贴板历史的图片附件，文本记录计入核心数据库".to_string(),
+            bytes: clip_bytes,
+            file_count: clip_files,
+            dir_count: clip_dirs,
             cleanable: false,
         },
         DataCategory {

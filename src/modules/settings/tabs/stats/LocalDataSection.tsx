@@ -4,9 +4,10 @@ import { useStatsStore, type DataCategory } from '@/stores/statsStore';
 import { useToastStore } from '@/stores/toastStore';
 import { fmtBytes, fmtScannedAt } from './format';
 
-/** 分类色：数据编码用，core_db/others 落灰阶，内容类用品牌色系 */
+/** 分类色：数据编码用，others 兜底落灰阶，内容类各用区分色 */
 const CATEGORY_COLORS: Record<string, string> = {
-  core_db: '#a1a1aa',
+  core_db: '#34d399',
+  clipboard: '#38bdf8',
   notes: '#818cf8',
   companion: '#a855f7',
   icon_cache: '#2dd4bf',
