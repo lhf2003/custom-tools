@@ -24,7 +24,7 @@ interface SortState {
 }
 
 const MAIN_GRID = 'grid-cols-[20px_1fr_64px_110px_80px_90px]';
-const DETAIL_GRID = 'grid-cols-[1fr_84px_84px_64px_64px_80px_104px]';
+const DETAIL_GRID = 'grid-cols-[1fr_76px_64px_44px_52px_68px_88px]';
 
 function startOfToday(): number {
   const d = new Date();
@@ -303,7 +303,7 @@ export function LlmObserveSection() {
                     </button>
 
                     {state && (
-                      <div className="ml-6 mt-1 mb-2 rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2">
+                      <div className="mt-1 mb-2 rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2">
                         {state.loading ? (
                           <p className="text-white/30 text-xs py-1.5">正在加载调用日志…</p>
                         ) : state.error ? (
