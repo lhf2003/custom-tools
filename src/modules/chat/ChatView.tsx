@@ -8,13 +8,11 @@ import {
   Copy,
   Check,
   Sparkles,
-  Languages,
   History,
   MousePointerClick,
   Terminal,
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
-import { useLlmProviderStore } from '@/stores/llmProviderStore';
 import { invoke } from '@tauri-apps/api/core';
 import { debouncedResize } from '@/utils/tauri';
 import { WINDOW_SIZE } from '@/constants/window';
@@ -25,7 +23,7 @@ import { parseActionMessage } from './a2ui/action';
 // Types
 // ─────────────────────────────────────────────
 
-type ChatMode = 'chat' | 'translate';
+type ChatMode = 'chat';
 
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
@@ -121,8 +119,6 @@ const MODES: Record<
     label: string;
     placeholder: string;
     icon: React.ElementType;
-    tagColor: string;
-    focusBorder: string;
     system: string;
   }
 > = {
@@ -130,23 +126,10 @@ const MODES: Record<
     label: '贾维斯',
     placeholder: '聊点什么？你的数据他也知道…',
     icon: Sparkles,
-    tagColor: 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30',
-    focusBorder: 'border-indigo-500/50',
     // 闲聊走贾维斯 agent 通道（claude CLI + MCP 数据工具），系统提示由后端 persona 体系组装
     system: '',
   },
-  translate: {
-    label: '翻译',
-    placeholder: '输入需要翻译的文本...',
-    icon: Languages,
-    tagColor: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30',
-    focusBorder: 'border-emerald-500/50',
-    system:
-      '你是专业翻译。请直接给出译文，不要添加任何解释或前言。如果输入是中文，译为英文；如果是其他语言，译为中文。',
-  },
 };
-
-const MODE_ORDER: ChatMode[] = ['chat', 'translate'];
 
 /** 距底部该像素范围内视为「贴底」：贴底时流式输出自动跟随，用户上翻超出后暂停跟随 */
 const STICK_TO_BOTTOM_PX = 48;
@@ -221,7 +204,7 @@ function AssistantContent({ text }: { text: string }) {
         p.aside ? (
           <div
             key={i}
-            className="my-1.5 pl-3 border-l-2 border-white/10 text-white/50 text-xs italic whitespace-pre-wrap"
+            className="my-1.5 pl-3 text-white/45 text-xs italic whitespace-pre-wrap"
           >
             {p.text}
           </div>
@@ -248,7 +231,7 @@ function UserMessageBubble({ content }: { content: string }) {
     );
   }
   return (
-    <div className="max-w-[80%] px-3 py-2 rounded-xl bg-zinc-700/60 text-sm text-zinc-200 break-words">
+    <div className="max-w-[80%] px-3 py-2 rounded-xl bg-white/10 text-sm text-zinc-100 break-words">
       {content}
     </div>
   );
@@ -260,7 +243,6 @@ function UserMessageBubble({ content }: { content: string }) {
 
 export function ChatView() {
   const { setActiveView, chatPrefill, setChatPrefill } = useAppStore();
-  const { sceneConfigs } = useLlmProviderStore();
 
   const [mode, setMode] = useState<ChatMode>('chat');
   const [input, setInput] = useState('');
@@ -328,7 +310,8 @@ export function ChatView() {
 
   // ── Mount: resize window + focus + restore session ─────────────────
   useEffect(() => {
-    debouncedResize(WINDOW_SIZE.CHAT.collapsed, WINDOW_SIZE.CHAT.width);
+    // 统一 expanded：有会话显示历史，无会话显示空状态引导
+    debouncedResize(WINDOW_SIZE.CHAT.expanded, WINDOW_SIZE.CHAT.width);
     textareaRef.current?.focus();
 
     const restoreSession = async () => {
@@ -587,52 +570,23 @@ export function ChatView() {
     if (mode === 'chat') pokeRecall();
 
     try {
-      if (mode === 'chat') {
-        setAgentStatus(null);
-        const agentAvailable = await invoke<boolean>('jarvis_agent_available');
-        if (agentAvailable) {
-          // 贾维斯 agent 通道：claude CLI + MCP 数据工具，流式事件 jarvis:*
-          await invoke('jarvis_chat_send', { text: userMessage.content });
-        } else {
-          // Claude Code 未开启：场景模型回退通道（tool-use 循环在后端，
-          // 事件契约与 agent 通道一致：jarvis:status / chunk / done / error）
-          const sid = sessionIdRef.current;
-          if (sid === null) throw new Error('会话未就绪，请稍候再试');
-          await invoke('jarvis_chat_send_scene', { sessionId: sid, text: userMessage.content });
-        }
+      setAgentStatus(null);
+      const agentAvailable = await invoke<boolean>('jarvis_agent_available');
+      if (agentAvailable) {
+        // 贾维斯 agent 通道：claude CLI + MCP 数据工具，流式事件 jarvis:*
+        await invoke('jarvis_chat_send', { text: userMessage.content });
       } else {
-        // 工具型通道：场景模型流式
-        const sceneConfig = sceneConfigs[mode];
-        const thinkingMode = sceneConfig?.thinking_mode ?? false;
-        await invoke('call_llm_stream_by_scene', {
-          scene: mode,
-          messages: newMessages,
-          thinkingMode,
-        });
+        // Claude Code 未开启：场景模型回退通道（tool-use 循环在后端，
+        // 事件契约与 agent 通道一致：jarvis:status / chunk / done / error）
+        const sid = sessionIdRef.current;
+        if (sid === null) throw new Error('会话未就绪，请稍候再试');
+        await invoke('jarvis_chat_send_scene', { sessionId: sid, text: userMessage.content });
       }
     } catch (err) {
       setIsLoading(false);
       setError(typeof err === 'string' ? err : '发送失败，请检查 AI 模型设置');
     }
-  }, [input, isLoading, messages, mode, sceneConfigs]);
-
-  // ── Cycle mode ────────────────────────────────────────────────────
-  const cycleMode = useCallback(() => {
-    // 切换前停掉在飞流式：restoreModeSession 只换内容不取消后端，
-    // 不拦的话 chat 回复会串进新模式会话并落库（与 handleNewSession 对齐）
-    isCancelledRef.current = true;
-    setIsLoading(false);
-    setStreamText('');
-    streamTextRef.current = '';
-    setAgentStatus(null);
-    if (mode === 'chat') {
-      invoke('jarvis_chat_cancel').catch(() => {});
-    }
-    setMode((prev) => {
-      const idx = MODE_ORDER.indexOf(prev);
-      return MODE_ORDER[(idx + 1) % MODE_ORDER.length];
-    });
-  }, [mode]);
+  }, [input, isLoading, messages]);
 
   // ── Restore session when mode changes ────────────────────────────
   useEffect(() => {
@@ -717,7 +671,8 @@ export function ChatView() {
     setCancelled(false);
     setIsLoading(false);
     setAgentStatus(null);
-    debouncedResize(WINDOW_SIZE.CHAT.collapsed, WINDOW_SIZE.CHAT.width);
+    // 新会话同样展开显示空状态引导（与挂载行为一致）
+    debouncedResize(WINDOW_SIZE.CHAT.expanded, WINDOW_SIZE.CHAT.width);
 
     // 贾维斯通道：同时清掉 claude 侧会话上下文
     if (mode === 'chat') {
@@ -904,9 +859,9 @@ export function ChatView() {
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (e.key === 'Tab') {
+        // 保留 Shift+Tab 回启动器；普通 Tab 不再切换模式（翻译已下线）
         e.preventDefault();
         if (e.shiftKey) setActiveView('launcher');
-        else cycleMode();
         return;
       }
       if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey) {
@@ -918,7 +873,7 @@ export function ChatView() {
         handleCancel();
       }
     },
-    [handleSend, cycleMode, handleCancel, isLoading, setActiveView],
+    [handleSend, handleCancel, isLoading, setActiveView],
   );
 
   // ── Computed ──────────────────────────────────────────────────────
@@ -926,20 +881,26 @@ export function ChatView() {
   const ModeIcon = modeConfig.icon;
   const visibleMessages = messages.filter((m) => m.role !== 'system');
   const showCursor = isLoading && streamText.length > 0;
+  // 空状态：无历史、无加载、无错误、无流式——显示引导而非空白
+  const showEmptyState =
+    !hasResponse && !isLoading && !error && streamText.length === 0;
   const statusText = isLoading
     ? (agentStatus ?? (streamText.length > 0 ? '正在输出...' : '正在思考...'))
     : error
       ? '发生错误'
       : cancelled
         ? '已停止'
-        : '生成完成';
+        : showEmptyState
+          ? '问点什么'
+          : '生成完成';
 
   return (
     <div className="w-full h-full flex flex-col select-none bg-transparent">
       {/* ── Input area (single-row) ──────────────────────────────── */}
-      <div className="px-3 py-2 shrink-0" data-tauri-drag-region>
-        <div className="flex items-center gap-2 px-3 py-2">
-          <ModeIcon className="w-4 h-4 text-zinc-500 shrink-0" />
+      <div className="px-3 py-2.5 shrink-0" data-tauri-drag-region>
+        <div className="flex items-center gap-2 px-3 py-1.5">
+          {/* 品牌时刻：唯一一处 Indigo，标识「这是贾维斯」 */}
+          <ModeIcon className="w-4 h-4 text-indigo-400 shrink-0" />
 
           <textarea
             ref={textareaRef}
@@ -952,31 +913,19 @@ export function ChatView() {
             rows={1}
             disabled={!!shellConfirm}
             className="flex-1 resize-none bg-transparent text-sm text-zinc-200 placeholder-app-text-placeholder outline-none leading-relaxed self-center disabled:opacity-60"
-            style={{ height: '22px' }}
+            style={{ height: '26px' }}
             data-tauri-drag-region={undefined}
           />
-
-          {/* Mode tag */}
-          <button
-            onClick={cycleMode}
-            className={`shrink-0 text-[10px] px-2 py-1 rounded-md border font-semibold transition-colors cursor-pointer ${modeConfig.tagColor}`}
-            tabIndex={-1}
-            aria-label="切换模式"
-            data-tauri-drag-region={undefined}
-          >
-            {modeConfig.label}
-            <span className="ml-1 opacity-40 font-mono text-[10px]">Tab</span>
-          </button>
 
           {/* Cancel button (only while loading) */}
           {isLoading && (
             <button
               onClick={handleCancel}
-              className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/60 transition-all cursor-pointer"
+              className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-zinc-400 hover:text-zinc-200 hover:bg-white/10 transition-all cursor-pointer"
               aria-label="取消生成"
               data-tauri-drag-region={undefined}
             >
-              <X className="w-3.5 h-3.5" />
+              <X className="w-4 h-4" />
             </button>
           )}
 
@@ -984,15 +933,15 @@ export function ChatView() {
           <button
             onClick={() => handleSend()}
             disabled={!input.trim() || (isLoading && mode !== 'chat') || !!shellConfirm}
-            className={`shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
+            className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-all ${
               input.trim() && (!isLoading || mode === 'chat') && !shellConfirm
-                ? 'text-zinc-200 hover:bg-zinc-700/60 cursor-pointer'
+                ? 'text-zinc-200 hover:bg-white/10 cursor-pointer'
                 : 'text-zinc-600 cursor-not-allowed'
             }`}
             aria-label="发送消息"
             data-tauri-drag-region={undefined}
           >
-            <ArrowUp className="w-3.5 h-3.5" />
+            <ArrowUp className="w-4 h-4" />
           </button>
         </div>
       </div>
@@ -1003,24 +952,30 @@ export function ChatView() {
         className="flex-1 min-h-0"
         style={{
           display: 'grid',
-          gridTemplateRows: hasResponse ? 'minmax(0, 1fr)' : '0fr',
+          gridTemplateRows: hasResponse || !!error || showEmptyState ? 'minmax(0, 1fr)' : '0fr',
           transition: 'grid-template-rows 300ms ease',
         }}
       >
         <div className="overflow-hidden h-full flex flex-col">
-          {/* Status bar */}
-          <div className="px-4 py-2 border-t border-zinc-700/30 flex items-center justify-between shrink-0">
+          {/* Status bar：左状态（三态语言，进行中 Indigo 脉冲点）/ 右操作组（Ghost 形态） */}
+          <div className="px-4 py-1.5 border-t border-zinc-700/30 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-1.5">
               {isLoading && (
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse shrink-0" />
+                <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse shrink-0" />
               )}
-              <span className="text-xs text-app-text-tertiary">{statusText}</span>
+              <span
+                className={`text-xs ${
+                  isLoading ? 'text-app-text-secondary' : 'text-app-text-tertiary'
+                }`}
+              >
+                {statusText}
+              </span>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1">
               {!isLoading && visibleMessages.length > 0 && !error && (
                 <button
                   onClick={handleCopy}
-                  className="flex items-center text-app-text-tertiary hover:text-app-text-primary transition-colors cursor-pointer"
+                  className="flex items-center w-7 h-7 justify-center rounded-md text-app-text-tertiary hover:text-app-text-primary hover:bg-white/10 transition-colors cursor-pointer"
                   aria-label="复制回复"
                 >
                   {copied ? (
@@ -1034,7 +989,7 @@ export function ChatView() {
                 <>
                   <button
                     onClick={handleNewSession}
-                    className="text-[10px] text-app-text-tertiary hover:text-app-text-primary transition-colors cursor-pointer"
+                    className="text-xs px-2 h-7 rounded-md text-app-text-tertiary hover:text-app-text-primary hover:bg-white/10 transition-colors cursor-pointer"
                     aria-label="开启新会话"
                   >
                     新会话
@@ -1042,8 +997,10 @@ export function ChatView() {
                   <button
                     ref={historyBtnRef}
                     onClick={toggleHistory}
-                    className={`flex items-center transition-colors cursor-pointer ${
-                      historyOpen ? 'text-app-text-primary' : 'text-app-text-tertiary hover:text-app-text-primary'
+                    className={`flex items-center w-7 h-7 justify-center rounded-md transition-colors cursor-pointer ${
+                      historyOpen
+                        ? 'text-app-text-primary bg-white/10'
+                        : 'text-app-text-tertiary hover:text-app-text-primary hover:bg-white/10'
                     }`}
                     aria-label="会话历史"
                   >
@@ -1060,6 +1017,32 @@ export function ChatView() {
             onScroll={handleResponseScroll}
             className="px-4 pt-1 pb-4 overflow-y-auto space-y-3 flex-1 min-h-0"
           >
+            {/* Empty state：教界面——引导句 + 示例 chip（点击代发） */}
+            {showEmptyState && (
+              <div className="h-full flex flex-col items-center justify-center gap-4 select-none">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-indigo-400/70 shrink-0" />
+                  <span className="text-sm text-app-text-tertiary">
+                    问我你的电脑——数据、习惯、剪贴板
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleSend('总结我今天的电脑使用情况')}
+                    className="text-xs px-3 py-1.5 rounded-md bg-white/5 border border-white/10 text-zinc-300 hover:text-zinc-100 hover:bg-white/10 transition-colors cursor-pointer"
+                  >
+                    总结我的今天
+                  </button>
+                  <button
+                    onClick={() => handleSend('我最近在忙什么')}
+                    className="text-xs px-3 py-1.5 rounded-md bg-white/5 border border-white/10 text-zinc-300 hover:text-zinc-100 hover:bg-white/10 transition-colors cursor-pointer"
+                  >
+                    最近在忙什么
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Error state */}
             {error && (
               <div className="flex items-start gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
@@ -1090,7 +1073,7 @@ export function ChatView() {
                     />
                   </div>
                 ) : (
-                  <div className="max-w-[90%] prose prose-invert prose-sm max-w-none prose-p:my-1.5 prose-headings:mt-3 prose-headings:mb-1.5 prose-pre:bg-zinc-800 prose-pre:border prose-pre:border-zinc-700 prose-code:text-emerald-300 prose-code:bg-zinc-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-a:text-blue-400 prose-strong:text-zinc-200">
+                  <div className="max-w-[90%] prose prose-invert prose-sm max-w-none prose-p:my-1.5 prose-headings:mt-3 prose-headings:mb-1.5 prose-pre:bg-zinc-800 prose-pre:border prose-pre:border-zinc-700 prose-pre:rounded-lg prose-code:text-emerald-300 prose-code:bg-zinc-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-a:text-blue-400 prose-strong:text-zinc-200">
                     <AssistantContent text={msg.content} />
                   </div>
                 )}
@@ -1118,10 +1101,10 @@ export function ChatView() {
             {/* Streaming assistant response */}
             {streamText.length > 0 && (
               <div className="flex justify-start">
-                <div className="max-w-[90%] prose prose-invert prose-sm max-w-none prose-p:my-1.5 prose-headings:mt-3 prose-headings:mb-1.5 prose-pre:bg-zinc-800 prose-pre:border prose-pre:border-zinc-700 prose-code:text-emerald-300 prose-code:bg-zinc-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-a:text-blue-400 prose-strong:text-zinc-200">
+                <div className="max-w-[90%] prose prose-invert prose-sm max-w-none prose-p:my-1.5 prose-headings:mt-3 prose-headings:mb-1.5 prose-pre:bg-zinc-800 prose-pre:border prose-pre:border-zinc-700 prose-pre:rounded-lg prose-code:text-emerald-300 prose-code:bg-zinc-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-a:text-blue-400 prose-strong:text-zinc-200">
                   <AssistantContent text={streamText} />
                   {showCursor && (
-                    <span className="inline-block w-0.5 h-4 bg-zinc-400 animate-pulse ml-0.5 align-middle" />
+                    <span className="inline-block w-0.5 h-4 bg-indigo-400/80 animate-pulse ml-0.5 align-middle" />
                   )}
                 </div>
               </div>

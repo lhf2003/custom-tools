@@ -116,7 +116,8 @@ pub async fn jarvis_chat_send_scene(
 }
 
 /// 执行一条回退聊天：tool-use 循环（上限 4 轮，每轮登记 llm_call_logs）。
-/// 非流式（裁决 D1）：循环中无法预知哪轮是最终回答，最终结果一次性推前端。
+/// 流式（与 agent 通道一致）：每轮调用经 on_text 逐 chunk emit jarvis:chunk，
+/// 工具轮文字照常送出，最终回答结束由 jarvis:done 收尾。
 async fn run_scene_chat(
     app_handle: &AppHandle,
     db_path: &PathBuf,
@@ -191,10 +192,16 @@ async fn run_scene_chat(
     // 跨消息保持——增量更新与「用户操作」回传后的界面刷新都依赖它）
     let mut render_ui_failures = 0usize;
 
-    let final_text = loop {
+    // 流式文字回调：逐段转发 jarvis:chunk（与 agent 通道同一事件契约）。
+    // 闭包不可变借用 app_handle，跨 await 持有（&AppHandle 本身 Send + Sync）
+    let on_text: &(dyn Fn(&str) + Send + Sync) = &|text: &str| {
+        let _ = app_handle.emit("jarvis:chunk", text);
+    };
+
+    loop {
         rounds += 1;
         let started = std::time::Instant::now();
-        let result = crate::llm::call_llm_with_tools(
+        let result = crate::llm::call_llm_stream_with_tools(
             &provider.base_url,
             &api_key,
             &model.model_id,
@@ -202,6 +209,7 @@ async fn run_scene_chat(
             messages.clone(),
             tools_json.clone(),
             thinking_mode,
+            on_text,
         )
         .await;
         let duration_ms = started.elapsed().as_millis() as u64;
@@ -303,7 +311,7 @@ async fn run_scene_chat(
                         "content": "（系统提示：工具调用次数已到上限，请基于已经拿到的信息直接回答，不要再调用工具。）"
                     }));
                     let started = std::time::Instant::now();
-                    let final_result = crate::llm::call_llm_with_tools(
+                    let final_result = crate::llm::call_llm_stream_with_tools(
                         &provider.base_url,
                         &api_key,
                         &model.model_id,
@@ -311,6 +319,7 @@ async fn run_scene_chat(
                         messages.clone(),
                         json!([]),
                         thinking_mode,
+                        on_text,
                     )
                     .await;
                     let duration_ms = started.elapsed().as_millis() as u64;
@@ -406,8 +415,7 @@ async fn run_scene_chat(
         }
     };
 
-    // 终态：全文一次性推前端（非流式裁决），assistant 落库由前端 done 监听完成
-    let _ = app_handle.emit("jarvis:chunk", final_text);
+    // 终态：文字已逐 chunk 流式送出，只发 done 收尾（assistant 落库由前端 done 监听完成）
     let _ = app_handle.emit("jarvis:done", total_cost);
     Ok(())
 }
