@@ -150,33 +150,39 @@ fn process_events(index: Arc<Mutex<SearchIndex>>, receiver: mpsc::Receiver<Watch
                 pending_removes.push(path);
             }
             WatcherEvent::BatchUpdate => {
-                // Check if debounce period has passed
-                if last_update.elapsed().as_millis() > DEBOUNCE_MS as u128 {
-                    // Process pending changes
-                    if let Ok(mut idx) = index.lock() {
-                        // Handle removals first
-                        for path in &pending_removes {
-                            if let Err(e) = idx.remove_app(path) {
-                                log::warn!("Failed to remove app {}: {}", path.display(), e);
-                            } else {
-                                log::info!("Removed app: {}", path.display());
-                            }
-                        }
+                // Debounce:事件流可能还在持续,先睡到 debounce 期满合并窗口内的
+                // 后续事件,期满后立即落地处理。旧实现 elapsed<=500ms 时既不处理
+                // 也不安排后续处理,事件流停止后的变更被无限期冻结——用户复制
+                // 单个 .lnk 后永远搜不到新应用,直到下一个文件系统事件到来。
+                if last_update.elapsed().as_millis() <= DEBOUNCE_MS as u128 {
+                    let remaining = DEBOUNCE_MS as u128 - last_update.elapsed().as_millis();
+                    thread::sleep(Duration::from_millis(remaining as u64));
+                }
 
-                        // Handle additions/updates
-                        for path in &pending_adds {
-                            if let Err(e) = idx.add_or_update_app(path) {
-                                log::warn!("Failed to add app {}: {}", path.display(), e);
-                            } else {
-                                log::info!("Added/updated app: {}", path.display());
-                            }
+                // Process pending changes
+                if let Ok(mut idx) = index.lock() {
+                    // Handle removals first
+                    for path in &pending_removes {
+                        if let Err(e) = idx.remove_app(path) {
+                            log::warn!("Failed to remove app {}: {}", path.display(), e);
+                        } else {
+                            log::info!("Removed app: {}", path.display());
                         }
                     }
 
-                    pending_adds.clear();
-                    pending_removes.clear();
-                    last_update = Instant::now();
+                    // Handle additions/updates
+                    for path in &pending_adds {
+                        if let Err(e) = idx.add_or_update_app(path) {
+                            log::warn!("Failed to add app {}: {}", path.display(), e);
+                        } else {
+                            log::info!("Added/updated app: {}", path.display());
+                        }
+                    }
                 }
+
+                pending_adds.clear();
+                pending_removes.clear();
+                last_update = Instant::now();
             }
         }
 

@@ -63,10 +63,12 @@ impl Database {
         )?;
 
         // Migration: add sort_order column if not exists
-        let _ = self.conn.execute(
+        ensure_column(
+            &self.conn,
+            "notes",
+            "sort_order",
             "ALTER TABLE notes ADD COLUMN sort_order INTEGER DEFAULT 0",
-            [],
-        );
+        )?;
 
         // Create index for sort_order
         self.conn.execute(
@@ -179,10 +181,12 @@ impl Database {
         )?;
 
         // Migration: A2UI 界面卡片消息（content_type='a2ui' 时 content 为协议 JSON）
-        let _ = self.conn.execute(
+        ensure_column(
+            &self.conn,
+            "chat_messages",
+            "content_type",
             "ALTER TABLE chat_messages ADD COLUMN content_type TEXT NOT NULL DEFAULT 'markdown'",
-            [],
-        );
+        )?;
 
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id)",
@@ -263,29 +267,41 @@ impl Database {
         )?;
 
         // Migration: add thinking_mode column if not exists (for existing tables)
-        let _ = self.conn.execute(
+        ensure_column(
+            &self.conn,
+            "llm_scene_configs",
+            "thinking_mode",
             "ALTER TABLE llm_scene_configs ADD COLUMN thinking_mode BOOLEAN DEFAULT 0",
-            [],
-        );
+        )?;
 
         // Migration: 模型单价（每百万 token 人民币，可选；填了成本面板才算金额）
-        let _ = self
-            .conn
-            .execute("ALTER TABLE llm_models ADD COLUMN input_price_per_m REAL", []);
-        let _ = self
-            .conn
-            .execute("ALTER TABLE llm_models ADD COLUMN output_price_per_m REAL", []);
+        ensure_column(
+            &self.conn,
+            "llm_models",
+            "input_price_per_m",
+            "ALTER TABLE llm_models ADD COLUMN input_price_per_m REAL",
+        )?;
+        ensure_column(
+            &self.conn,
+            "llm_models",
+            "output_price_per_m",
+            "ALTER TABLE llm_models ADD COLUMN output_price_per_m REAL",
+        )?;
 
         // Migration: 聊天历史增量摘要（回退通道上下文组装用）——
         // summary = 已压缩的历史摘要；summarized_up_to = 摘要覆盖到的消息 id 水位
-        let _ = self.conn.execute(
+        ensure_column(
+            &self.conn,
+            "chat_sessions",
+            "summary",
             "ALTER TABLE chat_sessions ADD COLUMN summary TEXT NOT NULL DEFAULT ''",
-            [],
-        );
-        let _ = self.conn.execute(
+        )?;
+        ensure_column(
+            &self.conn,
+            "chat_sessions",
+            "summarized_up_to",
             "ALTER TABLE chat_sessions ADD COLUMN summarized_up_to INTEGER NOT NULL DEFAULT 0",
-            [],
-        );
+        )?;
 
         // LLM 调用观测日志：每次调用登记来源/通道/token/耗时/成本（成本面板数据源）
         // cached_input_tokens = 命中缓存的输入 token（含在 input_tokens 内）；
@@ -315,14 +331,18 @@ impl Database {
         )?;
 
         // Migration: 统计页观测增强——缓存命中 token 与工具调用次数
-        let _ = self.conn.execute(
+        ensure_column(
+            &self.conn,
+            "llm_call_logs",
+            "cached_input_tokens",
             "ALTER TABLE llm_call_logs ADD COLUMN cached_input_tokens INTEGER DEFAULT 0",
-            [],
-        );
-        let _ = self.conn.execute(
+        )?;
+        ensure_column(
+            &self.conn,
+            "llm_call_logs",
+            "tool_call_count",
             "ALTER TABLE llm_call_logs ADD COLUMN tool_call_count INTEGER DEFAULT 0",
-            [],
-        );
+        )?;
 
         // Migration: 成本单位美元 → 人民币（cost_usd → cost_cny）。
         // 改名成功即首次迁移（之后启动列已不存在会报错跳过）：历史美元成本清零、
@@ -406,6 +426,39 @@ impl Database {
             Err(e) => log::error!("llm_scene_configs 迁移失败（旧约束保留）: {}", e),
         }
         Ok(())
+    }
+}
+
+/// 幂等迁移：表已有目标列则跳过，没有才执行 ALTER。
+/// 旧写法 `let _ = ALTER TABLE ADD COLUMN` 每次启动都执行必然失败的语句
+/// （列已存在报 duplicate column name 被吞掉），且吞错会掩盖真实迁移失败——
+/// 一旦因磁盘/锁错误没加上列，日志里毫无痕迹，运行时才报 no such column。
+/// 失败只记日志不阻断启动（列缺失的后果由后续代码显式暴露）。
+pub fn ensure_column(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    alter_ddl: &str,
+) -> Result<bool> {
+    let exists: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info(?1) WHERE name = ?2",
+        [table, column],
+        |row| row.get(0),
+    )?;
+
+    if exists > 0 {
+        return Ok(false);
+    }
+
+    match conn.execute(alter_ddl, []) {
+        Ok(_) => {
+            log::info!("Migrated: added column {}.{}", table, column);
+            Ok(true)
+        }
+        Err(e) => {
+            log::error!("Migration failed: add column {}.{}: {}", table, column, e);
+            Ok(false)
+        }
     }
 }
 

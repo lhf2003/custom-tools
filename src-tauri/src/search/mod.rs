@@ -134,6 +134,10 @@ fn score_app(app: &AppItem, pattern: &Pattern, matcher: &mut nucleo::Matcher) ->
 pub struct SearchIndex {
     apps: Vec<AppItem>,
     indexed: bool,
+    /// 全量扫描进行中标记（锁内读写）。用于启动期线程 B 区分
+    /// "线程 A 正在扫描（应等待）"与"线程 A 从未开始/已失败（应兜底）"，
+    /// 避免两个线程并发执行 collect_all_apps。
+    scanning: bool,
     db_state: Option<Arc<DatabaseState>>,
 }
 
@@ -142,6 +146,7 @@ impl SearchIndex {
         Self {
             apps: Vec::new(),
             indexed: false,
+            scanning: false,
             db_state: None,
         }
     }
@@ -150,6 +155,7 @@ impl SearchIndex {
         Self {
             apps: Vec::new(),
             indexed: false,
+            scanning: false,
             db_state: Some(db_state),
         }
     }
@@ -275,7 +281,7 @@ impl SearchIndex {
                     })
                     .collect();
 
-                if let Err(e) = app_cache::save_batch(&mut conn, &cache_entries) {
+                if let Err(e) = app_cache::replace_batch(&mut conn, &cache_entries) {
                     log::warn!("Failed to save cache: {}", e);
                 } else {
                     log::info!("Saved {} entries to cache", cache_entries.len());
@@ -292,6 +298,57 @@ impl SearchIndex {
     pub fn apply_indexed_apps(&mut self, apps: Vec<AppItem>) {
         self.apps = apps;
         self.indexed = true;
+        self.scanning = false;
+    }
+
+    /// 标记一次全量扫描开始（在锁内调用；collect_all_apps 本身不持锁执行）。
+    pub fn begin_scan(&mut self) {
+        self.scanning = true;
+    }
+
+    /// 扫描失败时清除扫描标记，让启动期的兜底线程可以接手。
+    pub fn abort_scan(&mut self) {
+        self.scanning = false;
+    }
+
+    pub fn is_scanning(&self) -> bool {
+        self.scanning
+    }
+
+    /// 缓存新鲜度阈值：超过该时长没有全量扫描视为陈旧。
+    /// Registry/UWP 应用增删只能靠全量扫描感知（watcher 只监听 .lnk），
+    /// 陈旧时启动后应触发一次后台刷新，而不是跳过。
+    const CACHE_STALE_AFTER: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+    /// 缓存是否新鲜：以 app_cache 表 MAX(updated_at)（UTC）近似"上次全量
+    /// 扫描时间"（save_batch/replace_batch 每次全量扫描都会刷新 updated_at）。
+    /// 判断失败或缓存为空时返回不新鲜（保守触发刷新）。
+    pub fn is_cache_fresh(&self) -> bool {
+        let Some(ref db_state) = self.db_state else {
+            return true;
+        };
+        let Ok(conn) = rusqlite::Connection::open(&db_state.0) else {
+            return true;
+        };
+        let last: Option<String> = conn
+            .query_row(
+                "SELECT MAX(updated_at) FROM app_cache WHERE is_valid = 1",
+                [],
+                |row| row.get(0),
+            )
+            .ok()
+            .flatten();
+        let Some(last) = last else {
+            return false;
+        };
+        // CURRENT_TIMESTAMP 存储的是 UTC
+        let Some(last_utc) =
+            chrono::NaiveDateTime::parse_from_str(&last, "%Y-%m-%d %H:%M:%S").ok()
+        else {
+            return false;
+        };
+        let elapsed = chrono::Utc::now().naive_utc() - last_utc;
+        elapsed < chrono::Duration::from_std(Self::CACHE_STALE_AFTER).unwrap_or_default()
     }
 
     /// Background refresh - scans directories and updates cache

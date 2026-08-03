@@ -281,7 +281,12 @@ pub fn run() {
                     };
 
                     if !cache_loaded {
-                        // 全量扫描不持锁(可能极慢),完成后再短暂持锁交换结果
+                        // 全量扫描不持锁(可能极慢),完成后再短暂持锁交换结果。
+                        // 扫描前先在锁内置 scanning 标记,让线程 B 知道"扫描进行中"
+                        // 应等待而非并发扫描。
+                        if let Ok(mut idx) = search_index_for_init.lock() {
+                            idx.begin_scan();
+                        }
                         match search::SearchIndex::collect_all_apps(&Some(db_state_for_init))
                         {
                             Ok(apps) => {
@@ -295,7 +300,11 @@ pub fn run() {
                                 }
                             }
                             Err(e) => {
-                                log::warn!("Background initial app indexing failed: {}", e)
+                                log::warn!("Background initial app indexing failed: {}", e);
+                                // 清除扫描标记,让线程 B 可以兜底扫描
+                                if let Ok(mut idx) = search_index_for_init.lock() {
+                                    idx.abort_scan();
+                                }
                             }
                         }
                     }
@@ -313,14 +322,59 @@ pub fn run() {
                 }
             });
 
-            // Background refresh in case cache is stale
+            // 启动期索引兜底线程（防缓存过期 + 兜底全量扫描）。
+            // 职责按场景区分，避免 Registry/UWP 扫描执行两次：
+            // 1. 线程 A 正在扫描（scanning=true）→ 等待其完成，不并发扫描；
+            // 2. 缓存已就绪且新鲜（<24h）→ 跳过；
+            // 3. 缓存已就绪但陈旧（≥24h）→ 后台刷新一次——Registry/UWP 应用
+            //    增删只能靠全量扫描感知（watcher 只监听 .lnk），必须保留这条路径；
+            // 4. 线程 A 从未开始/已失败（indexed=false 且不在扫描）→ 兜底全量扫描。
             let search_index_for_refresh = search_index_arc.clone();
             std::thread::spawn(move || {
                 std::thread::sleep(Duration::from_secs(2)); // Wait 2 seconds after startup
-                if let Ok(mut idx) = search_index_for_refresh.lock() {
-                    if let Err(e) = idx.refresh_in_background() {
-                        log::warn!("Background refresh failed: {}", e);
+
+                // 等待线程 A 的扫描结束：500ms 轮询一次，最多 60 次（30s）。
+                // 超时是极端慢速环境的兜底——此时自己扫描避免索引永远为空。
+                let mut waited = 0u32;
+                loop {
+                    let scanning = match search_index_for_refresh.lock() {
+                        Ok(idx) => idx.is_scanning(),
+                        Err(e) => {
+                            log::error!("Search index lock poisoned: {}", e);
+                            return;
+                        }
+                    };
+                    if !scanning {
+                        break;
                     }
+                    waited += 1;
+                    if waited >= 60 {
+                        log::error!(
+                            "Initial indexing still in progress after 30s, falling back to own scan"
+                        );
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(500));
+                }
+
+                let mut idx = match search_index_for_refresh.lock() {
+                    Ok(idx) => idx,
+                    Err(e) => {
+                        log::error!("Search index lock poisoned: {}", e);
+                        return;
+                    }
+                };
+                if idx.is_indexed() {
+                    if idx.is_cache_fresh() {
+                        log::info!("Index ready and cache fresh, skipping background refresh");
+                        return;
+                    }
+                    log::info!("Cache is stale, refreshing applications in background");
+                } else {
+                    log::info!("Index not ready after initial indexing, falling back to full scan");
+                }
+                if let Err(e) = idx.refresh_in_background() {
+                    log::warn!("Background refresh failed: {}", e);
                 }
             });
 
@@ -967,8 +1021,15 @@ fn install_panic_hook() {
         log::error!("PANIC: {}", msg);
 
         // 兜底:logger 可能尚未初始化或已失效,直接追加写文件。
-        if let Some(data_dir) = dirs::data_dir() {
-            let logs_dir = data_dir.join(APP_DIR_NAME).join("logs");
+        // 目录必须与日志插件(TargetKind::LogDir → %LOCALAPPDATA%\<identifier>\logs)
+        // 一致——旧实现用 dirs::data_dir() 推导到 %APPDATA%(Roaming),panic.log
+        // 与主日志分处两处,且不在 cleanup_old_logs 的清理范围内。
+        let base_dir = std::env::var("LOCALAPPDATA")
+            .ok()
+            .map(std::path::PathBuf::from)
+            .or_else(dirs::data_dir);
+        if let Some(base_dir) = base_dir {
+            let logs_dir = base_dir.join(APP_DIR_NAME).join("logs");
             if std::fs::create_dir_all(&logs_dir).is_ok() {
                 use std::io::Write;
                 if let Ok(mut file) = std::fs::OpenOptions::new()

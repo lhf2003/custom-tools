@@ -29,10 +29,24 @@ pub fn init_table(conn: &Connection) -> Result<()> {
     )?;
 
     // Migration: add pinyin_initials column if not exists
-    let _ = conn.execute(
+    super::ensure_column(
+        conn,
+        "app_cache",
+        "pinyin_initials",
         "ALTER TABLE app_cache ADD COLUMN pinyin_initials TEXT DEFAULT ''",
+    )?;
+
+    // 修复存量脏数据：旧版本把 is_valid 绑定为 TEXT 'true'/'false'（Rust bool 的
+    // to_string()），查询端全部用整数比较 is_valid = 1/0——TEXT 永不匹配，缓存
+    // 从未命中、每次启动全量扫描。把文本转回整数后新代码才能命中缓存。
+    conn.execute(
+        "UPDATE app_cache SET is_valid = 1 WHERE is_valid = 'true'",
         [],
-    );
+    )?;
+    conn.execute(
+        "UPDATE app_cache SET is_valid = 0 WHERE is_valid = 'false'",
+        [],
+    )?;
 
     // Create index for fast lookup
     conn.execute(
@@ -84,16 +98,52 @@ pub fn save(conn: &Connection, entry: &AppCacheEntry) -> Result<()> {
             pinyin_initials = ?6,
             updated_at = CURRENT_TIMESTAMP",
         [
-            &entry.path,
+            &entry.path as &dyn rusqlite::types::ToSql,
             &entry.name,
             &entry.target_path,
             &entry.last_modified.to_string(),
-            &entry.is_valid.to_string(),
+            &if entry.is_valid { "1" } else { "0" },
             &entry.pinyin_initials,
         ],
     )?;
 
     Ok(())
+}
+
+/// 全量替换缓存：事务内清空后重建。
+/// collect_all_apps 的语义是"当前集合即缓存全集"——DELETE 全表会清掉已删除
+/// 应用的僵尸条目（is_valid=1 永不清理的旧行为会让下次启动原样恢复）。
+/// INSERT 用 ON CONFLICT DO UPDATE：entries 内部允许重复 path（Registry 按
+/// name|exe_path 去重，同一 exe 不同名条目 path 相同），纯 INSERT 会报
+/// UNIQUE constraint failed 导致整个事务回滚、缓存停更——每次启动都判定
+/// 缓存陈旧而重复全量扫描。
+pub fn replace_batch(conn: &mut Connection, entries: &[AppCacheEntry]) -> Result<()> {
+    let tx = conn.transaction()?;
+
+    tx.execute("DELETE FROM app_cache", [])?;
+    for entry in entries {
+        tx.execute(
+            "INSERT INTO app_cache (path, name, target_path, last_modified, is_valid, pinyin_initials, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, CURRENT_TIMESTAMP)
+             ON CONFLICT(path) DO UPDATE SET
+                name = ?2,
+                target_path = ?3,
+                last_modified = ?4,
+                is_valid = ?5,
+                pinyin_initials = ?6,
+                updated_at = CURRENT_TIMESTAMP",
+            [
+                &entry.path as &dyn rusqlite::types::ToSql,
+                &entry.name,
+                &entry.target_path,
+                &entry.last_modified.to_string(),
+                &if entry.is_valid { "1" } else { "0" },
+                &entry.pinyin_initials,
+            ],
+        )?;
+    }
+
+    tx.commit()
 }
 
 /// Batch save multiple entries (more efficient)
@@ -112,11 +162,11 @@ pub fn save_batch(conn: &mut Connection, entries: &[AppCacheEntry]) -> Result<()
                 pinyin_initials = ?6,
                 updated_at = CURRENT_TIMESTAMP",
             [
-                &entry.path,
+                &entry.path as &dyn rusqlite::types::ToSql,
                 &entry.name,
                 &entry.target_path,
                 &entry.last_modified.to_string(),
-                &entry.is_valid.to_string(),
+                &if entry.is_valid { "1" } else { "0" },
                 &entry.pinyin_initials,
             ],
         )?;
