@@ -393,10 +393,6 @@ fn stream_chat_process(
             Some("result") => {
                 saw_result = true;
                 let is_error = msg.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false);
-                let cost = msg
-                    .get("total_cost_usd")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(0.0);
                 let duration_ms = started.elapsed().as_millis() as u64;
                 let input_tokens = msg
                     .pointer("/usage/input_tokens")
@@ -423,7 +419,7 @@ fn stream_chat_process(
                         input_tokens: 0,
                         cached_input_tokens: 0,
                         output_tokens: 0,
-                        cost_usd: 0.0,
+                        cost_cny: 0.0,
                         duration_ms,
                         tool_call_count: 0,
                         status: "error",
@@ -439,13 +435,14 @@ fn stream_chat_process(
                         input_tokens,
                         cached_input_tokens,
                         output_tokens,
-                        cost_usd: cost,
+                        // CC 通道（订阅制）不记成本，只统计 token
+                        cost_cny: 0.0,
                         duration_ms,
                         tool_call_count: 0,
                         status: "ok",
                         error: None,
                     });
-                    let _ = app_handle.emit("jarvis:done", cost);
+                    let _ = app_handle.emit("jarvis:done", 0.0_f64);
                 }
             }
             _ => {}

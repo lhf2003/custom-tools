@@ -28,6 +28,7 @@ pub struct AppSettings {
     pub companion_long_work_minutes: i32,
     pub companion_daily_report: bool,
     pub companion_monologue: bool,
+    pub debug_mode: bool,
 }
 
 impl Default for AppSettings {
@@ -54,6 +55,7 @@ impl Default for AppSettings {
             companion_long_work_minutes: 90,
             companion_daily_report: true,
             companion_monologue: true,
+            debug_mode: false,
         }
     }
 }
@@ -188,6 +190,11 @@ impl SettingsManager {
                         settings.companion_monologue = v;
                     }
                 }
+                "debug_mode" => {
+                    if let Ok(v) = value.parse::<bool>() {
+                        settings.debug_mode = v;
+                    }
+                }
                 _ => {}
             }
         }
@@ -305,6 +312,11 @@ impl SettingsManager {
                 "companion_monologue" => {
                     if let Ok(v) = value.parse::<bool>() {
                         cache.companion_monologue = v;
+                    }
+                }
+                "debug_mode" => {
+                    if let Ok(v) = value.parse::<bool>() {
+                        cache.debug_mode = v;
                     }
                 }
                 _ => {}

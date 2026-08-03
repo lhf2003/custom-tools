@@ -22,7 +22,6 @@ struct ClaudeCliResult {
     subtype: Option<String>,
     is_error: Option<bool>,
     result: Option<String>,
-    total_cost_usd: Option<f64>,
     num_turns: Option<u32>,
     usage: Option<ClaudeCliUsage>,
 }
@@ -38,7 +37,6 @@ struct ClaudeCliUsage {
 /// 单次问答的计量回执（观测登记用）
 pub struct OneshotReply {
     pub text: String,
-    pub cost_usd: f64,
     pub input_tokens: u64,
     pub cached_input_tokens: u64,
     pub output_tokens: u64,
@@ -138,7 +136,7 @@ pub fn run_daily_report_agent(
             input_tokens: 0,
             cached_input_tokens: 0,
             output_tokens: 0,
-            cost_usd: 0.0,
+            cost_cny: 0.0,
             duration_ms,
             tool_call_count: 0,
             status: "error",
@@ -147,7 +145,6 @@ pub fn run_daily_report_agent(
         return Err(reason);
     }
 
-    let cost = parsed.total_cost_usd.unwrap_or(0.0);
     let turns = parsed.num_turns.unwrap_or(0);
     let summary = parsed.result.unwrap_or_else(|| "日报已生成".to_string());
     let summary_preview: String = summary.chars().take(200).collect();
@@ -170,14 +167,15 @@ pub fn run_daily_report_agent(
         input_tokens,
         cached_input_tokens,
         output_tokens,
-        cost_usd: cost,
+        // CC 通道（订阅制）不记成本，只统计 token
+        cost_cny: 0.0,
         duration_ms,
         tool_call_count: 0,
         status: "ok",
         error: None,
     });
 
-    log::info!("Companion 日报 agent 完成: {} 轮, 成本 ${:.4}", turns, cost);
+    log::info!("Companion 日报 agent 完成: {} 轮", turns);
 
     // 推送"日报已生成"建议卡片，用户可点击查看
     if let Ok(conn) = rusqlite::Connection::open(db_path) {
@@ -192,8 +190,8 @@ pub fn run_daily_report_agent(
     }
 
     Ok(format!(
-        "日报 agent 完成（{} 轮，${:.4}）: {}",
-        turns, cost, summary_preview
+        "日报 agent 完成（{} 轮）: {}",
+        turns, summary_preview
     ))
 }
 
@@ -278,7 +276,6 @@ pub fn run_oneshot(bin_path: &str, work_dir: &Path, prompt: &str) -> Result<Ones
         text: parsed
             .result
             .ok_or_else(|| "claude 未返回结果".to_string())?,
-        cost_usd: parsed.total_cost_usd.unwrap_or(0.0),
         input_tokens: usage.as_ref().and_then(|u| u.input_tokens).unwrap_or(0),
         cached_input_tokens: usage
             .as_ref()

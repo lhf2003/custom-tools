@@ -299,6 +299,24 @@ pub fn toggle_auto_update(state: State<'_, SettingsState>) -> Result<bool, Strin
     Ok(new_value)
 }
 
+/// 调试模式开关：开 = debug 级日志落盘（含模型调用系统提示词），关 = Info 级。
+/// 运行时生效（log 全局闸门），并持久化供下次启动恢复。
+#[tauri::command]
+pub fn toggle_debug_mode(state: State<'_, SettingsState>) -> Result<bool, String> {
+    let manager = state.0.lock().map_err(|e| e.to_string())?;
+    let current = manager.get_settings().debug_mode;
+    let new_value = !current;
+
+    manager
+        .set_setting("debug_mode", &new_value.to_string())
+        .map_err(|e| e.to_string())?;
+
+    crate::apply_log_level(new_value);
+    log::info!("Debug mode toggled: {} -> {}", current, new_value);
+
+    Ok(new_value)
+}
+
 /// 获取自定义扫描目录列表（存在主 DB settings 表中，key = "custom_scan_dirs"）
 #[tauri::command]
 pub fn get_custom_scan_dirs(

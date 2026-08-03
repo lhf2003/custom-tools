@@ -10,12 +10,14 @@ export function GeneralSettings() {
     clipboard_keep_days,
     auto_update,
     clipboard_auto_paste,
+    debug_mode,
     toggleAlwaysOnTop,
     toggleHideOnBlur,
     setStartupLaunch,
     setClipboardKeepDays,
     setAutoUpdate,
     toggleClipboardAutoPaste,
+    toggleDebugMode,
   } = useSettingsStore();
 
   return (
@@ -75,6 +77,13 @@ export function GeneralSettings() {
 
         <SettingCard title="自动更新" description="启动时自动检查并下载最新版本">
           <Toggle enabled={auto_update} onToggle={setAutoUpdate} />
+        </SettingCard>
+
+        <SettingCard
+          title="调试模式"
+          description="写入 debug 级日志（含模型调用的系统提示词），位于 %LOCALAPPDATA%\com.flowhub.app\logs"
+        >
+          <Toggle enabled={debug_mode} onToggle={toggleDebugMode} />
         </SettingCard>
       </div>
     </>

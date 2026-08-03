@@ -192,6 +192,9 @@ pub fn run() {
             )));
             log::info!("Settings manager initialized");
 
+            // 调试模式：恢复运行时日志级别闸门（prompt 日志等 debug 级输出的总开关）
+            apply_log_level(settings.debug_mode);
+
             // Initialize shortcut manager
             let shortcuts_db_path = app
                 .path()
@@ -438,6 +441,7 @@ pub fn run() {
             commands::settings::reset_all_shortcuts,
             commands::settings::check_shortcut_conflict,
             commands::settings::toggle_auto_update,
+            commands::settings::toggle_debug_mode,
             commands::settings::validate_claude_cli,
             commands::settings::get_custom_scan_dirs,
             commands::settings::set_custom_scan_dirs,
@@ -899,6 +903,16 @@ fn setup_system_tray(app_handle: &tauri::AppHandle) -> Result<(), Box<dyn std::e
 
     log::info!("System tray icon set up successfully");
     Ok(())
+}
+
+/// 运行时日志级别闸门：调试模式开 = Debug（含 prompt 日志），关 = Info。
+/// log crate 的全局 max_level 是唯一闸门；插件初始级别只决定启动早期的输出。
+pub fn apply_log_level(debug: bool) {
+    log::set_max_level(if debug {
+        log::LevelFilter::Debug
+    } else {
+        log::LevelFilter::Info
+    });
 }
 
 /// 构建日志插件。日志目录用 TargetKind::LogDir(Tauri 自动解析

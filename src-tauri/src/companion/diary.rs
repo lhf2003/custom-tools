@@ -156,8 +156,13 @@ async fn run_focus(app_handle: &AppHandle, db_path: &PathBuf, source_date: &str)
     let aggregate = analyzer::aggregate_day(&conn, source_date).unwrap_or_default();
 
     let prompt = format!(
-        "你是他的 AI 搭档贾维斯。基于以下信息，为他的明天列出 3-5 条值得关注的事。\n\
-         要求：每条一行、一句话、具体不空泛；来自素材，不编造；只输出清单本身。\n\n\
+        "你是他的私人管家贾维斯。基于以下信息，为明天列 3-5 条「关注」——\n\
+         就是明天跟他相处时用得上的上下文：他的项目节点、没做完的事、在追的剧、最近的节奏。\n\
+         写法要求（违反任一条就不合格）：\n\
+         每条一行、一句话，说人话（「他在追《Loki》，午休可能会看」）；\n\
+         禁档案腔/监控腔：「保持既有的…」「通过X进行Y」「合理分配时间」这类措辞一律不许出现；\n\
+         是「留意」不是「安排」——不指挥他明天该干什么；\n\
+         来自素材，不编造；只输出清单本身。\n\n\
          ## 你记住的他\n{facts}\n\n\
          ## 他的备忘意图\n{intents}\n\n\
          ## 已学到的习惯模式\n{patterns}\n\n\

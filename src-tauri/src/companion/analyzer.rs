@@ -1341,6 +1341,7 @@ pub(crate) async fn call_llm_with_scene(
         let duration_ms = started.elapsed().as_millis() as u64;
         match cc_result {
             Ok(reply) => {
+                // CC 通道（订阅制）不记成本，只统计 token
                 crate::llm::observe::log_call(db_path, &crate::llm::observe::LlmCallEntry {
                     source,
                     channel: "claude_code",
@@ -1349,7 +1350,7 @@ pub(crate) async fn call_llm_with_scene(
                     input_tokens: reply.input_tokens,
                     cached_input_tokens: reply.cached_input_tokens,
                     output_tokens: reply.output_tokens,
-                    cost_usd: reply.cost_usd,
+                    cost_cny: 0.0,
                     duration_ms,
                     tool_call_count: 0,
                     status: "ok",
@@ -1367,7 +1368,7 @@ pub(crate) async fn call_llm_with_scene(
                     input_tokens: 0,
                     cached_input_tokens: 0,
                     output_tokens: 0,
-                    cost_usd: 0.0,
+                    cost_cny: 0.0,
                     duration_ms,
                     tool_call_count: 0,
                     status: "error",
@@ -1513,7 +1514,7 @@ pub(crate) async fn call_scene_model_llm(
                 input_tokens: reply.input_tokens,
                 cached_input_tokens: reply.cached_input_tokens,
                 output_tokens: reply.output_tokens,
-                cost_usd: cost,
+                cost_cny: cost,
                 duration_ms,
                 tool_call_count: 0,
                 status: "ok",
@@ -1530,7 +1531,7 @@ pub(crate) async fn call_scene_model_llm(
                 input_tokens: 0,
                 cached_input_tokens: 0,
                 output_tokens: 0,
-                cost_usd: 0.0,
+                cost_cny: 0.0,
                 duration_ms,
                 tool_call_count: 0,
                 status: "error",

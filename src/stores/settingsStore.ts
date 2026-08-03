@@ -10,6 +10,7 @@ export interface AppSettings {
   clipboard_keep_days: number;
   auto_update: boolean;
   clipboard_auto_paste: boolean;
+  debug_mode: boolean;
   llm_base_url: string;
   llm_api_key: string;
   llm_model: string;
@@ -51,6 +52,7 @@ interface SettingsState extends AppSettings {
   setClipboardKeepDays: (days: number) => Promise<void>;
   setAutoUpdate: (enabled: boolean) => Promise<void>;
   toggleAutoUpdate: () => Promise<boolean>;
+  toggleDebugMode: () => Promise<boolean>;
   setClipboardAutoPaste: (enabled: boolean) => Promise<void>;
   toggleClipboardAutoPaste: () => Promise<boolean>;
   setLlmBaseUrl: (url: string) => Promise<void>;
@@ -89,6 +91,7 @@ const defaultSettings: AppSettings = {
   clipboard_keep_days: 30,
   auto_update: true,
   clipboard_auto_paste: true,
+  debug_mode: false,
   llm_base_url: 'https://api.openai.com/v1',
   llm_api_key: '',
   llm_model: 'gpt-4o-mini',
@@ -218,6 +221,17 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     } catch (err) {
       console.error('Failed to toggle auto_update:', err);
       return get().auto_update;
+    }
+  },
+
+  toggleDebugMode: async () => {
+    try {
+      const newValue = await invoke<boolean>('toggle_debug_mode');
+      set({ debug_mode: newValue });
+      return newValue;
+    } catch (err) {
+      console.error('Failed to toggle debug_mode:', err);
+      return get().debug_mode;
     }
   },
 
