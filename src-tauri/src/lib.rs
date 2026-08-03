@@ -376,6 +376,8 @@ pub fn run() {
                 app.manage(companion_state);
                 app.manage(companion::chat::JarvisChatChild::default());
                 app.manage(companion::scene_chat::JarvisSceneChatState::default());
+                app.manage(companion::shell::ShellConfirmState::default());
+                app.manage(companion::websearch::WebSearchState::default());
             }
 
             log::info!("Application setup completed");
@@ -522,9 +524,18 @@ pub fn run() {
             companion::chat::jarvis_chat_reset,
             companion::chat::jarvis_agent_available,
             companion::chat::jarvis_chat_system,
+            commands::companion::list_companion_tools,
+            commands::companion::set_companion_tool_enabled,
+            companion::shell::resolve_shell_confirm,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // 退出时整树清理搜索 daemon（cmd→npx→node，不杀会留孤儿进程）
+            if matches!(event, tauri::RunEvent::Exit) {
+                companion::websearch::shutdown_daemon(app_handle);
+            }
+        });
 }
 
 fn setup_window_handlers(app_handle: &tauri::AppHandle) {

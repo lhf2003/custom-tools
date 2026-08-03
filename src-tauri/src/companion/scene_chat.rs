@@ -17,8 +17,9 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use super::{analyzer, chat, tools};
 use crate::llm_provider::models::Scene;
 
-/// tool-use 循环上限（每轮都是一次付费调用，防失控）
-const MAX_TOOL_ROUNDS: usize = 4;
+/// tool-use 循环上限（每轮都是一次付费调用，防失控；
+/// 接入 web_search/shell 后多步任务（搜→看→再搜→答）需要更大余量）
+const MAX_TOOL_ROUNDS: usize = 10;
 /// 未摘要消息超过该阈值时触发增量摘要（约 12 轮对话攒一次）
 const SUMMARY_THRESHOLD: usize = 24;
 /// 摘要后保留的最近原文条数（约 6 轮对话原样进上下文）
@@ -181,7 +182,9 @@ async fn run_scene_chat(
     }
     messages.push(json!({ "role": "user", "content": text }));
 
-    let tools_json = openai_tools_json();
+    // 工具清单：核心工具全开 + 用户未关闭的扩展工具（shell/web_search）
+    let disabled_tools = tools::disabled_tools(app_handle);
+    let tools_json = openai_tools_json(&disabled_tools);
     let mut total_cost = 0.0f64;
     let mut rounds = 0usize;
     // A2UI：render_ui 连续失败计数（surface 状态本身按会话存于 state.surfaces，
@@ -264,6 +267,14 @@ async fn run_scene_chat(
                             }
                             Err(e) => format!("surface 状态不可用：{}", e),
                         }
+                    } else if call.name == "run_shell_command" {
+                        super::shell::execute_shell_tool(app_handle, &call.arguments)
+                            .await
+                            .unwrap_or_else(|e| e)
+                    } else if call.name == "web_search" {
+                        super::websearch::execute_web_search_tool(app_handle, &call.arguments)
+                            .await
+                            .unwrap_or_else(|e| e)
                     } else {
                         tools::execute_tool(db_path, &notes_dir, &call.name, &call.arguments)
                             .unwrap_or_else(|e| e)
@@ -717,9 +728,9 @@ async fn summarize_chunk(
 }
 
 /// companion 工具声明转 OpenAI function calling 格式（Ollama 兼容同一格式）。
-/// 场景通道比 MCP 通道多一个 render_ui（A2UI 界面渲染，MCP 终端无渲染方）。
-fn openai_tools_json() -> serde_json::Value {
-    let arr: Vec<serde_json::Value> = tools::scene_tool_definitions()
+/// 场景通道比 MCP 通道多 render_ui 和可开关的扩展工具（shell/web_search）。
+fn openai_tools_json(disabled: &[String]) -> serde_json::Value {
+    let arr: Vec<serde_json::Value> = tools::scene_tool_definitions(disabled)
         .into_iter()
         .map(|d| {
             json!({

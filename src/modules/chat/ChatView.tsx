@@ -11,6 +11,7 @@ import {
   Languages,
   History,
   MousePointerClick,
+  Terminal,
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { useLlmProviderStore } from '@/stores/llmProviderStore';
@@ -233,6 +234,8 @@ export function ChatView() {
   const [sessionId, setSessionId] = useState<number | null>(null);
   // 贾维斯 agent 的工具活动提示（「贾维斯在翻数据…」）
   const [agentStatus, setAgentStatus] = useState<string | null>(null);
+  // Shell 命令确认请求（run_shell_command 工具，需用户点头才执行）
+  const [shellConfirm, setShellConfirm] = useState<{ id: string; command: string } | null>(null);
   // 会话历史浮层
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyVisible, setHistoryVisible] = useState(false);
@@ -250,6 +253,18 @@ export function ChatView() {
   const stickToBottomRef = useRef(true);
   const historyBtnRef = useRef<HTMLButtonElement>(null);
   const historyPanelRef = useRef<HTMLDivElement>(null);
+
+  // Shell 命令确认回执：先清弹窗再回传（后端 120s 超时兜底，重复回传无害）
+  const resolveShellConfirm = async (allow: boolean) => {
+    const pending = shellConfirm;
+    setShellConfirm(null);
+    if (!pending) return;
+    try {
+      await invoke('resolve_shell_confirm', { id: pending.id, allow });
+    } catch (e) {
+      console.error('Failed to resolve shell confirm:', e);
+    }
+  };
 
   // Consume companion prefill: wrap raw error content into an analysis prompt
   useEffect(() => {
@@ -444,12 +459,19 @@ export function ChatView() {
           );
         },
       );
+      // Shell 命令确认（run_shell_command 工具）：同一时间最多一条在等（tool 循环串行）
+      const u10 = await listen<{ id: string; command: string }>(
+        'jarvis:shell-confirm',
+        (event) => {
+          setShellConfirm(event.payload);
+        },
+      );
 
       if (!active) {
-        u1(); u2(); u3(); u4(); u5(); u6(); u7(); u8(); u9();
+        u1(); u2(); u3(); u4(); u5(); u6(); u7(); u8(); u9(); u10();
         return;
       }
-      unlistenFns = [u1, u2, u3, u4, u5, u6, u7, u8, u9];
+      unlistenFns = [u1, u2, u3, u4, u5, u6, u7, u8, u9, u10];
     };
 
     setupListeners();
@@ -1062,6 +1084,39 @@ export function ChatView() {
               ))}
             </ul>
           )}
+        </div>
+      )}
+
+      {/* ── Shell 命令确认弹窗（run_shell_command 工具的安全闸门） ── */}
+      {shellConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-[420px] max-w-[90%] rounded-xl border border-zinc-700/60 bg-zinc-800 shadow-2xl shadow-black/50 p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <Terminal className="w-4 h-4 text-amber-400" />
+              <span className="text-sm font-medium text-zinc-100">贾维斯想执行命令</span>
+            </div>
+            <pre className="max-h-40 overflow-y-auto rounded-lg bg-zinc-900/80 border border-zinc-700/50 px-3 py-2 text-xs text-zinc-200 font-mono whitespace-pre-wrap break-all select-text">
+              {shellConfirm.command}
+            </pre>
+            <p className="mt-2 text-xs text-zinc-500">
+              允许后命令立即在这台电脑上执行；拒绝后贾维斯会换个思路。约 2
+              分钟不操作自动拒绝。
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => resolveShellConfirm(false)}
+                className="px-3 py-1.5 rounded-lg text-xs text-zinc-300 border border-zinc-600/60 hover:bg-white/5 transition-colors cursor-pointer"
+              >
+                拒绝
+              </button>
+              <button
+                onClick={() => resolveShellConfirm(true)}
+                className="px-3 py-1.5 rounded-lg text-xs text-white bg-blue-500 hover:bg-blue-400 transition-colors cursor-pointer"
+              >
+                允许执行
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

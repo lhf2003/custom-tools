@@ -24,6 +24,10 @@ export interface AppSettings {
   companion_long_work_minutes: number;
   companion_daily_report: boolean;
   companion_monologue: boolean;
+  /** 被手动关闭的陪伴工具名列表（JSON 数组字符串） */
+  disabled_companion_tools: string;
+  /** Shell 工具权限模式：confirm_all | accept_edits | unattended */
+  shell_permission_mode: string;
 }
 
 export interface ShortcutConfig {
@@ -73,6 +77,7 @@ interface SettingsState extends AppSettings {
   setCompanionLongWorkMinutes: (minutes: number) => Promise<void>;
   setCompanionDailyReport: (enabled: boolean) => Promise<void>;
   setCompanionMonologue: (enabled: boolean) => Promise<void>;
+  setShellPermissionMode: (mode: string) => Promise<void>;
 
   // Shortcut Actions
   loadShortcuts: () => Promise<void>;
@@ -105,6 +110,8 @@ const defaultSettings: AppSettings = {
   companion_long_work_minutes: 90,
   companion_daily_report: true,
   companion_monologue: true,
+  disabled_companion_tools: '[]',
+  shell_permission_mode: 'confirm_all',
 };
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
@@ -396,6 +403,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       set({ companion_monologue: enabled });
     } catch (err) {
       console.error('Failed to set companion_monologue:', err);
+    }
+  },
+
+  setShellPermissionMode: async (mode: string) => {
+    try {
+      await invoke('set_setting', { key: 'shell_permission_mode', value: mode });
+      set({ shell_permission_mode: mode });
+    } catch (err) {
+      console.error('Failed to set shell_permission_mode:', err);
     }
   },
 

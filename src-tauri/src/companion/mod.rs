@@ -10,11 +10,13 @@ pub mod mcp;
 pub mod persona;
 pub mod recall;
 pub mod scene_chat;
+pub mod shell;
 pub mod skills;
 pub mod state;
 pub mod suggester;
 pub mod tools;
 pub mod watcher;
+pub mod websearch;
 
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc, RwLock};

@@ -29,6 +29,10 @@ pub struct AppSettings {
     pub companion_daily_report: bool,
     pub companion_monologue: bool,
     pub debug_mode: bool,
+    /// 被手动关闭的陪伴工具名列表（JSON 数组字符串，只含可开关的非核心工具）
+    pub disabled_companion_tools: String,
+    /// Shell 工具权限模式：confirm_all（每次确认）| accept_edits（预留，同 confirm_all）| unattended（安全命令自动放行）
+    pub shell_permission_mode: String,
 }
 
 impl Default for AppSettings {
@@ -56,6 +60,8 @@ impl Default for AppSettings {
             companion_daily_report: true,
             companion_monologue: true,
             debug_mode: false,
+            disabled_companion_tools: "[]".to_string(),
+            shell_permission_mode: "confirm_all".to_string(),
         }
     }
 }
@@ -195,6 +201,17 @@ impl SettingsManager {
                         settings.debug_mode = v;
                     }
                 }
+                "disabled_companion_tools" => {
+                    // 只接受合法 JSON 数组，坏数据回退空列表（全工具开启）
+                    if serde_json::from_str::<Vec<String>>(&value).is_ok() {
+                        settings.disabled_companion_tools = value;
+                    }
+                }
+                "shell_permission_mode" => {
+                    if ["confirm_all", "accept_edits", "unattended"].contains(&value.as_str()) {
+                        settings.shell_permission_mode = value;
+                    }
+                }
                 _ => {}
             }
         }
@@ -317,6 +334,16 @@ impl SettingsManager {
                 "debug_mode" => {
                     if let Ok(v) = value.parse::<bool>() {
                         cache.debug_mode = v;
+                    }
+                }
+                "disabled_companion_tools" => {
+                    if serde_json::from_str::<Vec<String>>(value).is_ok() {
+                        cache.disabled_companion_tools = value.to_string();
+                    }
+                }
+                "shell_permission_mode" => {
+                    if ["confirm_all", "accept_edits", "unattended"].contains(&value) {
+                        cache.shell_permission_mode = value.to_string();
                     }
                 }
                 _ => {}

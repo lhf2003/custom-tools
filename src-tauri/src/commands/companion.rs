@@ -536,3 +536,83 @@ fn format_bytes(n: usize) -> String {
         format!("{}B", n)
     }
 }
+
+// ── 工具管理（设置页「工具」页签）────────────────────────────────
+
+/// 设置页工具清单条目
+#[derive(Debug, serde::Serialize)]
+pub struct CompanionToolInfo {
+    pub name: String,
+    pub display_name: String,
+    pub description: String,
+    pub group: String,
+    pub group_label: String,
+    pub group_description: String,
+    /// 核心工具锁定不可关
+    pub core: bool,
+    pub enabled: bool,
+}
+
+/// 全部工具（核心 + 扩展）及其开关状态
+#[tauri::command]
+pub fn list_companion_tools(
+    settings_state: State<SettingsState>,
+) -> Result<Vec<CompanionToolInfo>, String> {
+    let disabled: Vec<String> = {
+        let manager = settings_state.0.lock().map_err(|e| e.to_string())?;
+        serde_json::from_str(&manager.get_settings().disabled_companion_tools).unwrap_or_default()
+    };
+
+    let infos = crate::companion::tools::all_tool_definitions()
+        .into_iter()
+        .map(|d| {
+            let enabled = d.core || !disabled.iter().any(|n| n == d.name);
+            CompanionToolInfo {
+                name: d.name.to_string(),
+                display_name: d.display_name.to_string(),
+                // 工具描述是给模型看的使用指南，太长；设置页只取首行做简介
+                description: d.description.lines().next().unwrap_or("").to_string(),
+                group: d.group.id().to_string(),
+                group_label: d.group.label().to_string(),
+                group_description: d.group.description().to_string(),
+                core: d.core,
+                enabled,
+            }
+        })
+        .collect();
+    Ok(infos)
+}
+
+/// 开关一个非核心工具（核心工具调用直接报错）
+#[tauri::command]
+pub fn set_companion_tool_enabled(
+    settings_state: State<'_, SettingsState>,
+    name: String,
+    enabled: bool,
+) -> Result<(), String> {
+    let defs = crate::companion::tools::all_tool_definitions();
+    let def = defs
+        .iter()
+        .find(|d| d.name == name)
+        .ok_or_else(|| format!("未知工具「{}」", name))?;
+    if def.core {
+        return Err(format!("「{}」是核心能力，不允许关闭", def.display_name));
+    }
+
+    let manager = settings_state.0.lock().map_err(|e| e.to_string())?;
+    let mut disabled: Vec<String> =
+        serde_json::from_str(&manager.get_settings().disabled_companion_tools)
+            .unwrap_or_default();
+    if enabled {
+        disabled.retain(|n| n != &name);
+    } else if !disabled.iter().any(|n| n == &name) {
+        disabled.push(name.clone());
+    }
+    let json = serde_json::to_string(&disabled).map_err(|e| e.to_string())?;
+    manager
+        .set_setting("disabled_companion_tools", &json)
+        .map_err(|e| format!("保存设置失败: {}", e))?;
+
+    log::info!("工具「{}」已{}", name, if enabled { "开启" } else { "关闭" });
+    Ok(())
+}
