@@ -35,7 +35,7 @@ interface AppItemData {
 }
 
 const ITEMS_PER_ROW = 9;
-// 折叠态搜索结果数：210px 窗口物理上只容一整行网格，超出交给「展开」
+// 折叠态搜索结果数：192px 窗口物理上只容一整行网格，超出交给「展开」
 const SEARCH_COLLAPSED_COUNT = ITEMS_PER_ROW;
 // 冷启动填充上限（无任何使用记录时展示索引应用）：取 9 列 × 2 行，
 // 避免一次渲染全部索引应用、触发大量图标提取
@@ -588,7 +588,8 @@ function ItemCard({
     loadIcon();
   }, [item.path, item.isBuiltIn, item.name]);
 
-  // 选中态信号统一为白纱底 + 文字变色（list-item-selected 规范），不做缩放
+  // 选中态信号统一为白纱底 + 白色加粗文字（list-item-selected 规范），不做缩放；
+  // hover 变色只作用于未选中项，避免与选中态颜色分叉（鼠标/键盘选中必须同色）
   // For built-in tools, use Lucide icon
   if (item.isBuiltIn) {
     const tool = BUILT_IN_TOOLS.find(t => t.id === item.toolId);
@@ -610,7 +611,7 @@ function ItemCard({
           </div>
           <span
             title={item.name}
-            className={`line-clamp-2 text-xs w-full text-center group-hover:text-app-text-primary transition-colors leading-tight ${isSelected ? 'text-app-brand-primary-light font-medium' : 'text-app-text-tertiary'}`}
+            className={`line-clamp-2 text-xs w-full text-center transition-colors leading-tight ${isSelected ? 'text-app-text-primary font-medium' : 'text-app-text-tertiary group-hover:text-app-text-primary'}`}
           >
             {item.name}
           </span>
@@ -642,7 +643,7 @@ function ItemCard({
         </div>
         <span
           title={item.name}
-          className={`line-clamp-2 text-xs w-full text-center group-hover:text-app-text-primary transition-colors leading-tight ${isSelected ? 'text-app-brand-primary-light font-medium' : 'text-app-text-tertiary'}`}
+          className={`line-clamp-2 text-xs w-full text-center transition-colors leading-tight ${isSelected ? 'text-app-text-primary font-medium' : 'text-app-text-tertiary group-hover:text-app-text-primary'}`}
         >
           {item.name}
         </span>
@@ -670,7 +671,7 @@ function ItemCard({
       </div>
       <span
         title={item.name}
-        className={`line-clamp-2 text-xs w-full text-center group-hover:text-app-text-primary transition-colors leading-tight ${isSelected ? 'text-app-brand-primary-light font-medium' : 'text-app-text-tertiary'}`}
+        className={`line-clamp-2 text-xs w-full text-center transition-colors leading-tight ${isSelected ? 'text-app-text-primary font-medium' : 'text-app-text-tertiary group-hover:text-app-text-primary'}`}
       >
         {item.name}
       </span>

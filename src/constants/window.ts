@@ -3,8 +3,9 @@
  */
 export const WINDOW_SIZE = {
   LAUNCHER: {
-    /** Height when the launcher grid is collapsed (default). */
-    collapsed: 210,
+    /** Height when the launcher grid is collapsed (default).
+     *  构成：搜索栏 60 + 区块头 32 + 一行网格 84（图标 32 + 两行名称）+ 底部留白 16。 */
+    collapsed: 192,
     /** Height when the launcher grid is expanded to show all recent apps. */
     expanded: 600,
     /** Default width for the launcher view (matches resize_window backend default). */
