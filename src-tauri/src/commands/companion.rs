@@ -142,7 +142,7 @@ pub fn clear_companion_activities(db_state: State<DatabaseState>) -> Result<(), 
     db::clear_all_activities(&conn).map_err(|e| format!("清空采集数据失败: {}", e))
 }
 
-/// 手动触发一次昨日分析（返回人话结果）
+/// 手动触发一次增量分析（水位线到当前时刻，返回人话结果）
 #[tauri::command]
 pub async fn analyze_companion_now(
     db_state: State<'_, DatabaseState>,
@@ -153,6 +153,7 @@ pub async fn analyze_companion_now(
 }
 
 /// 手动触发一次日报 agent（阻塞执行，可能耗时几分钟，返回人话结果）
+/// 归属与 0 点调度一致：生成「昨天」的日报
 /// 需要先在「设置 → AI 模型」中开启全局 Claude Code
 #[tauri::command]
 pub async fn run_companion_agent_now(
@@ -160,10 +161,12 @@ pub async fn run_companion_agent_now(
     app_handle: AppHandle,
 ) -> Result<String, String> {
     let db_path = db_state.0.clone();
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let yesterday = (chrono::Local::now() - chrono::Duration::days(1))
+        .format("%Y-%m-%d")
+        .to_string();
     let cc_off = !crate::companion::claude_code_enabled(&app_handle);
     let db_for_task = db_path.clone();
-    let date = today.clone();
+    let date = yesterday.clone();
     let result = if cc_off {
         // Claude Code 未开启：回退场景模型版日报（陪伴绑定模型）
         tauri::async_runtime::spawn_blocking(move || {
@@ -182,12 +185,12 @@ pub async fn run_companion_agent_now(
         .await
         .map_err(|e| format!("agent 线程异常: {}", e))?
     };
-    // 手动生成成功且笔记落盘 → 标记今日日报完成，避免 21 点调度重复生成
+    // 手动生成成功且笔记落盘 → 标记昨日日报完成，避免 0 点调度重复生成
     if result.is_ok() {
         let note_written = crate::notes::get_default_notes_dir()
             .map(|d| {
                 d.join(crate::companion::mcp::NOTE_DIR_PREFIX)
-                    .join(format!("{}.md", today))
+                    .join(format!("{}.md", yesterday))
                     .exists()
             })
             .unwrap_or(false);
@@ -195,12 +198,12 @@ pub async fn run_companion_agent_now(
             crate::companion::analyzer::save_setting(
                 &db_path,
                 "companion_last_report_date",
-                &today,
+                &yesterday,
             );
             if let Ok(conn) = Connection::open(&db_path) {
                 crate::companion::emotion::on_report_done(
                     &conn,
-                    &today,
+                    &yesterday,
                     chrono::Local::now().timestamp(),
                 );
             }
@@ -395,8 +398,13 @@ pub struct ManualInfo {
 fn format_schedule(s: &crate::companion::skills::Schedule) -> String {
     const DOW: [&str; 7] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
     match s {
-        crate::companion::skills::Schedule::Daily { hour, minute } => {
-            format!("daily {:02}:{:02}", hour, minute)
+        crate::companion::skills::Schedule::Daily { times } => {
+            let list = times
+                .iter()
+                .map(|(h, m)| format!("{:02}:{:02}", h, m))
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("daily {}", list)
         }
         crate::companion::skills::Schedule::Weekly {
             weekday,

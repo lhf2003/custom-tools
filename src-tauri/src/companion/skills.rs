@@ -1,7 +1,7 @@
 //! Skill 化手册：companion/skills/ 目录即能力目录。
 //! 每手册一个 .md，frontmatter（极简单行 key: value，不引 yaml 依赖）声明元数据：
 //!   name（必填，与文件名一致）/ description / trigger_description（有值才进聊天能力目录）
-//!   / schedule（daily HH:MM | weekly <mon..sun> HH:MM，可选）/ enabled（缺省 true）
+//!   / schedule（daily HH:MM[,HH:MM…] | weekly <mon..sun> HH:MM，可选）/ enabled（缺省 true）
 //! 启动时播种；旧 companion/agents/ 目录一次性迁移（内容搬进 skills/ 后整目录删除）。
 //! 聊天与调度循环每次现扫目录——用户改文件当轮生效，无需重启。
 
@@ -24,9 +24,10 @@ const EMBEDDED_SKILLS: &[(&str, &str)] = &[
 ];
 
 /// 机器可读触发时刻（weekday 与 chrono num_days_from_monday 对齐：0=周一 … 6=周日）
+/// Daily 支持逗号/空格分隔的多个时刻（如 daily 09:00,14:00,18:00,00:00），按时间升序去重。
 #[derive(Debug, Clone, PartialEq)]
 pub enum Schedule {
-    Daily { hour: u32, minute: u32 },
+    Daily { times: Vec<(u32, u32)> },
     Weekly { weekday: u32, hour: u32, minute: u32 },
 }
 
@@ -218,11 +219,20 @@ fn split_frontmatter_raw(content: &str) -> Option<(String, String)> {
     None
 }
 
-/// 解析 schedule 字段：daily HH:MM | weekly <mon..sun> HH:MM
+/// 解析 schedule 字段：daily HH:MM[,HH:MM…]（空格分隔亦可）| weekly <mon..sun> HH:MM
 fn parse_schedule(s: &str) -> Option<Schedule> {
     let parts: Vec<&str> = s.split_whitespace().collect();
     match parts.as_slice() {
-        ["daily", time] => parse_time(time).map(|(hour, minute)| Schedule::Daily { hour, minute }),
+        ["daily", rest @ ..] if !rest.is_empty() => {
+            let mut times: Vec<(u32, u32)> = rest
+                .join(",")
+                .split(',')
+                .map(|t| parse_time(t.trim()))
+                .collect::<Option<Vec<_>>>()?;
+            times.sort_unstable();
+            times.dedup();
+            (!times.is_empty()).then_some(Schedule::Daily { times })
+        }
         ["weekly", dow, time] => {
             let weekday = parse_weekday(dow)?;
             parse_time(time).map(|(hour, minute)| Schedule::Weekly { weekday, hour, minute })
@@ -284,13 +294,28 @@ mod tests {
     fn parses_schedules() {
         assert_eq!(
             parse_schedule("daily 21:00"),
-            Some(Schedule::Daily { hour: 21, minute: 0 })
+            Some(Schedule::Daily { times: vec![(21, 0)] })
+        );
+        assert_eq!(
+            parse_schedule("daily 09:00,14:00,18:00,00:00"),
+            Some(Schedule::Daily {
+                times: vec![(0, 0), (9, 0), (14, 0), (18, 0)]
+            })
+        );
+        // 空格分隔等价；重复时刻去重
+        assert_eq!(
+            parse_schedule("daily 14:00 09:00 14:00"),
+            Some(Schedule::Daily {
+                times: vec![(9, 0), (14, 0)]
+            })
         );
         assert_eq!(
             parse_schedule("weekly fri 17:30"),
             Some(Schedule::Weekly { weekday: 4, hour: 17, minute: 30 })
         );
         assert_eq!(parse_schedule("daily 25:00"), None);
+        assert_eq!(parse_schedule("daily 09:00,25:00"), None);
+        assert_eq!(parse_schedule("daily"), None);
         assert_eq!(parse_schedule("monthly 1 09:00"), None);
         assert_eq!(parse_schedule("garbage"), None);
     }

@@ -172,6 +172,7 @@ async fn run_scene_chat(
     if !context.summary.is_empty() {
         system_prompt.push_str(&format!("\n\n---\n\n# 此前聊天的摘要\n{}", context.summary));
     }
+    crate::llm::log_prompt("chat_scene", &system_prompt);
 
     // 组装消息：system + 近期历史 + 本轮用户消息
     let mut messages = vec![json!({ "role": "system", "content": system_prompt })];
@@ -489,6 +490,7 @@ async fn plain_fallback(
     if !context.summary.is_empty() {
         system_prompt.push_str(&format!("\n\n---\n\n# 此前聊天的摘要\n{}", context.summary));
     }
+    crate::llm::log_prompt("chat_scene_notools", &system_prompt);
     let mut msgs = vec![crate::llm::ChatMessage {
         role: "system".to_string(),
         content: system_prompt,

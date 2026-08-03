@@ -15,9 +15,9 @@ use crate::llm_provider::crypto::decrypt;
 use crate::llm_provider::db::LlmProviderDb;
 use crate::llm_provider::models::Scene;
 
-/// 每日 LLM 分析的触发小时（21 点后执行当日分析）
-const DAILY_ANALYSIS_HOUR: u32 = 21;
-/// 日报生成失败后的重试间隔（秒）：21 点后每 30 分钟重试一次，直到笔记落盘
+/// 模式挖掘的默认触发时刻（analyst.md 丢失/无 schedule 字段时回退）——手册丢了分析也不能丢
+const DEFAULT_ANALYSIS_SLOTS: [(u32, u32); 4] = [(9, 0), (14, 0), (18, 0), (0, 0)];
+/// 日报生成失败后的重试间隔（秒）：0 点块首跑失败后每 30 分钟重试一次，直到笔记落盘
 const REPORT_RETRY_SECS: i64 = 1800;
 /// 过期数据清理的触发小时（凌晨 3 点后）
 const CLEANUP_HOUR: u32 = 3;
@@ -25,12 +25,14 @@ const CLEANUP_HOUR: u32 = 3;
 const SESSION_MERGE_GAP_SECS: i64 = 180;
 /// 送给 LLM 的聚合文本长度上限（控制 token 成本）
 const AGGREGATE_TEXT_CAP: usize = 3500;
+/// 增量分析窗口的最大回看时长（水位线异常时兜底，防一次巨型窗口）
+const ANALYSIS_MAX_LOOKBACK_SECS: i64 = 7 * 86400;
 
 /// 日报触发时刻：从 reporter.md frontmatter 的 schedule 读（三期调度移交）。
-/// Some((时, 分)) = 按此时刻触发；None = 手册被 enabled:false 禁用，不调度。
-/// 文件丢失/无 schedule 字段回退内置 21:00——手册丢了日报也不能丢。
+/// Some((时, 分)) = 按此时刻触发（daily 多时刻时取首个）；None = 手册被 enabled:false 禁用，不调度。
+/// 文件丢失/无 schedule 字段回退内置 00:00——手册丢了日报也不能丢。
 fn reporter_schedule(app_handle: &AppHandle) -> Option<(u32, u32)> {
-    const DEFAULT: (u32, u32) = (DAILY_ANALYSIS_HOUR, 0);
+    const DEFAULT: (u32, u32) = (0, 0);
     let Ok(app_data) = app_handle.path().app_data_dir() else {
         return Some(DEFAULT);
     };
@@ -40,11 +42,52 @@ fn reporter_schedule(app_handle: &AppHandle) -> Option<(u32, u32)> {
     {
         Some(s) if !s.enabled => None,
         Some(s) => match s.schedule {
-            Some(super::skills::Schedule::Daily { hour, minute }) => Some((hour, minute)),
+            Some(super::skills::Schedule::Daily { times }) => times.first().copied().or(Some(DEFAULT)),
             _ => Some(DEFAULT),
         },
         None => Some(DEFAULT),
     }
+}
+
+/// 模式挖掘触发时刻表：从 analyst.md frontmatter 的 schedule 读（与日报同款调度移交）。
+/// Some(时刻表) = 按表触发；None = 手册被 enabled:false 禁用，模式挖掘停摆（0 点链路不受影响）。
+/// 文件丢失/无 schedule 字段回退内置 [9, 14, 18, 0]。
+fn analyst_schedule(app_handle: &AppHandle) -> Option<Vec<(u32, u32)>> {
+    let Ok(app_data) = app_handle.path().app_data_dir() else {
+        return Some(DEFAULT_ANALYSIS_SLOTS.to_vec());
+    };
+    match super::skills::scan_skills(&app_data)
+        .into_iter()
+        .find(|s| s.name == "analyst")
+    {
+        Some(s) if !s.enabled => None,
+        Some(s) => match s.schedule {
+            Some(super::skills::Schedule::Daily { times }) if !times.is_empty() => Some(times),
+            _ => Some(DEFAULT_ANALYSIS_SLOTS.to_vec()),
+        },
+        None => Some(DEFAULT_ANALYSIS_SLOTS.to_vec()),
+    }
+}
+
+/// 最近一个已到点的 slot key（格式 YYYY-MM-DD#HH）：今天的 slot 时刻已过取今天，否则取昨天。
+/// 与 settings 里的 companion_last_analysis_slot 比对防重；错过多个 slot 时只返回最新一个
+/// （水位线机制下错过的数据已并入本次窗口，逐个补跑只会重复送同一批数据）。
+fn latest_due_slot(now: chrono::DateTime<chrono::Local>, slots: &[(u32, u32)]) -> Option<String> {
+    let today = now.date_naive();
+    let mut best: Option<(chrono::NaiveDate, u32, u32)> = None;
+    for &(h, m) in slots {
+        let slot_today = today.and_hms_opt(h, m, 0)?;
+        let day = if slot_today > now.naive_local() {
+            today.pred_opt()?
+        } else {
+            today
+        };
+        let newer = best.map_or(true, |(bd, bh, bm)| day > bd || (day == bd && (h, m) > (bh, bm)));
+        if newer {
+            best = Some((day, h, m));
+        }
+    }
+    best.map(|(d, h, _)| format!("{}#{:02}", d.format("%Y-%m-%d"), h))
 }
 
 /// 每周自评（三期建议反馈闭环）：统计近 7 天弹窗处置 → 场景模型提炼 →
@@ -108,18 +151,13 @@ async fn run_weekly_review(app_handle: &AppHandle, db_path: &PathBuf) -> Result<
 }
 
 /// 调度线程：每分钟检查一次
-/// - 晨间工作套装模式匹配
-/// - 每日 LLM 分析（到点且今日未跑过，日期持久化到 settings 表防重启重复分析）
+/// - 晨间工作套装/情境联动模式匹配
+/// - 分析 slot（analyst.md 时刻表，水位线增量窗口）+ 0 点统一块
+///   （recall 兜底 → 日报首跑 → 日记 → 明日关注 → 周日自评，素材归属昨天）
+/// - 日报独立重试线（0 点块首跑失败后的保险）
 /// - 过期数据清理
 pub fn run_scheduler(app_handle: AppHandle, db_path: PathBuf, flags: Arc<RwLock<CompanionFlags>>) {
-    let mut last_analysis_date: Option<String> =
-        load_setting(&db_path, "companion_last_analysis_date");
     let mut last_cleanup_date: Option<String> = None;
-    // 日报上次尝试时间（节流用；成功标记每轮从 DB 现读，不做内存缓存）
-    let mut last_report_attempt: Option<i64> = None;
-
-    // 启动时检查昨日日报是否缺报（昨天 21 点时 app 未运行），缺则补跑
-    maybe_backfill_report(&app_handle, &db_path, &flags);
 
     loop {
         std::thread::sleep(Duration::from_secs(60));
@@ -134,6 +172,9 @@ pub fn run_scheduler(app_handle: AppHandle, db_path: PathBuf, flags: Arc<RwLock<
 
         let now = chrono::Local::now();
         let today = now.format("%Y-%m-%d").to_string();
+        let yesterday = (now - chrono::Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string();
 
         if !f.paused {
             if let Err(e) = match_work_suite(&app_handle, &db_path, now.timestamp()) {
@@ -148,99 +189,104 @@ pub fn run_scheduler(app_handle: AppHandle, db_path: PathBuf, flags: Arc<RwLock<
             }
         }
 
-        if now.hour() >= DAILY_ANALYSIS_HOUR && last_analysis_date.as_deref() != Some(&today) {
-            last_analysis_date = Some(today.clone());
-            save_setting(&db_path, "companion_last_analysis_date", &today);
+        // ── 分析 slot + 0 点统一块 ──
+        // slot 防重：companion_last_analysis_slot（key=YYYY-MM-DD#HH）
+        // 链路防重：companion_last_chain_date（每天过 0 点即到期，analyst 手册被禁用也不受影响）
+        let slots = analyst_schedule(&app_handle).unwrap_or_default();
+        let last_slot = load_setting(&db_path, "companion_last_analysis_slot");
+        let due_slot = latest_due_slot(now, &slots).filter(|k| last_slot.as_deref() != Some(k));
+        let chain_due =
+            load_setting(&db_path, "companion_last_chain_date").as_deref() != Some(&today);
+
+        if due_slot.is_some() || chain_due {
+            // 先标记再跑（与既有一致）；日报另有独立的成功后才标记 + 重试线，不受此影响
+            if let Some(k) = &due_slot {
+                save_setting(&db_path, "companion_last_analysis_slot", k);
+            }
+            if chain_due {
+                save_setting(&db_path, "companion_last_chain_date", &today);
+            }
             let app = app_handle.clone();
             let db = db_path.clone();
-            let date = today.clone();
+            let date = yesterday.clone(); // 链路素材归属：昨天（0 点跑时「今天」无数据）
+            let run_analysis = due_slot.is_some();
+            let daily_report = f.daily_report;
             // agent 调用是阻塞式 subprocess，放独立线程而非 async runtime
             std::thread::spawn(move || {
-                // 模式挖掘每晚固定执行（内部经 call_companion_llm 路由）
-                match run_daily_analysis_blocking(&app, &db) {
-                    Ok(msg) => log::info!("Companion 每日模式挖掘: {}", msg),
-                    Err(e) => log::warn!("Companion 每日模式挖掘失败: {}", e),
+                // 模式挖掘：水位线增量窗口（内部经 call_companion_llm 路由）
+                if run_analysis {
+                    match run_daily_analysis_blocking(&app, &db) {
+                        Ok(msg) => log::info!("Companion 模式挖掘: {}", msg),
+                        Err(e) => log::warn!("Companion 模式挖掘失败: {}", e),
+                    }
                 }
-                // 聊天记忆提取兜底（防抖通道之外的保险，水位已最新则空转）
-                match super::recall::run_recall_blocking(&app, &db) {
-                    Ok(msg) => log::info!("Companion 记忆提取兜底: {}", msg),
-                    Err(e) => log::warn!("Companion 记忆提取兜底失败: {}", e),
-                }
-                // 情感日记（私有）与明日关注预规划——独立于日报开关，失败不阻塞链路
-                match super::diary::run_diary_blocking(&app, &db, &date) {
-                    Ok(msg) => log::info!("Companion 情感日记: {}", msg),
-                    Err(e) => log::warn!("Companion 情感日记失败: {}", e),
-                }
-                match super::diary::run_focus_blocking(&app, &db) {
-                    Ok(msg) => log::info!("Companion 明日关注: {}", msg),
-                    Err(e) => log::warn!("Companion 明日关注生成失败: {}", e),
-                }
-                // 每周自评（周日；三期建议反馈闭环）：弹窗处置统计 → 写回「弹窗分寸」
-                if chrono::Local::now().weekday() == chrono::Weekday::Sun {
-                    let week_key = chrono::Local::now().format("%G-W%V").to_string();
-                    if load_setting(&db, "companion_last_weekly_review_week").as_deref()
-                        != Some(week_key.as_str())
-                    {
-                        save_setting(&db, "companion_last_weekly_review_week", &week_key);
-                        match run_weekly_review_blocking(&app, &db) {
-                            Ok(msg) => log::info!("Companion 每周自评: {}", msg),
-                            Err(e) => log::warn!("Companion 每周自评失败: {}", e),
+                if chain_due {
+                    // 聊天记忆提取兜底（防抖通道之外的保险，水位已最新则空转）
+                    match super::recall::run_recall_blocking(&app, &db) {
+                        Ok(msg) => log::info!("Companion 记忆提取兜底: {}", msg),
+                        Err(e) => log::warn!("Companion 记忆提取兜底失败: {}", e),
+                    }
+                    // 日报首跑（昨天）；失败由独立调度线按 REPORT_RETRY_SECS 节流重试
+                    // 与重试线互斥：attempt 时间戳新鲜（重试线在途或刚失败）时让位——
+                    // app 启动日两条线会同时看到「未完成」，不互斥就重复跑同一份日报
+                    let report_done =
+                        load_setting(&db, "companion_last_report_date").as_deref() == Some(&date);
+                    let last_attempt: i64 = load_setting(&db, "companion_last_report_attempt")
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(0);
+                    let attempt_fresh =
+                        chrono::Local::now().timestamp() - last_attempt < REPORT_RETRY_SECS;
+                    if daily_report && !report_done && !attempt_fresh {
+                        run_report_and_mark(&app, &db, &date);
+                    }
+                    // 情感日记（昨天，私有）与明日关注预规划（面向新一天），失败不阻塞链路
+                    match super::diary::run_diary_blocking(&app, &db, &date) {
+                        Ok(msg) => log::info!("Companion 情感日记: {}", msg),
+                        Err(e) => log::warn!("Companion 情感日记失败: {}", e),
+                    }
+                    match super::diary::run_focus_blocking(&app, &db, &date) {
+                        Ok(msg) => log::info!("Companion 明日关注: {}", msg),
+                        Err(e) => log::warn!("Companion 明日关注生成失败: {}", e),
+                    }
+                    // 每周自评（周日；三期建议反馈闭环）：弹窗处置统计 → 写回「弹窗分寸」
+                    if chrono::Local::now().weekday() == chrono::Weekday::Sun {
+                        let week_key = chrono::Local::now().format("%G-W%V").to_string();
+                        if load_setting(&db, "companion_last_weekly_review_week").as_deref()
+                            != Some(week_key.as_str())
+                        {
+                            save_setting(&db, "companion_last_weekly_review_week", &week_key);
+                            match run_weekly_review_blocking(&app, &db) {
+                                Ok(msg) => log::info!("Companion 每周自评: {}", msg),
+                                Err(e) => log::warn!("Companion 每周自评失败: {}", e),
+                            }
                         }
                     }
                 }
             });
         }
 
-        // 日报独立调度：companion_last_report_date 只在笔记落盘后才写，
-        // 失败按 REPORT_RETRY_SECS 节流重试；用户删掉笔记不会重生成（标记仍在）。
-        // 每轮从 DB 读标记（成功写入发生在子线程，内存缓存会丢更新）
+        // ── 日报独立重试线 ──
+        // 首跑归 0 点块；链路今日已跑而日报仍未落盘时，本线才接管（30 分钟节流，
+        // 尝试时间戳走 settings 持久化——0 点块在别的线程跑，内存节流状态共享不到）
         let report_done =
-            load_setting(&db_path, "companion_last_report_date").as_deref() == Some(&today);
-        let throttle_ok = last_report_attempt
-            .map(|t| now.timestamp() - t >= REPORT_RETRY_SECS)
-            .unwrap_or(true);
-        // 触发时刻从 reporter.md frontmatter 读（三期调度移交：改时间=改文件一行）；
-        // 手册被 enabled:false 禁用时不调度；文件丢失回退内置 21:00（手册丢了日报不能丢）
+            load_setting(&db_path, "companion_last_report_date").as_deref() == Some(&yesterday);
+        let chain_ran =
+            load_setting(&db_path, "companion_last_chain_date").as_deref() == Some(&today);
+        let last_attempt: i64 = load_setting(&db_path, "companion_last_report_attempt")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        let throttle_ok = now.timestamp() - last_attempt >= REPORT_RETRY_SECS;
+        // 触发时刻从 reporter.md frontmatter 读（改时间=改文件一行）；
+        // 手册被 enabled:false 禁用时不调度；文件丢失回退内置 00:00（手册丢了日报不能丢）
         let report_due = reporter_schedule(&app_handle)
             .map(|(h, m)| now.hour() > h || (now.hour() == h && now.minute() >= m))
             .unwrap_or(false);
         // 日报开关关闭时跳过日报调度（分析与记忆提取不受影响）
-        if report_due && !report_done && throttle_ok && f.daily_report {
-            last_report_attempt = Some(now.timestamp());
+        if report_due && !report_done && chain_ran && throttle_ok && f.daily_report {
             let app = app_handle.clone();
             let db = db_path.clone();
-            let date = today.clone();
-            let cc_enabled = super::claude_code_enabled(&app_handle);
-            // agent 调用是阻塞式 subprocess，放独立线程而非 async runtime
-            std::thread::spawn(move || {
-                let result = run_report_with_fallback(&app, &db, &date, cc_enabled);
-                match result {
-                    Ok(msg) => {
-                        // 成功判定：笔记真的落盘，或明确「当日无数据」（无需重试的终态）
-                        let note_written = crate::notes::get_default_notes_dir()
-                            .map(|d| {
-                                d.join(super::mcp::NOTE_DIR_PREFIX)
-                                    .join(format!("{}.md", date))
-                                    .exists()
-                            })
-                            .unwrap_or(false);
-                        if note_written || msg.contains("无数据") {
-                            save_setting(&db, "companion_last_report_date", &date);
-                            if let Ok(conn) = Connection::open(&db) {
-                                super::emotion::on_report_done(
-                                    &conn,
-                                    &date,
-                                    chrono::Local::now().timestamp(),
-                                );
-                            }
-                            log::info!("Companion 日报完成: {}", msg);
-                        } else {
-                            log::warn!("Companion 日报返回成功但笔记未落盘，稍后重试: {}", msg);
-                        }
-                    }
-                    Err(e) => log::warn!("Companion 日报失败（30 分钟后重试）: {}", e),
-                }
-            });
+            let date = yesterday.clone();
+            std::thread::spawn(move || run_report_and_mark(&app, &db, &date));
         }
 
         if now.hour() >= CLEANUP_HOUR && last_cleanup_date.as_deref() != Some(&today) {
@@ -261,89 +307,39 @@ pub fn run_scheduler(app_handle: AppHandle, db_path: PathBuf, flags: Arc<RwLock<
     }
 }
 
-// ── 缺报补跑 ─────────────────────────────────────────────
+// ── 日报执行与完成标记（0 点块首跑与独立重试线共用）─────────────────────
 
-/// 补跑昨日日报：昨天 21 点时 app 未运行（或运行但生成失败）导致缺报时，启动后补一次。
-/// 条件：陪伴开启 + 昨日有活动数据 + 昨日笔记不存在 + 今天没补过。
-/// 只补昨天一天；Claude Code 开启走 agent，未开启走场景模型版（两者都写日报笔记）。
-fn maybe_backfill_report(
-    app_handle: &AppHandle,
-    db_path: &PathBuf,
-    flags: &Arc<RwLock<CompanionFlags>>,
-) {
-    let f = flags
-        .read()
-        .map(|f| f.clone())
-        .unwrap_or_else(|_| CompanionFlags::default());
-    if !f.enabled || !f.daily_report {
-        return;
-    }
-
-    let yesterday_dt = chrono::Local::now() - chrono::Duration::days(1);
-    let yesterday = yesterday_dt.format("%Y-%m-%d").to_string();
-
-    // 昨日日报已成功过则跳过——标记在即使笔记被用户删掉也不重新生成
-    if load_setting(db_path, "companion_last_report_date").as_deref() == Some(&yesterday) {
-        return;
-    }
-
-    let notes_dir = match crate::notes::get_default_notes_dir() {
-        Ok(d) => d,
-        Err(e) => {
-            log::warn!("补跑日报：获取笔记目录失败: {}", e);
-            return;
-        }
-    };
-    let note_path = notes_dir
-        .join(super::mcp::NOTE_DIR_PREFIX)
-        .join(format!("{}.md", yesterday));
-    if note_path.exists() {
-        return;
-    }
-
-    // 昨日无活动数据则没有可补的内容（app 昨天可能根本没开）
-    let day_start = yesterday_dt
-        .date_naive()
-        .and_hms_opt(0, 0, 0)
-        .and_then(|d| d.and_local_timezone(chrono::Local).single())
-        .map(|t| t.timestamp());
-    let has_activity = day_start
-        .and_then(|start| {
-            Connection::open(db_path)
-                .ok()
-                .and_then(|conn| db::activities_between(&conn, start, start + 86400).ok())
-                .map(|a| !a.is_empty())
-        })
-        .unwrap_or(false);
-    if !has_activity {
-        return;
-    }
-
-    log::info!("昨日日报缺失，补跑 {} 的日报 agent", yesterday);
-    let app = app_handle.clone();
-    let db = db_path.clone();
-    let date = yesterday.clone();
-    let cc_enabled = super::claude_code_enabled(app_handle);
-    std::thread::spawn(move || {
-        let result = run_report_with_fallback(&app, &db, &date, cc_enabled);
-        match result {
-            Ok(msg) => {
-                log::info!("补跑日报完成: {}", msg);
-                // 只有笔记真的落盘才标记成功——agent 跑完但没写笔记时，下次启动重试
-                if note_path.exists() {
-                    save_setting(&db, "companion_last_report_date", &date);
-                    if let Ok(conn) = Connection::open(&db) {
-                        super::emotion::on_report_done(
-                            &conn,
-                            &date,
-                            chrono::Local::now().timestamp(),
-                        );
-                    }
+/// 跑日报并按结果标记完成：笔记真的落盘或明确「当日无数据」才写
+/// companion_last_report_date（用户删掉笔记不会重生成——标记仍在）。
+/// 尝试时间戳持久化到 settings，供独立重试线跨线程节流。
+fn run_report_and_mark(app: &AppHandle, db: &PathBuf, date: &str) {
+    save_setting(
+        db,
+        "companion_last_report_attempt",
+        &chrono::Local::now().timestamp().to_string(),
+    );
+    let cc_enabled = super::claude_code_enabled(app);
+    match run_report_with_fallback(app, db, date, cc_enabled) {
+        Ok(msg) => {
+            let note_written = crate::notes::get_default_notes_dir()
+                .map(|d| {
+                    d.join(super::mcp::NOTE_DIR_PREFIX)
+                        .join(format!("{}.md", date))
+                        .exists()
+                })
+                .unwrap_or(false);
+            if note_written || msg.contains("无数据") {
+                save_setting(db, "companion_last_report_date", date);
+                if let Ok(conn) = Connection::open(db) {
+                    super::emotion::on_report_done(&conn, date, chrono::Local::now().timestamp());
                 }
+                log::info!("Companion 日报完成: {}", msg);
+            } else {
+                log::warn!("Companion 日报返回成功但笔记未落盘，稍后重试: {}", msg);
             }
-            Err(e) => log::warn!("补跑日报失败（下次启动重试）: {}", e),
         }
-    });
+        Err(e) => log::warn!("Companion 日报失败（30 分钟后重试）: {}", e),
+    }
 }
 
 // ── 晨间工作套装 ─────────────────────────────────────────────
@@ -703,7 +699,10 @@ pub fn run_daily_analysis_blocking(
     tauri::async_runtime::block_on(run_daily_analysis(app_handle, db_path))
 }
 
-/// 分析昨日活动流水，挖掘习惯模式写入 habit_patterns。返回人话摘要。
+/// 分析「上次水位到现在」的活动流水（增量窗口），挖掘习惯模式写入 habit_patterns。
+/// 水位线 companion_last_analysis_ts 缺失时初始化为昨天 0 点（与旧「昨日全天」机制衔接，
+/// 昨晚没跑过旧机制的话昨天的数据也不漏）。数据不足（<10 条）跳过且不推进水位——
+/// 攒到下一 slot 一起分析；水位仅在成功落库后推进。
 pub async fn run_daily_analysis(
     app_handle: &AppHandle,
     db_path: &PathBuf,
@@ -711,26 +710,39 @@ pub async fn run_daily_analysis(
     let conn = Connection::open(db_path).map_err(|e| format!("打开数据库失败: {}", e))?;
 
     let now = chrono::Local::now();
+    let now_ts = now.timestamp();
     let today_start = now
         .date_naive()
         .and_hms_opt(0, 0, 0)
         .and_then(|d| d.and_local_timezone(chrono::Local).single())
         .ok_or("无法计算当日起点")?
         .timestamp();
-    let yesterday_start = today_start - 86400;
+    let start = load_setting(db_path, "companion_last_analysis_ts")
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(today_start - 86400)
+        // 水位线异常（未来时间/过旧）兜底：最多回看 7 天，防一次巨型窗口
+        .clamp(now_ts - ANALYSIS_MAX_LOOKBACK_SECS, now_ts);
 
-    let activities = db::activities_between(&conn, yesterday_start, today_start)
+    let activities = db::activities_between(&conn, start, now_ts)
         .map_err(|e| format!("读取活动失败: {}", e))?;
 
     if activities.len() < 10 {
         return Ok(format!(
-            "昨日活动仅 {} 条，数据不足，跳过分析",
+            "水位以来活动仅 {} 条，数据不足，跳过分析（水位不推进）",
             activities.len()
         ));
     }
 
     // 本地预聚合：原始流水可能有上千条，先压缩成会话级摘要再送 LLM
-    let aggregate_text = aggregate_activities(&activities, false, AGGREGATE_TEXT_CAP);
+    // 跨天窗口按天分节（只有 HH:MM 时分不清是哪天），文本上限随天数放大
+    let multi_day = fmt_local(start, "%Y-%m-%d") != fmt_local(now_ts - 1, "%Y-%m-%d");
+    let day_count = ((now_ts - start + 86399) / 86400).clamp(1, 7) as usize;
+    let aggregate_text = aggregate_activities(&activities, multi_day, AGGREGATE_TEXT_CAP * day_count);
+    let window_label = format!(
+        "{} ~ {}",
+        fmt_local(start, "%Y-%m-%d %H:%M"),
+        fmt_local(now_ts, "%Y-%m-%d %H:%M")
+    );
     let app_data = app_handle.path().app_data_dir().ok();
     let persona = app_data
         .as_ref()
@@ -745,7 +757,14 @@ pub async fn run_daily_analysis(
         .map(|dir| super::skills::load_skill_body(dir, "analyst"))
         .unwrap_or_default();
     let ve_section = voice_expectation_section(&conn);
-    let prompt = build_analysis_prompt(&persona, &evolution, &role, &aggregate_text, &ve_section);
+    let prompt = build_analysis_prompt(
+        &persona,
+        &evolution,
+        &role,
+        &window_label,
+        &aggregate_text,
+        &ve_section,
+    );
 
     let reply = call_companion_llm(app_handle, db_path, prompt, "analysis").await?;
     let parsed = parse_llm_patterns(&reply)?;
@@ -810,8 +829,12 @@ pub async fn run_daily_analysis(
         facts_saved += 1;
     }
 
+    // 成功落库后推进水位（失败/数据不足都不推进，下次窗口自动顺延合并）
+    save_setting(db_path, "companion_last_analysis_ts", &now_ts.to_string());
+
     Ok(format!(
-        "昨日 {} 条活动 → 聚合 {} 字符 → {} 个模式 + {} 条事实",
+        "窗口 {}：{} 条活动 → 聚合 {} 字符 → {} 个模式 + {} 条事实",
+        window_label,
         activities.len(),
         aggregate_text.len(),
         saved,
@@ -1017,16 +1040,18 @@ fn build_analysis_prompt(
     persona: &str,
     evolution: &str,
     role: &str,
+    window_label: &str,
     aggregate_text: &str,
     ve_section: &str,
 ) -> String {
     format!(
         "{persona}\n\n---\n\n{evolution}\n\n---\n\n{role}\n\n---\n\n\
          以上是贾维斯的身份设定、经验本与分析工作手册。\n\
-         以下是他昨天电脑使用情况的聚合摘要（进程名 + 窗口标题 + 时段）：\n\n{aggregate_text}{ve_section}",
+         以下是他在 {window_label} 时段电脑使用情况的聚合摘要（进程名 + 窗口标题 + 时段）：\n\n{aggregate_text}{ve_section}",
         persona = persona,
         evolution = evolution,
         role = role,
+        window_label = window_label,
         aggregate_text = aggregate_text,
         ve_section = ve_section
     )
@@ -1309,6 +1334,7 @@ pub(crate) async fn call_llm_with_scene(
     scene: Scene,
     source: &str,
 ) -> Result<String, String> {
+    crate::llm::log_prompt(source, &prompt);
     if super::claude_code_enabled(app_handle) {
         let started = std::time::Instant::now();
         let cc_result = run_claude_code_oneshot(app_handle, &prompt).await;
@@ -1518,6 +1544,66 @@ pub(crate) async fn call_scene_model_llm(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn local_dt(s: &str) -> chrono::DateTime<chrono::Local> {
+        let ts = parse_flexible_datetime(s, false).unwrap();
+        chrono::DateTime::from_timestamp(ts, 0)
+            .unwrap()
+            .with_timezone(&chrono::Local)
+    }
+
+    #[test]
+    fn latest_slot_picks_today_when_passed() {
+        let now = local_dt("2026-07-31 15:00");
+        let slots = [(9, 0), (14, 0), (18, 0), (0, 0)];
+        assert_eq!(
+            latest_due_slot(now, &slots),
+            Some("2026-07-31#14".to_string())
+        );
+    }
+
+    #[test]
+    fn latest_slot_after_midnight_is_zero() {
+        let now = local_dt("2026-08-01 00:30");
+        let slots = [(9, 0), (14, 0), (18, 0), (0, 0)];
+        assert_eq!(
+            latest_due_slot(now, &slots),
+            Some("2026-08-01#00".to_string())
+        );
+    }
+
+    #[test]
+    fn latest_slot_morning_falls_back_to_yesterday_evening() {
+        let now = local_dt("2026-08-01 08:00");
+        // 含 0 点 slot 时：今天 #00 已到点
+        let slots = [(9, 0), (14, 0), (18, 0), (0, 0)];
+        assert_eq!(
+            latest_due_slot(now, &slots),
+            Some("2026-08-01#00".to_string())
+        );
+        // 不含 0 点 slot 时：回退昨天最晚的 #18
+        let slots_no_zero = [(9, 0), (14, 0), (18, 0)];
+        assert_eq!(
+            latest_due_slot(now, &slots_no_zero),
+            Some("2026-07-31#18".to_string())
+        );
+    }
+
+    #[test]
+    fn latest_slot_at_exact_slot_time() {
+        let now = local_dt("2026-07-31 09:00");
+        let slots = [(9, 0), (14, 0)];
+        assert_eq!(
+            latest_due_slot(now, &slots),
+            Some("2026-07-31#09".to_string())
+        );
+    }
+
+    #[test]
+    fn latest_slot_empty_table() {
+        let now = local_dt("2026-07-31 15:00");
+        assert_eq!(latest_due_slot(now, &[]), None);
+    }
 
     fn log(id: i64, process: &str, start: i64, secs: i64) -> ActivityLog {
         ActivityLog {

@@ -1124,6 +1124,7 @@ pub fn upsert_pattern(
     confidence: f64,
     now: i64,
 ) -> rusqlite::Result<()> {
+    // 同一天内重复 sighting 只刷新不计数（分段分析下守住「occurrences = 天数、2 天确认」语义）
     conn.execute(
         "INSERT INTO habit_patterns
             (pattern_type, signature, description, pattern_data, confidence, occurrences, status, first_seen, last_seen)
@@ -1132,11 +1133,19 @@ pub fn upsert_pattern(
             description = excluded.description,
             pattern_data = excluded.pattern_data,
             confidence = excluded.confidence,
-            occurrences = habit_patterns.occurrences + 1,
+            occurrences = habit_patterns.occurrences + CASE
+                WHEN date(habit_patterns.last_seen, 'unixepoch', 'localtime') =
+                     date(excluded.last_seen, 'unixepoch', 'localtime') THEN 0
+                ELSE 1
+            END,
             last_seen = excluded.last_seen,
             status = CASE
                 WHEN habit_patterns.status = 'dismissed' THEN 'dismissed'
-                WHEN habit_patterns.occurrences + 1 >= 2 THEN 'confirmed'
+                WHEN habit_patterns.occurrences + CASE
+                    WHEN date(habit_patterns.last_seen, 'unixepoch', 'localtime') =
+                         date(excluded.last_seen, 'unixepoch', 'localtime') THEN 0
+                    ELSE 1
+                END >= 2 THEN 'confirmed'
                 ELSE habit_patterns.status
             END",
         params![pattern_type, signature, description, pattern_data, confidence, now],
@@ -1246,4 +1255,66 @@ pub fn latest_clipboard_text(conn: &Connection) -> rusqlite::Result<Option<(i64,
 pub fn clear_all_activities(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute("DELETE FROM activity_log", [])?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn setup() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE habit_patterns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                pattern_type TEXT NOT NULL,
+                signature TEXT NOT NULL UNIQUE,
+                description TEXT NOT NULL,
+                pattern_data TEXT NOT NULL,
+                confidence REAL DEFAULT 0,
+                occurrences INTEGER DEFAULT 1,
+                status TEXT NOT NULL DEFAULT 'learning'
+                    CHECK (status IN ('learning', 'confirmed', 'dismissed')),
+                first_seen INTEGER NOT NULL,
+                last_seen INTEGER NOT NULL
+            )",
+        )
+        .unwrap();
+        conn
+    }
+
+    fn day_ts(days_after_epoch: i64, hour: i64) -> i64 {
+        (days_after_epoch * 24 + hour) * 3600
+    }
+
+    fn occurrences_and_status(conn: &Connection) -> (i64, String) {
+        conn.query_row(
+            "SELECT occurrences, status FROM habit_patterns WHERE signature = 's'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn same_day_repeat_sighting_does_not_count() {
+        let conn = setup();
+        // 取 UTC 正午起相邻两小时（本地 20:00/21:00），确保任意时区下都在同一本地日
+        let d1_09 = day_ts(20000, 12);
+        let d1_14 = day_ts(20000, 13);
+        upsert_pattern(&conn, "app_combo", "s", "描述", "{}", 0.7, d1_09).unwrap();
+        // 同一天第二个时段再命中：occurrences 不加，状态不推进
+        upsert_pattern(&conn, "app_combo", "s", "描述", "{}", 0.8, d1_14).unwrap();
+        assert_eq!(occurrences_and_status(&conn), (1, "learning".to_string()));
+    }
+
+    #[test]
+    fn cross_day_sighting_counts_and_confirms() {
+        let conn = setup();
+        // 取 UTC 正午（本地 20:00），确保任意时区下都落在相邻两个本地日
+        let d1 = day_ts(20000, 12);
+        let d2 = day_ts(20001, 12);
+        upsert_pattern(&conn, "app_combo", "s", "描述", "{}", 0.7, d1).unwrap();
+        upsert_pattern(&conn, "app_combo", "s", "描述", "{}", 0.7, d2).unwrap();
+        assert_eq!(occurrences_and_status(&conn), (2, "confirmed".to_string()));
+    }
 }

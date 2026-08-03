@@ -93,6 +93,7 @@ pub fn run_daily_report_agent(
         })
         .unwrap_or_default();
     let prompt = build_report_prompt(&persona, &evolution, &role, date, &ve_section, &state_text, &emotion_section);
+    crate::llm::log_prompt("report_agent", &prompt);
 
     log::info!("Companion 日报 agent 启动: {}", bin_path);
     let started = std::time::Instant::now();

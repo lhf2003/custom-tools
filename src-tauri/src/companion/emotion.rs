@@ -211,15 +211,16 @@ pub fn on_suggestion_dismissed(conn: &Connection, now: i64) {
 /// 日报完成 → 连续第 N 天起记倦怠（streak 存 settings，跨天断档重置）
 pub fn on_report_done(conn: &Connection, date: &str, now: i64) {
     if setting(conn, STREAK_DATE_KEY).as_deref() == Some(date) {
-        return; // 今天已计（补跑/手动重复触发不重复计）
+        return; // 该日已计（补跑/手动重复触发不重复计）
     }
-    let yesterday = (chrono::DateTime::from_timestamp(now, 0)
-        .map(|utc| utc.with_timezone(&chrono::Local))
-        .unwrap_or_else(chrono::Local::now)
-        - chrono::Duration::days(1))
-    .format("%Y-%m-%d")
-    .to_string();
-    let streak = if setting(conn, STREAK_DATE_KEY).as_deref() == Some(yesterday.as_str()) {
+    // 连续判定基于报告所属日期的前一天，而非 now-1——0 点跑昨天日报时 now 已是次日
+    let prev_day = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+        .map(|d| d - chrono::Duration::days(1))
+        .map(|d| d.format("%Y-%m-%d").to_string())
+        .unwrap_or_default();
+    let streak = if !prev_day.is_empty()
+        && setting(conn, STREAK_DATE_KEY).as_deref() == Some(prev_day.as_str())
+    {
         setting(conn, STREAK_KEY)
             .and_then(|v| v.parse::<i64>().ok())
             .unwrap_or(0)

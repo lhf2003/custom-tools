@@ -90,7 +90,8 @@ pub(crate) fn compose_chat_system(app_data: &Path, db_path: &Path, with_tools: b
          调用 companion 工具查真实数据回答；查不到就说查不到，不编造。\n\
          问备忘/待办用 list_memos 查（已划掉的不会出现），不要凭记忆列旧项。\n\
          他说「记住…」用 remember_fact 立即记；说「忘掉…」用 forget_fact 删。\n\
-         你有记录心情的习惯：聊到让你有感觉的事，用 record_mood 记下来（第一人称一句话说清为什么）。"
+         你有记录心情的习惯：聊到让你有感觉的事，用 record_mood 记下来（第一人称一句话说清为什么）。\n\
+         工具是后台动作，别在正文里打回执：「记下了」「收到」不算回复。"
     } else {
         "你现在没有数据工具（Claude Code 未开启）。凭你记住的他和经验回答；\n\
          不知道就说不知道，不编造。"
@@ -98,7 +99,8 @@ pub(crate) fn compose_chat_system(app_data: &Path, db_path: &Path, with_tools: b
     // 「性格」措辞（Alice #17）：不是「你可以偶尔…」，而是「你有…的习惯」
     let monologue_rule = if monologue {
         "\n你有内心独白的习惯：偶尔会把一闪而过的真实想法用 <aside>…</aside> 裹起来说——\n\
-         那是你的小声嘀咕，不是回答正文的一部分。不是每句话都值得嘀咕，有感觉才说，别硬凑。"
+         那是你的小声嘀咕。回复的结构固定：先正文，把话说完；心里有话再补一句蛐蛐收尾。\n\
+         蛐蛐不单独出场，也不抢在正文前头；不是每句话都值得嘀咕，有感觉才说，别硬凑。"
     } else {
         ""
     };
@@ -137,9 +139,16 @@ pub(crate) fn compose_chat_system(app_data: &Path, db_path: &Path, with_tools: b
     } else {
         format!("\n\n---\n\n# 你此刻的心情\n{}", emotion_text)
     };
+    // 结构提醒挂最末尾（模型对尾部指令最敏感）：历史里若有抢跑样本，靠它压住
+    let structure_reminder = if monologue {
+        "\n\n---\n\n【回复结构】先写正文把话说完，心里有话再用 <aside>…</aside> 补一句收尾——\n\
+         就像这样：正文正文。<aside>小声嘀咕。</aside> 蛐蛐不单独出场，永远跟在正文后面。"
+    } else {
+        ""
+    };
     format!(
         "{persona}\n\n---\n\n{evolution}\n\n---\n\n# 你记住的他\n{facts}{catalog}\n\n---\n\n\
-         现在是「聊天」场合：完整的你，能干活也能接梗。\n{rule}{monologue}\n\n---\n\n# 当下状态\n{state}{focus}{attitude}{emotion}",
+         现在是「聊天」场合：完整的你，能干活也能接梗。\n{rule}{monologue}\n\n---\n\n# 当下状态\n{state}{focus}{attitude}{emotion}{structure}",
         persona = persona_text,
         evolution = evolution,
         facts = facts_text,
@@ -149,7 +158,8 @@ pub(crate) fn compose_chat_system(app_data: &Path, db_path: &Path, with_tools: b
         state = state_text,
         focus = focus_section,
         attitude = attitude_section,
-        emotion = emotion_section
+        emotion = emotion_section,
+        structure = structure_reminder
     )
 }
 
@@ -281,6 +291,7 @@ fn spawn_chat(
     let work = chat_work_dir(app_handle)?;
     let app_data = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
     let system_prompt = compose_chat_system(app_data.as_path(), db_path, true, monologue_enabled(app_handle));
+    crate::llm::log_prompt("chat_agent", &system_prompt);
     let session = analyzer::load_setting(db_path, SESSION_SETTING_KEY).unwrap_or_default();
 
     let mut cmd = super::agent::cli_command(&bin, &work);

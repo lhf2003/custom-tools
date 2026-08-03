@@ -5,6 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
+use chrono::Datelike;
 use rusqlite::Connection;
 use tauri::{AppHandle, Manager};
 
@@ -29,11 +30,13 @@ pub async fn run_diary(app_handle: &AppHandle, db_path: &PathBuf, date: &str) ->
     let app_data = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
 
     let aggregate = analyzer::aggregate_day(&conn, date).unwrap_or_default();
-    let recent_chats = recent_user_messages(&conn, 10);
-    let fact_events = today_fact_events(&conn);
+    let recent_chats = user_messages_on(&conn, date, 10);
+    // 素材锚定日记所属日期（0 点跑昨天日记时 now 已是次日，不能用「今天」）
+    let day_ref = day_ref_ts(date).unwrap_or_else(|| chrono::Local::now().timestamp());
+    let fact_events = fact_events_on(&conn, day_ref);
     let last_attitude = persona::load_attitude(&app_data);
     // 当日情绪轨迹（情绪状态机）：日记是它的归档归宿，趋势蒸馏进 attitude
-    let mood_track = super::emotion::render_today(&conn, chrono::Local::now().timestamp());
+    let mood_track = super::emotion::render_today(&conn, day_ref);
 
     let chats_text = if recent_chats.is_empty() {
         "（今天没有聊天）".to_string()
@@ -56,15 +59,16 @@ pub async fn run_diary(app_handle: &AppHandle, db_path: &PathBuf, date: &str) ->
     };
 
     let prompt = format!(
-        "{persona}\n\n---\n\n{manual}\n\n---\n\n# 今天的素材\n\n\
-         ## 他的电脑使用（{date}）\n{aggregate}\n\n\
-         ## 最近他对你说的话\n{chats}\n\n\
+        "{persona}\n\n---\n\n{manual}\n\n---\n\n# 今天的素材（{date}，{weekday}）\n\n\
+         ## 他的电脑使用\n{aggregate}\n\n\
+         ## 今天他对你说的话\n{chats}\n\n\
          ## 今天你记住/修改的关于他的事\n{events}\n\n\
          ## 今天你的心情轨迹\n{moods}\n\n\
          ## 你上次写下的态度指引\n{attitude}",
         persona = persona::load(&app_data),
         manual = super::skills::load_skill_body(&app_data, "diary"),
         date = date,
+        weekday = weekday_cn(date),
         aggregate = aggregate,
         chats = chats_text,
         events = events_text,
@@ -98,13 +102,14 @@ pub async fn run_diary(app_handle: &AppHandle, db_path: &PathBuf, date: &str) ->
     Ok(format!("日记已写入（{} 字）", diary_text.chars().count()))
 }
 
-pub fn run_focus_blocking(app_handle: &AppHandle, db_path: &PathBuf) -> Result<String, String> {
-    tauri::async_runtime::block_on(run_focus(app_handle, db_path))
+pub fn run_focus_blocking(app_handle: &AppHandle, db_path: &PathBuf, source_date: &str) -> Result<String, String> {
+    tauri::async_runtime::block_on(run_focus(app_handle, db_path, source_date))
 }
 
-/// 生成「明日关注」：基于记忆 + 活跃意图 + 习惯模式 + 今日使用，
-/// 为明天列 3-5 条关注清单，存 settings（晨间卡与聊天注入读取）。
-async fn run_focus(app_handle: &AppHandle, db_path: &PathBuf) -> Result<String, String> {
+/// 生成「明日关注」：基于记忆 + 活跃意图 + 习惯模式 + source_date 当天使用，
+/// 为 source_date 的次日列 3-5 条关注清单，存 settings（晨间卡与聊天注入读取）。
+/// 0 点链路传昨天 → 清单面向刚开始的新一天。
+async fn run_focus(app_handle: &AppHandle, db_path: &PathBuf, source_date: &str) -> Result<String, String> {
     let conn = Connection::open(db_path).map_err(|e| format!("打开数据库失败: {}", e))?;
 
     let facts = db::list_memory_facts(&conn, 50).unwrap_or_default();
@@ -148,8 +153,7 @@ async fn run_focus(app_handle: &AppHandle, db_path: &PathBuf) -> Result<String, 
         })
         .unwrap_or_else(|_| "（模式查询失败）".to_string());
 
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-    let aggregate = analyzer::aggregate_day(&conn, &today).unwrap_or_default();
+    let aggregate = analyzer::aggregate_day(&conn, source_date).unwrap_or_default();
 
     let prompt = format!(
         "你是他的 AI 搭档贾维斯。基于以下信息，为他的明天列出 3-5 条值得关注的事。\n\
@@ -157,10 +161,11 @@ async fn run_focus(app_handle: &AppHandle, db_path: &PathBuf) -> Result<String, 
          ## 你记住的他\n{facts}\n\n\
          ## 他的备忘意图\n{intents}\n\n\
          ## 已学到的习惯模式\n{patterns}\n\n\
-         ## 他今天的电脑使用\n{aggregate}",
+         ## 他 {source_date} 的电脑使用\n{aggregate}",
         facts = facts_text,
         intents = intents_text,
         patterns = patterns_text,
+        source_date = source_date,
         aggregate = aggregate,
     );
 
@@ -170,11 +175,13 @@ async fn run_focus(app_handle: &AppHandle, db_path: &PathBuf) -> Result<String, 
         return Err("关注清单生成内容为空".to_string());
     }
 
-    let tomorrow = (chrono::Local::now() + chrono::Duration::days(1))
-        .format("%Y-%m-%d")
-        .to_string();
+    // 清单面向 source_date 的次日（0 点链路传昨天 → 面向今天）
+    let target = chrono::NaiveDate::parse_from_str(source_date, "%Y-%m-%d")
+        .map(|d| d + chrono::Duration::days(1))
+        .map(|d| d.format("%Y-%m-%d").to_string())
+        .map_err(|e| format!("source_date 格式错误: {}", e))?;
     analyzer::save_setting(db_path, FOCUS_KEY, focus);
-    analyzer::save_setting(db_path, FOCUS_DATE_KEY, &tomorrow);
+    analyzer::save_setting(db_path, FOCUS_DATE_KEY, &target);
 
     Ok(format!("明日关注已生成（{} 条）", focus.lines().count()))
 }
@@ -201,17 +208,47 @@ pub fn today_focus(conn: &Connection) -> Option<String> {
     .filter(|v| !v.trim().is_empty())
 }
 
-/// 最近 N 条用户在聊天模式下的消息（时间倒序取回后翻转为正序）
-fn recent_user_messages(conn: &Connection, limit: usize) -> Vec<String> {
+/// 「2026-08-01」→「星期六」：日记素材的星期锚点。
+/// 模型靠裸日期推不出星期几，会从聊天内容里瞎猜（08-01 周六的日记
+/// 被前一天的「明天周末了」带偏成「周五」的教训）。
+fn weekday_cn(date: &str) -> &'static str {
+    chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+        .map(|d| match d.weekday() {
+            chrono::Weekday::Mon => "星期一",
+            chrono::Weekday::Tue => "星期二",
+            chrono::Weekday::Wed => "星期三",
+            chrono::Weekday::Thu => "星期四",
+            chrono::Weekday::Fri => "星期五",
+            chrono::Weekday::Sat => "星期六",
+            chrono::Weekday::Sun => "星期日",
+        })
+        .unwrap_or("")
+}
+
+/// 日记所属日期当天的用户聊天消息（时间倒序取回后翻转为正序）。
+/// 必须锚定日记日期取数——「最近 N 条」不带日期边界时，前几天的聊天会
+/// 原样混进今天的素材，模型分不清话是哪天说的（跨天污染的根因）。
+fn user_messages_on(conn: &Connection, date: &str, limit: usize) -> Vec<String> {
+    // created_at 是 'YYYY-MM-DD HH:MM:SS' 本地时间文本，字典序即时间序
+    let next_day = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+        .ok()
+        .map(|d| d + chrono::Duration::days(1))
+        .map(|d| d.format("%Y-%m-%d").to_string());
+    let Some(next_day) = next_day else {
+        return Vec::new();
+    };
     let result = conn.prepare(
         "SELECT m.content FROM chat_messages m
          JOIN chat_sessions s ON s.id = m.session_id
          WHERE m.role = 'user' AND s.mode = 'chat'
-         ORDER BY m.id DESC LIMIT ?1",
+           AND m.created_at >= ?1 AND m.created_at < ?2
+         ORDER BY m.id DESC LIMIT ?3",
     );
     let mut messages: Vec<String> = result
         .and_then(|mut stmt| {
-            let rows = stmt.query_map([limit as i64], |row| row.get::<_, String>(0))?;
+            let rows = stmt.query_map(rusqlite::params![date, next_day, limit as i64], |row| {
+                row.get::<_, String>(0)
+            })?;
             Ok(rows.filter_map(|r| r.ok()).collect())
         })
         .unwrap_or_default();
@@ -224,11 +261,26 @@ fn recent_user_messages(conn: &Connection, limit: usize) -> Vec<String> {
 }
 
 /// 今日记忆变更摘要（行动 + 内容，供日记感知「我今天新认识了他什么」）
-fn today_fact_events(conn: &Connection) -> Vec<String> {
-    let day_start = chrono::Local::now()
-        .date_naive()
-        .and_hms_opt(0, 0, 0)
-        .and_then(|t| t.and_local_timezone(chrono::Local).single())
+/// 日期标签 → 当天正午时间戳（取正午避开 0 点/夏令时边缘，用于「那一天」的日界计算）
+fn day_ref_ts(date: &str) -> Option<i64> {
+    chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d")
+        .ok()?
+        .and_hms_opt(12, 0, 0)?
+        .and_local_timezone(chrono::Local)
+        .single()
+        .map(|t| t.timestamp())
+}
+
+fn fact_events_on(conn: &Connection, ref_ts: i64) -> Vec<String> {
+    let day_start = chrono::DateTime::from_timestamp(ref_ts, 0)
+        .map(|utc| utc.with_timezone(&chrono::Local))
+        .and_then(|local| {
+            local
+                .date_naive()
+                .and_hms_opt(0, 0, 0)?
+                .and_local_timezone(chrono::Local)
+                .single()
+        })
         .map(|t| t.timestamp())
         .unwrap_or(0);
     conn.prepare(

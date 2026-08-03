@@ -31,7 +31,7 @@ pub struct CompanionFlags {
     pub paused: bool,
     pub retention_days: i64,
     pub long_work_minutes: i64,
-    /// 每日日报开关：关闭后 21 点只做分析与记忆提取，不生成日报
+    /// 每日日报开关：关闭后 0 点块只做分析与记忆提取，不生成日报
     pub daily_report: bool,
     /// 内心独白开关：关闭后聊天 prompt 不再带 <aside> 独白段
     pub monologue: bool,

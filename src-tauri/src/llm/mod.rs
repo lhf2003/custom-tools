@@ -13,6 +13,13 @@ fn http_client() -> reqwest::Client {
         .unwrap_or_else(|_| reqwest::Client::new())
 }
 
+/// 系统提示词 debug 日志：排查人格/手册行为问题的第一手证据。
+/// debug 级——dev 构建落 LogDir 文件（%LOCALAPPDATA%\com.flowhub.app\logs），
+/// release 构建是 Info 级不输出（提示词含记忆事实，不进生产日志）。
+pub fn log_prompt(source: &str, prompt: &str) {
+    log::debug!("[prompt][{}]\n{}", source, prompt);
+}
+
 /// 非流式调用的计量回执：content 之外带回 token 用量（观测登记用）
 #[derive(Debug, Clone)]
 pub struct LlmReply {
