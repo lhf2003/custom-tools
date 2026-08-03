@@ -268,7 +268,7 @@ impl Database {
             [],
         );
 
-        // Migration: 模型单价（每百万 token 美元，可选；填了成本面板才算金额）
+        // Migration: 模型单价（每百万 token 人民币，可选；填了成本面板才算金额）
         let _ = self
             .conn
             .execute("ALTER TABLE llm_models ADD COLUMN input_price_per_m REAL", []);
@@ -300,7 +300,7 @@ impl Database {
                 input_tokens INTEGER DEFAULT 0,
                 cached_input_tokens INTEGER DEFAULT 0,
                 output_tokens INTEGER DEFAULT 0,
-                cost_usd REAL DEFAULT 0,
+                cost_cny REAL DEFAULT 0,
                 duration_ms INTEGER DEFAULT 0,
                 tool_call_count INTEGER DEFAULT 0,
                 status TEXT NOT NULL DEFAULT 'ok' CHECK (status IN ('ok', 'error')),
@@ -323,6 +323,25 @@ impl Database {
             "ALTER TABLE llm_call_logs ADD COLUMN tool_call_count INTEGER DEFAULT 0",
             [],
         );
+
+        // Migration: 成本单位美元 → 人民币（cost_usd → cost_cny）。
+        // 改名成功即首次迁移（之后启动列已不存在会报错跳过）：历史美元成本清零、
+        // 已填美元单价清空——用户重新按人民币填单价，成本重新累计。
+        let cost_col_renamed = self
+            .conn
+            .execute(
+                "ALTER TABLE llm_call_logs RENAME COLUMN cost_usd TO cost_cny",
+                [],
+            )
+            .is_ok();
+        if cost_col_renamed {
+            self.conn
+                .execute("UPDATE llm_call_logs SET cost_cny = 0", [])?;
+            self.conn.execute(
+                "UPDATE llm_models SET input_price_per_m = NULL, output_price_per_m = NULL",
+                [],
+            )?;
+        }
 
         // Migration: 老库的 CHECK 约束不含 'companion'，SQLite 无法改 CHECK，需重建表
         self.migrate_scene_configs_check()?;

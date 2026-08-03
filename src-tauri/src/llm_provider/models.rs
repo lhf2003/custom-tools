@@ -98,7 +98,7 @@ pub struct Model {
     pub name: String,
     pub description: Option<String>,
     pub is_active: bool,
-    /// 可选单价（美元/百万 token）：填了成本面板才估算金额，缺省只统计 token
+    /// 可选单价（人民币/百万 token）：填了成本面板才估算金额，缺省只统计 token
     pub input_price_per_m: Option<f64>,
     pub output_price_per_m: Option<f64>,
     pub created_at: String,

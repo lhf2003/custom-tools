@@ -21,8 +21,8 @@ pub struct LlmCallEntry<'a> {
     /// 命中缓存的输入 token（含在 input_tokens 内；通道未上报时记 0）
     pub cached_input_tokens: u64,
     pub output_tokens: u64,
-    /// 美元成本：CC 通道为 CLI 实报；场景模型为 token×单价（未配单价记 0）
-    pub cost_usd: f64,
+    /// 人民币成本：CC 通道（订阅制）记 0；场景模型为 token×单价（未配单价记 0）
+    pub cost_cny: f64,
     pub duration_ms: u64,
     /// 本次响应请求的工具调用次数（CC 通道不可观测，记 0）
     pub tool_call_count: u64,
@@ -37,7 +37,7 @@ pub fn log_call(db_path: &Path, entry: &LlmCallEntry) {
     let result = Connection::open(db_path).and_then(|conn| {
         conn.execute(
             "INSERT INTO llm_call_logs
-             (source, channel, scene, model, input_tokens, cached_input_tokens, output_tokens, cost_usd,
+             (source, channel, scene, model, input_tokens, cached_input_tokens, output_tokens, cost_cny,
               duration_ms, tool_call_count, status, error, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             rusqlite::params![
@@ -48,7 +48,7 @@ pub fn log_call(db_path: &Path, entry: &LlmCallEntry) {
                 entry.input_tokens as i64,
                 entry.cached_input_tokens as i64,
                 entry.output_tokens as i64,
-                entry.cost_usd,
+                entry.cost_cny,
                 entry.duration_ms as i64,
                 entry.tool_call_count as i64,
                 entry.status,
@@ -70,7 +70,7 @@ pub struct SourceStat {
     pub errors: u64,
     pub input_tokens: u64,
     pub output_tokens: u64,
-    pub cost_usd: f64,
+    pub cost_cny: f64,
     pub total_duration_ms: u64,
 }
 
@@ -84,7 +84,7 @@ pub fn summarize(db_path: &Path, since: i64, until: i64) -> Result<Vec<SourceSta
                     SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END),
                     COALESCE(SUM(input_tokens), 0),
                     COALESCE(SUM(output_tokens), 0),
-                    COALESCE(SUM(cost_usd), 0),
+                    COALESCE(SUM(cost_cny), 0),
                     COALESCE(SUM(duration_ms), 0)
              FROM llm_call_logs
              WHERE created_at >= ?1 AND created_at < ?2
@@ -101,7 +101,7 @@ pub fn summarize(db_path: &Path, since: i64, until: i64) -> Result<Vec<SourceSta
                 errors: row.get::<_, i64>(2)? as u64,
                 input_tokens: row.get::<_, i64>(3)? as u64,
                 output_tokens: row.get::<_, i64>(4)? as u64,
-                cost_usd: row.get(5)?,
+                cost_cny: row.get(5)?,
                 total_duration_ms: row.get::<_, i64>(6)? as u64,
             })
         })

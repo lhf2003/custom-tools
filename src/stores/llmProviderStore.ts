@@ -26,7 +26,7 @@ export interface Model {
   name: string;
   description: string | null;
   is_active: boolean;
-  /** 可选单价（美元/百万 token），null = 未配置（成本面板只统计 token） */
+  /** 可选单价（人民币/百万 token），null = 未配置（成本面板只统计 token） */
   input_price_per_m: number | null;
   output_price_per_m: number | null;
   created_at: string;

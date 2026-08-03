@@ -39,10 +39,10 @@ export function fmtDuration(ms: number): string {
   return `${(ms / 60_000).toFixed(1)}min`;
 }
 
-export function fmtCost(usd: number): string {
-  if (usd === 0) return '—';
-  if (usd < 0.0001) return '<$0.0001';
-  return `$${usd.toFixed(4)}`;
+export function fmtCost(cny: number): string {
+  if (cny === 0) return '—';
+  if (cny < 0.0001) return '<¥0.0001';
+  return `¥${cny.toFixed(4)}`;
 }
 
 /** 计数（千分位）：12,345 */

@@ -26,7 +26,7 @@ export interface SourceStatRow {
   input_tokens: number;
   cached_input_tokens: number;
   output_tokens: number;
-  cost_usd: number;
+  cost_cny: number;
   total_duration_ms: number;
   tool_calls: number;
 }
@@ -45,7 +45,7 @@ export interface CallLogRow {
   input_tokens: number;
   cached_input_tokens: number;
   output_tokens: number;
-  cost_usd: number;
+  cost_cny: number;
   duration_ms: number;
   tool_call_count: number;
   status: string;

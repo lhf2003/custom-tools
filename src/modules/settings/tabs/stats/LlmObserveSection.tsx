@@ -108,7 +108,7 @@ export function LlmObserveSection() {
         case 'duration':
           return r.total_duration_ms;
         case 'cost':
-          return r.cost_usd;
+          return r.cost_cny;
       }
     };
     rows.sort((a, b) =>
@@ -298,7 +298,7 @@ export function LlmObserveSection() {
                         {fmtDuration(row.total_duration_ms)}
                       </span>
                       <span className="text-right text-white/60 tabular-nums">
-                        {fmtCost(row.cost_usd)}
+                        {fmtCost(row.cost_cny)}
                       </span>
                     </button>
 
@@ -356,7 +356,7 @@ export function LlmObserveSection() {
                                     {fmtDuration(logRow.duration_ms)}
                                   </span>
                                   <span className="text-right text-white/60 tabular-nums">
-                                    {fmtCost(logRow.cost_usd)}
+                                    {fmtCost(logRow.cost_cny)}
                                   </span>
                                   <span className="text-right text-white/40 tabular-nums">
                                     {fmtTime(logRow.created_at)}
@@ -379,8 +379,8 @@ export function LlmObserveSection() {
             </div>
           )}
           <p className="text-white/25 text-xs mt-2.5">
-            成本 = token × 模型单价（在「AI 模型」页配置）；流式调用（翻译/问答）暂不计
-            token；Claude Code 通道的工具调用数不可观测，记 0。
+            成本 = token × 模型单价（人民币，在「AI 模型」页配置）；Claude Code 通道为订阅制，不
+            计成本；流式调用（翻译/问答）暂不计 token；Claude Code 通道的工具调用数不可观测，记 0。
           </p>
         </div>
       </div>

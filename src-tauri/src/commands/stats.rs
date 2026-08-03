@@ -39,7 +39,7 @@ pub struct SourceStatRow {
     pub input_tokens: u64,
     pub cached_input_tokens: u64,
     pub output_tokens: u64,
-    pub cost_usd: f64,
+    pub cost_cny: f64,
     pub total_duration_ms: u64,
     pub tool_calls: u64,
 }
@@ -60,7 +60,7 @@ pub struct CallLogRow {
     pub input_tokens: u64,
     pub cached_input_tokens: u64,
     pub output_tokens: u64,
-    pub cost_usd: f64,
+    pub cost_cny: f64,
     pub duration_ms: u64,
     pub tool_call_count: u64,
     pub status: String,
@@ -148,7 +148,7 @@ pub fn get_llm_observability(
                 COALESCE(SUM(input_tokens), 0),
                 COALESCE(SUM(cached_input_tokens), 0),
                 COALESCE(SUM(output_tokens), 0),
-                COALESCE(SUM(cost_usd), 0),
+                COALESCE(SUM(cost_cny), 0),
                 COALESCE(SUM(duration_ms), 0),
                 COALESCE(SUM(tool_call_count), 0)
          FROM llm_call_logs WHERE {}
@@ -168,7 +168,7 @@ pub fn get_llm_observability(
                 input_tokens: row.get::<_, i64>(3)? as u64,
                 cached_input_tokens: row.get::<_, i64>(4)? as u64,
                 output_tokens: row.get::<_, i64>(5)? as u64,
-                cost_usd: row.get(6)?,
+                cost_cny: row.get(6)?,
                 total_duration_ms: row.get::<_, i64>(7)? as u64,
                 tool_calls: row.get::<_, i64>(8)? as u64,
             })
@@ -196,7 +196,7 @@ pub fn get_llm_call_logs(
     let sql = format!(
         "SELECT id, source, channel, scene, model,
                 input_tokens, cached_input_tokens, output_tokens,
-                cost_usd, duration_ms, tool_call_count, status, error, created_at
+                cost_cny, duration_ms, tool_call_count, status, error, created_at
          FROM llm_call_logs WHERE {}
          ORDER BY created_at DESC
          LIMIT ?",
@@ -216,7 +216,7 @@ pub fn get_llm_call_logs(
                 input_tokens: row.get::<_, i64>(5)? as u64,
                 cached_input_tokens: row.get::<_, i64>(6)? as u64,
                 output_tokens: row.get::<_, i64>(7)? as u64,
-                cost_usd: row.get(8)?,
+                cost_cny: row.get(8)?,
                 duration_ms: row.get::<_, i64>(9)? as u64,
                 tool_call_count: row.get::<_, i64>(10)? as u64,
                 status: row.get(11)?,

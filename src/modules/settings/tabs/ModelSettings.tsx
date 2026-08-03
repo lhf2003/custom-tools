@@ -537,14 +537,14 @@ export function ModelSettings() {
                                 </div>
                                 <div
                                   className="flex items-center gap-1 mr-1"
-                                  title="单价（美元/百万 token），成本面板据此估算金额；留空只统计 token"
+                                  title="单价（人民币/百万 token），成本面板据此估算金额；留空只统计 token"
                                 >
                                   <input
                                     key={`in-${model.id}-${model.input_price_per_m ?? ''}`}
                                     type="text"
                                     inputMode="decimal"
                                     defaultValue={model.input_price_per_m ?? ''}
-                                    placeholder="入$/M"
+                                    placeholder="入¥/M"
                                     onBlur={(e) => handlePriceBlur(model, 'input', e.target.value)}
                                     className="w-16 bg-zinc-800 text-white/70 text-xs rounded px-1.5 py-1 outline-none border border-zinc-700 focus:border-white/25 placeholder:text-white/20"
                                   />
@@ -553,7 +553,7 @@ export function ModelSettings() {
                                     type="text"
                                     inputMode="decimal"
                                     defaultValue={model.output_price_per_m ?? ''}
-                                    placeholder="出$/M"
+                                    placeholder="出¥/M"
                                     onBlur={(e) => handlePriceBlur(model, 'output', e.target.value)}
                                     className="w-16 bg-zinc-800 text-white/70 text-xs rounded px-1.5 py-1 outline-none border border-zinc-700 focus:border-white/25 placeholder:text-white/20"
                                   />
