@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 const DEFAULT_PERSONA: &str = include_str!("persona.md");
 /// 内嵌默认经验本
 const DEFAULT_EVOLUTION: &str = include_str!("evolution.md");
+/// 内嵌默认工具编排（工具使用规则 + 专长手册目录说明；手册列表动态拼入）
+const DEFAULT_TOOL: &str = include_str!("tool.md");
 
 /// 播种（不存在时）并读取运行时副本；失败回退内嵌默认版——人格与经验不能丢。
 fn seed_and_load(path: PathBuf, default: &str) -> String {
@@ -37,6 +39,11 @@ pub fn load_evolution(app_data_dir: &Path) -> String {
     )
 }
 
+/// 加载运行时工具编排（与 persona 同机制：播种 + 副本为准）
+pub fn load_tool(app_data_dir: &Path) -> String {
+    seed_and_load(companion_dir(app_data_dir).join("tool.md"), DEFAULT_TOOL)
+}
+
 /// 读取「近期态度指引」（日记蒸馏产物，注入聊天 prompt）。
 /// 不播种——首次日记生成后才出现；不存在时返回空串（聊天注入跳过该段）。
 pub fn load_attitude(app_data_dir: &Path) -> String {
@@ -58,6 +65,7 @@ pub fn save_attitude(app_data_dir: &Path, content: &str) -> Result<(), String> {
 /// 统一在陪伴模块启动时兜底。手册播种走 skills::seed_skills（含旧 agents/ 迁移）。
 pub fn seed_all(app_data_dir: &Path) {
     let _ = load(app_data_dir);
+    let _ = load_tool(app_data_dir);
     let _ = load_evolution(app_data_dir);
     super::skills::seed_skills(app_data_dir);
 }

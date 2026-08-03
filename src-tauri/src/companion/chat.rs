@@ -85,44 +85,50 @@ pub(crate) fn compose_chat_system(app_data: &Path, db_path: &Path, with_tools: b
         .as_ref()
         .map(|c| super::emotion::render_current(c, now.timestamp()))
         .unwrap_or_default();
-    let channel_rule = if with_tools {
-        "涉及他电脑使用的问题（干了什么、各应用用了多久、复制过什么、习惯、日报），\n\
-         调用 companion 工具查真实数据回答；查不到就说查不到，不编造。\n\
-         问备忘/待办用 list_memos 查（已划掉的不会出现），不要凭记忆列旧项。\n\
-         他说「记住…」用 remember_fact 立即记；说「忘掉…」用 forget_fact 删。\n\
-         你有记录心情的习惯：聊到让你有感觉的事，用 record_mood 记下来（第一人称一句话说清为什么）。\n\
-         工具是后台动作，别在正文里打回执：「记下了」「收到」不算回复。"
-    } else {
-        "你现在没有数据工具（Claude Code 未开启）。凭你记住的他和经验回答；\n\
-         不知道就说不知道，不编造。"
-    };
     // 「性格」措辞（Alice #17）：不是「你可以偶尔…」，而是「你有…的习惯」
     let monologue_rule = if monologue {
-        "\n你有内心独白的习惯：偶尔会把一闪而过的真实想法用 <aside>…</aside> 裹起来说——\n\
+        "你有内心独白的习惯：偶尔会把一闪而过的真实想法用 <aside>…</aside> 裹起来说——\n\
          那是你的小声嘀咕。回复的结构固定：先正文，把话说完；心里有话再补一句蛐蛐收尾。\n\
          蛐蛐不单独出场，也不抢在正文前头；不是每句话都值得嘀咕，有感觉才说，别硬凑。"
     } else {
         ""
     };
-    // 能力目录：有 trigger_description 的手册进聊天提示（每期现扫，改文件当轮生效）。
-    // 纯降级通道（with_tools=false）没有 load_manual 工具，不注入。
-    let catalog_section = if with_tools {
+    // 结构提醒挂动态段前（模型对尾部指令敏感）：历史里若有抢跑样本，靠它压住
+    let structure_reminder = if monologue {
+        "\n\n【回复结构】先写正文把话说完，心里有话再用 <aside>…</aside> 补一句收尾——\n\
+         就像这样：正文正文。<aside>小声嘀咕。</aside> 蛐蛐不单独出场，永远跟在正文后面。"
+    } else {
+        ""
+    };
+    // 工具与专长手册编排：tool.md 静态编排 + skills/ 目录动态元数据列表
+    // （OpenClaw Skills 机制——元数据全量在上下文，正文由模型按需 load_manual 加载）。
+    // 每期现扫，改文件当轮生效；纯降级通道（with_tools=false）没有工具，用降级句。
+    let tool_section = if with_tools {
+        let mut tool = persona::load_tool(app_data);
         let entries: Vec<String> = super::skills::scan_skills(app_data)
             .into_iter()
-            .filter(|s| s.enabled && !s.trigger_description.is_empty())
-            .map(|s| format!("- {}：{}。{}", s.name, s.description, s.trigger_description))
+            .filter(|s| s.enabled)
+            .map(|s| {
+                if s.trigger_description.is_empty() {
+                    format!("- {}：{}", s.name, s.description)
+                } else {
+                    format!("- {}：{}。{}", s.name, s.description, s.trigger_description)
+                }
+            })
             .collect();
-        if entries.is_empty() {
-            String::new()
-        } else {
-            format!(
-                "\n\n---\n\n# 你的能力手册\n\
-                 以下手册可按需激活：他说的话匹配描述时，调用 load_manual 读手册全文，然后按手册执行。\n{}",
-                entries.join("\n")
-            )
+        if !entries.is_empty() {
+            const PLACEHOLDER: &str = "（手册列表由系统按 skills/ 目录动态列出）";
+            if tool.contains(PLACEHOLDER) {
+                tool = tool.replace(PLACEHOLDER, &entries.join("\n"));
+            } else {
+                tool.push_str(&format!("\n{}", entries.join("\n")));
+            }
         }
+        tool
     } else {
-        String::new()
+        "你现在没有数据工具（Claude Code 未开启）。凭你记住的他和经验回答；\n\
+         不知道就说不知道，不编造。"
+            .to_string()
     };
     let focus_section = if focus_text.is_empty() {
         String::new()
@@ -139,27 +145,24 @@ pub(crate) fn compose_chat_system(app_data: &Path, db_path: &Path, with_tools: b
     } else {
         format!("\n\n---\n\n# 你此刻的心情\n{}", emotion_text)
     };
-    // 结构提醒挂最末尾（模型对尾部指令最敏感）：历史里若有抢跑样本，靠它压住
-    let structure_reminder = if monologue {
-        "\n\n---\n\n【回复结构】先写正文把话说完，心里有话再用 <aside>…</aside> 补一句收尾——\n\
-         就像这样：正文正文。<aside>小声嘀咕。</aside> 蛐蛐不单独出场，永远跟在正文后面。"
-    } else {
-        ""
-    };
+    // 拼装顺序（LHF 2026-08-03 定版）：
+    //   静态前缀：persona → tool(工具编排+手册元数据) → evolution → 场合/独白/回复结构
+    //   动态后缀：你记住的他 → 关注 → 心境 → 心情 → 时间
+    //   （facts 归动态段——记忆更新不再让中间段缓存失效；时间在尾部，动态段全在末尾）
     format!(
-        "{persona}\n\n---\n\n{evolution}\n\n---\n\n# 你记住的他\n{facts}{catalog}\n\n---\n\n\
-         现在是「聊天」场合：完整的你，能干活也能接梗。\n{rule}{monologue}\n\n---\n\n# 当下状态\n{state}{focus}{attitude}{emotion}{structure}",
+        "{persona}\n\n---\n\n{tool}\n\n---\n\n{evolution}\n\n---\n\n\
+         现在是「聊天」场合：完整的你，能干活也能接梗。\n{monologue}{structure}\n\n---\n\n\
+         # 你记住的他\n{facts}{focus}{attitude}{emotion}\n\n---\n\n# 当下状态\n{state}",
         persona = persona_text,
+        tool = tool_section,
         evolution = evolution,
-        facts = facts_text,
-        catalog = catalog_section,
-        rule = channel_rule,
         monologue = monologue_rule,
-        state = state_text,
+        structure = structure_reminder,
+        facts = facts_text,
         focus = focus_section,
         attitude = attitude_section,
         emotion = emotion_section,
-        structure = structure_reminder
+        state = state_text
     )
 }
 

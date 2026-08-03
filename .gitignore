@@ -40,3 +40,7 @@ mdeditor-*.png
 
 # impeccable live-server runtime state
 .impeccable/live/server.json
+
+# Python
+__pycache__/
+*.pyc

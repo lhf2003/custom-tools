@@ -36,7 +36,7 @@ pub enum Schedule {
 pub struct Skill {
     pub name: String,
     pub description: String,
-    /// 空 = 不进聊天能力目录（调度器内部工作手册）
+    /// 补充触发场景描述；为空 = 手册元数据仍进聊天能力目录，只是没有额外触发提示
     pub trigger_description: String,
     pub schedule: Option<Schedule>,
     pub enabled: bool,

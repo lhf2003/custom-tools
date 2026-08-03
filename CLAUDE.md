@@ -50,6 +50,9 @@ npm run lint
 
 # Type check
 npx tsc --noEmit
+
+# Prompt 回归（改了 persona.md/手册/聊天规则后必跑，防行为退化）
+python scripts/prompt_regression.py
 ```
 
 ## Architecture

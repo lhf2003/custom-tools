@@ -161,7 +161,7 @@ pub fn tool_definitions() -> Vec<ToolDef> {
             display_name: "记住事实",
             group: ToolGroup::Growth,
             core: true,
-            description: "把一条关于用户的事实立即写入长期记忆。\n\n适用场景：用户明确说「记住…」「以后…」「我喜欢/我不喜欢…」等值得长期记住的信息。\n不适用：可从电脑使用数据直接查到的、临时任务状态、隐私细节（密码/密钥）。\n\ncategory 五选一：person（他是谁/他认识的人）| project（项目/技术栈）| workflow（做事方式/作息节奏）| voice（表达偏好/语言风格）| expectation（他希望贾维斯怎么做）。".to_string(),
+            description: "把一条关于用户的事实立即写入长期记忆。\n\n适用场景：用户明确说「记住…」「以后…」「我喜欢/我不喜欢…」等值得长期记住的信息，以及纠正旧记忆（「不是X是Y」——会覆盖更新同主题旧条目，不会并存矛盾条目）。\n不适用：可从电脑使用数据直接查到的、临时任务状态、隐私细节（密码/密钥）。\n\ncategory 五选一：person（他是谁/他认识的人）| project（项目/技术栈）| workflow（做事方式/作息节奏）| voice（表达偏好/语言风格）| expectation（他希望贾维斯怎么做）。".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -654,7 +654,43 @@ fn tool_memory_facts(db_path: &Path) -> Result<String, String> {    let conn = o
     serde_json::to_string_pretty(&items).map_err(|e| e.to_string())
 }
 
-/// 显式记忆：用户说「记住X」时立即落库（source=explicit，写审计）
+/// 通用模板双字词：记忆条目常见的句首/虚词前缀（「他希望贾维斯」「用户」「目前」等）。
+/// 这类词在所有条目里高频出现，会把不相关主题的相似度拉高（实测「他希望你…」两条
+/// 不同主题条目仅靠模板词就有 0.28 相似度）——计算交集时一律剔除。
+const TEMPLATE_BIGRAMS: [&str; 18] = [
+    "希望", "望贾", "贾维", "维斯", "他的", "他是", "他会", "这个", "一个",
+    "主要", "目前", "现在", "进行", "可以", "能够", "用户", "是否", "一直",
+];
+
+/// 字符 bigram Jaccard 相似度（跳过 ASCII 符号，保留汉字/全角标点与字母数字）。
+/// 用于 remember_fact 的语义查重：纠正「安娜→安然」这类同主题改写时,
+/// 公共实体双字词（守望/先锋/英雄/安娜）足以命中；交集剔除模板双字词后,
+/// 仅靠「他希望贾维斯」这类句首模板重合的无关条目会被打回 ~0。
+fn char_bigram_jaccard(a: &str, b: &str) -> f64 {
+    fn bigrams(s: &str) -> std::collections::HashSet<(char, char)> {
+        let chars: Vec<char> = s
+            .chars()
+            .filter(|c| c.is_ascii_alphabetic() || c.is_ascii_digit() || !c.is_ascii())
+            .collect();
+        chars.windows(2).map(|w| (w[0], w[1])).collect()
+    }
+    fn is_template((c1, c2): &(char, char)) -> bool {
+        TEMPLATE_BIGRAMS
+            .iter()
+            .any(|t| t.starts_with(*c1) && t.ends_with(*c2))
+    }
+    let sa = bigrams(a);
+    let sb = bigrams(b);
+    if sa.is_empty() || sb.is_empty() {
+        return 0.0;
+    }
+    let inter = sa.intersection(&sb).filter(|p| !is_template(p)).count();
+    inter as f64 / (sa.len() + sb.len() - inter) as f64
+}
+
+/// 显式记忆：用户说「记住X」时立即落库（source=explicit，写审计）。
+/// 同分类下语义查重（bigram Jaccard ≥ 阈值）→ 覆盖旧条目（纠正场景不再并存矛盾条目）；
+/// 无匹配 → 新增（文本完全相等仍走 upsert 的确认累计）。
 fn tool_remember_fact(db_path: &Path, args: &Value) -> Result<String, String> {
     let fact = args
         .get("fact")
@@ -680,11 +716,75 @@ fn tool_remember_fact(db_path: &Path, args: &Value) -> Result<String, String> {
         ));
     }
 
+    // 实测标定：纠正「安娜→安然」≈0.155、同主题外甥 ≈0.25、仅模板前缀重合 ≈0.045、无关 ≈0
+    const MERGE_THRESHOLD: f64 = 0.12;
     let conn = open_db(db_path)?;
     let now = chrono::Local::now().timestamp();
+
+    // 同分类查重：取相似度最高者
+    let mut best: Option<(i64, String, f64)> = None;
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT id, fact FROM memory_facts WHERE category = ?1 ORDER BY confirmations DESC, last_confirmed DESC",
+    ) {
+        if let Ok(rows) = stmt.query_map([category], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        }) {
+            for row in rows.flatten() {
+                let (id, old) = row;
+                let sim = char_bigram_jaccard(fact, &old);
+                if best.as_ref().map_or(true, |(_, _, s)| sim > *s) {
+                    best = Some((id, old, sim));
+                }
+            }
+        }
+    }
+
+    if let Some((id, old, sim)) = best {
+        if sim >= MERGE_THRESHOLD {
+            db::update_memory_fact(&conn, id, fact, category, "explicit", now)
+                .map_err(|e| format!("覆盖记忆失败: {}", e))?;
+            return Ok(format!(
+                "已更新记忆（{}）：{}（覆盖原「{}」，相似度 {:.0}%）",
+                category,
+                fact,
+                old.chars().take(24).collect::<String>(),
+                sim * 100.0
+            ));
+        }
+    }
+
     db::upsert_memory_fact(&conn, fact, category, "explicit", now)
         .map_err(|e| format!("写入记忆失败: {}", e))?;
     Ok(format!("已记住（{}）：{}", category, fact))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::char_bigram_jaccard;
+
+    #[test]
+    fn jaccard_hits_correction_same_topic() {
+        // 纠正「安娜→安然」：公共双字词（守望/先锋/英雄/常用…）应命中
+        let old = "他喜欢玩《守望先锋》，常用英雄是安娜，认为安娜属于骚扰后排的高机动性角色，会关注季中冠军赛";
+        let new = "他玩守望先锋的常用英雄是安然（不是安娜），之前记错了";
+        let sim = char_bigram_jaccard(new, old);
+        assert!(sim >= 0.15, "纠正应命中（sim={:.3}）", sim);
+    }
+
+    #[test]
+    fn jaccard_misses_unrelated_same_category() {
+        // 同分类无关条目（B站动漫 vs 守望先锋）不应命中
+        let a = "他喜欢观看动漫和视频内容，使用 B 站和优酷";
+        let b = "他玩守望先锋的常用英雄是安然";
+        let sim = char_bigram_jaccard(b, a);
+        assert!(sim < 0.15, "无关条目不应命中（sim={:.3}）", sim);
+    }
+
+    #[test]
+    fn jaccard_single_word_no_bigram() {
+        assert_eq!(char_bigram_jaccard("他", "他"), 0.0);
+        assert_eq!(char_bigram_jaccard("", "abc"), 0.0);
+    }
 }
 
 /// 按关键词删除记忆：单次最多 5 条，逐条写审计；过多时先给清单
