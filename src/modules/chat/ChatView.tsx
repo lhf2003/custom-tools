@@ -152,26 +152,65 @@ const MODE_ORDER: ChatMode[] = ['chat', 'translate'];
 const STICK_TO_BOTTOM_PX = 48;
 
 /** 把助手文本切成正文段与内心独白段（<aside>…</aside>）。
- *  未闭合的 <aside> 按「到末尾」处理——流式途中标记尚未到达时样式不断裂。 */
+ *  未闭合的 <aside> 按「到末尾」处理——流式途中标记尚未到达时样式不断裂。
+ *  代码围栏（```）内的 <aside> 是字面量，跳过不解析——模型在示例代码里
+ *  写 <aside> 时正文不能被劫持成灰色斜体。 */
 function splitAsides(text: string): { aside: boolean; text: string }[] {
   const parts: { aside: boolean; text: string }[] = [];
-  let rest = text;
-  while (rest.length > 0) {
-    const start = rest.indexOf('<aside>');
-    if (start === -1) {
-      parts.push({ aside: false, text: rest });
-      break;
+  let current: { aside: boolean; text: string } | null = null;
+  let inCode = false;
+  const flush = () => {
+    if (current && current.text.length > 0) parts.push(current);
+    current = null;
+  };
+  const emit = (chunk: string, aside: boolean) => {
+    if (chunk.length === 0) return;
+    if (!current) {
+      current = { aside, text: chunk };
+      return;
     }
-    if (start > 0) parts.push({ aside: false, text: rest.slice(0, start) });
-    const end = rest.indexOf('</aside>', start + 7);
-    if (end === -1) {
-      parts.push({ aside: true, text: rest.slice(start + 7) });
-      break;
+    if (current.aside === aside) {
+      current.text += chunk;
+      return;
     }
-    parts.push({ aside: true, text: rest.slice(start + 7, end) });
-    rest = rest.slice(end + 8);
+    flush();
+    current = { aside, text: chunk };
+  };
+  for (const rawLine of text.split('\n')) {
+    if (/^\s*```/.test(rawLine)) {
+      inCode = !inCode;
+      emit(rawLine + '\n', false);
+      continue;
+    }
+    if (inCode) {
+      emit(rawLine + '\n', false);
+      continue;
+    }
+    let rest = rawLine;
+    let isAside = false;
+    while (rest.length > 0) {
+      const tag = isAside ? '</aside>' : '<aside>';
+      const idx = rest.indexOf(tag);
+      if (idx === -1) {
+        emit(rest + '\n', isAside);
+        break;
+      }
+      if (idx > 0) emit(rest.slice(0, idx), isAside);
+      rest = rest.slice(idx + tag.length);
+      isAside = !isAside;
+    }
   }
-  return parts.filter((p) => p.text.length > 0);
+  flush();
+  return parts;
+}
+
+/** a2ui 消息的稳定渲染 key：surfaceId 不变，增量合并（数组长度变化）时不重挂载 */
+function surfaceKey(content: string): string {
+  try {
+    return (JSON.parse(content) as { surfaceId?: string }).surfaceId ?? content;
+  } catch {
+    return content;
+  }
 }
 
 /** 助手消息渲染：正文走 Markdown，独白段（心声）渲染为灰小斜体 */
@@ -182,7 +221,7 @@ function AssistantContent({ text }: { text: string }) {
         p.aside ? (
           <div
             key={i}
-            className="my-1.5 pl-3 border-l-2 border-white/10 text-white/35 text-xs italic whitespace-pre-wrap"
+            className="my-1.5 pl-3 border-l-2 border-white/10 text-white/50 text-xs italic whitespace-pre-wrap"
           >
             {p.text}
           </div>
@@ -231,6 +270,8 @@ export function ChatView() {
   const [hasResponse, setHasResponse] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  // 取消后终态（状态栏「已停止」）；与完成/错误三分，取消不说成「生成完成」
+  const [cancelled, setCancelled] = useState(false);
   const [sessionId, setSessionId] = useState<number | null>(null);
   // 贾维斯 agent 的工具活动提示（「贾维斯在翻数据…」）
   const [agentStatus, setAgentStatus] = useState<string | null>(null);
@@ -243,6 +284,9 @@ export function ChatView() {
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([]);
   const [historyIdx, setHistoryIdx] = useState(0);
   const [historyPos, setHistoryPos] = useState({ top: 0, right: 0 });
+  // 会话删除两态确认：armed 后 3s 未确认自动复位
+  const [deleteArmedId, setDeleteArmedId] = useState<number | null>(null);
+  const deleteTimerRef = useRef<number | null>(null);
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const streamTextRef = useRef('');
@@ -366,6 +410,7 @@ export function ChatView() {
         ]);
         setStreamText('');
         streamTextRef.current = '';
+        setCancelled(false);
         setIsLoading(false);
 
         // 持久化 assistant 消息
@@ -386,6 +431,7 @@ export function ChatView() {
       const u3 = await listen<string>('llm:error', (event) => {
         isCancelledRef.current = false;
         setError(event.payload);
+        setCancelled(false);
         setIsLoading(false);
         setStreamText('');
         streamTextRef.current = '';
@@ -412,6 +458,7 @@ export function ChatView() {
         ]);
         setStreamText('');
         streamTextRef.current = '';
+        setCancelled(false);
         setIsLoading(false);
         setAgentStatus(null);
 
@@ -433,6 +480,7 @@ export function ChatView() {
         isCancelledRef.current = false;
         setAgentStatus(null);
         setError(event.payload);
+        setCancelled(false);
         setIsLoading(false);
         setStreamText('');
         streamTextRef.current = '';
@@ -466,12 +514,20 @@ export function ChatView() {
           setShellConfirm(event.payload);
         },
       );
+      // Shell 确认终态（后端超时/晚点路径回发）：关掉可能已成僵尸的弹窗。
+      // 用户点击路径前端已自行关窗，此处幂等。
+      const u11 = await listen<{ id: string; allowed: boolean }>(
+        'jarvis:shell-confirm-resolved',
+        (event) => {
+          setShellConfirm((prev) => (prev && prev.id === event.payload.id ? null : prev));
+        },
+      );
 
       if (!active) {
-        u1(); u2(); u3(); u4(); u5(); u6(); u7(); u8(); u9(); u10();
+        u1(); u2(); u3(); u4(); u5(); u6(); u7(); u8(); u9(); u10(); u11();
         return;
       }
-      unlistenFns = [u1, u2, u3, u4, u5, u6, u7, u8, u9, u10];
+      unlistenFns = [u1, u2, u3, u4, u5, u6, u7, u8, u9, u10, u11];
     };
 
     setupListeners();
@@ -511,6 +567,7 @@ export function ChatView() {
     setIsLoading(true);
     setHasResponse(true);
     setError(null);
+    setCancelled(false);
     setCopied(false);
 
     // 持久化 user 消息
@@ -561,11 +618,21 @@ export function ChatView() {
 
   // ── Cycle mode ────────────────────────────────────────────────────
   const cycleMode = useCallback(() => {
+    // 切换前停掉在飞流式：restoreModeSession 只换内容不取消后端，
+    // 不拦的话 chat 回复会串进新模式会话并落库（与 handleNewSession 对齐）
+    isCancelledRef.current = true;
+    setIsLoading(false);
+    setStreamText('');
+    streamTextRef.current = '';
+    setAgentStatus(null);
+    if (mode === 'chat') {
+      invoke('jarvis_chat_cancel').catch(() => {});
+    }
     setMode((prev) => {
       const idx = MODE_ORDER.indexOf(prev);
       return MODE_ORDER[(idx + 1) % MODE_ORDER.length];
     });
-  }, []);
+  }, [mode]);
 
   // ── Restore session when mode changes ────────────────────────────
   useEffect(() => {
@@ -597,6 +664,7 @@ export function ChatView() {
         setStreamText('');
         streamTextRef.current = '';
         setError(null);
+        setCancelled(false);
       } catch (e) {
         console.error('Failed to restore mode session:', e);
       }
@@ -608,6 +676,7 @@ export function ChatView() {
   // ── Cancel streaming ──────────────────────────────────────────────
   const handleCancel = useCallback(async () => {
     isCancelledRef.current = true;
+    setCancelled(true);
     setIsLoading(false);
     setStreamText('');
     streamTextRef.current = '';
@@ -645,6 +714,7 @@ export function ChatView() {
     stickToBottomRef.current = true;
     setHasResponse(false);
     setError(null);
+    setCancelled(false);
     setIsLoading(false);
     setAgentStatus(null);
     debouncedResize(WINDOW_SIZE.CHAT.collapsed, WINDOW_SIZE.CHAT.width);
@@ -707,6 +777,7 @@ export function ChatView() {
       streamTextRef.current = '';
       setAgentStatus(null);
       setError(null);
+      setCancelled(false);
       stickToBottomRef.current = true;
       try {
         const msgs = await invoke<ChatHistoryMessage[]>('get_session_messages', {
@@ -747,6 +818,28 @@ export function ChatView() {
     [handleNewSession],
   );
 
+  // 删除两态确认：第一次点击进入 armed（按钮变红勾），3s 未确认自动复位
+  const armDelete = (id: number) => {
+    setDeleteArmedId(id);
+    if (deleteTimerRef.current) window.clearTimeout(deleteTimerRef.current);
+    deleteTimerRef.current = window.setTimeout(() => {
+      setDeleteArmedId((cur) => (cur === id ? null : cur));
+    }, 3000);
+  };
+
+  const confirmDelete = useCallback(
+    (id: number) => {
+      if (deleteArmedId === id) {
+        if (deleteTimerRef.current) window.clearTimeout(deleteTimerRef.current);
+        setDeleteArmedId(null);
+        deleteSession(id);
+      } else {
+        armDelete(id);
+      }
+    },
+    [deleteArmedId, deleteSession],
+  );
+
   const handleHistoryKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -765,9 +858,13 @@ export function ChatView() {
         e.preventDefault();
         const s = sessions[historyIdx];
         if (s) switchSession(s.id);
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        const s = sessions[historyIdx];
+        if (s) confirmDelete(s.id);
       }
     },
-    [sessions, historyIdx, switchSession],
+    [sessions, historyIdx, switchSession, confirmDelete],
   );
 
   // 浮层开合动效（reduced-motion 由 motion-reduce 变体降级）
@@ -799,9 +896,8 @@ export function ChatView() {
   // 键盘导航时保持高亮条目可见
   useEffect(() => {
     if (!historyOpen) return;
-    historyPanelRef.current
-      ?.querySelectorAll('li')
-      [historyIdx]?.scrollIntoView({ block: 'nearest' });
+    const el = historyPanelRef.current?.querySelectorAll('li')[historyIdx];
+    el?.scrollIntoView({ block: 'nearest' });
   }, [historyIdx, historyOpen]);
 
   // ── Keyboard handler ──────────────────────────────────────────────
@@ -834,7 +930,9 @@ export function ChatView() {
     ? (agentStatus ?? (streamText.length > 0 ? '正在输出...' : '正在思考...'))
     : error
       ? '发生错误'
-      : '生成完成';
+      : cancelled
+        ? '已停止'
+        : '生成完成';
 
   return (
     <div className="w-full h-full flex flex-col select-none bg-transparent">
@@ -845,12 +943,15 @@ export function ChatView() {
 
           <textarea
             ref={textareaRef}
+            id="chat-input"
+            aria-label="消息输入框"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={modeConfig.placeholder}
             rows={1}
-            className="flex-1 resize-none bg-transparent text-sm text-zinc-200 placeholder-zinc-500 outline-none leading-relaxed self-center"
+            disabled={!!shellConfirm}
+            className="flex-1 resize-none bg-transparent text-sm text-zinc-200 placeholder-app-text-placeholder outline-none leading-relaxed self-center disabled:opacity-60"
             style={{ height: '22px' }}
             data-tauri-drag-region={undefined}
           />
@@ -858,9 +959,10 @@ export function ChatView() {
           {/* Mode tag */}
           <button
             onClick={cycleMode}
-            className={`shrink-0 text-[10px] px-2 py-1 rounded-md border font-medium transition-colors cursor-pointer ${modeConfig.tagColor}`}
+            className={`shrink-0 text-[10px] px-2 py-1 rounded-md border font-semibold transition-colors cursor-pointer ${modeConfig.tagColor}`}
             tabIndex={-1}
             aria-label="切换模式"
+            data-tauri-drag-region={undefined}
           >
             {modeConfig.label}
             <span className="ml-1 opacity-40 font-mono text-[10px]">Tab</span>
@@ -872,21 +974,23 @@ export function ChatView() {
               onClick={handleCancel}
               className="shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700/60 transition-all cursor-pointer"
               aria-label="取消生成"
+              data-tauri-drag-region={undefined}
             >
               <X className="w-3.5 h-3.5" />
             </button>
           )}
 
-          {/* Send button（贾维斯通道在飞时可排队发送） */}
+          {/* Send button（贾维斯通道在飞时可排队发送；Shell 确认弹窗期间禁发防串扰） */}
           <button
             onClick={() => handleSend()}
-            disabled={!input.trim() || (isLoading && mode !== 'chat')}
+            disabled={!input.trim() || (isLoading && mode !== 'chat') || !!shellConfirm}
             className={`shrink-0 w-7 h-7 rounded-lg flex items-center justify-center transition-all ${
-              input.trim() && (!isLoading || mode === 'chat')
+              input.trim() && (!isLoading || mode === 'chat') && !shellConfirm
                 ? 'text-zinc-200 hover:bg-zinc-700/60 cursor-pointer'
                 : 'text-zinc-600 cursor-not-allowed'
             }`}
             aria-label="发送消息"
+            data-tauri-drag-region={undefined}
           >
             <ArrowUp className="w-3.5 h-3.5" />
           </button>
@@ -910,13 +1014,13 @@ export function ChatView() {
               {isLoading && (
                 <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse shrink-0" />
               )}
-              <span className="text-xs text-zinc-500">{statusText}</span>
+              <span className="text-xs text-app-text-tertiary">{statusText}</span>
             </div>
             <div className="flex items-center gap-2">
               {!isLoading && visibleMessages.length > 0 && !error && (
                 <button
                   onClick={handleCopy}
-                  className="flex items-center text-zinc-500 hover:text-zinc-300 transition-colors cursor-pointer"
+                  className="flex items-center text-app-text-tertiary hover:text-app-text-primary transition-colors cursor-pointer"
                   aria-label="复制回复"
                 >
                   {copied ? (
@@ -930,7 +1034,7 @@ export function ChatView() {
                 <>
                   <button
                     onClick={handleNewSession}
-                    className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors cursor-pointer"
+                    className="text-[10px] text-app-text-tertiary hover:text-app-text-primary transition-colors cursor-pointer"
                     aria-label="开启新会话"
                   >
                     新会话
@@ -939,7 +1043,7 @@ export function ChatView() {
                     ref={historyBtnRef}
                     onClick={toggleHistory}
                     className={`flex items-center transition-colors cursor-pointer ${
-                      historyOpen ? 'text-zinc-300' : 'text-zinc-500 hover:text-zinc-300'
+                      historyOpen ? 'text-app-text-primary' : 'text-app-text-tertiary hover:text-app-text-primary'
                     }`}
                     aria-label="会话历史"
                   >
@@ -973,7 +1077,7 @@ export function ChatView() {
             {/* History messages */}
             {visibleMessages.map((msg, idx) => (
               <div
-                key={idx}
+                key={msg.contentType === 'a2ui' ? surfaceKey(msg.content) : `${idx}-${msg.role}`}
                 className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 {msg.role === 'user' ? (
@@ -1043,8 +1147,8 @@ export function ChatView() {
               <div className="h-4 rounded bg-zinc-700/40 animate-pulse w-3/4" />
             </div>
           ) : sessions.length === 0 ? (
-            <div className="px-3 py-4 text-center text-xs text-zinc-500">
-              还没有历史会话
+            <div className="px-3 py-4 text-center text-xs text-app-text-tertiary">
+              暂无过往会话
             </div>
           ) : (
             <ul className="py-1">
@@ -1065,19 +1169,31 @@ export function ChatView() {
                     <span className="flex-1 truncate text-xs text-zinc-300">
                       {previewText(s.preview)}
                     </span>
-                    <span className="shrink-0 text-[10px] text-zinc-500 group-hover:invisible">
+                    {/* 相对时间 hover 时淡出让位删除钮（opacity 过渡，不引起布局跳动） */}
+                    <span className="shrink-0 text-[10px] text-app-text-tertiary transition-opacity group-hover:opacity-0">
                       {formatRelativeTime(s.updated_at)}
                     </span>
+                    {/* 删除：键盘高亮行（historyIdx）常显，鼠标 hover 显示；两态确认防误触 */}
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        deleteSession(s.id);
+                        confirmDelete(s.id);
                       }}
-                      className="absolute right-2 hidden group-hover:flex w-5 h-5 items-center justify-center rounded text-zinc-500 hover:text-red-400 hover:bg-white/10 cursor-pointer"
-                      aria-label="删除会话"
+                      className={`absolute right-2 w-5 h-5 items-center justify-center rounded transition-all cursor-pointer ${
+                        deleteArmedId === s.id
+                          ? 'flex text-red-400 hover:bg-white/10'
+                          : i === historyIdx
+                            ? 'flex text-zinc-400 hover:text-red-400 hover:bg-white/10'
+                            : 'hidden group-hover:flex text-zinc-500 hover:text-red-400 hover:bg-white/10'
+                      }`}
+                      aria-label={deleteArmedId === s.id ? '确认删除会话' : '删除会话'}
                       tabIndex={-1}
                     >
-                      <X className="w-3 h-3" />
+                      {deleteArmedId === s.id ? (
+                        <Check className="w-3 h-3" />
+                      ) : (
+                        <X className="w-3 h-3" />
+                      )}
                     </button>
                   </div>
                 </li>
@@ -1089,21 +1205,40 @@ export function ChatView() {
 
       {/* ── Shell 命令确认弹窗（run_shell_command 工具的安全闸门） ── */}
       {shellConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="w-[420px] max-w-[90%] rounded-xl border border-zinc-700/60 bg-zinc-800 shadow-2xl shadow-black/50 p-4">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onKeyDown={(e) => {
+            // 弹窗内 Esc=拒绝（高利害时刻，键盘语义不许做错事）；
+            // Enter 交给聚焦按钮（默认聚焦「拒绝」，安全默认——允许执行须刻意操作）
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              resolveShellConfirm(false);
+            }
+          }}
+        >
+          <div
+            key={shellConfirm.id}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="shell-confirm-title"
+            className="w-[420px] max-w-[90%] rounded-xl border border-zinc-700/60 bg-zinc-800 shadow-2xl shadow-black/50 p-4 outline-none"
+          >
             <div className="flex items-center gap-2 mb-3">
               <Terminal className="w-4 h-4 text-amber-400" />
-              <span className="text-sm font-medium text-zinc-100">贾维斯想执行命令</span>
+              <span id="shell-confirm-title" className="text-sm font-medium text-zinc-100">
+                贾维斯想执行命令
+              </span>
             </div>
             <pre className="max-h-40 overflow-y-auto rounded-lg bg-zinc-900/80 border border-zinc-700/50 px-3 py-2 text-xs text-zinc-200 font-mono whitespace-pre-wrap break-all select-text">
               {shellConfirm.command}
             </pre>
-            <p className="mt-2 text-xs text-zinc-500">
+            <p className="mt-2 text-xs text-app-text-tertiary">
               允许后命令立即在这台电脑上执行；拒绝后贾维斯会换个思路。约 2
               分钟不操作自动拒绝。
             </p>
             <div className="mt-4 flex justify-end gap-2">
               <button
+                autoFocus
                 onClick={() => resolveShellConfirm(false)}
                 className="px-3 py-1.5 rounded-lg text-xs text-zinc-300 border border-zinc-600/60 hover:bg-white/5 transition-colors cursor-pointer"
               >
@@ -1111,7 +1246,7 @@ export function ChatView() {
               </button>
               <button
                 onClick={() => resolveShellConfirm(true)}
-                className="px-3 py-1.5 rounded-lg text-xs text-white bg-blue-500 hover:bg-blue-400 transition-colors cursor-pointer"
+                className="px-3 py-1.5 rounded-lg text-xs text-white bg-blue-600 hover:bg-blue-700 transition-colors cursor-pointer"
               >
                 允许执行
               </button>

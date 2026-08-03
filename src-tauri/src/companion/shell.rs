@@ -228,6 +228,12 @@ async fn confirm_with_user(app_handle: &AppHandle, command: &str) -> bool {
     if let Ok(mut pending) = state.pending.lock() {
         pending.remove(&confirm_id);
     }
+    // 终态回发：用户点击路径前端已自行关窗（幂等）；超时/晚点路径靠它关掉
+    // 僵尸弹窗——前端收不到 close 信号时确认框会永久悬挂
+    let _ = app_handle.emit(
+        "jarvis:shell-confirm-resolved",
+        serde_json::json!({ "id": confirm_id, "allowed": allowed }),
+    );
     allowed
 }
 

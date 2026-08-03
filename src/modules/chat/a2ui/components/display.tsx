@@ -13,14 +13,15 @@ import type { A2uiComponentDef } from '../types';
 
 export const DISPLAY_TYPES = new Set(['Text', 'Image', 'Icon', 'Video', 'AudioPlayer']);
 
+// 字级遵守 18px Ceiling 与 12/14/16/18 阶梯（DESIGN.md），层级靠字重与灰阶下探
 const TEXT_VARIANTS: Record<string, string> = {
-  h1: 'text-xl font-semibold text-zinc-100',
-  h2: 'text-lg font-semibold text-zinc-100',
-  h3: 'text-base font-semibold text-zinc-200',
-  h4: 'text-sm font-semibold text-zinc-200',
-  h5: 'text-sm font-medium text-zinc-300',
+  h1: 'text-lg font-semibold text-zinc-100',
+  h2: 'text-base font-semibold text-zinc-100',
+  h3: 'text-sm font-semibold text-zinc-200',
+  h4: 'text-sm font-medium text-zinc-200',
+  h5: 'text-xs font-semibold text-zinc-300',
   body: 'text-sm text-zinc-300',
-  caption: 'text-xs text-zinc-500',
+  caption: 'text-xs text-app-text-tertiary',
 };
 
 const ICONS: Record<string, LucideIcon> = {

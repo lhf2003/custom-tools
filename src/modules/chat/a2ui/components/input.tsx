@@ -10,11 +10,11 @@ export const INPUT_TYPES = new Set([
 ]);
 
 const INPUT_CLS =
-  'w-full bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 outline-none focus:border-indigo-500/50 placeholder-zinc-600';
+  'w-full bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 outline-none focus:border-indigo-500/50 placeholder-app-text-placeholder';
 
 function Label({ text }: { text: string }) {
   if (!text) return null;
-  return <div className="text-xs text-zinc-500 mb-1">{text}</div>;
+  return <div className="text-xs text-app-text-tertiary mb-1">{text}</div>;
 }
 
 /** 校验失败提示（checks 或 validationRegexp） */
@@ -56,7 +56,8 @@ function Button({ def }: { def: A2uiComponentDef }) {
 
   const cls =
     variant === 'primary'
-      ? 'bg-indigo-500/80 hover:bg-indigo-500 text-white rounded-lg px-3 py-1.5'
+      ? // 系统规定 Primary 用 Action Blue（#2563eb 白字 5.17:1）；indigo 留给选中/品牌时刻
+        'bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-3 py-1.5'
       : variant === 'borderless'
         ? 'text-indigo-300 hover:text-indigo-200 px-1 py-0.5'
         : 'border border-white/15 bg-white/5 hover:bg-white/10 rounded-lg px-3 py-1.5';
