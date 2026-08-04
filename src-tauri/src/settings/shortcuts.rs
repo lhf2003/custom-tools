@@ -140,26 +140,9 @@ impl ShortcutManager {
         manager
     }
 
-    /// 初始化数据库和加载配置
+    /// 初始化：加载配置（shortcuts 表结构由 db::init_tables 统一创建）
     fn init(&mut self) -> Result<()> {
-        let conn = Connection::open(&self.db_path)?;
-
-        // 创建快捷键表
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS shortcuts (
-                id TEXT PRIMARY KEY,
-                custom_keys TEXT,
-                enabled BOOLEAN DEFAULT 1,
-                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )",
-            [],
-        )?;
-
-        // 加载所有配置（默认 + 用户自定义）
-        self.load_configs()?;
-
-        Ok(())
+        self.load_configs()
     }
 
     /// 加载配置：默认配置 + 用户自定义覆盖

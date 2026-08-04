@@ -66,6 +66,36 @@ impl Default for AppSettings {
     }
 }
 
+/// SettingsManager 管辖的全部键。settings 表与陪伴模块状态、
+/// custom_scan_dirs / notes_directory 共享，reset 只能按此白名单删键——
+/// 全表 DELETE 会误删陪伴调度水位和扫描目录配置
+const KNOWN_KEYS: [&str; 24] = [
+    "always_on_top",
+    "hide_on_blur",
+    "startup_launch",
+    "theme",
+    "window_opacity",
+    "clipboard_keep_days",
+    "auto_update",
+    "clipboard_auto_paste",
+    "llm_base_url",
+    "llm_api_key",
+    "llm_model",
+    "llm_thinking_mode",
+    "claude_code_enabled",
+    "claude_code_bin_path",
+    "claude_code_work_dir",
+    "companion_enabled",
+    "companion_paused",
+    "companion_retention_days",
+    "companion_long_work_minutes",
+    "companion_daily_report",
+    "companion_monologue",
+    "debug_mode",
+    "disabled_companion_tools",
+    "shell_permission_mode",
+];
+
 pub struct SettingsManager {
     db_path: String,
     cache: Mutex<AppSettings>,
@@ -85,17 +115,8 @@ impl SettingsManager {
     }
 
     fn init(&self) -> Result<()> {
-        let conn = Connection::open(&self.db_path)?;
-
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            )",
-            [],
-        )?;
-
-        // Load settings into cache
+        // settings 表结构由 db::init_tables 统一创建（主库 flowhub.db），
+        // 这里只负责把行加载进缓存
         let settings = self.load_from_db()?;
         if let Ok(mut cache) = self.cache.lock() {
             *cache = settings;
@@ -227,10 +248,19 @@ impl SettingsManager {
         }
     }
 
-    /// 重置所有设置为默认值（清空 settings 表并刷新缓存）
+    /// 重置所有设置为默认值（按白名单删除本模块管辖的键并刷新缓存；
+    /// 陪伴模块状态、custom_scan_dirs 等共享同一张 settings 表的键不受影响）
     pub fn reset_settings(&self) -> Result<()> {
         let conn = Connection::open(&self.db_path)?;
-        conn.execute("DELETE FROM settings", [])?;
+        let placeholders = KNOWN_KEYS
+            .iter()
+            .map(|_| "?")
+            .collect::<Vec<_>>()
+            .join(", ");
+        conn.execute(
+            &format!("DELETE FROM settings WHERE key IN ({})", placeholders),
+            rusqlite::params_from_iter(KNOWN_KEYS.iter()),
+        )?;
 
         if let Ok(mut cache) = self.cache.lock() {
             *cache = AppSettings::default();

@@ -349,7 +349,7 @@ pub fn all_tool_definitions() -> Vec<ToolDef> {
     defs
 }
 
-/// 读用户关闭的工具名列表（settings.db；设置模块未初始化按空——全开）
+/// 读用户关闭的工具名列表（flowhub.db settings 表；设置模块未初始化按空——全开）
 pub fn disabled_tools(app_handle: &tauri::AppHandle) -> Vec<String> {
     use tauri::Manager;
     app_handle

@@ -389,7 +389,7 @@ fn walk_size(dir: &Path) -> (u64, u64, u64) {
 
 /// 核心数据库文件（含 SQLite 的 -wal/-shm 伴生文件）
 fn core_db_size(app_data: &Path) -> (u64, u64) {
-    const DB_NAMES: [&str; 3] = ["flowhub.db", "settings.db", "shortcuts.db"];
+    const DB_NAMES: [&str; 1] = ["flowhub.db"];
     let mut bytes = 0u64;
     let mut files = 0u64;
     if let Ok(rd) = std::fs::read_dir(app_data) {
@@ -469,7 +469,7 @@ pub fn get_local_data_stats(app_handle: tauri::AppHandle) -> Result<LocalDataSta
     let mut other_files = 0u64;
     let mut other_dirs = 0u64;
     const KNOWN_DIRS: [&str; 4] = ["notes", "companion", "companion-agent", "clipboard-images"];
-    const DB_PREFIXES: [&str; 3] = ["flowhub.db", "settings.db", "shortcuts.db"];
+    const DB_PREFIXES: [&str; 1] = ["flowhub.db"];
     if let Ok(rd) = std::fs::read_dir(&app_data) {
         for entry in rd.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();

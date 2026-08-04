@@ -134,11 +134,24 @@ impl Database {
         // App cache table (for fast startup)
         app_cache::init_table(&self.conn)?;
 
-        // Settings table
+        // Settings table（通用 KV：用户偏好 + 陪伴模块状态共存，键空间互不重叠）
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )",
+            [],
+        )?;
+
+        // Shortcuts table（快捷键用户覆盖；默认配置在 settings::shortcuts 代码里，
+        // 表只存 custom_keys/enabled 覆盖项）
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS shortcuts (
+                id TEXT PRIMARY KEY,
+                custom_keys TEXT,
+                enabled BOOLEAN DEFAULT 1,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )",
             [],
@@ -401,6 +414,62 @@ impl Database {
         Ok(())
     }
 
+    /// 一次性迁移：settings.db / shortcuts.db 两个独立小库并回 flowhub.db。
+    /// 合并成功后旧文件改名 .bak-YYYYMMDD 保留（不删，防迁移有遗漏时无据可查）；
+    /// 失败只记日志不阻断启动——旧文件还在，下次启动自动重试。
+    fn migrate_legacy_db_files(&self, app_dir: &Path) {
+        let stamp = chrono::Local::now().format("%Y%m%d");
+        for file_name in ["settings.db", "shortcuts.db"] {
+            let legacy_path = app_dir.join(file_name);
+            if !legacy_path.exists() {
+                continue;
+            }
+            if let Err(e) = self.merge_legacy_db(&legacy_path, file_name) {
+                log::error!(
+                    "合并 {} 进 flowhub.db 失败（保留原文件，下次启动重试）: {}",
+                    file_name,
+                    e
+                );
+                continue;
+            }
+            let bak_path = app_dir.join(format!("{}.bak-{}", file_name, stamp));
+            match fs::rename(&legacy_path, &bak_path) {
+                Ok(_) => log::info!(
+                    "{} 已并入 flowhub.db，原文件备份为 {}",
+                    file_name,
+                    bak_path.display()
+                ),
+                // 数据已合并，改名失败不致命；旧文件留着下次启动会幂等重合并
+                Err(e) => log::warn!("旧库 {} 改名备份失败: {}", file_name, e),
+            }
+        }
+    }
+
+    /// 把单个旧库文件的数据并入主库（settings.db 是当前用户偏好的真值源，
+    /// 同键覆盖主库化石默认值；shortcuts 全量并入覆盖表）
+    fn merge_legacy_db(&self, legacy_path: &Path, file_name: &str) -> Result<()> {
+        self.conn.execute(
+            "ATTACH DATABASE ?1 AS legacy",
+            [legacy_path.to_string_lossy().as_ref()],
+        )?;
+        let merge_result = match file_name {
+            "settings.db" => self.conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) SELECT key, value FROM legacy.settings",
+                [],
+            ),
+            "shortcuts.db" => self.conn.execute(
+                "INSERT OR REPLACE INTO shortcuts (id, custom_keys, enabled, created_at, updated_at)
+                 SELECT id, custom_keys, enabled, created_at, updated_at FROM legacy.shortcuts",
+                [],
+            ),
+            _ => unreachable!("migrate_legacy_db_files 只传入两个固定文件名"),
+        };
+        let detach_result = self.conn.execute("DETACH DATABASE legacy", []);
+        merge_result?;
+        detach_result?;
+        Ok(())
+    }
+
     /// 老库 llm_scene_configs 的 CHECK 场景值列表不全（缺 companion / memory_extraction），
     /// SQLite 无法修改 CHECK，需 RENAME → 重建 → 显式列名拷贝 → DROP。
     /// 失败只记日志，不阻断启动（后果仅是新场景行插不进去，不丢老数据）。
@@ -496,6 +565,7 @@ pub fn init(app_handle: &tauri::AppHandle) -> Result<()> {
 
     let db = Database::new(conn);
     db.init_tables()?;
+    db.migrate_legacy_db_files(&app_dir);
 
     // Store database connection in app state
     app_handle.manage(DatabaseState(db_path));
@@ -527,6 +597,7 @@ fn get_app_dir(app_handle: &tauri::AppHandle) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::DB_FILE_NAME;
 
     fn setup_chat_tables(conn: &Connection) {
         conn.execute_batch(
@@ -587,5 +658,108 @@ mod tests {
             [],
         );
         assert!(result.is_err(), "向已删除/不存在的会话写消息必须被外键拒绝");
+    }
+
+    /// 旧版独立小库（settings.db / shortcuts.db）并入主库：
+    /// 行合并、主库既有键不受损、旧文件改名 .bak 且不再被二次迁移
+    #[test]
+    fn legacy_db_files_merge_into_main_db() {
+        let dir = std::env::temp_dir().join(format!(
+            "flowhub_migrate_test_{}_{}",
+            std::process::id(),
+            chrono::Local::now().timestamp_nanos_opt().unwrap_or(0)
+        ));
+        fs::create_dir_all(&dir).unwrap();
+
+        // 造旧 settings.db：两行用户偏好
+        let legacy_settings = Connection::open(dir.join("settings.db")).unwrap();
+        legacy_settings
+            .execute_batch(
+                "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                 INSERT INTO settings VALUES ('debug_mode', 'true'), ('startup_launch', 'true');",
+            )
+            .unwrap();
+        drop(legacy_settings);
+
+        // 造旧 shortcuts.db：一行自定义快捷键
+        let legacy_shortcuts = Connection::open(dir.join("shortcuts.db")).unwrap();
+        legacy_shortcuts
+            .execute_batch(
+                "CREATE TABLE shortcuts (
+                    id TEXT PRIMARY KEY, custom_keys TEXT, enabled BOOLEAN DEFAULT 1,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                 );
+                 INSERT INTO shortcuts (id, custom_keys, enabled) VALUES ('toggle_window', 'Ctrl+Alt+Space', 1);",
+            )
+            .unwrap();
+        drop(legacy_shortcuts);
+
+        // 主库：建表 + 预置一个陪伴模块的键（验证合并不误伤）
+        let conn = Connection::open(dir.join(DB_FILE_NAME)).unwrap();
+        let db = Database::new(conn);
+        db.init_tables().unwrap();
+        db.conn
+            .execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('daily_focus', '专注写代码')",
+                [],
+            )
+            .unwrap();
+
+        db.migrate_legacy_db_files(&dir);
+
+        // 旧库行并入
+        let debug_mode: String = db
+            .conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'debug_mode'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(debug_mode, "true");
+        let startup: String = db
+            .conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'startup_launch'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(startup, "true");
+        let custom_keys: String = db
+            .conn
+            .query_row(
+                "SELECT custom_keys FROM shortcuts WHERE id = 'toggle_window'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(custom_keys, "Ctrl+Alt+Space");
+
+        // 主库既有键完好
+        let focus: String = db
+            .conn
+            .query_row(
+                "SELECT value FROM settings WHERE key = 'daily_focus'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(focus, "专注写代码");
+
+        // 旧文件已改名 .bak-*，二次迁移幂等（文件不存在直接跳过）
+        assert!(!dir.join("settings.db").exists());
+        assert!(!dir.join("shortcuts.db").exists());
+        let baks: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().contains(".bak-"))
+            .collect();
+        assert_eq!(baks.len(), 2, "两个旧库都应改名备份");
+        db.migrate_legacy_db_files(&dir);
+
+        drop(db);
+        let _ = fs::remove_dir_all(&dir);
     }
 }

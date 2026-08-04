@@ -127,14 +127,15 @@ pub fn run() {
             app.manage(commands::updater::PendingUpdate(Mutex::new(None)));
 
             // Initialize settings manager first (needed by window handlers)
-            let settings_db_path = app
+            // 设置/快捷键与主库共用一个 flowhub.db（settings/shortcuts 两张表）
+            let main_db_path = app
                 .path()
                 .app_data_dir()
                 .unwrap()
-                .join("settings.db")
+                .join(DB_FILE_NAME)
                 .to_string_lossy()
                 .to_string();
-            let settings_manager = settings::SettingsManager::new(settings_db_path);
+            let settings_manager = settings::SettingsManager::new(main_db_path.clone());
 
             // Apply always_on_top setting to window
             let settings = settings_manager.get_settings();
@@ -195,15 +196,8 @@ pub fn run() {
             // 调试模式：恢复运行时日志级别闸门（prompt 日志等 debug 级输出的总开关）
             apply_log_level(settings.debug_mode);
 
-            // Initialize shortcut manager
-            let shortcuts_db_path = app
-                .path()
-                .app_data_dir()
-                .unwrap()
-                .join("shortcuts.db")
-                .to_string_lossy()
-                .to_string();
-            let shortcut_manager = settings::ShortcutManager::new(shortcuts_db_path);
+            // Initialize shortcut manager（与主库共用 flowhub.db）
+            let shortcut_manager = settings::ShortcutManager::new(main_db_path);
 
             // Register all shortcuts from database
             if let Err(e) = shortcut_manager.register_all(app.handle()) {
