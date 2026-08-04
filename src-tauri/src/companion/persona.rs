@@ -47,7 +47,7 @@ pub fn load_tool(app_data_dir: &Path) -> String {
     seed_and_load(companion_dir(app_data_dir).join("tool.md"), DEFAULT_TOOL)
 }
 
-/// 读取「近期态度指引」（日记蒸馏产物，注入聊天 prompt）。
+/// 读取「昨天的心境」（日记蒸馏产物，注入聊天 prompt）。
 /// 不播种——首次日记生成后才出现；不存在时返回空串（聊天注入跳过该段）。
 pub fn load_attitude(app_data_dir: &Path) -> String {
     std::fs::read_to_string(companion_dir(app_data_dir).join("attitude.md")).unwrap_or_default()

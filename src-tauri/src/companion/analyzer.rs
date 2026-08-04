@@ -785,6 +785,12 @@ pub async fn run_daily_analysis(
         .map(|dir| super::skills::load_skill_body(dir, "analyst"))
         .unwrap_or_default();
     let ve_section = voice_expectation_section(&conn);
+    // 已有记忆进 prompt（与 recall 同一渲染）：看不到已有条目就只能不停 add 近义新条
+    let existing_facts = super::recall::load_existing_facts(&conn);
+    let facts_section = format!(
+        "\n\n---\n\n# 已有记忆\n{}",
+        super::recall::format_facts_with_ids(&existing_facts)
+    );
     let prompt = build_analysis_prompt(
         &persona,
         &evolution,
@@ -792,6 +798,7 @@ pub async fn run_daily_analysis(
         &window_label,
         &aggregate_text,
         &ve_section,
+        &facts_section,
     );
 
     let reply = call_companion_llm(app_handle, db_path, prompt, "analysis").await?;
@@ -849,24 +856,48 @@ pub async fn run_daily_analysis(
         saved += 1;
     }
 
-    // 沉淀个人事实（记忆层）
+    // 沉淀个人事实（记忆层）：与 recall 同一套 add/update 语义——
+    // target_id 对得上已有记忆才覆盖更新，否则降级为 add（宁多记不丢记）
+    let known: std::collections::HashSet<i64> = existing_facts.iter().map(|f| f.id).collect();
     let mut facts_saved = 0;
+    let mut facts_updated = 0;
     for f in &parsed.facts {
-        db::upsert_memory_fact(&conn, &f.fact, &f.category, "daily_analysis", now_ts)
-            .map_err(|e| format!("保存事实失败: {}", e))?;
-        facts_saved += 1;
+        let fact = f.fact.trim();
+        if fact.is_empty() {
+            continue;
+        }
+        match f.action.as_str() {
+            "update" if f.target_id.map(|t| known.contains(&t)).unwrap_or(false) => {
+                db::update_memory_fact(
+                    &conn,
+                    f.target_id.unwrap(),
+                    fact,
+                    &f.category,
+                    "daily_analysis",
+                    now_ts,
+                )
+                .map_err(|e| format!("更新记忆失败: {}", e))?;
+                facts_updated += 1;
+            }
+            _ => {
+                db::upsert_memory_fact(&conn, fact, &f.category, "daily_analysis", now_ts)
+                    .map_err(|e| format!("保存事实失败: {}", e))?;
+                facts_saved += 1;
+            }
+        }
     }
 
     // 成功落库后推进水位（失败/数据不足都不推进，下次窗口自动顺延合并）
     save_setting(db_path, "companion_last_analysis_ts", &now_ts.to_string());
 
     Ok(format!(
-        "窗口 {}：{} 条活动 → 聚合 {} 字符 → {} 个模式 + {} 条事实",
+        "窗口 {}：{} 条活动 → 聚合 {} 字符 → {} 个模式 + 事实新增 {} / 更新 {}",
         window_label,
         activities.len(),
         aggregate_text.len(),
         saved,
-        facts_saved
+        facts_saved,
+        facts_updated
     ))
 }
 
@@ -1071,14 +1102,16 @@ fn build_analysis_prompt(
     window_label: &str,
     aggregate_text: &str,
     ve_section: &str,
+    facts_section: &str,
 ) -> String {
     format!(
-        "{persona}\n\n---\n\n{evolution}\n\n---\n\n{role}\n\n---\n\n\
-         以上是贾维斯的身份设定、经验本与分析工作手册。\n\
+        "{persona}\n\n---\n\n{evolution}\n\n---\n\n{role}{facts_section}\n\n---\n\n\
+         以上是贾维斯的身份设定、经验本、分析工作手册与已有记忆。\n\
          以下是他在 {window_label} 时段电脑使用情况的聚合摘要（进程名 + 窗口标题 + 时段）：\n\n{aggregate_text}{ve_section}",
         persona = persona,
         evolution = evolution,
         role = role,
+        facts_section = facts_section,
         window_label = window_label,
         aggregate_text = aggregate_text,
         ve_section = ve_section
@@ -1115,13 +1148,21 @@ struct LlmPattern {
 
 #[derive(Debug, Deserialize)]
 struct LlmFact {
+    #[serde(default = "default_fact_action")]
+    action: String,
     fact: String,
     #[serde(default = "default_fact_category")]
     category: String,
+    #[serde(default)]
+    target_id: Option<i64>,
+}
+
+fn default_fact_action() -> String {
+    "add".to_string()
 }
 
 fn default_fact_category() -> String {
-    "general".to_string()
+    "person".to_string()
 }
 
 fn parse_llm_patterns(reply: &str) -> Result<LlmPatternsResponse, String> {

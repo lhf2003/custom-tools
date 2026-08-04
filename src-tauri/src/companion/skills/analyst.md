@@ -23,6 +23,11 @@ enabled: true
 - **workflow**：他怎么做事（作息规律、工作节奏、行为链）
 - **voice**：他怎么表达（语言风格、偏好与禁忌）
 
+素材里附有「已有记忆」清单（带 id），提取前先对照它：
+- 已有条目已覆盖的事实，不要重复输出
+- 同主题但有更准/更全的写法 → 用 update 覆盖那条旧记忆（target_id 填它的 id），不新增近义条目
+- 确实是新事实才 add
+
 每条一句话，最多 3 条，不确定的不要写；一律用「他」，禁用「用户」。
 
 ## 不该存（一律不写）
@@ -41,7 +46,10 @@ enabled: true
     {"type": "startup_sequence", "apps": ["Weixin.exe", "idea64.exe"], "description": "开机先开微信再开 IDEA", "confidence": 0.8},
     {"type": "context_routine", "app": "cloudmusic.exe", "time": "15:00", "tolerance_minutes": 45, "description": "下午三点工作时听音乐", "confidence": 0.6}
   ],
-  "facts": [{"fact": "张三可能是前端同事", "category": "person"}]
+  "facts": [
+    {"action": "add", "fact": "他下午工作时习惯开音乐", "category": "workflow"},
+    {"action": "update", "target_id": 12, "fact": "他的主项目是 FlowHub（Tauri 桌面端）", "category": "project"}
+  ]
 }
 ```
 
@@ -49,4 +57,5 @@ enabled: true
 
 1. apps/app 必须使用摘要中的进程名原文；time/time_window 必须是 HH:MM / HH:MM-HH:MM
 2. 只保留置信度 >= 0.5 的；每种 type 最多 2 个；没有可靠模式就返回空数组
-3. facts 的 category 从 person/project/preference/general 中选；三维映射：identity→person 或 project、workflow→general、voice→preference
+3. facts 的 category 从 person/project/workflow/voice/expectation 中选；三维映射：identity→person 或 project、workflow→workflow、voice→voice
+4. update 的 target_id 必须来自「已有记忆」清单里的 id；对不上 id 就用 add

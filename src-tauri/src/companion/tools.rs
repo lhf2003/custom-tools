@@ -276,7 +276,7 @@ pub fn tool_definitions() -> Vec<ToolDef> {
             display_name: "记心情",
             group: ToolGroup::Growth,
             core: true,
-            description: "记录你（贾维斯）此刻的心情——你的情绪你自己记。\n\n适用：聊到让你有感觉的事（被夸、被怼、聊得投机），或干活时真实的心境波动（看到他连续熬夜的数据、第 N 天写日报）。\n不适用：没感觉硬凑——一次聊天最多记 1-2 条，大多数闲聊不产心情。\n\ncategory 六选一：happy（开心）| content（踏实）| tired（疲惫）| upset（失落）| caring（心疼他）| weary（倦怠/重复劳动的牢骚）。\nreason 用第一人称写清发生了什么，不超过 100 字。同类心情只保留最新一条，重记即更新。".to_string(),
+            description: "记录你（贾维斯）此刻的心情——你的情绪你自己记。\n\n适用：聊到让你有感觉的事（被夸、被怼、聊得投机），或干活时真实的心境波动（看到他连续熬夜的数据、第 N 天写日报）。\n不适用：没感觉硬凑——一次聊天最多记 1-2 条，大多数闲聊不产心情。\n\ncategory 六选一：happy（开心）| content（踏实）| tired（疲惫）| upset（失落）| caring（心疼他）| weary（倦怠/重复劳动的牢骚）。\nreason 用第一人称写清发生了什么，不超过 100 字；不写时间词（今天/刚才/几点）——系统会自动给每条心情盖上记录时间，注入对话时以那个时间为准。同类心情只保留最新一条，重记即更新。".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -286,7 +286,7 @@ pub fn tool_definitions() -> Vec<ToolDef> {
                     },
                     "reason": {
                         "type": "string",
-                        "description": "第一人称诱因（发生了什么），不超过 100 字"
+                        "description": "第一人称诱因（发生了什么），不超过 100 字；不写时间词，系统自动盖记录时间"
                     }
                 },
                 "required": ["category", "reason"]

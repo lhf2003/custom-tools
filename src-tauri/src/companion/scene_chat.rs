@@ -117,6 +117,25 @@ pub async fn jarvis_chat_send_scene(
 /// 执行一条回退聊天：tool-use 循环（上限 4 轮，每轮登记 llm_call_logs）。
 /// 流式（与 agent 通道一致）：每轮调用经 on_text 逐 chunk emit jarvis:chunk，
 /// 工具轮文字照常送出，最终回答结束由 jarvis:done 收尾。
+/// render_ui 使用规则：只挂场景通道（agent 通道经 MCP 没有 render_ui），
+/// 由 compose_chat_system 注入「工具与专长手册」小节，不挂系统提示尾部。
+/// 【界面卡片规则】——工具描述只说了「能做什么」；模型没有明确偏好时倾向
+/// 纯文本作答（实测验证），这里补上硬性规则：数据工具出多条数据 → 必须先卡片后文字。
+/// 【界面操作回传】——没有这段，模型收到按钮点击回传后无所适从，
+/// 只能复读上下文里的 assistant 句式（实测会原样复述卡片占位文本）。
+const UI_RULES: &str = "\
+    【界面卡片规则】调用数据工具（get_activity_summary、search_clipboard、\n\
+    get_habit_patterns、list_memos 等）拿到多条数据后，不要只用文字罗列——必须先调用 render_ui\n\
+    把数据渲染成界面卡片给他看，再用一两句文字总结要点。\n\
+    纯闲聊、一句话问答直接用文字，不用卡片。\n\n\
+    【界面操作回传】以「用户操作：」开头的用户消息，是他在你之前展示的界面卡片上的操作\n\
+    （点击按钮或提交表单），不是他手打的文字。action 是操作名，「上下文」是按钮绑定的数据，\n\
+    「界面当前数据」是他填写的表单值。收到后按 action 语义处理：需要数据操作就调对应工具；\n\
+    需要更新界面就用同一 surface_id 再调 render_ui——surface 状态在会话内保持，直接发\n\
+    updateComponents/updateDataModel 增量消息即可，不要重复 createSurface；想展示全新卡片\n\
+    就换一个新的 surface_id。处理完用一两句文字向他确认结果，不要把「用户操作」消息\n\
+    当作闲聊话题，也不要复述「向用户展示了一张界面卡片」这类上下文里的占位文本。";
+
 async fn run_scene_chat(
     app_handle: &AppHandle,
     db_path: &PathBuf,
@@ -147,32 +166,14 @@ async fn run_scene_chat(
     let provider_type = provider.provider_type.to_string();
     let scene_str = used_scene.to_string();
 
-    // 系统提示：有数据工具版（回退通道升级后与 agent 通道同一套措辞）
+    // 系统提示：有数据工具版（回退通道升级后与 agent 通道同一套措辞）；
+    // UI_RULES 随之注入「工具与专长手册」小节
     let mut system_prompt = chat::compose_chat_system(
         &app_data,
         db_path,
         true,
         chat::monologue_enabled(app_handle),
-    );
-    // render_ui 使用偏好引导（只挂场景通道——agent 通道经 MCP 没有这个工具）。
-    // 工具描述只说了「能做什么」；模型没有明确偏好时倾向纯文本作答（实测验证），
-    // 这里补上硬性规则：数据工具出多条数据 → 必须先卡片后文字
-    system_prompt.push_str(
-        "\n\n【界面卡片规则】调用数据工具（get_activity_summary、search_clipboard、\n\
-         get_habit_patterns、list_memos 等）拿到多条数据后，不要只用文字罗列——必须先调用 render_ui\n\
-         把数据渲染成界面卡片给他看，再用一两句文字总结要点。\n\
-         纯闲聊、一句话问答直接用文字，不用卡片。",
-    );
-    // 「用户操作」回传处理指引：没有这段，模型收到按钮点击回传后无所适从，
-    // 只能复读上下文里的 assistant 句式（实测会原样复述卡片占位文本）
-    system_prompt.push_str(
-        "\n\n【界面操作回传】以「用户操作：」开头的用户消息，是他在你之前展示的界面卡片上的操作\n\
-         （点击按钮或提交表单），不是他手打的文字。action 是操作名，「上下文」是按钮绑定的数据，\n\
-         「界面当前数据」是他填写的表单值。收到后按 action 语义处理：需要数据操作就调对应工具；\n\
-         需要更新界面就用同一 surface_id 再调 render_ui——surface 状态在会话内保持，直接发\n\
-         updateComponents/updateDataModel 增量消息即可，不要重复 createSurface；想展示全新卡片\n\
-         就换一个新的 surface_id。处理完用一两句文字向他确认结果，不要把「用户操作」消息\n\
-         当作闲聊话题，也不要复述「向用户展示了一张界面卡片」这类上下文里的占位文本。",
+        Some(UI_RULES),
     );
 
     // 历史上下文：增量摘要（必要时先压缩旧消息）+ 最近原文。
@@ -527,6 +528,7 @@ async fn plain_fallback(
         db_path,
         false,
         chat::monologue_enabled(app_handle),
+        None,
     );
     let context = load_context(app_handle, db_path, session_id).await?;
     if !context.summary.is_empty() {

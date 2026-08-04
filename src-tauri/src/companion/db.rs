@@ -1263,6 +1263,22 @@ pub fn clear_all_activities(conn: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
+/// 最近一条 assistant 聊天消息的时间（unix 秒，本地时区）；无记录返回 None。
+/// 供聊天系统提示词拼「距上次聊天 X」的时间对照（chat.rs::chat_gap_bridge）
+pub fn last_assistant_chat_at(conn: &Connection) -> Option<i64> {
+    let raw: String = conn
+        .query_row(
+            "SELECT created_at FROM chat_messages WHERE role = 'assistant' ORDER BY id DESC LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .ok()?;
+    let ndt = chrono::NaiveDateTime::parse_from_str(&raw, "%Y-%m-%d %H:%M:%S").ok()?;
+    chrono::TimeZone::from_local_datetime(&chrono::Local, &ndt)
+        .single()
+        .map(|dt| dt.timestamp())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

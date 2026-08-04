@@ -23,12 +23,30 @@ use crate::llm_provider::models::Scene;
 const RECALL_DEBOUNCE_SECS: u64 = 600;
 /// 单次提取的用户消息上限（超出留下次，防成本尖峰）
 const RECALL_MSG_LIMIT: i64 = 30;
-/// 提取时给模型看的已有记忆上限
-const RECALL_FACT_LIMIT: i64 = 100;
+/// 提取时给模型看的已有记忆上限（两条提取管道共用：recall 与定时分析）
+const EXISTING_FACT_LIMIT: i64 = 100;
 /// 单条消息进 prompt 的截断长度
 const MSG_PREVIEW_CAP: usize = 500;
 /// 提取水位 settings key（已提取到的 chat_messages.id）
 const WATERMARK_KEY: &str = "companion_recall_watermark";
+
+/// 取已有记忆——recall 与 analyst 定时分析两条提取管道必须看同一份清单，
+/// 否则看不见的管道只能不停 add 近义新条（记忆膨胀的根因）
+pub(crate) fn load_existing_facts(conn: &Connection) -> Vec<db::MemoryFact> {
+    db::list_memory_facts(conn, EXISTING_FACT_LIMIT).unwrap_or_default()
+}
+
+/// 「已有记忆」段渲染：带 id 供 update 的 target_id 引用，两管道格式必须一致
+pub(crate) fn format_facts_with_ids(facts: &[db::MemoryFact]) -> String {
+    if facts.is_empty() {
+        return "（还没有已有记忆）".to_string();
+    }
+    facts
+        .iter()
+        .map(|f| format!("- [id:{}] ({}) {}", f.id, f.category, f.fact))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
 
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 static EXTRACTED: AtomicU64 = AtomicU64::new(0);
@@ -98,17 +116,8 @@ pub async fn run_recall(app_handle: &AppHandle, db_path: &PathBuf) -> Result<Str
     let persona_text = persona::load(&app_data);
     let evolution = persona::load_evolution(&app_data);
     let manual = super::skills::load_skill_body(&app_data, "recall");
-    let facts = db::list_memory_facts(&conn, RECALL_FACT_LIMIT).unwrap_or_default();
-
-    let facts_text = if facts.is_empty() {
-        "（还没有已有记忆）".to_string()
-    } else {
-        facts
-            .iter()
-            .map(|f| format!("- [id:{}] ({}) {}", f.id, f.category, f.fact))
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
+    let facts = load_existing_facts(&conn);
+    let facts_text = format_facts_with_ids(&facts);
     let msgs_text = msgs
         .iter()
         .map(|(id, c)| {
