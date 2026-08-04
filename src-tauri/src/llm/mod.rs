@@ -151,7 +151,11 @@ pub fn assistant_tool_message(provider_type: &str, reply: &ToolReply) -> serde_j
 }
 
 /// 组装 tool 结果消息（OpenAI 用 tool_call_id 配对，Ollama 用 name）
-pub fn tool_result_message(provider_type: &str, call: &ToolCall, result: &str) -> serde_json::Value {
+pub fn tool_result_message(
+    provider_type: &str,
+    call: &ToolCall,
+    result: &str,
+) -> serde_json::Value {
     if provider_type == "ollama" {
         serde_json::json!({
             "role": "tool",
@@ -253,7 +257,10 @@ pub async fn call_llm_with_tools(
         .map_err(|e| format!("解析响应失败: {}", e))?;
 
     if is_ollama_native {
-        let msg = raw.get("message").cloned().unwrap_or(serde_json::Value::Null);
+        let msg = raw
+            .get("message")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
         let content = msg
             .get("content")
             .and_then(|c| c.as_str())
@@ -294,7 +301,10 @@ pub async fn call_llm_with_tools(
             .and_then(|arr| arr.first())
             .cloned()
             .ok_or("LLM 返回了空响应")?;
-        let msg = choice.get("message").cloned().unwrap_or(serde_json::Value::Null);
+        let msg = choice
+            .get("message")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
         let content = msg
             .get("content")
             .and_then(|c| c.as_str())
@@ -470,7 +480,8 @@ pub async fn call_llm_stream_with_tools(
                                 }
                             }
                             if chunk_data.done {
-                                ollama_usage = (chunk_data.prompt_eval_count, chunk_data.eval_count);
+                                ollama_usage =
+                                    (chunk_data.prompt_eval_count, chunk_data.eval_count);
                             }
                         }
                         Err(e) => {

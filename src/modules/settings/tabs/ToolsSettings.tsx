@@ -21,9 +21,9 @@ interface CompanionToolInfo {
 const GROUP_ORDER = ['perception', 'growth', 'interface', 'system', 'network'];
 
 const SHELL_MODE_OPTIONS = [
-  { value: 'confirm_all', label: '默认模式 — 每条命令都需确认' },
-  { value: 'accept_edits', label: '可编辑模式 — 文件读写自动接受，Bash 需确认' },
-  { value: 'unattended', label: '无打扰模式 — 只读安全命令自动放行' },
+  { value: 'confirm_all', label: '默认模式 — 每条命令都需系统弹窗确认' },
+  { value: 'accept_edits', label: '可编辑模式 — 文件读写自动接受，Bash 需系统弹窗确认' },
+  { value: 'unattended', label: '无打扰模式 — 只读安全命令自动放行，其余系统弹窗确认' },
 ];
 
 export function ToolsSettings() {
@@ -161,15 +161,11 @@ export function ToolsSettings() {
                       <span className="text-white/40 text-xs">
                         {g.enabledCount}/{g.tools.length} 开启
                       </span>
-                      <span
-                        onClick={(e) => e.stopPropagation()}
-                        onKeyDown={(e) => e.stopPropagation()}
-                      >
                         <Toggle
                           enabled={g.tools.filter((t) => !t.core).every((t) => t.enabled)}
                           onToggle={(v) => handleGroupToggle(g.tools, v)}
+                          onClick={(e) => e.stopPropagation()}
                         />
-                      </span>
                     </>
                   )}
                 </span>
@@ -221,9 +217,10 @@ export function ToolsSettings() {
                             searchable={false}
                           />
                           <p className="text-white/30 text-xs mt-2 leading-relaxed">
-                            确认在聊天窗口弹出，命令内容可见，120 秒未操作视为拒绝。
-                            无打扰模式自动放行只读命令（dir、ipconfig、git status、npm
-                            list 等）；灾难命令（格式化、删库、关机等）任何模式都直接拒绝。
+                            需要确认时以系统原生弹窗形式弹出（在应用窗口之外），命令内容可见，
+                            每次确认或拒绝都会写入本地审计记录。无打扰模式自动放行只读命令
+                           （dir、ipconfig、git status、npm list 等）；灾难命令（格式化、删库、
+                            关机等）任何模式都直接拒绝。
                           </p>
                         </div>
                       )}

@@ -46,8 +46,9 @@ pub fn push_suggestion(
     action_payload: Option<&str>,
 ) -> Result<i64, String> {
     let now = chrono::Local::now().timestamp();
-    let mut suggestion = db::create_suggestion(conn, suggestion_type, title, body, action_payload, now)
-        .map_err(|e| format!("创建建议失败: {}", e))?;
+    let mut suggestion =
+        db::create_suggestion(conn, suggestion_type, title, body, action_payload, now)
+            .map_err(|e| format!("创建建议失败: {}", e))?;
 
     // 纯提示型：推送即落 seen，看过即终结（toast 只负责展示，不回传处置）
     if INFO_TYPES.contains(&suggestion_type) {

@@ -10,8 +10,24 @@ use serde_json::{json, Value};
 
 /// 基础目录全量 18 个组件（与前端渲染器一一对应）
 const ALLOWED_COMPONENTS: [&str; 18] = [
-    "Text", "Image", "Icon", "Video", "AudioPlayer", "Row", "Column", "List", "Card", "Tabs",
-    "Divider", "Modal", "Button", "CheckBox", "TextField", "DateTimeInput", "ChoicePicker", "Slider",
+    "Text",
+    "Image",
+    "Icon",
+    "Video",
+    "AudioPlayer",
+    "Row",
+    "Column",
+    "List",
+    "Card",
+    "Tabs",
+    "Divider",
+    "Modal",
+    "Button",
+    "CheckBox",
+    "TextField",
+    "DateTimeInput",
+    "ChoicePicker",
+    "Slider",
 ];
 
 /// 防失控上限：单次调用的消息数 / 组件总数 / 序列化体积
@@ -39,7 +55,9 @@ pub fn validate_and_apply(
     if messages.len() > MAX_MESSAGES {
         return Err(format!("messages 超过 {} 条上限", MAX_MESSAGES));
     }
-    let payload_size = serde_json::to_string(messages).map(|s| s.len()).unwrap_or(0);
+    let payload_size = serde_json::to_string(messages)
+        .map(|s| s.len())
+        .unwrap_or(0);
     if payload_size > MAX_PAYLOAD_BYTES {
         return Err(format!("消息体积超过 {}KB 上限", MAX_PAYLOAD_BYTES / 1024));
     }
@@ -47,7 +65,10 @@ pub fn validate_and_apply(
     let existing = surfaces.get(surface_id);
     let will_create = messages.iter().any(|m| m.get("createSurface").is_some());
     if existing.map(|s| s.created).unwrap_or(false) && will_create {
-        return Err(format!("surface「{}」已存在，重复 createSurface", surface_id));
+        return Err(format!(
+            "surface「{}」已存在，重复 createSurface",
+            surface_id
+        ));
     }
     if existing.is_none() && !will_create {
         return Err("首个 render_ui 调用必须包含 createSurface".to_string());
@@ -69,11 +90,16 @@ pub fn validate_and_apply(
         if obj.get("version").and_then(|v| v.as_str()) != Some("v0.9") {
             return Err(format!("messages[{}] 缺少 version: \"v0.9\"", i));
         }
-        let kinds: Vec<&str> = ["createSurface", "updateComponents", "updateDataModel", "deleteSurface"]
-            .iter()
-            .filter(|k| obj.contains_key(**k))
-            .copied()
-            .collect();
+        let kinds: Vec<&str> = [
+            "createSurface",
+            "updateComponents",
+            "updateDataModel",
+            "deleteSurface",
+        ]
+        .iter()
+        .filter(|k| obj.contains_key(**k))
+        .copied()
+        .collect();
         if kinds.len() != 1 {
             return Err(format!(
                 "messages[{}] 必须且只能包含 createSurface/updateComponents/updateDataModel/deleteSurface 之一",
@@ -257,7 +283,10 @@ pub fn summarize_surface(messages: &[Value]) -> String {
                     _ => {}
                 }
             }
-            Some("TextField") | Some("CheckBox") | Some("Slider") | Some("ChoicePicker")
+            Some("TextField")
+            | Some("CheckBox")
+            | Some("Slider")
+            | Some("ChoicePicker")
             | Some("DateTimeInput") => {
                 if let Some(l) = c.get("label").and_then(|v| v.as_str()) {
                     let l = truncate_chars(l.trim(), 20);
@@ -371,7 +400,9 @@ mod tests {
     fn allows_incremental_update_after_create() {
         let mut surfaces = HashMap::new();
         validate_and_apply(&sample_create(), "s1", &mut surfaces).unwrap();
-        let update = vec![json!({"version":"v0.9","updateDataModel":{"surfaceId":"s1","path":"/title","value":"bye"}})];
+        let update = vec![
+            json!({"version":"v0.9","updateDataModel":{"surfaceId":"s1","path":"/title","value":"bye"}}),
+        ];
         assert!(validate_and_apply(&update, "s1", &mut surfaces).is_ok());
     }
 

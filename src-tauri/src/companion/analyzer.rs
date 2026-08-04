@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
@@ -42,7 +42,9 @@ fn reporter_schedule(app_handle: &AppHandle) -> Option<(u32, u32)> {
     {
         Some(s) if !s.enabled => None,
         Some(s) => match s.schedule {
-            Some(super::skills::Schedule::Daily { times }) => times.first().copied().or(Some(DEFAULT)),
+            Some(super::skills::Schedule::Daily { times }) => {
+                times.first().copied().or(Some(DEFAULT))
+            }
             _ => Some(DEFAULT),
         },
         None => Some(DEFAULT),
@@ -82,7 +84,9 @@ fn latest_due_slot(now: chrono::DateTime<chrono::Local>, slots: &[(u32, u32)]) -
         } else {
             today
         };
-        let newer = best.map_or(true, |(bd, bh, bm)| day > bd || (day == bd && (h, m) > (bh, bm)));
+        let newer = best.map_or(true, |(bd, bh, bm)| {
+            day > bd || (day == bd && (h, m) > (bh, bm))
+        });
         if newer {
             best = Some((day, h, m));
         }
@@ -93,7 +97,10 @@ fn latest_due_slot(now: chrono::DateTime<chrono::Local>, slots: &[(u32, u32)]) -
 /// 每周自评（三期建议反馈闭环）：统计近 7 天弹窗处置 → 场景模型提炼 →
 /// 写回经验本「弹窗分寸」节（走 append_evolution 同路径：校验+快照，不门控）。
 /// 登记观测 source=weekly_review；本周无数据/无新经验时跳过不写。
-pub fn run_weekly_review_blocking(app_handle: &AppHandle, db_path: &PathBuf) -> Result<String, String> {
+pub fn run_weekly_review_blocking(
+    app_handle: &AppHandle,
+    db_path: &PathBuf,
+) -> Result<String, String> {
     tauri::async_runtime::block_on(run_weekly_review(app_handle, db_path))
 }
 
@@ -124,21 +131,27 @@ async fn run_weekly_review(app_handle: &AppHandle, db_path: &PathBuf) -> Result<
          只输出经验条目本身，不要标题、编号和前后缀。",
         lines
     );
-    let result =
-        call_scene_model_llm(app_handle, db_path, prompt, Scene::Companion, "weekly_review")
-            .await?;
+    let result = call_scene_model_llm(
+        app_handle,
+        db_path,
+        prompt,
+        Scene::Companion,
+        "weekly_review",
+    )
+    .await?;
     let mut wrote = 0;
     for line in result.lines().take(3) {
-        let lesson = line
-            .trim()
-            .trim_start_matches(['-', '•', '*', ' '])
-            .trim();
+        let lesson = line.trim().trim_start_matches(['-', '•', '*', ' ']).trim();
         if lesson.is_empty() || lesson == "无" {
             continue;
         }
         let args = serde_json::json!({ "section": "弹窗分寸", "lesson": lesson });
-        match super::tools::execute_tool(db_path, std::path::Path::new(""), "append_evolution", &args)
-        {
+        match super::tools::execute_tool(
+            db_path,
+            std::path::Path::new(""),
+            "append_evolution",
+            &args,
+        ) {
             Ok(_) => wrote += 1,
             Err(e) => log::warn!("每周自评写回经验失败（{}）: {}", lesson, e),
         }
@@ -426,7 +439,11 @@ fn graduation_gate(
         ) {
             let _ = db::link_suggestion_pattern(conn, sid, pattern.id);
         }
-        log::info!("pattern #{} 毕业（接受 {} 次），自动执行", pattern.id, accepted);
+        log::info!(
+            "pattern #{} 毕业（接受 {} 次），自动执行",
+            pattern.id,
+            accepted
+        );
         return GateAction::Executed;
     }
 
@@ -504,7 +521,14 @@ fn match_work_suite(app_handle: &AppHandle, db_path: &PathBuf, now_ts: i64) -> R
         }
 
         // 毕业制闸门：被拒停用 / 已毕业直接执行 / 被忽略降频
-        match graduation_gate(&conn, app_handle, &pattern, &launchable, "已为你启动工作模式", now_ts) {
+        match graduation_gate(
+            &conn,
+            app_handle,
+            &pattern,
+            &launchable,
+            "已为你启动工作模式",
+            now_ts,
+        ) {
             GateAction::Skip => continue,
             GateAction::Executed => break,
             GateAction::Ask => {}
@@ -570,7 +594,10 @@ fn match_context_routines(
         // 目标应用近期已有活动 → 用户自己开了，不打扰
         let recent_start = now_ts - data.tolerance_minutes as i64 * 60;
         let totals = db::process_totals_between(&conn, recent_start, now_ts).unwrap_or_default();
-        if totals.iter().any(|(p, _)| p.eq_ignore_ascii_case(&data.app)) {
+        if totals
+            .iter()
+            .any(|(p, _)| p.eq_ignore_ascii_case(&data.app))
+        {
             continue;
         }
         // 解析启动路径
@@ -723,8 +750,8 @@ pub async fn run_daily_analysis(
         // 水位线异常（未来时间/过旧）兜底：最多回看 7 天，防一次巨型窗口
         .clamp(now_ts - ANALYSIS_MAX_LOOKBACK_SECS, now_ts);
 
-    let activities = db::activities_between(&conn, start, now_ts)
-        .map_err(|e| format!("读取活动失败: {}", e))?;
+    let activities =
+        db::activities_between(&conn, start, now_ts).map_err(|e| format!("读取活动失败: {}", e))?;
 
     if activities.len() < 10 {
         return Ok(format!(
@@ -737,7 +764,8 @@ pub async fn run_daily_analysis(
     // 跨天窗口按天分节（只有 HH:MM 时分不清是哪天），文本上限随天数放大
     let multi_day = fmt_local(start, "%Y-%m-%d") != fmt_local(now_ts - 1, "%Y-%m-%d");
     let day_count = ((now_ts - start + 86399) / 86400).clamp(1, 7) as usize;
-    let aggregate_text = aggregate_activities(&activities, multi_day, AGGREGATE_TEXT_CAP * day_count);
+    let aggregate_text =
+        aggregate_activities(&activities, multi_day, AGGREGATE_TEXT_CAP * day_count);
     let window_label = format!(
         "{} ~ {}",
         fmt_local(start, "%Y-%m-%d %H:%M"),
@@ -1258,7 +1286,7 @@ fn run_report_with_fallback(
 pub(crate) async fn run_scene_report(
     app_handle: &AppHandle,
     db_path: &PathBuf,
-    notes_dir: &PathBuf,
+    notes_dir: &Path,
     date: &str,
 ) -> Result<String, String> {
     let conn = Connection::open(db_path).map_err(|e| format!("打开数据库失败: {}", e))?;
@@ -1294,7 +1322,7 @@ pub(crate) async fn run_scene_report(
     }
 
     let relative = format!("{}/{}.md", super::mcp::NOTE_DIR_PREFIX, date);
-    let manager = crate::notes::NotesManager::new(notes_dir.clone());
+    let manager = crate::notes::NotesManager::new(notes_dir.to_path_buf());
     manager
         .write_note(&relative, &report)
         .map_err(|e| format!("写入笔记失败: {}", e))?;
@@ -1342,38 +1370,44 @@ pub(crate) async fn call_llm_with_scene(
         match cc_result {
             Ok(reply) => {
                 // CC 通道（订阅制）不记成本，只统计 token
-                crate::llm::observe::log_call(db_path, &crate::llm::observe::LlmCallEntry {
-                    source,
-                    channel: "claude_code",
-                    scene: None,
-                    model: None,
-                    input_tokens: reply.input_tokens,
-                    cached_input_tokens: reply.cached_input_tokens,
-                    output_tokens: reply.output_tokens,
-                    cost_cny: 0.0,
-                    duration_ms,
-                    tool_call_count: 0,
-                    status: "ok",
-                    error: None,
-                });
+                crate::llm::observe::log_call(
+                    db_path,
+                    &crate::llm::observe::LlmCallEntry {
+                        source,
+                        channel: "claude_code",
+                        scene: None,
+                        model: None,
+                        input_tokens: reply.input_tokens,
+                        cached_input_tokens: reply.cached_input_tokens,
+                        output_tokens: reply.output_tokens,
+                        cost_cny: 0.0,
+                        duration_ms,
+                        tool_call_count: 0,
+                        status: "ok",
+                        error: None,
+                    },
+                );
                 return Ok(reply.text);
             }
             Err(cc_err) => {
                 // CC 失败也登记——「Claude Code 挂了多少次」在面板可见
-                crate::llm::observe::log_call(db_path, &crate::llm::observe::LlmCallEntry {
-                    source,
-                    channel: "claude_code",
-                    scene: None,
-                    model: None,
-                    input_tokens: 0,
-                    cached_input_tokens: 0,
-                    output_tokens: 0,
-                    cost_cny: 0.0,
-                    duration_ms,
-                    tool_call_count: 0,
-                    status: "error",
-                    error: Some(&cc_err),
-                });
+                crate::llm::observe::log_call(
+                    db_path,
+                    &crate::llm::observe::LlmCallEntry {
+                        source,
+                        channel: "claude_code",
+                        scene: None,
+                        model: None,
+                        input_tokens: 0,
+                        cached_input_tokens: 0,
+                        output_tokens: 0,
+                        cost_cny: 0.0,
+                        duration_ms,
+                        tool_call_count: 0,
+                        status: "error",
+                        error: Some(&cc_err),
+                    },
+                );
                 log::warn!("Claude Code 调用失败，回退场景模型: {}", cc_err);
                 return call_scene_model_llm(app_handle, db_path, prompt, scene, source)
                     .await
@@ -1506,37 +1540,43 @@ pub(crate) async fn call_scene_model_llm(
             // 单价为可选配置：填了才估算金额，未填 cost 记 0（面板只显示 token）
             let cost = reply.input_tokens as f64 / 1e6 * model.input_price_per_m.unwrap_or(0.0)
                 + reply.output_tokens as f64 / 1e6 * model.output_price_per_m.unwrap_or(0.0);
-            crate::llm::observe::log_call(db_path, &crate::llm::observe::LlmCallEntry {
-                source,
-                channel: "scene_model",
-                scene: Some(&scene_str),
-                model: Some(&model.model_id),
-                input_tokens: reply.input_tokens,
-                cached_input_tokens: reply.cached_input_tokens,
-                output_tokens: reply.output_tokens,
-                cost_cny: cost,
-                duration_ms,
-                tool_call_count: 0,
-                status: "ok",
-                error: None,
-            });
+            crate::llm::observe::log_call(
+                db_path,
+                &crate::llm::observe::LlmCallEntry {
+                    source,
+                    channel: "scene_model",
+                    scene: Some(&scene_str),
+                    model: Some(&model.model_id),
+                    input_tokens: reply.input_tokens,
+                    cached_input_tokens: reply.cached_input_tokens,
+                    output_tokens: reply.output_tokens,
+                    cost_cny: cost,
+                    duration_ms,
+                    tool_call_count: 0,
+                    status: "ok",
+                    error: None,
+                },
+            );
             Ok(reply.content)
         }
         Err(e) => {
-            crate::llm::observe::log_call(db_path, &crate::llm::observe::LlmCallEntry {
-                source,
-                channel: "scene_model",
-                scene: Some(&scene_str),
-                model: Some(&model.model_id),
-                input_tokens: 0,
-                cached_input_tokens: 0,
-                output_tokens: 0,
-                cost_cny: 0.0,
-                duration_ms,
-                tool_call_count: 0,
-                status: "error",
-                error: Some(&e),
-            });
+            crate::llm::observe::log_call(
+                db_path,
+                &crate::llm::observe::LlmCallEntry {
+                    source,
+                    channel: "scene_model",
+                    scene: Some(&scene_str),
+                    model: Some(&model.model_id),
+                    input_tokens: 0,
+                    cached_input_tokens: 0,
+                    output_tokens: 0,
+                    cost_cny: 0.0,
+                    duration_ms,
+                    tool_call_count: 0,
+                    status: "error",
+                    error: Some(&e),
+                },
+            );
             Err(e)
         }
     }
@@ -1646,10 +1686,7 @@ mod tests {
     fn timeline_groups_by_day_when_multi_day() {
         let d1 = parse_flexible_datetime("2026-07-28 23:00", false).unwrap();
         let d2 = parse_flexible_datetime("2026-07-29 09:00", false).unwrap();
-        let acts = vec![
-            log(1, "code.exe", d1, 1800),
-            log(2, "chrome.exe", d2, 1800),
-        ];
+        let acts = vec![log(1, "code.exe", d1, 1800), log(2, "chrome.exe", d2, 1800)];
         let text = aggregate_activities(&acts, true, AGGREGATE_TEXT_CAP);
         assert!(text.contains("【07-28】"), "缺第一天分节: {}", text);
         assert!(text.contains("【07-29】"), "缺第二天分节: {}", text);

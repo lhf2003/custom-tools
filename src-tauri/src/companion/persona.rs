@@ -28,7 +28,10 @@ fn companion_dir(app_data_dir: &Path) -> PathBuf {
 
 /// 加载运行时设定集
 pub fn load(app_data_dir: &Path) -> String {
-    seed_and_load(companion_dir(app_data_dir).join("persona.md"), DEFAULT_PERSONA)
+    seed_and_load(
+        companion_dir(app_data_dir).join("persona.md"),
+        DEFAULT_PERSONA,
+    )
 }
 
 /// 加载运行时经验本（自进化区）

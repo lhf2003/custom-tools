@@ -59,7 +59,10 @@ pub async fn act_on_companion_suggestion(
         } else if let Ok(edit) = serde_json::from_str::<db::ManualEditPayload>(payload_str) {
             if edit.action == "apply_manual_edit" {
                 // 手册修改门控（三期）：用户点了接受才走到这——校验+快照+写入
-                let app_data = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+                let app_data = app_handle
+                    .path()
+                    .app_data_dir()
+                    .map_err(|e| e.to_string())?;
                 crate::companion::skills::apply_manual_content(
                     &app_data,
                     &edit.name,
@@ -173,7 +176,10 @@ pub async fn run_companion_agent_now(
             let notes_dir = crate::notes::get_default_notes_dir()
                 .map_err(|e| format!("获取笔记目录失败: {}", e))?;
             tauri::async_runtime::block_on(crate::companion::analyzer::run_scene_report(
-                &app_handle, &db_for_task, &notes_dir, &date,
+                &app_handle,
+                &db_for_task,
+                &notes_dir,
+                &date,
             ))
         })
         .await
@@ -251,8 +257,7 @@ pub fn list_memos(
     limit: Option<i64>,
 ) -> Result<Vec<db::Memo>, String> {
     let conn = open_conn(&db_state)?;
-    db::list_memos_for_view(&conn, limit.unwrap_or(200))
-        .map_err(|e| format!("查询备忘失败: {}", e))
+    db::list_memos_for_view(&conn, limit.unwrap_or(200)).map_err(|e| format!("查询备忘失败: {}", e))
 }
 
 /// 笔记视图：处置备忘（done / dismissed / 取消勾回 pending）
@@ -300,10 +305,7 @@ pub fn update_companion_memory_fact(
 }
 
 #[tauri::command]
-pub fn delete_companion_memory_fact(
-    db_state: State<DatabaseState>,
-    id: i64,
-) -> Result<(), String> {
+pub fn delete_companion_memory_fact(db_state: State<DatabaseState>, id: i64) -> Result<(), String> {
     let conn = open_conn(&db_state)?;
     let now = chrono::Local::now().timestamp();
     db::delete_memory_fact_audited(&conn, id, "user", now)
@@ -421,7 +423,10 @@ fn format_schedule(s: &crate::companion::skills::Schedule) -> String {
 
 #[tauri::command]
 pub fn list_manuals(app_handle: AppHandle) -> Result<Vec<ManualInfo>, String> {
-    let app_data = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    let app_data = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
     Ok(crate::companion::skills::scan_skills(&app_data)
         .into_iter()
         .map(|s| ManualInfo {
@@ -437,7 +442,10 @@ pub fn list_manuals(app_handle: AppHandle) -> Result<Vec<ManualInfo>, String> {
 /// 读手册完整原文（含 frontmatter——编辑器里 schedule/enabled 也可改）
 #[tauri::command]
 pub fn get_manual(app_handle: AppHandle, name: String) -> Result<String, String> {
-    let app_data = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    let app_data = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
     crate::companion::skills::load_skill_raw(&app_data, &name)
         .ok_or_else(|| format!("手册「{}」不存在", name))
 }
@@ -448,7 +456,10 @@ pub fn save_manual(app_handle: AppHandle, name: String, content: String) -> Resu
     if content.len() > 32 * 1024 {
         return Err("手册内容过长（不超过 32KB）".to_string());
     }
-    let app_data = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    let app_data = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
     crate::companion::skills::apply_manual_content(&app_data, &name, &content)
 }
 
@@ -456,7 +467,10 @@ pub fn save_manual(app_handle: AppHandle, name: String, content: String) -> Resu
 pub fn list_evolution_backups(
     app_handle: AppHandle,
 ) -> Result<Vec<crate::companion::backup::BackupEntry>, String> {
-    let app_data = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    let app_data = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
     Ok(crate::companion::backup::list_backups(&app_data))
 }
 
@@ -467,14 +481,20 @@ pub fn rollback_evolution_backup(
     file: String,
     stamp: String,
 ) -> Result<(), String> {
-    let app_data = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    let app_data = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
     crate::companion::backup::rollback_backup(&app_data, &file, &stamp)
 }
 
 /// 经验本当前容量（字节；治理视图容量条，硬上限 16KB）
 #[tauri::command]
 pub fn get_evolution_size(app_handle: AppHandle) -> Result<u64, String> {
-    let app_data = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    let app_data = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
     let path = app_data.join("companion").join("evolution.md");
     Ok(std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0))
 }
@@ -486,7 +506,10 @@ pub async fn compact_evolution(
     app_handle: AppHandle,
     db_state: State<'_, DatabaseState>,
 ) -> Result<String, String> {
-    let app_data = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    let app_data = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
     let evolution = crate::companion::persona::load_evolution(&app_data);
     if evolution.len() < 14 * 1024 {
         return Ok("经验本还很空，不需要整理".to_string());
@@ -515,7 +538,10 @@ pub async fn compact_evolution(
         }
     }
     if compacted.trim().is_empty() || !missing.is_empty() {
-        return Err(format!("整理结果不完整（缺小节: {}），未覆盖原文件", missing.join("、")));
+        return Err(format!(
+            "整理结果不完整（缺小节: {}），未覆盖原文件",
+            missing.join("、")
+        ));
     }
     if let Err(e) = crate::companion::backup::backup_file(&app_data, "evolution.md") {
         log::warn!("经验本整理前快照失败: {}", e);
@@ -601,8 +627,7 @@ pub fn set_companion_tool_enabled(
 
     let manager = settings_state.0.lock().map_err(|e| e.to_string())?;
     let mut disabled: Vec<String> =
-        serde_json::from_str(&manager.get_settings().disabled_companion_tools)
-            .unwrap_or_default();
+        serde_json::from_str(&manager.get_settings().disabled_companion_tools).unwrap_or_default();
     if enabled {
         disabled.retain(|n| n != &name);
     } else if !disabled.iter().any(|n| n == &name) {
@@ -613,6 +638,10 @@ pub fn set_companion_tool_enabled(
         .set_setting("disabled_companion_tools", &json)
         .map_err(|e| format!("保存设置失败: {}", e))?;
 
-    log::info!("工具「{}」已{}", name, if enabled { "开启" } else { "关闭" });
+    log::info!(
+        "工具「{}」已{}",
+        name,
+        if enabled { "开启" } else { "关闭" }
+    );
     Ok(())
 }

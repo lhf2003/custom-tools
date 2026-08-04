@@ -10,6 +10,7 @@ import {
 import { toDisplayString } from '../functions';
 import { useA2ui } from '../render';
 import type { A2uiComponentDef } from '../types';
+import { sanitizeA2uiUrl } from './url';
 
 export const DISPLAY_TYPES = new Set(['Text', 'Image', 'Icon', 'Video', 'AudioPlayer']);
 
@@ -46,8 +47,12 @@ function Text({ def }: { def: A2uiComponentDef }) {
 
 function Image({ def }: { def: A2uiComponentDef }) {
   const { resolve } = useA2ui();
-  const url = toDisplayString(resolve(def.url));
-  if (!url) return null;
+  const raw = toDisplayString(resolve(def.url));
+  if (!raw) return null;
+  const url = sanitizeA2uiUrl(raw);
+  if (!url) {
+    return <BlockedUrl />;
+  }
   const fit = typeof def.fit === 'string' ? def.fit : 'cover';
   return (
     <img
@@ -67,16 +72,36 @@ function Icon({ def }: { def: A2uiComponentDef }) {
 
 function Video({ def }: { def: A2uiComponentDef }) {
   const { resolve } = useA2ui();
-  const url = toDisplayString(resolve(def.url));
-  if (!url) return null;
-  return <video src={url} controls className="w-full rounded-lg max-h-56" />;
+  const raw = toDisplayString(resolve(def.url));
+  if (!raw) return null;
+  const url = sanitizeA2uiUrl(raw);
+  if (!url) {
+    return <BlockedUrl />;
+  }
+  return <video src={url} controls className="w-full rounded-lg max-h-56">
+      <track kind="captions" src="" srcLang="en" label="无字幕" default />
+    </video>;
 }
 
 function AudioPlayer({ def }: { def: A2uiComponentDef }) {
   const { resolve } = useA2ui();
-  const url = toDisplayString(resolve(def.url));
-  if (!url) return null;
-  return <audio src={url} controls className="w-full h-8" />;
+  const raw = toDisplayString(resolve(def.url));
+  if (!raw) return null;
+  const url = sanitizeA2uiUrl(raw);
+  if (!url) {
+    return <BlockedUrl />;
+  }
+  return <audio src={url} controls className="w-full h-8">
+      <track kind="captions" src="" srcLang="en" label="无字幕" default />
+    </audio>;
+}
+
+function BlockedUrl() {
+  return (
+    <div className="text-xs text-app-text-tertiary bg-white/5 border border-white/10 rounded-lg px-3 py-2">
+      资源被安全策略拦截
+    </div>
+  );
 }
 
 export function DisplayComponent({ def }: { def: A2uiComponentDef }) {

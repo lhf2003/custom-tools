@@ -34,9 +34,11 @@ fn relationship_stage(days: i64) -> &'static str {
 /// 组装状态叙事句（纯函数，便于单测）。
 /// `now` epoch 秒；`open_since` 当前未闭合活动段的开始时间；`first_date` 首次聊天日期。
 fn assemble(now: i64, open_since: Option<i64>, first_date: Option<chrono::NaiveDate>) -> String {
-    let local = chrono::DateTime::from_timestamp(now, 0)
-        .map(|utc| utc.with_timezone(&chrono::Local));
-    let Some(local) = local else { return String::new() };
+    let local =
+        chrono::DateTime::from_timestamp(now, 0).map(|utc| utc.with_timezone(&chrono::Local));
+    let Some(local) = local else {
+        return String::new();
+    };
 
     let mut sentence = format!(
         "现在是{} {}。",

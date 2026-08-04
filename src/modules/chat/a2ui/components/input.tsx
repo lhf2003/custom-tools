@@ -1,6 +1,7 @@
 // 交互组件：Button / CheckBox / TextField / Slider / ChoicePicker / DateTimeInput
 // 输入组件与数据模型双向绑定：写入即时更新本地模型，随 Button action 回传给模型。
 
+import { useId, type ReactNode } from 'react';
 import { evalChecks, toDisplayString } from '../functions';
 import { RenderComponent, useA2ui } from '../render';
 import type { A2uiAction, A2uiComponentDef } from '../types';
@@ -12,9 +13,24 @@ export const INPUT_TYPES = new Set([
 const INPUT_CLS =
   'w-full bg-white/5 border border-white/10 rounded-lg px-2.5 py-1.5 text-sm text-zinc-200 outline-none focus:border-indigo-500/50 placeholder-app-text-placeholder';
 
-function Label({ text }: { text: string }) {
-  if (!text) return null;
-  return <div className="text-xs text-app-text-tertiary mb-1">{text}</div>;
+function Label({
+  text,
+  htmlFor,
+  children,
+}: {
+  text: string;
+  htmlFor?: string;
+  children?: ReactNode;
+}) {
+  if (!text) return children ? <>{children}</> : null;
+  return (
+    // Label 是通用 wrapper：调用方通过 children 传入关联控件，并同步传入 htmlFor/id。
+    // eslint-disable-next-line jsx-a11y/label-has-for
+    <label htmlFor={htmlFor} className="block text-xs text-app-text-tertiary mb-1">
+      {text}
+      {children}
+    </label>
+  );
 }
 
 /** 校验失败提示（checks 或 validationRegexp） */
@@ -79,13 +95,15 @@ function Button({ def }: { def: A2uiComponentDef }) {
 }
 
 function CheckBox({ def }: { def: A2uiComponentDef }) {
+  const id = useId();
   const { resolve, resolvePath, setBoundValue } = useA2ui();
   const path = (def.value as { path?: string } | undefined)?.path;
   const label = toDisplayString(resolve(def.label));
   const checked = path ? Boolean(resolvePath(path)) : false;
   return (
-    <label className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
+    <label htmlFor={id} className="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer">
       <input
+        id={id}
         type="checkbox"
         checked={checked}
         onChange={(e) => path && setBoundValue(path, e.target.checked)}
@@ -97,6 +115,7 @@ function CheckBox({ def }: { def: A2uiComponentDef }) {
 }
 
 function TextField({ def }: { def: A2uiComponentDef }) {
+  const id = useId();
   const { resolve, resolvePath, setBoundValue } = useA2ui();
   const path = (def.value as { path?: string } | undefined)?.path;
   const label = toDisplayString(resolve(def.label));
@@ -105,28 +124,32 @@ function TextField({ def }: { def: A2uiComponentDef }) {
   const value = path ? toDisplayString(resolvePath(path)) : '';
   return (
     <div>
-      <Label text={label} />
-      {multiline ? (
-        <textarea
-          value={value}
-          rows={3}
-          onChange={(e) => path && setBoundValue(path, e.target.value)}
-          className={`${INPUT_CLS} resize-none`}
-        />
-      ) : (
-        <input
-          type="text"
-          value={value}
-          onChange={(e) => path && setBoundValue(path, e.target.value)}
-          className={INPUT_CLS}
-        />
-      )}
+      <Label text={label} htmlFor={id}>
+        {multiline ? (
+          <textarea
+            id={id}
+            value={value}
+            rows={3}
+            onChange={(e) => path && setBoundValue(path, e.target.value)}
+            className={`${INPUT_CLS} resize-none`}
+          />
+        ) : (
+          <input
+            id={id}
+            type="text"
+            value={value}
+            onChange={(e) => path && setBoundValue(path, e.target.value)}
+            className={INPUT_CLS}
+          />
+        )}
+      </Label>
       {!validation.ok && <div className="text-xs text-red-400 mt-1">{validation.message}</div>}
     </div>
   );
 }
 
 function Slider({ def }: { def: A2uiComponentDef }) {
+  const id = useId();
   const { resolve, resolvePath, setBoundValue } = useA2ui();
   const path = (def.value as { path?: string } | undefined)?.path;
   const label = toDisplayString(resolve(def.label));
@@ -145,15 +168,17 @@ function Slider({ def }: { def: A2uiComponentDef }) {
   }
   return (
     <div>
-      <Label text={label ? `${label}：${value}` : String(value)} />
-      <input
-        type="range"
-        min={min}
-        max={max}
-        value={value}
-        onChange={(e) => path && setBoundValue(path, Number(e.target.value))}
-        className="w-full accent-indigo-500"
-      />
+      <Label text={label ? `${label}：${value}` : String(value)} htmlFor={id}>
+        <input
+          id={id}
+          type="range"
+          min={min}
+          max={max}
+          value={value}
+          onChange={(e) => path && setBoundValue(path, Number(e.target.value))}
+          className="w-full accent-indigo-500"
+        />
+      </Label>
     </div>
   );
 }
@@ -184,9 +209,8 @@ function ChoicePicker({ def }: { def: A2uiComponentDef }) {
     if (multiple) {
       const arr = Array.isArray(current) ? [...current] : [];
       const idx = arr.indexOf(v);
-      if (idx >= 0) arr.splice(idx, 1);
-      else arr.push(v);
-      setBoundValue(path, arr);
+      const next = idx >= 0 ? arr.filter((_, i) => i !== idx) : [...arr, v];
+      setBoundValue(path, next);
     } else {
       setBoundValue(path, v);
     }
@@ -218,6 +242,7 @@ function ChoicePicker({ def }: { def: A2uiComponentDef }) {
 }
 
 function DateTimeInput({ def }: { def: A2uiComponentDef }) {
+  const id = useId();
   const { resolve, resolvePath, setBoundValue } = useA2ui();
   const path = (def.value as { path?: string } | undefined)?.path;
   const label = toDisplayString(resolve(def.label));
@@ -227,15 +252,17 @@ function DateTimeInput({ def }: { def: A2uiComponentDef }) {
   const value = path ? toDisplayString(resolvePath(path)) : '';
   return (
     <div>
-      <Label text={label} />
-      <input
-        type={type}
-        value={value}
-        min={typeof def.min === 'string' ? def.min : undefined}
-        max={typeof def.max === 'string' ? def.max : undefined}
-        onChange={(e) => path && setBoundValue(path, e.target.value)}
-        className={`${INPUT_CLS} [color-scheme:dark]`}
-      />
+      <Label text={label} htmlFor={id}>
+        <input
+          id={id}
+          type={type}
+          value={value}
+          min={typeof def.min === 'string' ? def.min : undefined}
+          max={typeof def.max === 'string' ? def.max : undefined}
+          onChange={(e) => path && setBoundValue(path, e.target.value)}
+          className={`${INPUT_CLS} [color-scheme:dark]`}
+        />
+      </Label>
     </div>
   );
 }

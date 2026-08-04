@@ -8,7 +8,7 @@
 //!   Claude Code agent → 场景模型+工具 →（模型/API 不支持 tools 时）场景模型纯问答
 
 use std::collections::{HashMap, VecDeque};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Value};
@@ -27,6 +27,12 @@ const RECENT_KEEP: usize = 12;
 
 /// A2UI surface 状态表：surface_id → 校验器累积状态（组件 id 集等）
 type SurfaceMap = HashMap<String, super::a2ui::SurfaceState>;
+
+/// 未摘要消息行：(消息 id, 角色, 内容)
+type UnsummarizedRows = Vec<(i64, String, String)>;
+
+/// read_unsummarized 的返回：(旧摘要, 摘要水位, 未摘要消息)
+type RawContext = (String, i64, UnsummarizedRows);
 
 /// 回退通道在飞状态：FIFO 排队（与 agent 通道同一语义——
 /// 在飞时新消息入队不打断，答完自动发下一条）
@@ -74,10 +80,7 @@ pub async fn jarvis_chat_send_scene(
 
     // FIFO 排队：在飞则入队，后台循环答完自动续发
     {
-        let mut flying = scene_state
-            .in_flight
-            .lock()
-            .map_err(|e| e.to_string())?;
+        let mut flying = scene_state.in_flight.lock().map_err(|e| e.to_string())?;
         if *flying {
             if let Ok(mut q) = scene_state.queue.lock() {
                 q.push_back((session_id, text));
@@ -101,11 +104,7 @@ pub async fn jarvis_chat_send_scene(
             {
                 log::warn!("场景模型聊天失败: {}", e);
             }
-            let next = state
-                .queue
-                .lock()
-                .ok()
-                .and_then(|mut q| q.pop_front());
+            let next = state.queue.lock().ok().and_then(|mut q| q.pop_front());
             match next {
                 Some(m) => current = m,
                 None => break,
@@ -133,10 +132,18 @@ async fn run_scene_chat(
         .map_err(|e| e.to_string())?;
     let notes_dir = crate::notes::get_default_notes_dir().map_err(|e| e.to_string())?;
 
-    // 解析陪伴场景模型
-    let conn = crate::db::open_connection(db_path).map_err(|e| format!("打开数据库失败: {}", e))?;
+    // 解析陪伴场景模型（同步 SQLite 走 spawn_blocking——本循环跑在 tokio
+    // worker 上，DB 锁等待会拖累整个前端事件泵；下同，不再逐处备注）
+    let app_c = app_handle.clone();
+    let db_path_owned = db_path.clone();
     let (provider, model, thinking_mode, api_key, used_scene) =
-        analyzer::resolve_scene_provider(app_handle, &conn, Scene::Companion)?;
+        tauri::async_runtime::spawn_blocking(move || {
+            let conn = crate::db::open_connection(&db_path_owned)
+                .map_err(|e| format!("打开数据库失败: {}", e))?;
+            analyzer::resolve_scene_provider(&app_c, &conn, Scene::Companion)
+        })
+        .await
+        .map_err(|e| format!("场景模型解析任务失败: {}", e))??;
     let provider_type = provider.provider_type.to_string();
     let scene_str = used_scene.to_string();
 
@@ -198,7 +205,9 @@ async fn run_scene_chat(
         let _ = app_handle.emit("jarvis:chunk", text);
     };
 
-    loop {
+    // 注意：loop 必须绑值（let _），不能写裸 `loop {...};`——rustfmt 会把语句位置
+    // loop 尾部分号当冗余删掉，而 break 带值时无分号形式直接 E0308（实测 rustfmt 1.8）
+    let _ = loop {
         rounds += 1;
         let started = std::time::Instant::now();
         let result = crate::llm::call_llm_stream_with_tools(
@@ -216,10 +225,8 @@ async fn run_scene_chat(
 
         match result {
             Ok(reply) => {
-                let cost = reply.input_tokens as f64 / 1e6
-                    * model.input_price_per_m.unwrap_or(0.0)
-                    + reply.output_tokens as f64 / 1e6
-                        * model.output_price_per_m.unwrap_or(0.0);
+                let cost = reply.input_tokens as f64 / 1e6 * model.input_price_per_m.unwrap_or(0.0)
+                    + reply.output_tokens as f64 / 1e6 * model.output_price_per_m.unwrap_or(0.0);
                 total_cost += cost;
                 crate::llm::observe::log_call(
                     db_path,
@@ -244,11 +251,7 @@ async fn run_scene_chat(
                 }
 
                 // 工具轮：状态提示 + 逐个执行（错误也回传，模型自我纠正）
-                let names: Vec<&str> = reply
-                    .tool_calls
-                    .iter()
-                    .map(|c| c.name.as_str())
-                    .collect();
+                let names: Vec<&str> = reply.tool_calls.iter().map(|c| c.name.as_str()).collect();
                 log::info!("场景模型第 {} 轮工具调用: [{}]", rounds, names.join(", "));
                 let _ = app_handle.emit(
                     "jarvis:status",
@@ -257,23 +260,30 @@ async fn run_scene_chat(
                 messages.push(crate::llm::assistant_tool_message(&provider_type, &reply));
                 for call in &reply.tool_calls {
                     let mut tool_result = if call.name == "render_ui" {
-                        // 锁只在同步校验期间持有（纯 CPU、无 await），FIFO 保证无竞争
-                        match surfaces.lock() {
+                        // 校验同步持锁（纯 CPU、无 await），emit/落库在锁外异步完成
+                        let validated = match surfaces.lock() {
                             Ok(mut all) => {
                                 let session_surfaces = all.entry(session_id).or_default();
-                                match handle_render_ui(
-                                    app_handle,
-                                    db_path,
+                                validate_render_ui(
                                     session_id,
                                     &call.arguments,
                                     session_surfaces,
                                     &mut render_ui_failures,
-                                ) {
-                                    Ok(ok) => ok,
-                                    Err(e) => e,
-                                }
+                                )
                             }
-                            Err(e) => format!("surface 状态不可用：{}", e),
+                            Err(e) => Err(format!("surface 状态不可用：{}", e)),
+                        };
+                        match validated {
+                            Ok((surface_id, payload)) => {
+                                let _ = app_handle.emit("jarvis:status", "贾维斯在画界面…");
+                                let _ = app_handle.emit("jarvis:surface", &payload);
+                                persist_a2ui_message(db_path, session_id, &payload).await;
+                                format!(
+                                    "界面已展示给用户（surface: {}）。用户可能点击其中的按钮或填写表单，届时会以「用户操作」消息的形式回传给你。",
+                                    surface_id
+                                )
+                            }
+                            Err(e) => e,
                         }
                     } else if call.name == "run_shell_command" {
                         super::shell::execute_shell_tool(app_handle, &call.arguments)
@@ -284,14 +294,27 @@ async fn run_scene_chat(
                             .await
                             .unwrap_or_else(|e| e)
                     } else {
-                        tools::execute_tool(db_path, &notes_dir, &call.name, &call.arguments)
-                            .unwrap_or_else(|e| e)
+                        let dp = db_path.clone();
+                        let nd = notes_dir.clone();
+                        let name = call.name.clone();
+                        let args = call.arguments.clone();
+                        match tauri::async_runtime::spawn_blocking(move || {
+                            tools::execute_tool(&dp, &nd, &name, &args)
+                        })
+                        .await
+                        {
+                            Ok(r) => r.unwrap_or_else(|e| e),
+                            Err(e) => format!("工具执行失败: {}", e),
+                        }
                     };
                     // 数据工具结果尾部追加卡片提醒：工具结果是模型注意力最高的位置，
                     // 系统提示里的偏好引导实测会被忽略（软引导失败后的第二道转向）
                     if matches!(
                         call.name.as_str(),
-                        "get_activity_summary" | "search_clipboard" | "get_habit_patterns" | "list_memos"
+                        "get_activity_summary"
+                            | "search_clipboard"
+                            | "get_habit_patterns"
+                            | "list_memos"
                     ) {
                         tool_result.push_str(
                             "\n\n（系统提醒：以上是多条数据，按【界面卡片规则】应接着调用 render_ui 渲染成卡片，再用文字总结。）",
@@ -420,17 +443,16 @@ async fn run_scene_chat(
     Ok(())
 }
 
-/// render_ui 工具（A2UI）：校验 → emit jarvis:surface → 落库 content_type='a2ui'。
-/// 校验失败的原因作为工具结果回喂模型自我纠正；连续失败 2 次后劝退，保文字兜底。
+/// render_ui 校验（同步纯 CPU，持 surfaces 锁期间调用）：A2UI 消息校验并
+/// 应用进 surface 状态，成功返回 (surface_id, 待 emit 的 payload)。
+/// 校验失败原因作为工具结果回喂模型自我纠正；连续失败 2 次后劝退，保文字兜底。
 /// surfaces 来自 state.surfaces（按会话跨消息保持），增量更新因此可行。
-fn handle_render_ui(
-    app_handle: &AppHandle,
-    db_path: &PathBuf,
+fn validate_render_ui(
     session_id: i64,
     arguments: &serde_json::Value,
     surfaces: &mut SurfaceMap,
     failures: &mut usize,
-) -> Result<String, String> {
+) -> Result<(String, serde_json::Value), String> {
     const MAX_RENDER_UI_FAILURES: usize = 2;
 
     let surface_id = arguments
@@ -455,32 +477,33 @@ fn handle_render_ui(
         return Err(format!("A2UI 校验失败：{}。请修正后重试", e));
     }
 
-    let _ = app_handle.emit("jarvis:status", "贾维斯在画界面…");
     let payload = json!({
         "sessionId": session_id,
         "surfaceId": surface_id,
         "messages": msgs,
     });
-    let _ = app_handle.emit("jarvis:surface", &payload);
+    Ok((surface_id.to_string(), payload))
+}
 
-    // 后端直接落库（不同于文字回复由前端 done 落库——界面消息在 tool 循环
-    // 中途产生，等 done 时前端已没有上下文判断该存什么）
-    if let Ok(conn) = crate::db::open_connection(db_path) {
-        let content = serde_json::to_string(&payload).unwrap_or_default();
-        let _ = conn.execute(
-            "INSERT INTO chat_messages (session_id, role, content, content_type, created_at) VALUES (?1, 'assistant', ?2, 'a2ui', datetime('now','localtime'))",
-            rusqlite::params![session_id, content],
-        );
-        let _ = conn.execute(
-            "UPDATE chat_sessions SET updated_at = datetime('now','localtime') WHERE id = ?1",
-            rusqlite::params![session_id],
-        );
-    }
-
-    Ok(format!(
-        "界面已展示给用户（surface: {}）。用户可能点击其中的按钮或填写表单，届时会以「用户操作」消息的形式回传给你。",
-        surface_id
-    ))
+/// A2UI 界面消息落库（spawn_blocking 同步写）。后端直接落库，不同于文字回复
+/// 由前端 done 落库——界面消息在 tool 循环中途产生，等 done 时前端已没有
+/// 上下文判断该存什么。
+async fn persist_a2ui_message(db_path: &Path, session_id: i64, payload: &Value) {
+    let content = serde_json::to_string(payload).unwrap_or_default();
+    let dp = db_path.to_path_buf();
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        if let Ok(conn) = crate::db::open_connection(&dp) {
+            let _ = conn.execute(
+                "INSERT INTO chat_messages (session_id, role, content, content_type, created_at) VALUES (?1, 'assistant', ?2, 'a2ui', datetime('now','localtime'))",
+                rusqlite::params![session_id, content],
+            );
+            let _ = conn.execute(
+                "UPDATE chat_sessions SET updated_at = datetime('now','localtime') WHERE id = ?1",
+                rusqlite::params![session_id],
+            );
+        }
+    })
+    .await;
 }
 
 /// 降级纯问答：模型不支持 function calling 时，换无工具措辞的系统提示单次问答。
@@ -489,7 +512,7 @@ fn handle_render_ui(
 async fn plain_fallback(
     app_handle: &AppHandle,
     db_path: &PathBuf,
-    app_data: &PathBuf,
+    app_data: &Path,
     provider: &crate::llm_provider::models::Provider,
     model: &crate::llm_provider::models::Model,
     api_key: &str,
@@ -544,39 +567,45 @@ async fn plain_fallback(
         Ok(reply) => {
             let cost = reply.input_tokens as f64 / 1e6 * model.input_price_per_m.unwrap_or(0.0)
                 + reply.output_tokens as f64 / 1e6 * model.output_price_per_m.unwrap_or(0.0);
-            crate::llm::observe::log_call(db_path, &crate::llm::observe::LlmCallEntry {
-                source: "chat",
-                channel: "scene_model",
-                scene: Some(scene_str),
-                model: Some(&model.model_id),
-                input_tokens: reply.input_tokens,
-                cached_input_tokens: reply.cached_input_tokens,
-                output_tokens: reply.output_tokens,
-                cost_cny: cost,
-                duration_ms,
-                tool_call_count: 0,
-                status: "ok",
-                error: None,
-            });
+            crate::llm::observe::log_call(
+                db_path,
+                &crate::llm::observe::LlmCallEntry {
+                    source: "chat",
+                    channel: "scene_model",
+                    scene: Some(scene_str),
+                    model: Some(&model.model_id),
+                    input_tokens: reply.input_tokens,
+                    cached_input_tokens: reply.cached_input_tokens,
+                    output_tokens: reply.output_tokens,
+                    cost_cny: cost,
+                    duration_ms,
+                    tool_call_count: 0,
+                    status: "ok",
+                    error: None,
+                },
+            );
             let _ = app_handle.emit("jarvis:chunk", reply.content);
             let _ = app_handle.emit("jarvis:done", cost);
             Ok(())
         }
         Err(e) => {
-            crate::llm::observe::log_call(db_path, &crate::llm::observe::LlmCallEntry {
-                source: "chat",
-                channel: "scene_model",
-                scene: Some(scene_str),
-                model: Some(&model.model_id),
-                input_tokens: 0,
-                cached_input_tokens: 0,
-                output_tokens: 0,
-                cost_cny: 0.0,
-                duration_ms,
-                tool_call_count: 0,
-                status: "error",
-                error: Some(&e),
-            });
+            crate::llm::observe::log_call(
+                db_path,
+                &crate::llm::observe::LlmCallEntry {
+                    source: "chat",
+                    channel: "scene_model",
+                    scene: Some(scene_str),
+                    model: Some(&model.model_id),
+                    input_tokens: 0,
+                    cached_input_tokens: 0,
+                    output_tokens: 0,
+                    cost_cny: 0.0,
+                    duration_ms,
+                    tool_call_count: 0,
+                    status: "error",
+                    error: Some(&e),
+                },
+            );
             let _ = app_handle.emit("jarvis:error", e.clone());
             Err(e)
         }
@@ -596,81 +625,12 @@ async fn load_context(
     db_path: &PathBuf,
     session_id: i64,
 ) -> Result<ChatContext, String> {
-    let (summary, watermark, unsummarized) = {
-        let conn = crate::db::open_connection(db_path).map_err(|e| format!("打开数据库失败: {}", e))?;
-        let (summary, watermark) = conn
-            .query_row(
-                "SELECT summary, summarized_up_to FROM chat_sessions WHERE id = ?1",
-                [session_id],
-                |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)),
-            )
-            .unwrap_or((String::new(), 0));
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, role, content, content_type FROM chat_messages
-                 WHERE session_id = ?1 AND id > ?2 ORDER BY id ASC",
-            )
-            .map_err(|e| e.to_string())?;
-        let rows = stmt
-            .query_map(rusqlite::params![session_id, watermark], |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                ))
-            })
-            .map_err(|e| e.to_string())?;
-        let raw: Vec<(i64, String, String, String)> = rows
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
-        // a2ui 界面消息不喂协议 JSON（烧 token 且干扰回答），但也不再用空占位文本——
-        // 空占位会让模型对卡片内容失忆，收到「用户操作」回传时只能复读占位句式。
-        // 做法：同一 surfaceId 的多行（创建+增量）合并重放，在其最后出现处放语义摘要
-        //（标题/按钮 action/数据），模型由此记得卡片里有什么。
-        let mut surface_acc: HashMap<String, (Vec<Value>, usize)> = HashMap::new();
-        for (idx, (_, _, content, content_type)) in raw.iter().enumerate() {
-            if content_type != "a2ui" {
-                continue;
-            }
-            if let Ok(p) = serde_json::from_str::<Value>(content) {
-                let sid = p
-                    .get("surfaceId")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_string();
-                let msgs = p
-                    .get("messages")
-                    .and_then(|v| v.as_array())
-                    .cloned()
-                    .unwrap_or_default();
-                let entry = surface_acc.entry(sid).or_insert_with(|| (Vec::new(), idx));
-                entry.0.extend(msgs);
-                entry.1 = idx;
-            }
-        }
-        let mut unsummarized: Vec<(i64, String, String)> = Vec::new();
-        for (idx, (id, role, content, content_type)) in raw.into_iter().enumerate() {
-            if content_type != "a2ui" {
-                unsummarized.push((id, role, content));
-                continue;
-            }
-            let sid = serde_json::from_str::<Value>(&content)
-                .ok()
-                .and_then(|p| p.get("surfaceId").and_then(|v| v.as_str()).map(str::to_string));
-            match sid {
-                // 同 surface 的较早行已并入摘要，丢弃；最后一行位置放摘要
-                Some(s) if surface_acc.get(&s).map(|e| e.1) == Some(idx) => {
-                    let summary = super::a2ui::summarize_surface(&surface_acc[&s].0);
-                    unsummarized.push((id, role, summary));
-                }
-                Some(_) => {}
-                // 解析失败的 a2ui 行：回退空占位，不带原始 JSON
-                None => unsummarized.push((id, role, "（向用户展示了一张界面卡片）".to_string())),
-            }
-        }
-        (summary, watermark, unsummarized)
-    };
+    // 同步 SQLite 读段整体进 spawn_blocking
+    let dp = db_path.clone();
+    let (summary, watermark, unsummarized) =
+        tauri::async_runtime::spawn_blocking(move || read_unsummarized(&dp, session_id))
+            .await
+            .map_err(|e| format!("读取聊天上下文任务失败: {}", e))??;
 
     let mut summary = summary;
     let mut summarized_count = 0usize;
@@ -680,12 +640,7 @@ async fn load_context(
         match summarize_chunk(app_handle, db_path, &summary, chunk).await {
             Ok(new_summary) => {
                 let new_watermark = chunk.last().map(|(id, _, _)| *id).unwrap_or(watermark);
-                if let Ok(conn) = crate::db::open_connection(db_path) {
-                    let _ = conn.execute(
-                        "UPDATE chat_sessions SET summary = ?1, summarized_up_to = ?2 WHERE id = ?3",
-                        rusqlite::params![new_summary, new_watermark, session_id],
-                    );
-                }
+                save_summary(db_path, session_id, &new_summary, new_watermark).await;
                 summary = new_summary;
                 summarized_count = cut;
             }
@@ -698,6 +653,100 @@ async fn load_context(
         .map(|(_, role, content)| (role.clone(), content.clone()))
         .collect();
     Ok(ChatContext { summary, recent })
+}
+
+/// 摘要回写（同步 SQLite 写进 spawn_blocking）
+async fn save_summary(db_path: &Path, session_id: i64, summary: &str, watermark: i64) {
+    let dp = db_path.to_path_buf();
+    let s = summary.to_string();
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        if let Ok(conn) = crate::db::open_connection(&dp) {
+            let _ = conn.execute(
+                "UPDATE chat_sessions SET summary = ?1, summarized_up_to = ?2 WHERE id = ?3",
+                rusqlite::params![s, watermark, session_id],
+            );
+        }
+    })
+    .await;
+}
+
+/// 同步读取段：旧摘要 + 摘要水位 + 未摘要消息（a2ui 合并重放为语义摘要）。
+/// a2ui 界面消息不喂协议 JSON（烧 token 且干扰回答），但也不再用空占位文本——
+/// 空占位会让模型对卡片内容失忆，收到「用户操作」回传时只能复读占位句式。
+/// 做法：同一 surfaceId 的多行（创建+增量）合并重放，在其最后出现处放语义摘要
+///（标题/按钮 action/数据），模型由此记得卡片里有什么。
+fn read_unsummarized(db_path: &Path, session_id: i64) -> Result<RawContext, String> {
+    let conn = crate::db::open_connection(db_path).map_err(|e| format!("打开数据库失败: {}", e))?;
+    let (summary, watermark) = conn
+        .query_row(
+            "SELECT summary, summarized_up_to FROM chat_sessions WHERE id = ?1",
+            [session_id],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)),
+        )
+        .unwrap_or((String::new(), 0));
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, role, content, content_type FROM chat_messages
+             WHERE session_id = ?1 AND id > ?2 ORDER BY id ASC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(rusqlite::params![session_id, watermark], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+    let raw: Vec<(i64, String, String, String)> = rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    let mut surface_acc: HashMap<String, (Vec<Value>, usize)> = HashMap::new();
+    for (idx, (_, _, content, content_type)) in raw.iter().enumerate() {
+        if content_type != "a2ui" {
+            continue;
+        }
+        if let Ok(p) = serde_json::from_str::<Value>(content) {
+            let sid = p
+                .get("surfaceId")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
+            let msgs = p
+                .get("messages")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+            let entry = surface_acc.entry(sid).or_insert_with(|| (Vec::new(), idx));
+            entry.0.extend(msgs);
+            entry.1 = idx;
+        }
+    }
+    let mut unsummarized: Vec<(i64, String, String)> = Vec::new();
+    for (idx, (id, role, content, content_type)) in raw.into_iter().enumerate() {
+        if content_type != "a2ui" {
+            unsummarized.push((id, role, content));
+            continue;
+        }
+        let sid = serde_json::from_str::<Value>(&content).ok().and_then(|p| {
+            p.get("surfaceId")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        });
+        match sid {
+            // 同 surface 的较早行已并入摘要，丢弃；最后一行位置放摘要
+            Some(s) if surface_acc.get(&s).map(|e| e.1) == Some(idx) => {
+                let summary = super::a2ui::summarize_surface(&surface_acc[&s].0);
+                unsummarized.push((id, role, summary));
+            }
+            Some(_) => {}
+            // 解析失败的 a2ui 行：回退空占位，不带原始 JSON
+            None => unsummarized.push((id, role, "（向用户展示了一张界面卡片）".to_string())),
+        }
+    }
+    Ok((summary, watermark, unsummarized))
 }
 
 /// 把一段旧消息压缩进滚动摘要：旧摘要 + 新增对话 → 新摘要（一次场景模型调用，

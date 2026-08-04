@@ -18,7 +18,7 @@ pub mod tools;
 pub mod watcher;
 pub mod websearch;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc, RwLock};
 
 use rusqlite::Connection;
@@ -110,7 +110,11 @@ pub fn claude_code_enabled(app_handle: &AppHandle) -> bool {
 
     app_handle
         .try_state::<crate::commands::settings::SettingsState>()
-        .and_then(|s| s.0.lock().ok().map(|m| m.get_settings().claude_code_enabled))
+        .and_then(|s| {
+            s.0.lock()
+                .ok()
+                .map(|m| m.get_settings().claude_code_enabled)
+        })
         .unwrap_or(false)
 }
 
@@ -475,13 +479,13 @@ fn check_morning_digest(
 
 /// 触发器解析重试：LLM 暂时不可达（如断网/VPN 未连）导致解析失败的备忘，
 /// 每小时补试一次（每次最多 2 条，避免风暴）
-fn retry_intent_parse(conn: &Connection, app_handle: &AppHandle, db_path: &PathBuf) {
+fn retry_intent_parse(conn: &Connection, app_handle: &AppHandle, db_path: &Path) {
     let pending = db::list_memos_unparsed(conn, 2).unwrap_or_default();
 
     for memo in pending {
         let text = memo.content_raw.clone();
         let app = app_handle.clone();
-        let db = db_path.clone();
+        let db = db_path.to_path_buf();
         tauri::async_runtime::spawn(async move {
             if let Err(e) = analyzer::parse_and_store_triggers(&app, &db, memo.id, &text).await {
                 log::warn!("备忘 #{} 重试解析仍失败: {}", memo.id, e);

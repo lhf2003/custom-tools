@@ -59,6 +59,16 @@ pub fn init_table(conn: &Connection) -> Result<()> {
         [],
     )?;
 
+    // 全量扫描元信息：last_full_scan 供新鲜度判断——不能复用 app_cache 表的
+    // MAX(updated_at)（watcher 增量更新也刷它，会让全量扫描永不触发）
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS app_cache_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )",
+        [],
+    )?;
+
     Ok(())
 }
 
@@ -143,7 +153,26 @@ pub fn replace_batch(conn: &mut Connection, entries: &[AppCacheEntry]) -> Result
         )?;
     }
 
-    tx.commit()
+    tx.commit()?;
+
+    // 记录全量扫描完成时间（新鲜度判断的真值源，见 init_table 注释）
+    conn.execute(
+        "INSERT INTO app_cache_meta (key, value) VALUES ('last_full_scan', CURRENT_TIMESTAMP)
+         ON CONFLICT(key) DO UPDATE SET value = CURRENT_TIMESTAMP",
+        [],
+    )?;
+
+    Ok(())
+}
+
+/// 上次全量扫描时间（UTC，格式同 CURRENT_TIMESTAMP）；从未全量扫过返回 None
+pub fn last_full_scan(conn: &Connection) -> Option<String> {
+    conn.query_row(
+        "SELECT value FROM app_cache_meta WHERE key = 'last_full_scan'",
+        [],
+        |row| row.get(0),
+    )
+    .ok()
 }
 
 /// Batch save multiple entries (more efficient)

@@ -330,6 +330,19 @@ impl Database {
             [],
         )?;
 
+        // Shell 命令确认审计：每条用户确认/拒绝落痕（命令全文 + 决策 + 当时权限模式）。
+        // 系统原生弹窗防伪造点击，审计表保证事后可追溯
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS shell_confirm_audit (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                command TEXT NOT NULL,
+                allowed INTEGER NOT NULL,
+                mode TEXT NOT NULL,
+                created_at DATETIME DEFAULT (datetime('now','localtime'))
+            )",
+            [],
+        )?;
+
         // Migration: 统计页观测增强——缓存命中 token 与工具调用次数
         ensure_column(
             &self.conn,
@@ -367,7 +380,14 @@ impl Database {
         self.migrate_scene_configs_check()?;
 
         // Insert default scene configs if not exists (provider_id and model_id are NULL initially)
-        let default_scenes = ["chat", "qa", "translate", "companion", "memory_extraction", "diary"];
+        let default_scenes = [
+            "chat",
+            "qa",
+            "translate",
+            "companion",
+            "memory_extraction",
+            "diary",
+        ];
         for scene in &default_scenes {
             self.conn.execute(
                 "INSERT OR IGNORE INTO llm_scene_configs (scene, provider_id, model_id) VALUES (?1, NULL, NULL)",

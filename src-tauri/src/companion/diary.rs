@@ -19,15 +19,26 @@ const ATTITUDE_SPLIT: &str = "===态度===";
 pub const FOCUS_KEY: &str = "daily_focus";
 pub const FOCUS_DATE_KEY: &str = "daily_focus_date";
 
-pub fn run_diary_blocking(app_handle: &AppHandle, db_path: &PathBuf, date: &str) -> Result<String, String> {
+pub fn run_diary_blocking(
+    app_handle: &AppHandle,
+    db_path: &PathBuf,
+    date: &str,
+) -> Result<String, String> {
     tauri::async_runtime::block_on(run_diary(app_handle, db_path, date))
 }
 
 /// 生成当晚日记：素材（当日聚合 + 最近聊天 + 今日记忆变更 + 上次态度）→
 /// 单次调用两段输出（日记正文 + 态度指引）→ 日记落盘、attitude.md 重写。
-pub async fn run_diary(app_handle: &AppHandle, db_path: &PathBuf, date: &str) -> Result<String, String> {
+pub async fn run_diary(
+    app_handle: &AppHandle,
+    db_path: &PathBuf,
+    date: &str,
+) -> Result<String, String> {
     let conn = Connection::open(db_path).map_err(|e| format!("打开数据库失败: {}", e))?;
-    let app_data = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    let app_data = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
 
     let aggregate = analyzer::aggregate_day(&conn, date).unwrap_or_default();
     let recent_chats = user_messages_on(&conn, date, 10);
@@ -102,14 +113,22 @@ pub async fn run_diary(app_handle: &AppHandle, db_path: &PathBuf, date: &str) ->
     Ok(format!("日记已写入（{} 字）", diary_text.chars().count()))
 }
 
-pub fn run_focus_blocking(app_handle: &AppHandle, db_path: &PathBuf, source_date: &str) -> Result<String, String> {
+pub fn run_focus_blocking(
+    app_handle: &AppHandle,
+    db_path: &PathBuf,
+    source_date: &str,
+) -> Result<String, String> {
     tauri::async_runtime::block_on(run_focus(app_handle, db_path, source_date))
 }
 
 /// 生成「明日关注」：基于记忆 + 活跃意图 + 习惯模式 + source_date 当天使用，
 /// 为 source_date 的次日列 3-5 条关注清单，存 settings（晨间卡与聊天注入读取）。
 /// 0 点链路传昨天 → 清单面向刚开始的新一天。
-async fn run_focus(app_handle: &AppHandle, db_path: &PathBuf, source_date: &str) -> Result<String, String> {
+async fn run_focus(
+    app_handle: &AppHandle,
+    db_path: &PathBuf,
+    source_date: &str,
+) -> Result<String, String> {
     let conn = Connection::open(db_path).map_err(|e| format!("打开数据库失败: {}", e))?;
 
     let facts = db::list_memory_facts(&conn, 50).unwrap_or_default();
@@ -148,7 +167,10 @@ async fn run_focus(app_handle: &AppHandle, db_path: &PathBuf, source_date: &str)
             if list.is_empty() {
                 "（还没学到稳定模式）".to_string()
             } else {
-                list.iter().map(|d| format!("- {}", d)).collect::<Vec<_>>().join("\n")
+                list.iter()
+                    .map(|d| format!("- {}", d))
+                    .collect::<Vec<_>>()
+                    .join("\n")
             }
         })
         .unwrap_or_else(|_| "（模式查询失败）".to_string());

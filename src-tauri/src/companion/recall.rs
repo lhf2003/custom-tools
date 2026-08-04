@@ -91,7 +91,10 @@ pub async fn run_recall(app_handle: &AppHandle, db_path: &PathBuf) -> Result<Str
     }
     let max_id = msgs.last().map(|(id, _)| *id).unwrap_or(watermark);
 
-    let app_data = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
+    let app_data = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
     let persona_text = persona::load(&app_data);
     let evolution = persona::load_evolution(&app_data);
     let manual = super::skills::load_skill_body(&app_data, "recall");
@@ -125,8 +128,14 @@ pub async fn run_recall(app_handle: &AppHandle, db_path: &PathBuf) -> Result<Str
         msgs = msgs_text
     );
 
-    let reply =
-        analyzer::call_llm_with_scene(app_handle, db_path, prompt, Scene::MemoryExtraction, "recall").await?;
+    let reply = analyzer::call_llm_with_scene(
+        app_handle,
+        db_path,
+        prompt,
+        Scene::MemoryExtraction,
+        "recall",
+    )
+    .await?;
     let ops = parse_recall_ops(&reply)?;
 
     let now = chrono::Local::now().timestamp();
@@ -141,8 +150,15 @@ pub async fn run_recall(app_handle: &AppHandle, db_path: &PathBuf) -> Result<Str
         match op.action.as_str() {
             // target_id 对不上已有记忆时降级为 add（宁多记不丢记）
             "update" if op.target_id.map(|t| known.contains(&t)).unwrap_or(false) => {
-                db::update_memory_fact(&conn, op.target_id.unwrap(), fact, &op.category, "recall", now)
-                    .map_err(|e| format!("更新记忆失败: {}", e))?;
+                db::update_memory_fact(
+                    &conn,
+                    op.target_id.unwrap(),
+                    fact,
+                    &op.category,
+                    "recall",
+                    now,
+                )
+                .map_err(|e| format!("更新记忆失败: {}", e))?;
                 updated += 1;
             }
             _ => {

@@ -27,8 +27,14 @@ const EMBEDDED_SKILLS: &[(&str, &str)] = &[
 /// Daily 支持逗号/空格分隔的多个时刻（如 daily 09:00,14:00,18:00,00:00），按时间升序去重。
 #[derive(Debug, Clone, PartialEq)]
 pub enum Schedule {
-    Daily { times: Vec<(u32, u32)> },
-    Weekly { weekday: u32, hour: u32, minute: u32 },
+    Daily {
+        times: Vec<(u32, u32)>,
+    },
+    Weekly {
+        weekday: u32,
+        hour: u32,
+        minute: u32,
+    },
 }
 
 /// 一本手册：frontmatter 元数据 + 正文
@@ -69,7 +75,10 @@ pub fn scan_skills(app_data_dir: &Path) -> Vec<Skill> {
         let (fields, body) = split_frontmatter(&content);
         match skill_from_fields(&fields, body, &stem) {
             Some(skill) => out.push(skill),
-            None => log::warn!("手册 {} frontmatter 无效（缺 name 或与文件名不一致），已跳过", path.display()),
+            None => log::warn!(
+                "手册 {} frontmatter 无效（缺 name 或与文件名不一致），已跳过",
+                path.display()
+            ),
         }
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));
@@ -111,8 +120,11 @@ pub fn apply_manual_content(app_data_dir: &Path, name: &str, content: &str) -> R
     if let Err(e) = super::backup::backup_file(app_data_dir, &format!("skills/{}.md", name)) {
         log::warn!("手册 {} 快照失败: {}", name, e);
     }
-    std::fs::write(skills_dir(app_data_dir).join(format!("{}.md", name)), content)
-        .map_err(|e| format!("写入手册失败: {}", e))
+    std::fs::write(
+        skills_dir(app_data_dir).join(format!("{}.md", name)),
+        content,
+    )
+    .map_err(|e| format!("写入手册失败: {}", e))
 }
 
 /// 启动播种：skills/<name>.md 不存在时写入。
@@ -168,7 +180,11 @@ fn skill_from_fields(fields: &[(String, String)], body: String, stem: &str) -> O
     } else {
         let parsed = parse_schedule(&schedule_raw);
         if parsed.is_none() {
-            log::warn!("手册 {} 的 schedule「{}」无法解析，按无定时处理", name, schedule_raw);
+            log::warn!(
+                "手册 {} 的 schedule「{}」无法解析，按无定时处理",
+                name,
+                schedule_raw
+            );
         }
         parsed
     };
@@ -235,7 +251,11 @@ fn parse_schedule(s: &str) -> Option<Schedule> {
         }
         ["weekly", dow, time] => {
             let weekday = parse_weekday(dow)?;
-            parse_time(time).map(|(hour, minute)| Schedule::Weekly { weekday, hour, minute })
+            parse_time(time).map(|(hour, minute)| Schedule::Weekly {
+                weekday,
+                hour,
+                minute,
+            })
         }
         _ => None,
     }
@@ -294,7 +314,9 @@ mod tests {
     fn parses_schedules() {
         assert_eq!(
             parse_schedule("daily 21:00"),
-            Some(Schedule::Daily { times: vec![(21, 0)] })
+            Some(Schedule::Daily {
+                times: vec![(21, 0)]
+            })
         );
         assert_eq!(
             parse_schedule("daily 09:00,14:00,18:00,00:00"),
@@ -311,7 +333,11 @@ mod tests {
         );
         assert_eq!(
             parse_schedule("weekly fri 17:30"),
-            Some(Schedule::Weekly { weekday: 4, hour: 17, minute: 30 })
+            Some(Schedule::Weekly {
+                weekday: 4,
+                hour: 17,
+                minute: 30
+            })
         );
         assert_eq!(parse_schedule("daily 25:00"), None);
         assert_eq!(parse_schedule("daily 09:00,25:00"), None);
@@ -331,7 +357,11 @@ mod tests {
     #[test]
     fn enabled_defaults_true() {
         let fields = vec![("name".to_string(), "a".to_string())];
-        assert!(skill_from_fields(&fields, String::new(), "a").unwrap().enabled);
+        assert!(
+            skill_from_fields(&fields, String::new(), "a")
+                .unwrap()
+                .enabled
+        );
         let off = vec![
             ("name".to_string(), "a".to_string()),
             ("enabled".to_string(), "false".to_string()),

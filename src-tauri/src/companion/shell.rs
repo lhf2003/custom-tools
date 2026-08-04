@@ -4,7 +4,8 @@
 //! Claude Code 自己有 shell。
 //!
 //! 安全模型（设置页「工具」页签可配，settings 键 shell_permission_mode）：
-//! - confirm_all（默认）：每条命令执行前都要用户在聊天里点头
+//! - confirm_all（默认）：每条命令执行前弹系统原生确认框（渲染在 WebView 外，
+//!   前端被注入也伪造不了点击），用户决策写 shell_confirm_audit 审计表
 //! - accept_edits：预留档位（对齐 Claude Code 权限语义），当前没有文件类工具，
 //!   行为同 confirm_all
 //! - unattended：安全命令自动放行——只读首词白名单（dir/ipconfig 等）+
@@ -12,21 +13,10 @@
 //!
 //! 灾难命令硬拒绝清单不受权限模式影响，用户确认也救不回来。
 
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::sync::oneshot;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
-/// 等待用户确认的 pending 表：confirm_id → 放行通道（tauri managed state）
-#[derive(Default)]
-pub struct ShellConfirmState {
-    pending: Arc<Mutex<HashMap<String, oneshot::Sender<bool>>>>,
-}
-
-/// 确认等待超时：用户不点视为拒绝（防 tool 循环吊死）
-const CONFIRM_TIMEOUT_SECS: u64 = 120;
 /// 命令执行默认/最大超时
 const DEFAULT_TIMEOUT_SECS: u64 = 30;
 const MAX_TIMEOUT_SECS: u64 = 120;
@@ -34,20 +24,53 @@ const MAX_TIMEOUT_SECS: u64 = 120;
 const MAX_OUTPUT_CHARS: usize = 6000;
 
 /// 硬拒绝：单 token 即灾难的命令（token 去可执行后缀后匹配，防 format.com 绕过）
-const DENY_TOKENS: &[&str] = &["diskpart", "shutdown", "bcdedit", "takeown", "icacls", "format"];
+const DENY_TOKENS: &[&str] = &[
+    "diskpart", "shutdown", "bcdedit", "takeown", "icacls", "format",
+];
 
 /// 无打扰模式自动放行的只读命令首词（且整串不含 | & > < ` 等壳元字符）
 const SAFE_COMMANDS: &[&str] = &[
-    "dir", "type", "echo", "where", "whoami", "hostname", "ver", "vol", "ipconfig", "ping",
-    "nslookup", "tasklist", "systeminfo", "tree", "findstr", "find", "more",
+    "dir",
+    "type",
+    "echo",
+    "where",
+    "whoami",
+    "hostname",
+    "ver",
+    "vol",
+    "ipconfig",
+    "ping",
+    "nslookup",
+    "tasklist",
+    "systeminfo",
+    "tree",
+    "findstr",
+    "find",
+    "more",
 ];
 
 /// 子命令级白名单：带写能力的命令，只在子命令明确只读时放行
 const SAFE_GIT_SUBS: &[&str] = &[
-    "status", "log", "diff", "show", "blame", "ls-files", "shortlog", "describe", "rev-parse",
+    "status",
+    "log",
+    "diff",
+    "show",
+    "blame",
+    "ls-files",
+    "shortlog",
+    "describe",
+    "rev-parse",
 ];
 const SAFE_NPM_SUBS: &[&str] = &[
-    "list", "ls", "outdated", "view", "info", "doctor", "ping", "--version", "-v",
+    "list",
+    "ls",
+    "outdated",
+    "view",
+    "info",
+    "doctor",
+    "ping",
+    "--version",
+    "-v",
 ];
 const SAFE_PIP_SUBS: &[&str] = &["list", "show", "freeze", "--version", "-V"];
 const SAFE_CARGO_SUBS: &[&str] = &["tree", "search", "--version", "-V"];
@@ -74,7 +97,9 @@ pub async fn execute_shell_tool(app_handle: &AppHandle, args: &Value) -> Result<
     // 换行/回车在 cmd 里能分隔命令（normalize 会压成空格，首词白名单被打穿）；
     // 双向覆盖字符（U+202A-202E、U+2066-2069）让确认弹窗显示的与实际执行的不一致
     if command.chars().any(|c| {
-        c.is_control() || ('\u{202a}'..='\u{202e}').contains(&c) || ('\u{2066}'..='\u{2069}').contains(&c)
+        c.is_control()
+            || ('\u{202a}'..='\u{202e}').contains(&c)
+            || ('\u{2066}'..='\u{2069}').contains(&c)
     }) {
         return Err("命令包含控制字符（换行/双向覆盖等），已拒绝执行".to_string());
     }
@@ -156,9 +181,12 @@ fn hard_deny_reason(command: &str) -> Option<&'static str> {
 /// 只读安全判定：整串无壳元字符（防 dir && del 拼接），且命中
 /// 首词白名单 或 子命令级白名单（git/npm 等有写能力的命令只看只读子命令）
 fn is_safe_readonly(normalized: &str) -> bool {
+    // 元字符黑名单：| & > < ` 是 cmd 真分隔/重定向；';' 在 cmd 里不是分隔符
+    //（实测 `cmd /c "dir ; echo x"` 中分号按字面传递），但 dir 等命令用它
+    // 分隔参数、PowerShell 拿它分语句——收进来做纵深防御，成本为零
     if normalized
         .chars()
-        .any(|c| matches!(c, '|' | '&' | '>' | '<' | '`'))
+        .any(|c| matches!(c, '|' | '&' | '>' | '<' | '`' | ';'))
     {
         return false;
     }
@@ -197,44 +225,54 @@ fn permission_mode(app_handle: &AppHandle) -> String {
         .unwrap_or_else(|| "confirm_all".to_string())
 }
 
-/// 发起用户确认：emit 事件给聊天前端，等允许/拒绝（超时按拒绝）。
+/// 发起用户确认：系统原生弹窗 + 审计留痕。
+/// 原生弹窗渲染在 WebView 外——前端被注入恶意脚本也伪造不了用户点击
+///（此前 WebView 弹窗只回传 boolean，invoke 即可放行）；每条决策连同
+/// 命令全文、当时权限模式写入 shell_confirm_audit，事后可追溯。
 /// 返回 true = 用户允许执行。
 async fn confirm_with_user(app_handle: &AppHandle, command: &str) -> bool {
-    let Some(state) = app_handle.try_state::<ShellConfirmState>() else {
-        log::warn!("ShellConfirmState 未初始化，拒绝执行");
-        return false;
-    };
-
-    let confirm_id = format!("{:016x}", rand::random::<u64>());
-    let (tx, rx) = oneshot::channel::<bool>();
-    if let Ok(mut pending) = state.pending.lock() {
-        pending.insert(confirm_id.clone(), tx);
-    } else {
-        return false;
-    }
-
-    let _ = app_handle.emit(
-        "jarvis:shell-confirm",
-        serde_json::json!({ "id": confirm_id, "command": command }),
-    );
-    let _ = app_handle.emit("jarvis:status", "等你确认命令…");
-
-    let allowed = matches!(
-        tokio::time::timeout(std::time::Duration::from_secs(CONFIRM_TIMEOUT_SECS), rx).await,
-        Ok(Ok(true))
-    );
-
-    // 兜底清理（正常路径 resolve 时已移除）
-    if let Ok(mut pending) = state.pending.lock() {
-        pending.remove(&confirm_id);
-    }
-    // 终态回发：用户点击路径前端已自行关窗（幂等）；超时/晚点路径靠它关掉
-    // 僵尸弹窗——前端收不到 close 信号时确认框会永久悬挂
-    let _ = app_handle.emit(
-        "jarvis:shell-confirm-resolved",
-        serde_json::json!({ "id": confirm_id, "allowed": allowed }),
-    );
-    allowed
+    let _ = app_handle.emit("jarvis:status", "等你确认命令（系统弹窗）…");
+    let app = app_handle.clone();
+    let command_owned = command.to_string();
+    let db_path = app_handle
+        .try_state::<crate::db::DatabaseState>()
+        .map(|s| s.0.clone());
+    let mode = permission_mode(app_handle);
+    // blocking_show 是同步阻塞调用，必须进 spawn_blocking（顺带把审计写入
+    // 也放这里——SQLite 同步写不占用 tokio worker）
+    tauri::async_runtime::spawn_blocking(move || {
+        // 弹窗展示截断：命令全文在审计表，弹窗保证关键部分可见即可
+        let display: String = command_owned.chars().take(800).collect();
+        let display = if display.len() < command_owned.len() {
+            format!("{}\n…（命令过长已截断，全文见审计表）", display)
+        } else {
+            display
+        };
+        let allowed = app
+            .dialog()
+            .message(format!(
+                "贾维斯要在你的电脑上执行命令：\n\n{}\n\n只放行你本人核实过的命令。",
+                display
+            ))
+            .title("Shell 命令确认")
+            .kind(MessageDialogKind::Warning)
+            .buttons(MessageDialogButtons::OkCancelCustom(
+                "允许执行".to_string(),
+                "拒绝".to_string(),
+            ))
+            .blocking_show();
+        if let Some(db_path) = db_path {
+            if let Ok(conn) = crate::db::open_connection(&db_path) {
+                let _ = conn.execute(
+                    "INSERT INTO shell_confirm_audit (command, allowed, mode) VALUES (?1, ?2, ?3)",
+                    rusqlite::params![command_owned, allowed as i64, mode],
+                );
+            }
+        }
+        allowed
+    })
+    .await
+    .unwrap_or(false)
 }
 
 /// 执行命令：cmd /c + UTF-8 代码页（中文 Windows 默认 GBK，不切页输出必乱码），
@@ -293,28 +331,6 @@ fn truncate(s: &str) -> String {
     format!("{}\n…（输出过长，已截断）", kept)
 }
 
-/// 前端确认回执：允许/拒绝（tauri command，聊天弹窗按钮调用）
-#[tauri::command]
-pub fn resolve_shell_confirm(
-    state: tauri::State<'_, ShellConfirmState>,
-    id: String,
-    allow: bool,
-) -> Result<(), String> {
-    let tx = state
-        .pending
-        .lock()
-        .map_err(|e| e.to_string())?
-        .remove(&id);
-    match tx {
-        Some(tx) => {
-            let _ = tx.send(allow);
-            Ok(())
-        }
-        // 超时已被清理：静默成功（用户晚点了，结果与拒绝一致）
-        None => Ok(()),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -329,7 +345,7 @@ mod tests {
         assert!(hard_deny_reason("reg delete HKLM\\Software /f").is_some());
         assert!(hard_deny_reason("net user admin pass /add").is_some());
         assert!(hard_deny_reason("rm -rf /").is_some());
-        assert!(hard_deny_reason("cipher /w:c:\\").is_some() == false); // /w 带盘符合并非独立 token，走确认
+        assert!(hard_deny_reason("cipher /w:c:\\").is_none()); // /w 带盘符合并非独立 token，走确认
         assert!(hard_deny_reason("cipher /w c:\\").is_some());
         // 大小写不敏感
         assert!(hard_deny_reason("DEL /S /Q c:\\temp").is_some());
@@ -366,6 +382,8 @@ mod tests {
         assert!(is_safe_readonly(&normalize("tasklist")));
         assert!(!is_safe_readonly(&normalize("dir && del x")));
         assert!(!is_safe_readonly(&normalize("dir > out.txt")));
+        // ';' 在 cmd 里不是分隔符（实测），但列入黑名单做纵深防御
+        assert!(!is_safe_readonly(&normalize("dir ; del x")));
     }
 
     #[test]
@@ -375,13 +393,15 @@ mod tests {
         assert!(is_safe_readonly(&normalize("git log --oneline -10")));
         assert!(is_safe_readonly(&normalize("git diff HEAD~1")));
         assert!(is_safe_readonly(&normalize("git branch"))); // 裸命令 = 列表
-        // git 写子命令/带参 branch 不放行
+                                                             // git 写子命令/带参 branch 不放行
         assert!(!is_safe_readonly(&normalize("git branch -d feature")));
         assert!(!is_safe_readonly(&normalize("git reset --hard")));
         assert!(!is_safe_readonly(&normalize("git checkout main")));
         // npm/pip/cargo/winget 只读组合
         assert!(is_safe_readonly(&normalize("npm list")));
-        assert!(is_safe_readonly(&normalize("npm view open-websearch version")));
+        assert!(is_safe_readonly(&normalize(
+            "npm view open-websearch version"
+        )));
         assert!(is_safe_readonly(&normalize("pip list")));
         assert!(is_safe_readonly(&normalize("cargo tree")));
         assert!(is_safe_readonly(&normalize("winget search powertoys")));
@@ -391,7 +411,9 @@ mod tests {
         assert!(is_safe_readonly(&normalize("python --version")));
         assert!(is_safe_readonly(&normalize("java -version")));
         // node -e 可执行任意 JS，绝不能放行
-        assert!(!is_safe_readonly(&normalize("node -e \"require('fs').rmSync('x')\"")));
+        assert!(!is_safe_readonly(&normalize(
+            "node -e \"require('fs').rmSync('x')\""
+        )));
         assert!(!is_safe_readonly(&normalize("python -c \"import os\"")));
     }
 

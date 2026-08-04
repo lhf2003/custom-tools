@@ -262,7 +262,10 @@ pub fn init_tables(conn: &Connection) -> rusqlite::Result<()> {
         [],
     )?;
     // 分家迁移：suggestions 回归纯系统建议，存量 intent 直接删（裁决：不迁移）
-    conn.execute("DELETE FROM suggestions WHERE suggestion_type = 'intent'", [])?;
+    conn.execute(
+        "DELETE FROM suggestions WHERE suggestion_type = 'intent'",
+        [],
+    )?;
     // Migrations: 场景联动投票关联（B3）
     add_column_if_missing(
         conn,
@@ -1015,7 +1018,10 @@ pub fn pattern_vote_counts(
 }
 
 /// 查询某 pattern 最近一次建议时间（降频判断用）
-pub fn last_pattern_suggestion_at(conn: &Connection, pattern_id: i64) -> rusqlite::Result<Option<i64>> {
+pub fn last_pattern_suggestion_at(
+    conn: &Connection,
+    pattern_id: i64,
+) -> rusqlite::Result<Option<i64>> {
     conn.query_row(
         "SELECT MAX(created_at) FROM suggestions WHERE pattern_id = ?1",
         params![pattern_id],

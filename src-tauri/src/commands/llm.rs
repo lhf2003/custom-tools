@@ -51,37 +51,43 @@ pub async fn test_llm_connection(
 
     match result {
         Ok(reply) => {
-            log_call(&db_state.0, &LlmCallEntry {
-                source: "test",
-                channel: "scene_model",
-                scene: None,
-                model: Some(&model),
-                input_tokens: reply.input_tokens,
-                cached_input_tokens: reply.cached_input_tokens,
-                output_tokens: reply.output_tokens,
-                cost_cny: 0.0,
-                duration_ms,
-                tool_call_count: 0,
-                status: "ok",
-                error: None,
-            });
+            log_call(
+                &db_state.0,
+                &LlmCallEntry {
+                    source: "test",
+                    channel: "scene_model",
+                    scene: None,
+                    model: Some(&model),
+                    input_tokens: reply.input_tokens,
+                    cached_input_tokens: reply.cached_input_tokens,
+                    output_tokens: reply.output_tokens,
+                    cost_cny: 0.0,
+                    duration_ms,
+                    tool_call_count: 0,
+                    status: "ok",
+                    error: None,
+                },
+            );
             Ok(reply.content)
         }
         Err(e) => {
-            log_call(&db_state.0, &LlmCallEntry {
-                source: "test",
-                channel: "scene_model",
-                scene: None,
-                model: Some(&model),
-                input_tokens: 0,
-                cached_input_tokens: 0,
-                output_tokens: 0,
-                cost_cny: 0.0,
-                duration_ms,
-                tool_call_count: 0,
-                status: "error",
-                error: Some(&e),
-            });
+            log_call(
+                &db_state.0,
+                &LlmCallEntry {
+                    source: "test",
+                    channel: "scene_model",
+                    scene: None,
+                    model: Some(&model),
+                    input_tokens: 0,
+                    cached_input_tokens: 0,
+                    output_tokens: 0,
+                    cost_cny: 0.0,
+                    duration_ms,
+                    tool_call_count: 0,
+                    status: "error",
+                    error: Some(&e),
+                },
+            );
             Err(e)
         }
     }
@@ -159,36 +165,42 @@ pub async fn call_llm_stream_by_scene(
     // 只登记次数/耗时——诚实的降级，面板按来源分组时该来源 token 显示为 0
     match &result {
         Ok(()) => {
-            log_call(&db_state.0, &LlmCallEntry {
-                source: &scene_str,
-                channel: "scene_model",
-                scene: Some(&scene_str),
-                model: Some(&model_for_log),
-                input_tokens: 0,
-                cached_input_tokens: 0,
-                output_tokens: 0,
-                cost_cny: 0.0,
-                duration_ms,
-                tool_call_count: 0,
-                status: "ok",
-                error: None,
-            });
+            log_call(
+                &db_state.0,
+                &LlmCallEntry {
+                    source: &scene_str,
+                    channel: "scene_model",
+                    scene: Some(&scene_str),
+                    model: Some(&model_for_log),
+                    input_tokens: 0,
+                    cached_input_tokens: 0,
+                    output_tokens: 0,
+                    cost_cny: 0.0,
+                    duration_ms,
+                    tool_call_count: 0,
+                    status: "ok",
+                    error: None,
+                },
+            );
         }
         Err(e) => {
-            log_call(&db_state.0, &LlmCallEntry {
-                source: &scene_str,
-                channel: "scene_model",
-                scene: Some(&scene_str),
-                model: Some(&model_for_log),
-                input_tokens: 0,
-                cached_input_tokens: 0,
-                output_tokens: 0,
-                cost_cny: 0.0,
-                duration_ms,
-                tool_call_count: 0,
-                status: "error",
-                error: Some(e),
-            });
+            log_call(
+                &db_state.0,
+                &LlmCallEntry {
+                    source: &scene_str,
+                    channel: "scene_model",
+                    scene: Some(&scene_str),
+                    model: Some(&model_for_log),
+                    input_tokens: 0,
+                    cached_input_tokens: 0,
+                    output_tokens: 0,
+                    cost_cny: 0.0,
+                    duration_ms,
+                    tool_call_count: 0,
+                    status: "error",
+                    error: Some(e),
+                },
+            );
         }
     }
     result

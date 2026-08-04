@@ -10,7 +10,6 @@ import {
   Sparkles,
   History,
   MousePointerClick,
-  Terminal,
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { invoke } from '@tauri-apps/api/core';
@@ -257,8 +256,6 @@ export function ChatView() {
   const [sessionId, setSessionId] = useState<number | null>(null);
   // 贾维斯 agent 的工具活动提示（「贾维斯在翻数据…」）
   const [agentStatus, setAgentStatus] = useState<string | null>(null);
-  // Shell 命令确认请求（run_shell_command 工具，需用户点头才执行）
-  const [shellConfirm, setShellConfirm] = useState<{ id: string; command: string } | null>(null);
   // 会话历史浮层
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyVisible, setHistoryVisible] = useState(false);
@@ -279,18 +276,6 @@ export function ChatView() {
   const stickToBottomRef = useRef(true);
   const historyBtnRef = useRef<HTMLButtonElement>(null);
   const historyPanelRef = useRef<HTMLDivElement>(null);
-
-  // Shell 命令确认回执：先清弹窗再回传（后端 120s 超时兜底，重复回传无害）
-  const resolveShellConfirm = async (allow: boolean) => {
-    const pending = shellConfirm;
-    setShellConfirm(null);
-    if (!pending) return;
-    try {
-      await invoke('resolve_shell_confirm', { id: pending.id, allow });
-    } catch (e) {
-      console.error('Failed to resolve shell confirm:', e);
-    }
-  };
 
   // Consume companion prefill: wrap raw error content into an analysis prompt
   useEffect(() => {
@@ -490,27 +475,11 @@ export function ChatView() {
           );
         },
       );
-      // Shell 命令确认（run_shell_command 工具）：同一时间最多一条在等（tool 循环串行）
-      const u10 = await listen<{ id: string; command: string }>(
-        'jarvis:shell-confirm',
-        (event) => {
-          setShellConfirm(event.payload);
-        },
-      );
-      // Shell 确认终态（后端超时/晚点路径回发）：关掉可能已成僵尸的弹窗。
-      // 用户点击路径前端已自行关窗，此处幂等。
-      const u11 = await listen<{ id: string; allowed: boolean }>(
-        'jarvis:shell-confirm-resolved',
-        (event) => {
-          setShellConfirm((prev) => (prev && prev.id === event.payload.id ? null : prev));
-        },
-      );
-
       if (!active) {
-        u1(); u2(); u3(); u4(); u5(); u6(); u7(); u8(); u9(); u10(); u11();
+        u1(); u2(); u3(); u4(); u5(); u6(); u7(); u8(); u9();
         return;
       }
-      unlistenFns = [u1, u2, u3, u4, u5, u6, u7, u8, u9, u10, u11];
+      unlistenFns = [u1, u2, u3, u4, u5, u6, u7, u8, u9];
     };
 
     setupListeners();
@@ -586,7 +555,7 @@ export function ChatView() {
       setIsLoading(false);
       setError(typeof err === 'string' ? err : '发送失败，请检查 AI 模型设置');
     }
-  }, [input, isLoading, messages]);
+  }, [input, isLoading, messages, mode]);
 
   // ── Restore session when mode changes ────────────────────────────
   useEffect(() => {
@@ -661,6 +630,8 @@ export function ChatView() {
   // ── New session ──────────────────────────────────────────────────
   const handleNewSession = useCallback(async () => {
     setHistoryOpen(false);
+    // 先取消后端在飞流式，避免旧会话回调继续改状态
+    invoke('jarvis_chat_cancel').catch(() => {});
     isCancelledRef.current = true;
     setMessages([]);
     setStreamText('');
@@ -725,6 +696,8 @@ export function ChatView() {
         return;
       }
       setHistoryOpen(false);
+      // 先取消后端在飞流式，避免旧会话回调继续改状态
+      invoke('jarvis_chat_cancel').catch(() => {});
       // 停掉在飞流式，整体替换内容
       isCancelledRef.current = true;
       setIsLoading(false);
@@ -911,7 +884,6 @@ export function ChatView() {
             onKeyDown={handleKeyDown}
             placeholder={modeConfig.placeholder}
             rows={1}
-            disabled={!!shellConfirm}
             className="flex-1 resize-none bg-transparent text-sm text-zinc-200 placeholder-app-text-placeholder outline-none leading-relaxed self-center disabled:opacity-60"
             style={{ height: '26px' }}
             data-tauri-drag-region={undefined}
@@ -929,12 +901,12 @@ export function ChatView() {
             </button>
           )}
 
-          {/* Send button（贾维斯通道在飞时可排队发送；Shell 确认弹窗期间禁发防串扰） */}
+          {/* Send button（贾维斯通道在飞时可排队发送） */}
           <button
             onClick={() => handleSend()}
-            disabled={!input.trim() || (isLoading && mode !== 'chat') || !!shellConfirm}
+            disabled={!input.trim() || (isLoading && mode !== 'chat')}
             className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-all ${
-              input.trim() && (!isLoading || mode === 'chat') && !shellConfirm
+              input.trim() && (!isLoading || mode === 'chat')
                 ? 'text-zinc-200 hover:bg-white/10 cursor-pointer'
                 : 'text-zinc-600 cursor-not-allowed'
             }`}
@@ -1118,6 +1090,8 @@ export function ChatView() {
         <div
           ref={historyPanelRef}
           tabIndex={-1}
+          role="listbox"
+          aria-label="会话历史"
           onKeyDown={handleHistoryKeyDown}
           className={`fixed z-50 w-80 max-h-80 overflow-y-auto rounded-lg border border-zinc-700/60 bg-zinc-800 shadow-xl shadow-black/40 outline-none transition-all duration-150 ease-out motion-reduce:transition-none ${
             historyVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-1'
@@ -1141,6 +1115,12 @@ export function ChatView() {
                     role="button"
                     tabIndex={-1}
                     onClick={() => switchSession(s.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        switchSession(s.id);
+                      }
+                    }}
                     onMouseEnter={() => setHistoryIdx(i)}
                     className={`group relative flex items-center gap-2 px-3 py-2 cursor-pointer ${
                       i === historyIdx ? 'bg-white/5' : ''
@@ -1186,57 +1166,6 @@ export function ChatView() {
         </div>
       )}
 
-      {/* ── Shell 命令确认弹窗（run_shell_command 工具的安全闸门） ── */}
-      {shellConfirm && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-          onKeyDown={(e) => {
-            // 弹窗内 Esc=拒绝（高利害时刻，键盘语义不许做错事）；
-            // Enter 交给聚焦按钮（默认聚焦「拒绝」，安全默认——允许执行须刻意操作）
-            if (e.key === 'Escape') {
-              e.preventDefault();
-              resolveShellConfirm(false);
-            }
-          }}
-        >
-          <div
-            key={shellConfirm.id}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="shell-confirm-title"
-            className="w-[420px] max-w-[90%] rounded-xl border border-zinc-700/60 bg-zinc-800 shadow-2xl shadow-black/50 p-4 outline-none"
-          >
-            <div className="flex items-center gap-2 mb-3">
-              <Terminal className="w-4 h-4 text-amber-400" />
-              <span id="shell-confirm-title" className="text-sm font-medium text-zinc-100">
-                贾维斯想执行命令
-              </span>
-            </div>
-            <pre className="max-h-40 overflow-y-auto rounded-lg bg-zinc-900/80 border border-zinc-700/50 px-3 py-2 text-xs text-zinc-200 font-mono whitespace-pre-wrap break-all select-text">
-              {shellConfirm.command}
-            </pre>
-            <p className="mt-2 text-xs text-app-text-tertiary">
-              允许后命令立即在这台电脑上执行；拒绝后贾维斯会换个思路。约 2
-              分钟不操作自动拒绝。
-            </p>
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                autoFocus
-                onClick={() => resolveShellConfirm(false)}
-                className="px-3 py-1.5 rounded-lg text-xs text-zinc-300 border border-zinc-600/60 hover:bg-white/5 transition-colors cursor-pointer"
-              >
-                拒绝
-              </button>
-              <button
-                onClick={() => resolveShellConfirm(true)}
-                className="px-3 py-1.5 rounded-lg text-xs text-white bg-blue-600 hover:bg-blue-700 transition-colors cursor-pointer"
-              >
-                允许执行
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

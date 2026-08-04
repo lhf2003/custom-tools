@@ -90,7 +90,15 @@ pub fn run_daily_report_agent(
             )
         })
         .unwrap_or_default();
-    let prompt = build_report_prompt(&persona, &evolution, &role, date, &ve_section, &state_text, &emotion_section);
+    let prompt = build_report_prompt(
+        &persona,
+        &evolution,
+        &role,
+        date,
+        &ve_section,
+        &state_text,
+        &emotion_section,
+    );
     crate::llm::log_prompt("report_agent", &prompt);
 
     log::info!("Companion 日报 agent 启动: {}", bin_path);
@@ -128,20 +136,23 @@ pub fn run_daily_report_agent(
                 .take(300)
                 .collect::<String>()
         );
-        crate::llm::observe::log_call(db_path, &crate::llm::observe::LlmCallEntry {
-            source: "report",
-            channel: "claude_code",
-            scene: None,
-            model: None,
-            input_tokens: 0,
-            cached_input_tokens: 0,
-            output_tokens: 0,
-            cost_cny: 0.0,
-            duration_ms,
-            tool_call_count: 0,
-            status: "error",
-            error: Some(&reason),
-        });
+        crate::llm::observe::log_call(
+            db_path,
+            &crate::llm::observe::LlmCallEntry {
+                source: "report",
+                channel: "claude_code",
+                scene: None,
+                model: None,
+                input_tokens: 0,
+                cached_input_tokens: 0,
+                output_tokens: 0,
+                cost_cny: 0.0,
+                duration_ms,
+                tool_call_count: 0,
+                status: "error",
+                error: Some(&reason),
+            },
+        );
         return Err(reason);
     }
 
@@ -159,21 +170,24 @@ pub fn run_daily_report_agent(
             )
         })
         .unwrap_or((0, 0, 0));
-    crate::llm::observe::log_call(db_path, &crate::llm::observe::LlmCallEntry {
-        source: "report",
-        channel: "claude_code",
-        scene: None,
-        model: None,
-        input_tokens,
-        cached_input_tokens,
-        output_tokens,
-        // CC 通道（订阅制）不记成本，只统计 token
-        cost_cny: 0.0,
-        duration_ms,
-        tool_call_count: 0,
-        status: "ok",
-        error: None,
-    });
+    crate::llm::observe::log_call(
+        db_path,
+        &crate::llm::observe::LlmCallEntry {
+            source: "report",
+            channel: "claude_code",
+            scene: None,
+            model: None,
+            input_tokens,
+            cached_input_tokens,
+            output_tokens,
+            // CC 通道（订阅制）不记成本，只统计 token
+            cost_cny: 0.0,
+            duration_ms,
+            tool_call_count: 0,
+            status: "ok",
+            error: None,
+        },
+    );
 
     log::info!("Companion 日报 agent 完成: {} 轮", turns);
 
@@ -356,9 +370,7 @@ fn ensure_mcp_registered_once(
     match existing {
         // 已注册且 exe 与数据参数都指向当前路径 → 直接用
         Some(line)
-            if line.contains(&exe_str)
-                && line.contains(&db_str)
-                && line.contains(&notes_str) =>
+            if line.contains(&exe_str) && line.contains(&db_str) && line.contains(&notes_str) =>
         {
             return Ok(())
         }
@@ -399,7 +411,15 @@ fn ensure_mcp_registered_once(
     Ok(())
 }
 
-fn build_report_prompt(persona: &str, evolution: &str, role: &str, date: &str, ve_section: &str, state_text: &str, emotion_section: &str) -> String {
+fn build_report_prompt(
+    persona: &str,
+    evolution: &str,
+    role: &str,
+    date: &str,
+    ve_section: &str,
+    state_text: &str,
+    emotion_section: &str,
+) -> String {
     format!(
         "{persona}\n\n---\n\n{evolution}\n\n---\n\n{role}{ve_section}\n\n---\n\n\
          以上是贾维斯的身份设定、经验本与日报工作手册。请完成「{date}」的工作日报。\n\n---\n\n# 当下状态\n{state}{emotion}",

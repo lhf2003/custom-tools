@@ -28,6 +28,8 @@ const SESSION_SETTING_KEY: &str = "companion_chat_claude_session";
 pub struct JarvisChatChild {
     pub child: Arc<Mutex<Option<Child>>>,
     pub queue: Arc<Mutex<VecDeque<String>>>,
+    /// 用户主动取消标记：取消杀进程不等于异常结束（收尾时据此不误报 error）
+    pub cancelled: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// 聊天工作区（与日报 agent 共用隔离目录：无 CLAUDE.md、无 hooks 注入）
@@ -44,7 +46,12 @@ fn chat_work_dir(app_handle: &AppHandle) -> Result<PathBuf, String> {
 /// 聊天系统提示：身份证 + 经验本 + 关于他的事实（五维分组）+ 聊天场合规则。
 /// with_tools=true 时用 --append-system-prompt 注入 claude agent 通道，
 /// 或场景模型回退通道（有数据工具版）；false 为无工具降级措辞。
-pub(crate) fn compose_chat_system(app_data: &Path, db_path: &Path, with_tools: bool, monologue: bool) -> String {
+pub(crate) fn compose_chat_system(
+    app_data: &Path,
+    db_path: &Path,
+    with_tools: bool,
+    monologue: bool,
+) -> String {
     let persona_text = persona::load(app_data);
     let evolution = persona::load_evolution(app_data);
     let conn = Connection::open(db_path).ok();
@@ -65,7 +72,12 @@ pub(crate) fn compose_chat_system(app_data: &Path, db_path: &Path, with_tools: b
         5 => "六",
         _ => "日",
     };
-    let time_text = format!("现在是 {} 周{} {}", now.format("%Y-%m-%d"), weekday, now.format("%H:%M"));
+    let time_text = format!(
+        "现在是 {} 周{} {}",
+        now.format("%Y-%m-%d"),
+        weekday,
+        now.format("%H:%M")
+    );
     let state_text = conn
         .as_ref()
         .map(|c| super::state::current_state_sentence(c, now.timestamp()))
@@ -236,8 +248,16 @@ pub fn jarvis_chat_system(
 ) -> Result<String, String> {
     touch_first_chat_date(&db_state.0);
     let monologue = monologue_enabled(&app_handle);
-    let app_data = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
-    Ok(compose_chat_system(&app_data, &db_state.0, with_tools, monologue))
+    let app_data = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+    Ok(compose_chat_system(
+        &app_data,
+        &db_state.0,
+        with_tools,
+        monologue,
+    ))
 }
 
 /// 发送一条聊天消息（流式返回经 jarvis:chunk / jarvis:status / jarvis:done / jarvis:error 事件）
@@ -282,6 +302,10 @@ fn spawn_chat(
     db_path: &PathBuf,
     text: String,
 ) -> Result<(), String> {
+    // 新一轮发送复位取消标记（FIFO 续发也走这里，各轮独立）
+    chat_child
+        .cancelled
+        .store(false, std::sync::atomic::Ordering::SeqCst);
     let settings_state = app_handle
         .try_state::<crate::commands::settings::SettingsState>()
         .ok_or("设置模块未初始化")?;
@@ -292,8 +316,16 @@ fn spawn_chat(
         .get_settings()
         .claude_code_bin_path;
     let work = chat_work_dir(app_handle)?;
-    let app_data = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
-    let system_prompt = compose_chat_system(app_data.as_path(), db_path, true, monologue_enabled(app_handle));
+    let app_data = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+    let system_prompt = compose_chat_system(
+        app_data.as_path(),
+        db_path,
+        true,
+        monologue_enabled(app_handle),
+    );
     crate::llm::log_prompt("chat_agent", &system_prompt);
     let session = analyzer::load_setting(db_path, SESSION_SETTING_KEY).unwrap_or_default();
 
@@ -317,10 +349,7 @@ fn spawn_chat(
         .spawn()
         .map_err(|e| format!("启动 claude CLI 失败（{}）: {}", bin, e))?;
 
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or("无法获取 claude CLI 输出管道")?;
+    let stdout = child.stdout.take().ok_or("无法获取 claude CLI 输出管道")?;
     if let Ok(mut guard) = chat_child.child.lock() {
         *guard = Some(child);
     }
@@ -368,9 +397,7 @@ fn stream_chat_process(
                 }
             }
             Some("assistant") => {
-                let blocks = msg
-                    .pointer("/message/content")
-                    .and_then(|c| c.as_array());
+                let blocks = msg.pointer("/message/content").and_then(|c| c.as_array());
                 if let Some(blocks) = blocks {
                     for block in blocks {
                         match block.get("type").and_then(|t| t.as_str()) {
@@ -395,7 +422,10 @@ fn stream_chat_process(
             }
             Some("result") => {
                 saw_result = true;
-                let is_error = msg.get("is_error").and_then(|v| v.as_bool()).unwrap_or(false);
+                let is_error = msg
+                    .get("is_error")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
                 let duration_ms = started.elapsed().as_millis() as u64;
                 let input_tokens = msg
                     .pointer("/usage/input_tokens")
@@ -414,37 +444,43 @@ fn stream_chat_process(
                         .get("result")
                         .and_then(|r| r.as_str())
                         .unwrap_or("agent 执行失败");
-                    crate::llm::observe::log_call(&db_path, &crate::llm::observe::LlmCallEntry {
-                        source: "chat",
-                        channel: "claude_code",
-                        scene: None,
-                        model: None,
-                        input_tokens: 0,
-                        cached_input_tokens: 0,
-                        output_tokens: 0,
-                        cost_cny: 0.0,
-                        duration_ms,
-                        tool_call_count: 0,
-                        status: "error",
-                        error: Some(reason),
-                    });
+                    crate::llm::observe::log_call(
+                        &db_path,
+                        &crate::llm::observe::LlmCallEntry {
+                            source: "chat",
+                            channel: "claude_code",
+                            scene: None,
+                            model: None,
+                            input_tokens: 0,
+                            cached_input_tokens: 0,
+                            output_tokens: 0,
+                            cost_cny: 0.0,
+                            duration_ms,
+                            tool_call_count: 0,
+                            status: "error",
+                            error: Some(reason),
+                        },
+                    );
                     let _ = app_handle.emit("jarvis:error", reason.to_string());
                 } else {
-                    crate::llm::observe::log_call(&db_path, &crate::llm::observe::LlmCallEntry {
-                        source: "chat",
-                        channel: "claude_code",
-                        scene: None,
-                        model: None,
-                        input_tokens,
-                        cached_input_tokens,
-                        output_tokens,
-                        // CC 通道（订阅制）不记成本，只统计 token
-                        cost_cny: 0.0,
-                        duration_ms,
-                        tool_call_count: 0,
-                        status: "ok",
-                        error: None,
-                    });
+                    crate::llm::observe::log_call(
+                        &db_path,
+                        &crate::llm::observe::LlmCallEntry {
+                            source: "chat",
+                            channel: "claude_code",
+                            scene: None,
+                            model: None,
+                            input_tokens,
+                            cached_input_tokens,
+                            output_tokens,
+                            // CC 通道（订阅制）不记成本，只统计 token
+                            cost_cny: 0.0,
+                            duration_ms,
+                            tool_call_count: 0,
+                            status: "ok",
+                            error: None,
+                        },
+                    );
                     let _ = app_handle.emit("jarvis:done", 0.0_f64);
                 }
             }
@@ -452,22 +488,23 @@ fn stream_chat_process(
         }
     }
 
-    // 收尾：清掉在飞句柄；异常退出（没收到 result）时给前端一个明确信号
+    // 收尾：清掉在飞句柄；异常退出（没收到 result）时给前端一个明确信号。
+    // 用户主动取消不算异常——前端已自行复位界面，再弹 error 是误报
     if let Ok(mut guard) = chat_child.child.lock() {
         if let Some(mut child) = guard.take() {
             let _ = child.wait();
         }
     }
-    if !saw_result {
+    if !saw_result
+        && !chat_child
+            .cancelled
+            .load(std::sync::atomic::Ordering::SeqCst)
+    {
         let _ = app_handle.emit("jarvis:error", "agent 异常结束，请重试");
     }
 
     // FIFO 续发：队列里有等待的消息就自动发下一条（一条失败不堵死队列）
-    let next = chat_child
-        .queue
-        .lock()
-        .ok()
-        .and_then(|mut q| q.pop_front());
+    let next = chat_child.queue.lock().ok().and_then(|mut q| q.pop_front());
     if let Some(next_text) = next {
         if let Err(e) = spawn_chat(&app_handle, &chat_child, &db_path, next_text) {
             let _ = app_handle.emit("jarvis:error", format!("发送排队消息失败: {}", e));
@@ -478,6 +515,10 @@ fn stream_chat_process(
 /// 取消当前在飞的聊天回复（同时清空排队消息）
 #[tauri::command]
 pub fn jarvis_chat_cancel(chat_child: State<'_, JarvisChatChild>) -> Result<(), String> {
+    // 先立标记再杀进程：stream 线程收尾时区分「取消」与「异常结束」
+    chat_child
+        .cancelled
+        .store(true, std::sync::atomic::Ordering::SeqCst);
     if let Ok(mut q) = chat_child.queue.lock() {
         q.clear();
     }

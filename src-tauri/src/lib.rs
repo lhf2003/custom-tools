@@ -287,8 +287,7 @@ pub fn run() {
                         if let Ok(mut idx) = search_index_for_init.lock() {
                             idx.begin_scan();
                         }
-                        match search::SearchIndex::collect_all_apps(&Some(db_state_for_init))
-                        {
+                        match search::SearchIndex::collect_all_apps(&Some(db_state_for_init)) {
                             Ok(apps) => {
                                 let count = apps.len();
                                 if let Ok(mut idx) = search_index_for_init.lock() {
@@ -430,7 +429,6 @@ pub fn run() {
                 app.manage(companion_state);
                 app.manage(companion::chat::JarvisChatChild::default());
                 app.manage(companion::scene_chat::JarvisSceneChatState::default());
-                app.manage(companion::shell::ShellConfirmState::default());
                 app.manage(companion::websearch::WebSearchState::default());
             }
 
@@ -580,7 +578,6 @@ pub fn run() {
             companion::chat::jarvis_chat_system,
             commands::companion::list_companion_tools,
             commands::companion::set_companion_tool_enabled,
-            companion::shell::resolve_shell_confirm,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -768,10 +765,7 @@ pub(crate) fn toggle_main_window(app_handle: &tauri::AppHandle) {
 }
 
 /// Emit the manual update-check result to the frontend (shown as in-app feedback)
-fn emit_check_result(
-    app_handle: &tauri::AppHandle,
-    result: commands::updater::UpdateCheckResult,
-) {
+fn emit_check_result(app_handle: &tauri::AppHandle, result: commands::updater::UpdateCheckResult) {
     if let Err(e) = app_handle.emit("update-check-result", result) {
         log::warn!("Failed to emit update-check-result event: {}", e);
     }
@@ -993,9 +987,7 @@ fn build_log_plugin() -> tauri_plugin_log::Builder {
 
     tauri_plugin_log::Builder::default()
         .targets([
-            tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
-                file_name: None,
-            }),
+            tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir { file_name: None }),
             tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
             tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
         ])

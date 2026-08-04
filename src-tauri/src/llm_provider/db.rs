@@ -269,26 +269,28 @@ impl LlmProviderDb {
             .map_err(|e| format!("保存模型失败: {}", e))?;
 
             // Query the model to get its current state (including is_active)
-            let model = conn.query_row(
-                "SELECT id, provider_id, model_id, name, description, is_active,
+            let model = conn
+                .query_row(
+                    "SELECT id, provider_id, model_id, name, description, is_active,
                         input_price_per_m, output_price_per_m, created_at, updated_at
                  FROM llm_models WHERE provider_id = ?1 AND model_id = ?2",
-                [&provider_id.to_string(), &model_info.id],
-                |row| {
-                    Ok(Model {
-                        id: row.get(0)?,
-                        provider_id: row.get(1)?,
-                        model_id: row.get(2)?,
-                        name: row.get(3)?,
-                        description: row.get(4)?,
-                        is_active: row.get(5)?,
-                        input_price_per_m: row.get(6)?,
-                        output_price_per_m: row.get(7)?,
-                        created_at: row.get(8)?,
-                        updated_at: row.get(9)?,
-                    })
-                },
-            ).map_err(|e| format!("查询保存的模型失败: {}", e))?;
+                    [&provider_id.to_string(), &model_info.id],
+                    |row| {
+                        Ok(Model {
+                            id: row.get(0)?,
+                            provider_id: row.get(1)?,
+                            model_id: row.get(2)?,
+                            name: row.get(3)?,
+                            description: row.get(4)?,
+                            is_active: row.get(5)?,
+                            input_price_per_m: row.get(6)?,
+                            output_price_per_m: row.get(7)?,
+                            created_at: row.get(8)?,
+                            updated_at: row.get(9)?,
+                        })
+                    },
+                )
+                .map_err(|e| format!("查询保存的模型失败: {}", e))?;
 
             saved_models.push(model);
         }
@@ -377,7 +379,12 @@ impl LlmProviderDb {
             .execute(
                 "UPDATE llm_models SET input_price_per_m = ?1, output_price_per_m = ?2,
                  updated_at = ?3 WHERE id = ?4",
-                rusqlite::params![input_price, output_price, chrono::Local::now().to_rfc3339(), model_id],
+                rusqlite::params![
+                    input_price,
+                    output_price,
+                    chrono::Local::now().to_rfc3339(),
+                    model_id
+                ],
             )
             .map_err(|e| format!("更新模型单价失败: {}", e))?;
         Ok(rows_affected > 0)
@@ -487,8 +494,9 @@ impl LlmProviderDb {
     ) -> Result<Option<(Provider, Model)>, String> {
         let scene_str = scene.to_string();
 
-        let result = conn.query_row(
-            "SELECT
+        let result = conn
+            .query_row(
+                "SELECT
                 p.id, p.name, p.label, p.base_url, p.api_key_encrypted, p.provider_type,
                 p.is_active, p.connection_status, p.last_connected_at, p.created_at, p.updated_at,
                 m.id, m.provider_id, m.model_id, m.name, m.description, m.is_active,
@@ -497,41 +505,43 @@ impl LlmProviderDb {
              JOIN llm_providers p ON sc.provider_id = p.id
              JOIN llm_models m ON sc.provider_id = m.provider_id AND sc.model_id = m.model_id
              WHERE sc.scene = ?1 AND p.is_active = 1 AND m.is_active = 1",
-            [&scene_str],
-            |row| {
-                let provider_type_str: String = row.get(5)?;
-                let connection_status_str: String = row.get(7)?;
+                [&scene_str],
+                |row| {
+                    let provider_type_str: String = row.get(5)?;
+                    let connection_status_str: String = row.get(7)?;
 
-                let provider = Provider {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    label: row.get(2)?,
-                    base_url: row.get(3)?,
-                    api_key_encrypted: row.get(4)?,
-                    provider_type: provider_type_str.parse().unwrap_or_default(),
-                    is_active: row.get(6)?,
-                    connection_status: connection_status_str.parse().unwrap_or_default(),
-                    last_connected_at: row.get(8)?,
-                    created_at: row.get(9)?,
-                    updated_at: row.get(10)?,
-                };
+                    let provider = Provider {
+                        id: row.get(0)?,
+                        name: row.get(1)?,
+                        label: row.get(2)?,
+                        base_url: row.get(3)?,
+                        api_key_encrypted: row.get(4)?,
+                        provider_type: provider_type_str.parse().unwrap_or_default(),
+                        is_active: row.get(6)?,
+                        connection_status: connection_status_str.parse().unwrap_or_default(),
+                        last_connected_at: row.get(8)?,
+                        created_at: row.get(9)?,
+                        updated_at: row.get(10)?,
+                    };
 
-                let model = Model {
-                    id: row.get(11)?,
-                    provider_id: row.get(12)?,
-                    model_id: row.get(13)?,
-                    name: row.get(14)?,
-                    description: row.get(15)?,
-                    is_active: row.get(16)?,
-                    input_price_per_m: row.get(17)?,
-                    output_price_per_m: row.get(18)?,
-                    created_at: row.get(19)?,
-                    updated_at: row.get(20)?,
-                };
+                    let model = Model {
+                        id: row.get(11)?,
+                        provider_id: row.get(12)?,
+                        model_id: row.get(13)?,
+                        name: row.get(14)?,
+                        description: row.get(15)?,
+                        is_active: row.get(16)?,
+                        input_price_per_m: row.get(17)?,
+                        output_price_per_m: row.get(18)?,
+                        created_at: row.get(19)?,
+                        updated_at: row.get(20)?,
+                    };
 
-                Ok((provider, model))
-            },
-        ).optional().map_err(|e| format!("查询场景模型失败: {}", e))?;
+                    Ok((provider, model))
+                },
+            )
+            .optional()
+            .map_err(|e| format!("查询场景模型失败: {}", e))?;
 
         Ok(result)
     }

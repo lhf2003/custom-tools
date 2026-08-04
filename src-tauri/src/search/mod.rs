@@ -190,9 +190,7 @@ impl SearchIndex {
     /// 设计上允许在不持有索引锁的情况下执行——扫描会触达文件系统/注册表/外部
     /// 进程，在慢速或不可达环境（网络盘、EDR 拦截）中可能长时间阻塞；持锁执行
     /// 会饿死搜索命令与文件监听线程。
-    pub fn collect_all_apps(
-        db_state: &Option<Arc<DatabaseState>>,
-    ) -> anyhow::Result<Vec<AppItem>> {
+    pub fn collect_all_apps(db_state: &Option<Arc<DatabaseState>>) -> anyhow::Result<Vec<AppItem>> {
         let start = std::time::Instant::now();
 
         let mut apps = Vec::new();
@@ -289,7 +287,11 @@ impl SearchIndex {
             }
         }
 
-        log::info!("Collected {} applications in {:?}", apps.len(), start.elapsed());
+        log::info!(
+            "Collected {} applications in {:?}",
+            apps.len(),
+            start.elapsed()
+        );
         Ok(apps)
     }
 
@@ -320,30 +322,22 @@ impl SearchIndex {
     /// 陈旧时启动后应触发一次后台刷新，而不是跳过。
     const CACHE_STALE_AFTER: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
-    /// 缓存是否新鲜：以 app_cache 表 MAX(updated_at)（UTC）近似"上次全量
-    /// 扫描时间"（save_batch/replace_batch 每次全量扫描都会刷新 updated_at）。
-    /// 判断失败或缓存为空时返回不新鲜（保守触发刷新）。
+    /// 缓存是否新鲜：以 app_cache_meta.last_full_scan（UTC）为准——不能用
+    /// app_cache 表 MAX(updated_at)（watcher 增量更新也会刷新它，全量扫描
+    /// 会永不触发）。判断失败或从未全量扫过一律视为不新鲜（保守触发刷新：
+    /// 多扫一次的代价远低于索引长期陈旧）。
     pub fn is_cache_fresh(&self) -> bool {
         let Some(ref db_state) = self.db_state else {
-            return true;
+            return false;
         };
         let Ok(conn) = rusqlite::Connection::open(&db_state.0) else {
-            return true;
+            return false;
         };
-        let last: Option<String> = conn
-            .query_row(
-                "SELECT MAX(updated_at) FROM app_cache WHERE is_valid = 1",
-                [],
-                |row| row.get(0),
-            )
-            .ok()
-            .flatten();
-        let Some(last) = last else {
+        let Some(last) = crate::db::app_cache::last_full_scan(&conn) else {
             return false;
         };
         // CURRENT_TIMESTAMP 存储的是 UTC
-        let Some(last_utc) =
-            chrono::NaiveDateTime::parse_from_str(&last, "%Y-%m-%d %H:%M:%S").ok()
+        let Some(last_utc) = chrono::NaiveDateTime::parse_from_str(&last, "%Y-%m-%d %H:%M:%S").ok()
         else {
             return false;
         };
@@ -465,7 +459,10 @@ fn scan_directory(
     depth: usize,
 ) -> anyhow::Result<()> {
     if depth > MAX_SCAN_DEPTH {
-        log::warn!("Scan depth limit reached, skipping subtree: {}", dir.display());
+        log::warn!(
+            "Scan depth limit reached, skipping subtree: {}",
+            dir.display()
+        );
         return Ok(());
     }
 
@@ -490,8 +487,7 @@ fn scan_directory(
             if ext.eq_ignore_ascii_case("lnk") {
                 if let Some((app, target_path)) = parse_shortcut(&path) {
                     // Use target path for deduplication
-                    let key =
-                        format!("{}|{}", app.name.to_lowercase(), target_path.to_lowercase());
+                    let key = format!("{}|{}", app.name.to_lowercase(), target_path.to_lowercase());
                     if seen.insert(key) {
                         apps.push(app);
                     }

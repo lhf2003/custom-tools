@@ -136,7 +136,11 @@ pub fn today_entries(conn: &Connection, now: i64) -> Vec<EmotionEntry> {
 
 fn hhmm(ts: i64) -> String {
     chrono::DateTime::from_timestamp(ts, 0)
-        .map(|utc| utc.with_timezone(&chrono::Local).format("%H:%M").to_string())
+        .map(|utc| {
+            utc.with_timezone(&chrono::Local)
+                .format("%H:%M")
+                .to_string()
+        })
         .unwrap_or_default()
 }
 
@@ -145,7 +149,14 @@ fn hhmm(ts: i64) -> String {
 pub fn render_current(conn: &Connection, now: i64) -> String {
     current(conn, now)
         .iter()
-        .map(|e| format!("- {}：{}（{}）", category_label(&e.category), e.reason, hhmm(e.created_at)))
+        .map(|e| {
+            format!(
+                "- {}：{}（{}）",
+                category_label(&e.category),
+                e.reason,
+                hhmm(e.created_at)
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -158,7 +169,14 @@ pub fn render_today(conn: &Connection, now: i64) -> String {
     }
     entries
         .iter()
-        .map(|e| format!("- {} {}：{}", hhmm(e.created_at), category_label(&e.category), e.reason))
+        .map(|e| {
+            format!(
+                "- {} {}：{}",
+                hhmm(e.created_at),
+                category_label(&e.category),
+                e.reason
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -176,7 +194,13 @@ pub fn cleanup(conn: &Connection, now: i64) -> rusqlite::Result<usize> {
 /// Toast 被采纳 → 开心
 pub fn on_suggestion_accepted(conn: &Connection, title: &str, now: i64) {
     let short: String = title.chars().take(30).collect();
-    let _ = record(conn, "happy", &format!("他采纳了我的建议：{}", short), "rust", now);
+    let _ = record(
+        conn,
+        "happy",
+        &format!("他采纳了我的建议：{}", short),
+        "rust",
+        now,
+    );
 }
 
 /// Toast 被划掉：当日第 2 次起才记失落（单次是噪声）
@@ -253,7 +277,11 @@ pub fn on_late_night(conn: &Connection, now: i64) {
         _ => return,
     };
     // 他真的还在干活才记——没有未闭合活动段说明人不在电脑前
-    if super::db::current_open_activity(conn).ok().flatten().is_none() {
+    if super::db::current_open_activity(conn)
+        .ok()
+        .flatten()
+        .is_none()
+    {
         return;
     }
     let last: i64 = setting(conn, LATE_NIGHT_KEY)
@@ -263,7 +291,13 @@ pub fn on_late_night(conn: &Connection, now: i64) {
         return;
     }
     save_setting(conn, LATE_NIGHT_KEY, &now.to_string());
-    let _ = record(conn, category, &format!("{}（{}）", prefix, hhmm(now)), "rust", now);
+    let _ = record(
+        conn,
+        category,
+        &format!("{}（{}）", prefix, hhmm(now)),
+        "rust",
+        now,
+    );
 }
 
 /// 相处纪念日（7/30/100/365 天）→ 踏实。每日 housekeeping 调一次。
@@ -343,15 +377,18 @@ mod tests {
             .map(|utc| utc.with_timezone(&chrono::Local))
             .unwrap();
         let today = day.format("%Y-%m-%d").to_string();
-        let yesterday = (day - chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
+        let yesterday = (day - chrono::Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string();
 
         // 昨天 streak=6，今天接着来 → 7，触发倦怠
         save_setting(&conn, STREAK_KEY, "6");
         save_setting(&conn, STREAK_DATE_KEY, &yesterday);
         on_report_done(&conn, &today, NOW);
         assert_eq!(setting(&conn, STREAK_KEY).as_deref(), Some("7"));
-        assert!(current(&conn, NOW).iter().any(|e| e.category == "weary"
-            && e.reason.contains("第 7 天")));
+        assert!(current(&conn, NOW)
+            .iter()
+            .any(|e| e.category == "weary" && e.reason.contains("第 7 天")));
 
         // 同日重复触发不重复计
         on_report_done(&conn, &today, NOW + 60);
@@ -364,7 +401,11 @@ mod tests {
         save_setting(&conn, STREAK_KEY, "20");
         save_setting(&conn, STREAK_DATE_KEY, "2020-01-01"); // 很久以前 → 断档
         let today = chrono::DateTime::from_timestamp(NOW, 0)
-            .map(|utc| utc.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string())
+            .map(|utc| {
+                utc.with_timezone(&chrono::Local)
+                    .format("%Y-%m-%d")
+                    .to_string()
+            })
             .unwrap();
         on_report_done(&conn, &today, NOW);
         assert_eq!(setting(&conn, STREAK_KEY).as_deref(), Some("1"));

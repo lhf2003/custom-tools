@@ -634,7 +634,8 @@ fn tool_list_memos(db_path: &Path) -> Result<String, String> {
     serde_json::to_string_pretty(&items).map_err(|e| e.to_string())
 }
 
-fn tool_memory_facts(db_path: &Path) -> Result<String, String> {    let conn = open_db(db_path)?;
+fn tool_memory_facts(db_path: &Path) -> Result<String, String> {
+    let conn = open_db(db_path)?;
     let facts = db::list_memory_facts(&conn, 30).map_err(|e| format!("查询记忆失败: {}", e))?;
 
     if facts.is_empty() {
@@ -658,8 +659,8 @@ fn tool_memory_facts(db_path: &Path) -> Result<String, String> {    let conn = o
 /// 这类词在所有条目里高频出现，会把不相关主题的相似度拉高（实测「他希望你…」两条
 /// 不同主题条目仅靠模板词就有 0.28 相似度）——计算交集时一律剔除。
 const TEMPLATE_BIGRAMS: [&str; 18] = [
-    "希望", "望贾", "贾维", "维斯", "他的", "他是", "他会", "这个", "一个",
-    "主要", "目前", "现在", "进行", "可以", "能够", "用户", "是否", "一直",
+    "希望", "望贾", "贾维", "维斯", "他的", "他是", "他会", "这个", "一个", "主要", "目前", "现在",
+    "进行", "可以", "能够", "用户", "是否", "一直",
 ];
 
 /// 字符 bigram Jaccard 相似度（跳过 ASCII 符号，保留汉字/全角标点与字母数字）。
@@ -756,35 +757,6 @@ fn tool_remember_fact(db_path: &Path, args: &Value) -> Result<String, String> {
     db::upsert_memory_fact(&conn, fact, category, "explicit", now)
         .map_err(|e| format!("写入记忆失败: {}", e))?;
     Ok(format!("已记住（{}）：{}", category, fact))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::char_bigram_jaccard;
-
-    #[test]
-    fn jaccard_hits_correction_same_topic() {
-        // 纠正「安娜→安然」：公共双字词（守望/先锋/英雄/常用…）应命中
-        let old = "他喜欢玩《守望先锋》，常用英雄是安娜，认为安娜属于骚扰后排的高机动性角色，会关注季中冠军赛";
-        let new = "他玩守望先锋的常用英雄是安然（不是安娜），之前记错了";
-        let sim = char_bigram_jaccard(new, old);
-        assert!(sim >= 0.15, "纠正应命中（sim={:.3}）", sim);
-    }
-
-    #[test]
-    fn jaccard_misses_unrelated_same_category() {
-        // 同分类无关条目（B站动漫 vs 守望先锋）不应命中
-        let a = "他喜欢观看动漫和视频内容，使用 B 站和优酷";
-        let b = "他玩守望先锋的常用英雄是安然";
-        let sim = char_bigram_jaccard(b, a);
-        assert!(sim < 0.15, "无关条目不应命中（sim={:.3}）", sim);
-    }
-
-    #[test]
-    fn jaccard_single_word_no_bigram() {
-        assert_eq!(char_bigram_jaccard("他", "他"), 0.0);
-        assert_eq!(char_bigram_jaccard("", "abc"), 0.0);
-    }
 }
 
 /// 按关键词删除记忆：单次最多 5 条，逐条写审计；过多时先给清单
@@ -992,7 +964,11 @@ fn tool_load_manual(db_path: &Path, args: &Value) -> Result<String, String> {
     Err(format!(
         "没有找到手册「{}」。当前可激活的手册：\n{}",
         name,
-        if available.is_empty() { "（无）".to_string() } else { available }
+        if available.is_empty() {
+            "（无）".to_string()
+        } else {
+            available
+        }
     ))
 }
 
@@ -1086,4 +1062,33 @@ fn tool_propose_manual_edit(db_path: &Path, args: &Value) -> Result<String, Stri
         "提案已提交（id: {}），等用户在建议中心确认后生效；生效前手册保持原样",
         suggestion.id
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::char_bigram_jaccard;
+
+    #[test]
+    fn jaccard_hits_correction_same_topic() {
+        // 纠正「安娜→安然」：公共双字词（守望/先锋/英雄/常用…）应命中
+        let old = "他喜欢玩《守望先锋》，常用英雄是安娜，认为安娜属于骚扰后排的高机动性角色，会关注季中冠军赛";
+        let new = "他玩守望先锋的常用英雄是安然（不是安娜），之前记错了";
+        let sim = char_bigram_jaccard(new, old);
+        assert!(sim >= 0.15, "纠正应命中（sim={:.3}）", sim);
+    }
+
+    #[test]
+    fn jaccard_misses_unrelated_same_category() {
+        // 同分类无关条目（B站动漫 vs 守望先锋）不应命中
+        let a = "他喜欢观看动漫和视频内容，使用 B 站和优酷";
+        let b = "他玩守望先锋的常用英雄是安然";
+        let sim = char_bigram_jaccard(b, a);
+        assert!(sim < 0.15, "无关条目不应命中（sim={:.3}）", sim);
+    }
+
+    #[test]
+    fn jaccard_single_word_no_bigram() {
+        assert_eq!(char_bigram_jaccard("他", "他"), 0.0);
+        assert_eq!(char_bigram_jaccard("", "abc"), 0.0);
+    }
 }
