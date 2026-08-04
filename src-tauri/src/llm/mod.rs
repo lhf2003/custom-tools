@@ -605,6 +605,147 @@ pub async fn call_llm_stream_with_tools(
     })
 }
 
+/// 流式收集版 LLM 调用：SSE 逐行解析累积完整文本（无工具、无 Tauri 事件），
+/// 超时可参数化。用于单次长文本生成（如 AI 排版）——非流式接口在长生成时
+/// 会因服务端/代理中途断连而响应体不完整（表现为 "error decoding response body"），
+/// 流式接口首 token 快、长生成稳定。
+pub async fn call_llm_stream_collect(
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+    provider_type: &str,
+    messages: Vec<serde_json::Value>,
+    thinking_mode: bool,
+    timeout: std::time::Duration,
+) -> Result<String, String> {
+    if model.is_empty() {
+        return Err("模型名称未配置".to_string());
+    }
+
+    let trimmed = base_url.trim_end_matches('/');
+    let is_ollama_native = provider_type == "ollama";
+    let url = if is_ollama_native {
+        format!("{}/api/chat", trimmed)
+    } else {
+        format!("{}/chat/completions", trimmed)
+    };
+
+    // 独立 client：超时按调用方需求（排版长生成需要 >120s，不动全局 http_client）
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(timeout)
+        .build()
+        .map_err(|e| format!("构建 HTTP 客户端失败: {}", e))?;
+
+    let mut body = serde_json::json!({
+        "model": model,
+        "messages": messages,
+        "stream": true,
+    });
+    if is_ollama_native {
+        body["think"] = serde_json::json!(thinking_mode);
+    } else {
+        let is_bailian = base_url.contains("bailian") || base_url.contains("aliyun");
+        let is_deepseek = base_url.contains("deepseek");
+        if is_bailian {
+            body["enable_thinking"] = serde_json::json!(thinking_mode);
+        } else if is_deepseek {
+            // DeepSeek V4 思考模式默认开启，关闭时同样需显式传 thinking disabled
+            body["thinking"] = serde_json::json!({
+                "type": if thinking_mode { "enabled" } else { "disabled" }
+            });
+        } else if thinking_mode {
+            body["reasoning_effort"] = serde_json::json!("medium");
+        }
+    }
+
+    log::debug!(
+        "LLM 请求(collect): url={} model={} provider={} stream=true messages={} [{}]",
+        url,
+        model,
+        provider_type,
+        body["messages"].as_array().map(|a| a.len()).unwrap_or(0),
+        thinking_control_desc(base_url, provider_type, thinking_mode),
+    );
+
+    let mut req_builder = client.post(&url).json(&body);
+    if !api_key.is_empty() {
+        req_builder = req_builder.header("Authorization", format!("Bearer {}", api_key));
+    }
+
+    let response = req_builder
+        .send()
+        .await
+        .map_err(|e| format!("请求失败: {}", e))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let resp_body = response.text().await.unwrap_or_default();
+        return Err(format!("API 错误 {}: {}", status, resp_body));
+    }
+
+    use futures_util::StreamExt;
+    let mut stream = response.bytes_stream();
+    let mut line_buf: Vec<u8> = Vec::new();
+    let mut content_acc = String::new();
+
+    'stream: while let Some(chunk_result) = stream.next().await {
+        let chunk = chunk_result.map_err(|e| format!("读取流失败: {}", e))?;
+
+        for byte in chunk {
+            if byte == b'\n' {
+                let line = {
+                    let raw = std::str::from_utf8(&line_buf)
+                        .unwrap_or("")
+                        .trim_end_matches('\r');
+                    raw.to_string()
+                };
+                line_buf.clear();
+
+                if line.is_empty() {
+                    continue;
+                }
+
+                if is_ollama_native {
+                    if let Ok(chunk_data) = serde_json::from_str::<OllamaStreamChunk>(&line) {
+                        content_acc.push_str(&chunk_data.message.content);
+                    }
+                } else {
+                    let data = if let Some(rest) = line.strip_prefix("data: ") {
+                        rest.trim()
+                    } else {
+                        continue;
+                    };
+                    if data == "[DONE]" {
+                        break 'stream;
+                    }
+                    if let Ok(chunk_data) = serde_json::from_str::<StreamChunk>(data) {
+                        if let Some(choice) = chunk_data.choices.into_iter().next() {
+                            if let Some(content) = choice.delta.content {
+                                content_acc.push_str(&content);
+                            }
+                        }
+                    }
+                }
+            } else {
+                line_buf.push(byte);
+            }
+        }
+    }
+
+    // 流结束后 line_buf 剩余的最后一行（Ollama 无结尾换行时）
+    if !line_buf.is_empty() && is_ollama_native {
+        let line = std::str::from_utf8(&line_buf)
+            .unwrap_or("")
+            .trim_end_matches('\r');
+        if let Ok(chunk_data) = serde_json::from_str::<OllamaStreamChunk>(line) {
+            content_acc.push_str(&chunk_data.message.content);
+        }
+    }
+
+    Ok(content_acc)
+}
+
 #[derive(Debug, Serialize)]
 struct ChatRequest<'a> {
     model: &'a str,

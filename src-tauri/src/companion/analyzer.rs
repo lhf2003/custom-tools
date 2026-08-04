@@ -1623,6 +1623,84 @@ pub(crate) async fn call_scene_model_llm(
     }
 }
 
+/// 按场景配置调用场景模型（流式收集版）：长文本生成（如 AI 排版）走流式接口，
+/// 规避非流式在长生成时响应体被服务端/代理截断的问题。观测登记同 call_scene_model_llm；
+/// 流式响应不携带 usage，token 计量记 0。
+pub(crate) async fn call_scene_model_llm_stream(
+    app_handle: &AppHandle,
+    db_path: &PathBuf,
+    prompt: String,
+    scene: Scene,
+    source: &str,
+) -> Result<String, String> {
+    let started = std::time::Instant::now();
+    let conn = Connection::open(db_path).map_err(|e| format!("打开数据库失败: {}", e))?;
+
+    let (provider, model, thinking_mode, api_key, used_scene) =
+        resolve_scene_provider(app_handle, &conn, scene)?;
+
+    let messages = vec![serde_json::json!({
+        "role": "user",
+        "content": prompt,
+    })];
+
+    let scene_str = used_scene.to_string();
+    let result = crate::llm::call_llm_stream_collect(
+        &provider.base_url,
+        &api_key,
+        &model.model_id,
+        &provider.provider_type.to_string(),
+        messages,
+        thinking_mode,
+        std::time::Duration::from_secs(300),
+    )
+    .await;
+    let duration_ms = started.elapsed().as_millis() as u64;
+
+    match result {
+        Ok(content) => {
+            crate::llm::observe::log_call(
+                db_path,
+                &crate::llm::observe::LlmCallEntry {
+                    source,
+                    channel: "scene_model",
+                    scene: Some(&scene_str),
+                    model: Some(&model.model_id),
+                    input_tokens: 0,
+                    cached_input_tokens: 0,
+                    output_tokens: 0,
+                    cost_cny: 0.0,
+                    duration_ms,
+                    tool_call_count: 0,
+                    status: "ok",
+                    error: None,
+                },
+            );
+            Ok(content)
+        }
+        Err(e) => {
+            crate::llm::observe::log_call(
+                db_path,
+                &crate::llm::observe::LlmCallEntry {
+                    source,
+                    channel: "scene_model",
+                    scene: Some(&scene_str),
+                    model: Some(&model.model_id),
+                    input_tokens: 0,
+                    cached_input_tokens: 0,
+                    output_tokens: 0,
+                    cost_cny: 0.0,
+                    duration_ms,
+                    tool_call_count: 0,
+                    status: "error",
+                    error: Some(&e),
+                },
+            );
+            Err(e)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

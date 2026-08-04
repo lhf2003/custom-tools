@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { FileText, Plus, Folder, Loader2, Search, Maximize2, Minimize2, Download, Pencil, X, ListTodo } from 'lucide-react';
+import { FileText, Plus, Folder, Loader2, Search, Maximize2, Minimize2, Download, Pencil, X, ListTodo, Wand2 } from 'lucide-react';
 import { Tooltip } from '@/components/Tooltip';
 import { save } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
+import { useToastStore } from '@/stores/toastStore';
 import type { NoteItemData, CreateNoteRequest } from './types';
 import { useNotes } from './hooks/useNotes';
 import { Modal, EmptyState, SortableNoteTree, ErrorBoundary, VditorEditor, ContextMenu, MenuIcons, DeleteConfirmDialog } from './components';
@@ -253,6 +254,10 @@ export function MarkdownView() {
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
 
+  // AI 排版 state：进行中标记 + 排版前的原文（用于「恢复原文」）
+  const [isAiFormatting, setIsAiFormatting] = useState(false);
+  const [lastAiOriginal, setLastAiOriginal] = useState<string | null>(null);
+
   // Empty area context menu state
   const [emptyAreaMenu, setEmptyAreaMenu] = useState<{
     visible: boolean;
@@ -441,6 +446,49 @@ export function MarkdownView() {
       setIsExporting(false);
     }
   };
+
+  // AI 排版：调后端 format_note_content（复用陪伴 LLM 路由），成功后替换编辑器内容
+  const handleAiFormat = useCallback(async () => {
+    if (!editorContent.trim() || isAiFormatting) return;
+
+    const original = editorContent;
+    setIsAiFormatting(true);
+    try {
+      const formatted = await invoke<string>('format_note_content', { content: original });
+      if (!formatted.trim()) {
+        throw new Error('AI 排版返回内容为空');
+      }
+      setEditorContent(formatted);
+      setLastAiOriginal(original);
+      useToastStore.getState().addToast({ type: 'success', title: 'AI 排版完成' });
+    } catch (err) {
+      console.error('AI 排版失败:', err);
+      useToastStore
+        .getState()
+        .addToast({ type: 'error', title: 'AI 排版失败', message: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setIsAiFormatting(false);
+    }
+  }, [editorContent, isAiFormatting, setEditorContent]);
+
+  // 恢复排版前的原文（10 秒后提示条自动消失）
+  const [showAiRestore, setShowAiRestore] = useState(false);
+  useEffect(() => {
+    if (!lastAiOriginal) {
+      setShowAiRestore(false);
+      return;
+    }
+    setShowAiRestore(true);
+    const timer = setTimeout(() => setShowAiRestore(false), 10000);
+    return () => clearTimeout(timer);
+  }, [lastAiOriginal]);
+
+  const handleAiRestore = useCallback(() => {
+    if (lastAiOriginal === null) return;
+    setEditorContent(lastAiOriginal);
+    setLastAiOriginal(null);
+    useToastStore.getState().addToast({ type: 'info', title: '已恢复原文' });
+  }, [lastAiOriginal, setEditorContent]);
 
   // Close empty area context menu
   const closeEmptyAreaMenu = useCallback(() => {
@@ -781,6 +829,12 @@ export function MarkdownView() {
                       导出中...
                     </span>
                   )}
+                  {isAiFormatting && (
+                    <span className="text-xs flex items-center gap-1" style={{ color: THEME.TEXT_DISABLED }}>
+                      <Loader2 size={12} className="animate-spin" />
+                      AI 排版中...
+                    </span>
+                  )}
                   {exportError && (
                     <span className="text-xs flex items-center gap-1">
                       <span style={{ color: THEME.ERROR }}>{exportError}</span>
@@ -823,6 +877,27 @@ export function MarkdownView() {
                     </button>
                   </Tooltip>
 
+                  {/* AI 排版 Button */}
+                  <Tooltip content="AI 排版" placement="bottom">
+                    <button
+                      onClick={handleAiFormat}
+                      disabled={isAiFormatting || !selectedNote}
+                      aria-label="AI 排版"
+                      className="w-7 h-7 rounded-md flex items-center justify-center transition-all duration-200 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                      style={{ color: THEME.TEXT_DISABLED }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.color = THEME.TEXT_PRIMARY;
+                        e.currentTarget.style.backgroundColor = 'rgba(63, 63, 70, 0.5)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.color = THEME.TEXT_DISABLED;
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                      }}
+                    >
+                      {isAiFormatting ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />}
+                    </button>
+                  </Tooltip>
+
                   {/* Fullscreen Button */}
                   <Tooltip content={isEditorFullscreen ? '退出全屏' : '全屏编辑'} placement="bottom">
                     <button
@@ -844,6 +919,40 @@ export function MarkdownView() {
                 </div>
               </div>
             </div>
+
+            {/* AI 排版完成提示条：可恢复原文（10 秒自动消失） */}
+            {showAiRestore && lastAiOriginal !== null && (
+              <div
+                className="flex items-center justify-between px-6 py-1.5 text-xs"
+                style={{
+                  backgroundColor: 'rgba(59, 130, 246, 0.12)',
+                  borderBottom: `1px solid ${THEME.BORDER_DEFAULT}`,
+                  color: '#93c5fd',
+                }}
+                role="status"
+              >
+                <span className="flex items-center gap-1.5">
+                  <Wand2 size={12} />
+                  AI 排版完成，可恢复原文
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleAiRestore}
+                    className="underline cursor-pointer transition-colors hover:text-white"
+                  >
+                    恢复原文
+                  </button>
+                  <button
+                    onClick={() => setShowAiRestore(false)}
+                    aria-label="关闭提示"
+                    className="p-0.5 rounded transition-colors hover:bg-white/10 cursor-pointer"
+                    style={{ color: '#93c5fd' }}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* WYSIWYG Markdown Editor */}
             <div className="flex-1 overflow-hidden vditor-container">
