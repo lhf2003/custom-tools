@@ -13,15 +13,14 @@ use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 #[cfg(windows)]
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     MapVirtualKeyW, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT,
-    KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, MAPVK_VK_TO_VSC, MOUSEEVENTF_ABSOLUTE,
-    MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MOVE, MOUSEINPUT, VIRTUAL_KEY,
-    VK_CONTROL, VK_V,
+    KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, MAPVK_VK_TO_VSC, MOUSEEVENTF_LEFTDOWN,
+    MOUSEEVENTF_LEFTUP, MOUSEINPUT, VIRTUAL_KEY, VK_CONTROL, VK_V,
 };
 #[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::{
-    BringWindowToTop, GetCursorPos, GetForegroundWindow, GetGUIThreadInfo, GetSystemMetrics,
-    GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, GUITHREADINFO, IsWindow,
-    IsWindowVisible, SetCursorPos, SetForegroundWindow, SM_CXSCREEN, SM_CYSCREEN,
+    BringWindowToTop, GetCursorPos, GetForegroundWindow, GetGUIThreadInfo, GetWindowRect,
+    GetWindowTextW, GetWindowThreadProcessId, GUITHREADINFO, IsWindow, IsWindowVisible,
+    SetCursorPos, SetForegroundWindow,
 };
 
 /// Result type for clipboard read operations
@@ -1008,6 +1007,9 @@ unsafe fn simulate_paste_to_window(target_hwnd: isize) {
     // 轮询确认前台就绪（IDE 激活慢，固定 sleep 可能不够）
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(300);
     while std::time::Instant::now() < deadline {
+        if !IsWindow(Some(hwnd)).as_bool() {
+            break; // 目标窗口已销毁，停止空转
+        }
         if GetForegroundWindow() == hwnd {
             break;
         }
@@ -1041,17 +1043,19 @@ unsafe fn simulate_paste_to_window(target_hwnd: isize) {
     let has_cursor = GetCursorPos(&mut cursor_pos).is_ok();
     let mut rect = RECT::default();
     if GetWindowRect(hwnd, &mut rect).is_ok() {
-        let screen_w = GetSystemMetrics(SM_CXSCREEN).max(1);
-        let screen_h = GetSystemMetrics(SM_CYSCREEN).max(1);
-        let mx = ((rect.left + rect.right) / 2 * 65535 / screen_w) as i32;
-        let my = ((rect.top + 10) * 65535 / screen_h) as i32;
+        // 物理屏幕坐标。不用 MOUSEEVENTF_ABSOLUTE 归一化坐标——其 0-65535
+        // 映射对副屏（负坐标）会算错，点击落到错误屏幕
+        let x = (rect.left + rect.right) / 2;
+        let y = rect.top + 10;
+        let _ = SetCursorPos(x, y);
+        // 相对模式点击：鼠标已在标题栏位置，dx/dy 置 0
         let click = |flags: windows::Win32::UI::Input::KeyboardAndMouse::MOUSE_EVENT_FLAGS| {
             INPUT {
                 r#type: INPUT_MOUSE,
                 Anonymous: INPUT_0 {
                     mi: MOUSEINPUT {
-                        dx: mx,
-                        dy: my,
+                        dx: 0,
+                        dy: 0,
                         mouseData: 0,
                         dwFlags: flags,
                         time: 0,
@@ -1061,11 +1065,7 @@ unsafe fn simulate_paste_to_window(target_hwnd: isize) {
             }
         };
         SendInput(
-            &[
-                click(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE),
-                click(MOUSEEVENTF_LEFTDOWN),
-                click(MOUSEEVENTF_LEFTUP),
-            ],
+            &[click(MOUSEEVENTF_LEFTDOWN), click(MOUSEEVENTF_LEFTUP)],
             std::mem::size_of::<INPUT>() as i32,
         );
         // 等窗口完成用户级激活与内部焦点恢复
