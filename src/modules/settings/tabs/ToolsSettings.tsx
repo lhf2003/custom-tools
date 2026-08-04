@@ -161,11 +161,11 @@ export function ToolsSettings() {
                       <span className="text-white/40 text-xs">
                         {g.enabledCount}/{g.tools.length} 开启
                       </span>
-                        <Toggle
-                          enabled={g.tools.filter((t) => !t.core).every((t) => t.enabled)}
-                          onToggle={(v) => handleGroupToggle(g.tools, v)}
-                          onClick={(e) => e.stopPropagation()}
-                        />
+                      <Toggle
+                        enabled={g.tools.filter((t) => !t.core).every((t) => t.enabled)}
+                        onToggle={(v) => handleGroupToggle(g.tools, v)}
+                        onClick={(e) => e.stopPropagation()}
+                      />
                     </>
                   )}
                 </span>
@@ -219,7 +219,7 @@ export function ToolsSettings() {
                           <p className="text-white/30 text-xs mt-2 leading-relaxed">
                             需要确认时以系统原生弹窗形式弹出（在应用窗口之外），命令内容可见，
                             每次确认或拒绝都会写入本地审计记录。无打扰模式自动放行只读命令
-                           （dir、ipconfig、git status、npm list 等）；灾难命令（格式化、删库、
+                            （dir、ipconfig、git status、npm list 等）；灾难命令（格式化、删库、
                             关机等）任何模式都直接拒绝。
                           </p>
                         </div>

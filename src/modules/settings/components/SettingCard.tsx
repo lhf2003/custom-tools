@@ -23,12 +23,19 @@ export function SettingCard({ title, description, children }: SettingCardProps) 
 interface ToggleProps {
   enabled?: boolean;
   onToggle?: (enabled: boolean) => void;
+  /** 点击事件拦截，常用于阻止外层可折叠区域误触发 */
+  onClick?: (e: React.MouseEvent<HTMLButtonElement>) => void;
 }
 
-export function Toggle({ enabled = false, onToggle }: ToggleProps) {
+export function Toggle({ enabled = false, onToggle, onClick }: ToggleProps) {
   return (
     <button
-      onClick={() => onToggle?.(!enabled)}
+      type="button"
+      aria-label={enabled ? '关闭' : '开启'}
+      onClick={(e) => {
+        onClick?.(e);
+        onToggle?.(!enabled);
+      }}
       className={`relative w-12 h-7 rounded-full overflow-hidden transition-colors duration-200 cursor-pointer ${
         enabled ? 'bg-blue-500' : 'bg-zinc-600 hover:bg-zinc-500'
       }`}
