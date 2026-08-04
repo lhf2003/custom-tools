@@ -43,11 +43,9 @@ const RECENT_FALLBACK_COUNT = 18;
 
 // 搜索框 placeholder 轮换：让隐藏能力（记/Ctrl+J/粘贴 JSON）被自然发现
 const PLACEHOLDER_HINTS = [
-  '搜索应用和指令 / 粘贴文件或图片...',
+  '搜索应用 / 粘贴 JSON 文本',
   '输入「记 + 内容」快速记下备忘',
-  'Ctrl+J 打开 AI 聊天',
-  '粘贴 JSON 文本，自动打开格式化',
-  '「记」下的备忘，会在对的时机还给你',
+  'tab 切换到 AI 视图'
 ];
 
 export function LauncherView() {
@@ -129,6 +127,27 @@ export function LauncherView() {
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 方向键导航时间戳：scrollIntoView 会合成 mouseover，短时间内的 hover 选中必须屏蔽
   const lastKeyboardNavRef = useRef(0);
+
+  // 边界溢出聚焦目标：方向键越界时把 DOM 焦点交给设置/展开按钮（选中清空为 -1，
+  // Enter 放行默认点击触发按钮），再次按方向键回到网格
+  const settingsBtnRef = useRef<HTMLButtonElement>(null);
+  const expandBtnRef = useRef<HTMLButtonElement>(null);
+
+  const focusSettingsButton = useCallback(() => {
+    settingsBtnRef.current?.focus();
+    setSelectedIndex(-1);
+  }, []);
+
+  const focusExpandButton = useCallback(() => {
+    expandBtnRef.current?.focus();
+    setSelectedIndex(-1);
+  }, []);
+
+  // 从外部按钮回网格时，DOM 焦点要还给对应卡片（选中态与焦点必须一致，
+  // 否则 Enter 会被选中项拦截，按钮点击无法触发）
+  const focusGridItem = useCallback((index: number) => {
+    document.getElementById(`launcher-option-${index}`)?.focus();
+  }, []);
 
   // hover 即选中，但方向键导航后的 200ms 内忽略（防 scrollIntoView 合成事件吸回选择）
   const handleHoverSelect = useCallback((index: number) => {
@@ -365,13 +384,6 @@ export function LauncherView() {
       return;
     }
 
-    // Ctrl+J 跳转 AI 聊天（不占用 Tab/Shift+Tab 的焦点导航语义）
-    if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'j') {
-      e.preventDefault();
-      setActiveView('chat');
-      return;
-    }
-
     // 备忘模式无结果网格：左右键放行给输入框移动光标，不做网格导航
     if (isNoteMode && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
       return;
@@ -384,12 +396,36 @@ export function LauncherView() {
       case 'ArrowDown':
         e.preventDefault();
         lastKeyboardNavRef.current = Date.now();
-        setSelectedIndex(prev => Math.min(prev + ITEMS_PER_ROW, maxIndex));
+        setSelectedIndex(prev => {
+          if (prev < 0) {
+            // 焦点在设置/展开按钮：回网格第一项，并把 DOM 焦点还给卡片
+            focusGridItem(0);
+            return 0;
+          }
+          if (prev + ITEMS_PER_ROW > maxIndex) {
+            // 已在最后一行：溢出聚焦「展开」按钮
+            focusExpandButton();
+            return -1;
+          }
+          return prev + ITEMS_PER_ROW;
+        });
         break;
       case 'ArrowUp':
         e.preventDefault();
         lastKeyboardNavRef.current = Date.now();
-        setSelectedIndex(prev => Math.max(prev - ITEMS_PER_ROW, 0));
+        setSelectedIndex(prev => {
+          if (prev < 0) {
+            // 焦点在外部按钮：回网格最后一项
+            focusGridItem(maxIndex);
+            return maxIndex;
+          }
+          if (prev - ITEMS_PER_ROW < 0) {
+            // 已在第一行：溢出聚焦设置按钮
+            focusSettingsButton();
+            return -1;
+          }
+          return prev - ITEMS_PER_ROW;
+        });
         break;
       case 'ArrowRight':
         e.preventDefault();
@@ -402,6 +438,8 @@ export function LauncherView() {
         setSelectedIndex(prev => Math.max(prev - 1, 0));
         break;
       case 'Enter':
+        // 焦点在设置/展开按钮（选中已清空为 -1）：放行默认行为，让按钮点击生效
+        if (!isNoteMode && selectedIndex < 0) return;
         e.preventDefault();
         // 「记」命令：暂存意图备忘，不走搜索
         if (isNoteMode) {
@@ -450,7 +488,7 @@ export function LauncherView() {
         }
         break;
     }
-  }, [searchQuery, navItems, selectedIndex, setActiveView, addToast, setSearchQuery, searchApps, buildResults, handleItemClick, isNoteMode, noteContent]);
+  }, [searchQuery, navItems, selectedIndex, addToast, setSearchQuery, searchApps, buildResults, handleItemClick, isNoteMode, noteContent, focusSettingsButton, focusExpandButton, focusGridItem]);
 
   return (
     <div
@@ -470,13 +508,14 @@ export function LauncherView() {
           role="combobox"
           aria-expanded={!isNoteMode}
           aria-controls="launcher-listbox"
-          aria-activedescendant={!isNoteMode && navItems.length > 0 ? `launcher-option-${selectedIndex}` : undefined}
+          aria-activedescendant={!isNoteMode && navItems.length > 0 && selectedIndex >= 0 ? `launcher-option-${selectedIndex}` : undefined}
           className="flex-1 bg-transparent text-lg text-app-text-primary placeholder-app-text-placeholder outline-none"
           autoFocus
         />
 
         {/* Profile Button */}
         <button
+          ref={settingsBtnRef}
           onClick={() => setActiveView('settings')}
           aria-label="打开设置"
           className="ml-3 w-9 h-9 rounded-full bg-app-bg-elevated flex items-center justify-center overflow-hidden hover:bg-app-bg-pressed transition-all group flex-shrink-0"
@@ -496,6 +535,7 @@ export function LauncherView() {
             visibleResults={navItems}
             isExpanded={isExpanded}
             onToggleExpand={() => setIsExpanded(!isExpanded)}
+            expandBtnRef={expandBtnRef}
             selectedIndex={selectedIndex}
             onItemClick={handleItemClick}
             onSelect={handleHoverSelect}
@@ -508,6 +548,7 @@ export function LauncherView() {
               <h2 className="text-sm font-semibold text-app-text-tertiary">最近使用</h2>
               {recentItems.length > ITEMS_PER_ROW && (
                 <button
+                  ref={expandBtnRef}
                   onClick={() => setIsExpanded(!isExpanded)}
                   className="text-xs text-app-text-tertiary cursor-pointer hover:text-app-text-secondary transition-colors"
                 >
@@ -686,6 +727,7 @@ function SearchResults({
   visibleResults,
   isExpanded,
   onToggleExpand,
+  expandBtnRef,
   selectedIndex,
   onItemClick,
   onSelect,
@@ -696,6 +738,7 @@ function SearchResults({
   visibleResults: AppItemData[];
   isExpanded: boolean;
   onToggleExpand: () => void;
+  expandBtnRef: React.RefObject<HTMLButtonElement>;
   selectedIndex: number;
   onItemClick: (item: AppItemData) => void;
   onSelect: (index: number) => void;
@@ -729,6 +772,7 @@ function SearchResults({
         </h2>
         {showExpandButton && (
           <button
+            ref={expandBtnRef}
             onClick={onToggleExpand}
             className="text-xs text-app-text-tertiary cursor-pointer hover:text-app-text-secondary transition-colors"
           >
