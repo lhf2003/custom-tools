@@ -45,6 +45,8 @@ export interface SceneConfig {
   provider_id: number;
   model_id: string;
   thinking_mode: boolean;
+  /** 思考强度（low/medium/high/max，档位按提供商能力提供），DeepSeek/OpenAI 系模型生效；缺省 medium */
+  reasoning_effort: string;
   updated_at: string;
 }
 
@@ -100,8 +102,9 @@ interface LlmProviderState {
 
   // Scene actions
   loadSceneConfigs: () => Promise<void>;
-  setSceneModel: (scene: Scene, providerId: number, modelId: string, thinkingMode?: boolean) => Promise<void>;
+  setSceneModel: (scene: Scene, providerId: number, modelId: string, thinkingMode?: boolean, reasoningEffort?: string) => Promise<void>;
   setSceneThinkingMode: (scene: Scene, thinkingMode: boolean) => Promise<void>;
+  setSceneReasoningEffort: (scene: Scene, reasoningEffort: string) => Promise<void>;
   getSceneModelInfo: (scene: Scene) => Promise<SceneModelInfo | null>;
 }
 
@@ -264,10 +267,10 @@ export const useLlmProviderStore = create<LlmProviderState>((set, get) => ({
     }
   },
 
-  setSceneModel: async (scene, providerId, modelId, thinkingMode = false) => {
+  setSceneModel: async (scene, providerId, modelId, thinkingMode = false, reasoningEffort = 'medium') => {
     try {
       const config = await invoke<SceneConfig>('set_scene_model', {
-        req: { scene, providerId, modelId, thinkingMode },
+        req: { scene, providerId, modelId, thinkingMode, reasoningEffort },
       });
       set((state) => ({
         sceneConfigs: { ...state.sceneConfigs, [scene]: config },
@@ -290,6 +293,7 @@ export const useLlmProviderStore = create<LlmProviderState>((set, get) => ({
           providerId: currentConfig.provider_id,
           modelId: currentConfig.model_id,
           thinkingMode,
+          reasoningEffort: currentConfig.reasoning_effort ?? 'medium',
         },
       });
       set((state) => ({
@@ -297,6 +301,30 @@ export const useLlmProviderStore = create<LlmProviderState>((set, get) => ({
       }));
     } catch (err) {
       console.error('Failed to set scene thinking mode:', err);
+      throw err;
+    }
+  },
+
+  setSceneReasoningEffort: async (scene, reasoningEffort) => {
+    try {
+      const currentConfig = get().sceneConfigs[scene];
+      if (!currentConfig || !currentConfig.provider_id) {
+        throw new Error('请先选择提供商和模型');
+      }
+      const config = await invoke<SceneConfig>('set_scene_model', {
+        req: {
+          scene,
+          providerId: currentConfig.provider_id,
+          modelId: currentConfig.model_id,
+          thinkingMode: currentConfig.thinking_mode,
+          reasoningEffort,
+        },
+      });
+      set((state) => ({
+        sceneConfigs: { ...state.sceneConfigs, [scene]: config },
+      }));
+    } catch (err) {
+      console.error('Failed to set scene reasoning effort:', err);
       throw err;
     }
   },

@@ -205,6 +205,7 @@ pub async fn set_scene_model(
         req.provider_id,
         &req.model_id,
         req.thinking_mode,
+        &normalize_reasoning_effort(req.reasoning_effort.as_deref().unwrap_or("medium")),
     )
 }
 

@@ -23,7 +23,12 @@ pub fn log_prompt(source: &str, prompt: &str) {
 /// LLM 请求参数 debug 日志摘要：各提供商思考控制参数的显式下发形态。
 /// 与请求组装逻辑保持一致——用于排查思考模式开关是否按配置下发。
 /// 只记录参数形态，不记录 api_key 与消息内容。
-fn thinking_control_desc(base_url: &str, provider_type: &str, thinking_mode: bool) -> String {
+fn thinking_control_desc(
+    base_url: &str,
+    provider_type: &str,
+    thinking_mode: bool,
+    reasoning_effort: &str,
+) -> String {
     if provider_type == "ollama" {
         format!("think={}", thinking_mode)
     } else {
@@ -33,11 +38,12 @@ fn thinking_control_desc(base_url: &str, provider_type: &str, thinking_mode: boo
             format!("enable_thinking={}", thinking_mode)
         } else if is_deepseek {
             format!(
-                "thinking.type={}",
-                if thinking_mode { "enabled" } else { "disabled" }
+                "thinking.type={}, reasoning_effort={}",
+                if thinking_mode { "enabled" } else { "disabled" },
+                if thinking_mode { reasoning_effort } else { "未传" }
             )
         } else if thinking_mode {
-            "reasoning_effort=medium".to_string()
+            format!("reasoning_effort={}", reasoning_effort)
         } else {
             "reasoning_effort=未传".to_string()
         }
@@ -182,6 +188,7 @@ pub async fn call_llm_with_tools(
     messages: Vec<serde_json::Value>,
     tools: serde_json::Value,
     thinking_mode: bool,
+    reasoning_effort: &str,
 ) -> Result<ToolReply, String> {
     if model.is_empty() {
         return Err("模型名称未配置".to_string());
@@ -220,8 +227,12 @@ pub async fn call_llm_with_tools(
             body["thinking"] = serde_json::json!({
                 "type": if thinking_mode { "enabled" } else { "disabled" }
             });
+            // reasoning_effort 官方文档与 thinking 成对下发（high/medium/low）
+            if thinking_mode {
+                body["reasoning_effort"] = serde_json::json!(reasoning_effort);
+            }
         } else if thinking_mode {
-            body["reasoning_effort"] = serde_json::json!("medium");
+            body["reasoning_effort"] = serde_json::json!(reasoning_effort);
         }
     }
 
@@ -232,7 +243,7 @@ pub async fn call_llm_with_tools(
         provider_type,
         messages.len(),
         tools_count,
-        thinking_control_desc(base_url, provider_type, thinking_mode),
+        thinking_control_desc(base_url, provider_type, thinking_mode, reasoning_effort),
     );
 
     let mut req_builder = client.post(&url).json(&body);
@@ -365,6 +376,7 @@ pub async fn call_llm_stream_with_tools(
     messages: Vec<serde_json::Value>,
     tools: serde_json::Value,
     thinking_mode: bool,
+    reasoning_effort: &str,
     on_text: &(dyn Fn(&str) + Send + Sync),
 ) -> Result<ToolReply, String> {
     if model.is_empty() {
@@ -399,13 +411,19 @@ pub async fn call_llm_stream_with_tools(
         let is_deepseek = base_url.contains("deepseek");
         if is_bailian {
             body["enable_thinking"] = serde_json::json!(thinking_mode);
+            // 百炼流式：末 chunk 需显式请求才回传 usage（否则 token 计量恒为 0）
+            body["stream_options"] = serde_json::json!({ "include_usage": true });
         } else if is_deepseek {
             // DeepSeek V4 思考模式默认开启，关闭时同样需显式传 thinking disabled
             body["thinking"] = serde_json::json!({
                 "type": if thinking_mode { "enabled" } else { "disabled" }
             });
+            // reasoning_effort 官方文档与 thinking 成对下发（high/medium/low）
+            if thinking_mode {
+                body["reasoning_effort"] = serde_json::json!(reasoning_effort);
+            }
         } else if thinking_mode {
-            body["reasoning_effort"] = serde_json::json!("medium");
+            body["reasoning_effort"] = serde_json::json!(reasoning_effort);
         }
     }
 
@@ -416,7 +434,7 @@ pub async fn call_llm_stream_with_tools(
         provider_type,
         messages_len,
         tools_count,
-        thinking_control_desc(base_url, provider_type, thinking_mode),
+        thinking_control_desc(base_url, provider_type, thinking_mode, reasoning_effort),
     );
 
     let mut req_builder = client.post(&url).json(&body);
@@ -616,6 +634,7 @@ pub async fn call_llm_stream_collect(
     provider_type: &str,
     messages: Vec<serde_json::Value>,
     thinking_mode: bool,
+    reasoning_effort: &str,
     timeout: std::time::Duration,
 ) -> Result<String, String> {
     if model.is_empty() {
@@ -649,13 +668,19 @@ pub async fn call_llm_stream_collect(
         let is_deepseek = base_url.contains("deepseek");
         if is_bailian {
             body["enable_thinking"] = serde_json::json!(thinking_mode);
+            // 百炼流式：末 chunk 需显式请求才回传 usage（否则 token 计量恒为 0）
+            body["stream_options"] = serde_json::json!({ "include_usage": true });
         } else if is_deepseek {
             // DeepSeek V4 思考模式默认开启，关闭时同样需显式传 thinking disabled
             body["thinking"] = serde_json::json!({
                 "type": if thinking_mode { "enabled" } else { "disabled" }
             });
+            // reasoning_effort 官方文档与 thinking 成对下发（high/medium/low）
+            if thinking_mode {
+                body["reasoning_effort"] = serde_json::json!(reasoning_effort);
+            }
         } else if thinking_mode {
-            body["reasoning_effort"] = serde_json::json!("medium");
+            body["reasoning_effort"] = serde_json::json!(reasoning_effort);
         }
     }
 
@@ -665,7 +690,7 @@ pub async fn call_llm_stream_collect(
         model,
         provider_type,
         body["messages"].as_array().map(|a| a.len()).unwrap_or(0),
-        thinking_control_desc(base_url, provider_type, thinking_mode),
+        thinking_control_desc(base_url, provider_type, thinking_mode, reasoning_effort),
     );
 
     let mut req_builder = client.post(&url).json(&body);
@@ -907,6 +932,7 @@ pub async fn call_llm(
     provider_type: &str,
     messages: Vec<ChatMessage>,
     thinking_mode: bool,
+    reasoning_effort: &str,
 ) -> Result<LlmReply, String> {
     if model.is_empty() {
         return Err("模型名称未配置".to_string());
@@ -974,8 +1000,9 @@ pub async fn call_llm(
             model,
             messages: &messages,
             stream: false,
-            reasoning_effort: if thinking_mode && !is_bailian && !is_deepseek {
-                Some("medium")
+            // DeepSeek V4 思考开启时也下发 reasoning_effort（官方示例与 thinking 成对出现）
+            reasoning_effort: if thinking_mode && !is_bailian {
+                Some(reasoning_effort)
             } else {
                 None
             },
@@ -992,7 +1019,7 @@ pub async fn call_llm(
         model,
         provider_type,
         messages.len(),
-        thinking_control_desc(base_url, provider_type, thinking_mode),
+        thinking_control_desc(base_url, provider_type, thinking_mode, reasoning_effort),
     );
 
     let response = req_builder
@@ -1043,6 +1070,7 @@ pub async fn call_llm_stream(
     provider_type: &str,
     messages: Vec<ChatMessage>,
     thinking_mode: bool,
+    reasoning_effort: &str,
     app_handle: &tauri::AppHandle,
 ) -> Result<(), String> {
     if model.is_empty() {
@@ -1096,6 +1124,11 @@ pub async fn call_llm_stream(
                 "enable_thinking".to_string(),
                 serde_json::json!(thinking_mode),
             );
+            // 百炼流式：末 chunk 需显式请求才回传 usage（否则 token 计量恒为 0）
+            body.insert(
+                "stream_options".to_string(),
+                serde_json::json!({ "include_usage": true }),
+            );
             Some(body)
         } else if is_deepseek {
             let mut body = serde_json::Map::new();
@@ -1113,8 +1146,8 @@ pub async fn call_llm_stream(
             model,
             messages: &messages,
             stream: true,
-            reasoning_effort: if thinking_mode && !is_bailian && !is_deepseek {
-                Some("medium")
+            reasoning_effort: if thinking_mode && !is_bailian {
+                Some(reasoning_effort)
             } else {
                 None
             },
@@ -1133,7 +1166,7 @@ pub async fn call_llm_stream(
         model,
         provider_type,
         messages.len(),
-        thinking_control_desc(base_url, provider_type, thinking_mode),
+        thinking_control_desc(base_url, provider_type, thinking_mode, reasoning_effort),
     );
 
     let response = req_builder.send().await.map_err(|e| {

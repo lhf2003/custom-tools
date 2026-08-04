@@ -155,7 +155,7 @@ async fn run_scene_chat(
     // worker 上，DB 锁等待会拖累整个前端事件泵；下同，不再逐处备注）
     let app_c = app_handle.clone();
     let db_path_owned = db_path.clone();
-    let (provider, model, thinking_mode, api_key, used_scene) =
+    let (provider, model, thinking_mode, reasoning_effort, api_key, used_scene) =
         tauri::async_runtime::spawn_blocking(move || {
             let conn = crate::db::open_connection(&db_path_owned)
                 .map_err(|e| format!("打开数据库失败: {}", e))?;
@@ -219,6 +219,7 @@ async fn run_scene_chat(
             messages.clone(),
             tools_json.clone(),
             thinking_mode,
+            &reasoning_effort,
             on_text,
         )
         .await;
@@ -343,6 +344,7 @@ async fn run_scene_chat(
                         messages.clone(),
                         json!([]),
                         thinking_mode,
+                        &reasoning_effort,
                         on_text,
                     )
                     .await;
@@ -428,6 +430,7 @@ async fn run_scene_chat(
                         &provider_type,
                         &scene_str,
                         thinking_mode,
+                        &reasoning_effort,
                         session_id,
                         &text,
                     )
@@ -520,6 +523,7 @@ async fn plain_fallback(
     provider_type: &str,
     scene_str: &str,
     thinking_mode: bool,
+    reasoning_effort: &str,
     session_id: i64,
     text: &str,
 ) -> Result<(), String> {
@@ -561,6 +565,7 @@ async fn plain_fallback(
         provider_type,
         msgs,
         thinking_mode,
+        reasoning_effort,
     )
     .await;
     let duration_ms = started.elapsed().as_millis() as u64;

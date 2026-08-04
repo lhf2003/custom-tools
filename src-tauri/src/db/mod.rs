@@ -283,6 +283,7 @@ impl Database {
                 provider_id INTEGER REFERENCES llm_providers(id),
                 model_id TEXT,
                 thinking_mode BOOLEAN DEFAULT 0,
+                reasoning_effort TEXT DEFAULT 'medium',
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )",
             [],
@@ -294,6 +295,14 @@ impl Database {
             "llm_scene_configs",
             "thinking_mode",
             "ALTER TABLE llm_scene_configs ADD COLUMN thinking_mode BOOLEAN DEFAULT 0",
+        )?;
+
+        // Migration: 场景思考强度（reasoning_effort：low/medium/high，DeepSeek/OpenAI 系生效）
+        ensure_column(
+            &self.conn,
+            "llm_scene_configs",
+            "reasoning_effort",
+            "ALTER TABLE llm_scene_configs ADD COLUMN reasoning_effort TEXT DEFAULT 'medium'",
         )?;
 
         // Migration: 模型单价（每百万 token 人民币，可选；填了成本面板才算金额）

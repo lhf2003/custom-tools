@@ -112,6 +112,8 @@ pub struct SceneConfig {
     pub provider_id: i64,
     pub model_id: String,
     pub thinking_mode: bool,
+    /// 思考强度（low/medium/high/max，档位按提供商能力提供），DeepSeek/OpenAI 系模型生效；缺省 medium
+    pub reasoning_effort: String,
     pub updated_at: String,
 }
 
@@ -184,6 +186,16 @@ pub struct SetSceneModelRequest {
     pub provider_id: i64,
     pub model_id: String,
     pub thinking_mode: bool,
+    /// 思考强度（low/medium/high/max）；缺省 medium（Option 兼容旧前端不带此字段）
+    pub reasoning_effort: Option<String>,
+}
+
+/// 思考强度合法值归一：low/medium/high/max 原样返回，其余回退 medium（写入边界防御）
+pub fn normalize_reasoning_effort(v: &str) -> String {
+    match v {
+        "low" | "medium" | "high" | "max" => v.to_string(),
+        _ => "medium".to_string(),
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

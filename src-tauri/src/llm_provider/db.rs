@@ -415,7 +415,7 @@ impl LlmProviderDb {
     pub fn get_scene_configs(&self, conn: &Connection) -> Result<Vec<SceneConfig>, String> {
         let mut stmt = conn
             .prepare(
-                "SELECT id, scene, provider_id, model_id, thinking_mode, updated_at
+                "SELECT id, scene, provider_id, model_id, thinking_mode, reasoning_effort, updated_at
                  FROM llm_scene_configs ORDER BY scene",
             )
             .map_err(|e| format!("准备查询失败: {}", e))?;
@@ -429,7 +429,8 @@ impl LlmProviderDb {
                     provider_id: row.get(2)?,
                     model_id: row.get(3)?,
                     thinking_mode: row.get(4)?,
-                    updated_at: row.get(5)?,
+                    reasoning_effort: row.get(5)?,
+                    updated_at: row.get(6)?,
                 })
             })
             .map_err(|e| format!("查询场景配置失败: {}", e))?
@@ -446,20 +447,29 @@ impl LlmProviderDb {
         provider_id: i64,
         model_id: &str,
         thinking_mode: bool,
+        reasoning_effort: &str,
     ) -> Result<SceneConfig, String> {
         let scene_str = scene.to_string();
         let now = chrono::Local::now().to_rfc3339();
         let thinking_mode_val = if thinking_mode { "1" } else { "0" };
 
         conn.execute(
-            "INSERT INTO llm_scene_configs (scene, provider_id, model_id, thinking_mode, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)
+            "INSERT INTO llm_scene_configs (scene, provider_id, model_id, thinking_mode, reasoning_effort, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(scene) DO UPDATE SET
                 provider_id = excluded.provider_id,
                 model_id = excluded.model_id,
                 thinking_mode = excluded.thinking_mode,
+                reasoning_effort = excluded.reasoning_effort,
                 updated_at = excluded.updated_at",
-            [&scene_str, &provider_id.to_string(), model_id, thinking_mode_val, &now],
+            [
+                &scene_str,
+                &provider_id.to_string(),
+                model_id,
+                thinking_mode_val,
+                reasoning_effort,
+                &now,
+            ],
         )
         .map_err(|e| format!("设置场景模型失败: {}", e))?;
 
@@ -471,6 +481,7 @@ impl LlmProviderDb {
             provider_id,
             model_id: model_id.to_string(),
             thinking_mode,
+            reasoning_effort: reasoning_effort.to_string(),
             updated_at: now,
         })
     }
@@ -485,6 +496,22 @@ impl LlmProviderDb {
             )
             .unwrap_or(false);
         Ok(thinking_mode)
+    }
+
+    pub fn get_scene_reasoning_effort(
+        &self,
+        conn: &Connection,
+        scene: Scene,
+    ) -> Result<String, String> {
+        let scene_str = scene.to_string();
+        let reasoning_effort: String = conn
+            .query_row(
+                "SELECT reasoning_effort FROM llm_scene_configs WHERE scene = ?1",
+                [&scene_str],
+                |row| row.get(0),
+            )
+            .unwrap_or_else(|_| "medium".to_string());
+        Ok(reasoning_effort)
     }
 
     pub fn get_scene_model(

@@ -30,7 +30,7 @@ import { CustomSelect } from '../components/CustomSelect';
 // Provider type options
 const PROVIDER_TYPES: { value: ProviderType; label: string; baseUrl: string; apiKeyRequired: boolean }[] = [
   { value: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', apiKeyRequired: true },
-  { value: 'deepseek', label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', apiKeyRequired: true },
+  { value: 'deepseek', label: 'DeepSeek', baseUrl: 'https://api.deepseek.com', apiKeyRequired: true },
   { value: 'bailian', label: '百炼', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', apiKeyRequired: true },
   { value: 'ollama', label: 'Ollama 本地', baseUrl: 'http://localhost:11434', apiKeyRequired: false },
   { value: 'custom', label: '自定义', baseUrl: '', apiKeyRequired: true },
@@ -78,6 +78,7 @@ export function ModelSettings() {
     loadSceneConfigs,
     setSceneModel,
     setSceneThinkingMode,
+    setSceneReasoningEffort,
   } = useLlmProviderStore();
 
   const [expandedProvider, setExpandedProvider] = useState<number | null>(null);
@@ -285,7 +286,8 @@ export function ModelSettings() {
     }
     const currentConfig = sceneConfigs[scene];
     const thinkingMode = currentConfig?.thinking_mode ?? false;
-    await setSceneModel(scene, providerId, modelId, thinkingMode);
+    const reasoningEffort = currentConfig?.reasoning_effort ?? 'medium';
+    await setSceneModel(scene, providerId, modelId, thinkingMode, reasoningEffort);
   };
 
   const isFormValid = formData.name && formData.label && formData.baseUrl;
@@ -647,7 +649,7 @@ export function ModelSettings() {
                     className="w-full bg-zinc-800 text-white text-sm rounded-lg px-3 py-2 outline-none border border-zinc-700 focus:border-violet-500/60 transition-colors placeholder:text-white/20"
                   />
                   <p className="text-white/30 text-xs mt-1">
-                    OpenAI 兼容填 /v1 结尾；Ollama 填 http://localhost:11434
+                    OpenAI 兼容填 /v1 结尾（DeepSeek 填 https://api.deepseek.com）；Ollama 填 http://localhost:11434
                   </p>
                 </div>
 
@@ -710,6 +712,24 @@ export function ModelSettings() {
             {(Object.keys(SCENE_LABELS) as Scene[]).map((scene) => {
               const config = sceneConfigs[scene];
               const SceneIcon = SCENE_LABELS[scene].icon;
+              const sceneProvider = providers.find((p) => p.id === config?.provider_id);
+              // 强度档位按提供商能力提供：DeepSeek 官方仅 low/high/max（medium 被映射为 high）；
+              // OpenAI 系原生 low/medium/high；百炼/Ollama 无此参数（空选项 + 禁用）
+              const effortOptions =
+                sceneProvider?.provider_type === 'deepseek'
+                  ? [
+                      { value: 'low', label: '低' },
+                      { value: 'high', label: '高' },
+                      { value: 'max', label: '极致' },
+                    ]
+                  : sceneProvider?.provider_type === 'openai' ||
+                    sceneProvider?.provider_type === 'custom'
+                    ? [
+                        { value: 'low', label: '低' },
+                        { value: 'medium', label: '中' },
+                        { value: 'high', label: '高' },
+                      ]
+                    : [];
 
               return (
                 <div key={scene} className="px-4 py-3 flex items-center gap-4">
@@ -740,6 +760,7 @@ export function ModelSettings() {
                         try {
                           const providerId = parseInt(value);
                           const currentThinkingMode = config?.thinking_mode ?? false;
+                          const currentReasoningEffort = config?.reasoning_effort ?? 'medium';
                           if (providerId) {
                             let providerModels = models[providerId];
                             if (!providerModels) {
@@ -747,14 +768,14 @@ export function ModelSettings() {
                             }
                             const activeModels = providerModels?.filter((m) => m.is_active);
                             if (activeModels && activeModels.length > 0) {
-                              await setSceneModel(scene, providerId, activeModels[0].model_id, currentThinkingMode);
+                              await setSceneModel(scene, providerId, activeModels[0].model_id, currentThinkingMode, currentReasoningEffort);
                             } else if (providerModels && providerModels.length > 0) {
-                              await setSceneModel(scene, providerId, providerModels[0].model_id, currentThinkingMode);
+                              await setSceneModel(scene, providerId, providerModels[0].model_id, currentThinkingMode, currentReasoningEffort);
                             } else {
-                              await setSceneModel(scene, providerId, '', currentThinkingMode);
+                              await setSceneModel(scene, providerId, '', currentThinkingMode, currentReasoningEffort);
                             }
                           } else {
-                            await setSceneModel(scene, 0, '', currentThinkingMode);
+                            await setSceneModel(scene, 0, '', currentThinkingMode, currentReasoningEffort);
                           }
                         } catch (e) {
                           alert(`应用提供商失败: ${e}`);
@@ -805,6 +826,27 @@ export function ModelSettings() {
                         <span>思考</span>
                       </button>
                     </Tooltip>
+
+                    {/* 思考强度（按提供商能力提供档位；仅思考开启时可调） */}
+                    <CustomSelect
+                      value={config?.reasoning_effort ?? 'medium'}
+                      options={effortOptions}
+                      onChange={(value) => {
+                        try {
+                          setSceneReasoningEffort(scene, value);
+                        } catch (e) {
+                          alert(`设置思考强度失败: ${e}`);
+                        }
+                      }}
+                      disabled={
+                        !config?.provider_id ||
+                        !config?.thinking_mode ||
+                        effortOptions.length === 0
+                      }
+                      placeholder="强度"
+                      className="w-20"
+                      menuClassName="w-24"
+                    />
                   </div>
                 </div>
               );

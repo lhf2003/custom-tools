@@ -1503,6 +1503,7 @@ pub(crate) fn resolve_scene_provider(
         crate::llm_provider::models::Model,
         bool,
         String,
+        String,
         Scene,
     ),
     String,
@@ -1531,6 +1532,10 @@ pub(crate) fn resolve_scene_provider(
         .get_scene_thinking_mode(conn, used_scene.clone())
         .unwrap_or(false);
 
+    let reasoning_effort = provider_db
+        .get_scene_reasoning_effort(conn, used_scene.clone())
+        .unwrap_or_else(|_| "medium".to_string());
+
     let api_key = match &provider.api_key_encrypted {
         Some(encrypted) if !encrypted.is_empty() => {
             let app_data_dir = app_handle.path().app_data_dir().unwrap_or_default();
@@ -1539,7 +1544,7 @@ pub(crate) fn resolve_scene_provider(
         _ => String::new(),
     };
 
-    Ok((provider, model, thinking_mode, api_key, used_scene))
+    Ok((provider, model, thinking_mode, reasoning_effort, api_key, used_scene))
 }
 
 /// 按场景配置调用场景模型。非陪伴场景未单独配置时，
@@ -1555,7 +1560,7 @@ pub(crate) async fn call_scene_model_llm(
     let started = std::time::Instant::now();
     let conn = Connection::open(db_path).map_err(|e| format!("打开数据库失败: {}", e))?;
 
-    let (provider, model, thinking_mode, api_key, used_scene) =
+    let (provider, model, thinking_mode, reasoning_effort, api_key, used_scene) =
         resolve_scene_provider(app_handle, &conn, scene)?;
 
     let messages = vec![ChatMessage {
@@ -1572,6 +1577,7 @@ pub(crate) async fn call_scene_model_llm(
         &provider.provider_type.to_string(),
         messages,
         thinking_mode,
+        &reasoning_effort,
     )
     .await;
     let duration_ms = started.elapsed().as_millis() as u64;
@@ -1636,7 +1642,7 @@ pub(crate) async fn call_scene_model_llm_stream(
     let started = std::time::Instant::now();
     let conn = Connection::open(db_path).map_err(|e| format!("打开数据库失败: {}", e))?;
 
-    let (provider, model, thinking_mode, api_key, used_scene) =
+    let (provider, model, thinking_mode, reasoning_effort, api_key, used_scene) =
         resolve_scene_provider(app_handle, &conn, scene)?;
 
     let messages = vec![serde_json::json!({
@@ -1652,6 +1658,7 @@ pub(crate) async fn call_scene_model_llm_stream(
         &provider.provider_type.to_string(),
         messages,
         thinking_mode,
+        &reasoning_effort,
         std::time::Duration::from_secs(300),
     )
     .await;

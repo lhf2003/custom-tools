@@ -45,6 +45,7 @@ pub async fn test_llm_connection(
         provider_type,
         messages,
         thinking_mode,
+        "medium",
     )
     .await;
     let duration_ms = started.elapsed().as_millis() as u64;
@@ -104,7 +105,7 @@ pub async fn call_llm_stream_by_scene(
 ) -> Result<(), String> {
     let scene_enum: Scene = scene.parse().map_err(|e: String| e)?;
 
-    let (base_url, api_key, model, provider_type, thinking_mode) = {
+    let (base_url, api_key, model, provider_type, thinking_mode, reasoning_effort) = {
         let db_path = &db_state.0;
         let conn =
             rusqlite::Connection::open(db_path).map_err(|e| format!("无法连接数据库: {}", e))?;
@@ -119,6 +120,11 @@ pub async fn call_llm_stream_by_scene(
         let thinking_mode = provider_db
             .get_scene_thinking_mode(&conn, scene_enum.clone())
             .unwrap_or(false);
+
+        // 获取场景的思考强度配置（DeepSeek/OpenAI 系生效）
+        let reasoning_effort = provider_db
+            .get_scene_reasoning_effort(&conn, scene_enum.clone())
+            .unwrap_or_else(|_| "medium".to_string());
 
         // 解密 API key
         let api_key = if let Some(encrypted) = provider.api_key_encrypted {
@@ -143,6 +149,7 @@ pub async fn call_llm_stream_by_scene(
             model.model_id,
             provider_type_str,
             thinking_mode,
+            reasoning_effort,
         )
     };
 
@@ -156,6 +163,7 @@ pub async fn call_llm_stream_by_scene(
         &provider_type,
         messages,
         thinking_mode,
+        &reasoning_effort,
         &app_handle,
     )
     .await;
