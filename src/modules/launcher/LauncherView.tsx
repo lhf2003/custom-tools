@@ -61,7 +61,7 @@ export function LauncherView() {
   useEffect(() => {
     const timer = setInterval(() => {
       setHintIndex(prev => (prev + 1) % PLACEHOLDER_HINTS.length);
-    }, 8000);
+    }, 3000);
     return () => clearInterval(timer);
   }, []);
 
@@ -384,6 +384,13 @@ export function LauncherView() {
       return;
     }
 
+    // Tab 切换到 AI 视图（聊天页 Shift+Tab 切回）；Shift+Tab 不占用，放行默认
+    if (e.key === 'Tab' && !e.shiftKey) {
+      e.preventDefault();
+      setActiveView('chat');
+      return;
+    }
+
     // 备忘模式无结果网格：左右键放行给输入框移动光标，不做网格导航
     if (isNoteMode && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
       return;
@@ -488,15 +495,15 @@ export function LauncherView() {
         }
         break;
     }
-  }, [searchQuery, navItems, selectedIndex, addToast, setSearchQuery, searchApps, buildResults, handleItemClick, isNoteMode, noteContent, focusSettingsButton, focusExpandButton, focusGridItem]);
+  }, [searchQuery, navItems, selectedIndex, setActiveView, addToast, setSearchQuery, searchApps, buildResults, handleItemClick, isNoteMode, noteContent, focusSettingsButton, focusExpandButton, focusGridItem]);
 
   return (
     <div
-      className="w-full h-full flex flex-col rounded-lg overflow-hidden outline-none bg-transparent"
+      className="w-full h-full flex flex-col rounded-lg overflow-hidden outline-none bg-zinc-800/50"
       onKeyDown={handleKeyDown}
     >
-      {/* Search Bar */}
-      <div className="w-full flex items-center px-4 py-3 search-shadow">
+      {/* Search Bar（兼窗口拖拽区；输入框与按钮显式摘除，否则会被拖拽拦截） */}
+      <div className="w-full flex items-center px-4 py-3 search-shadow" data-tauri-drag-region>
         <Search className="w-5 h-5 text-app-text-tertiary mr-3 flex-shrink-0" />
         <input
           type="text"
@@ -510,6 +517,7 @@ export function LauncherView() {
           aria-controls="launcher-listbox"
           aria-activedescendant={!isNoteMode && navItems.length > 0 && selectedIndex >= 0 ? `launcher-option-${selectedIndex}` : undefined}
           className="flex-1 bg-transparent text-lg text-app-text-primary placeholder-app-text-placeholder outline-none"
+          data-tauri-drag-region={undefined}
           autoFocus
         />
 
@@ -519,6 +527,7 @@ export function LauncherView() {
           onClick={() => setActiveView('settings')}
           aria-label="打开设置"
           className="ml-3 w-9 h-9 rounded-full bg-app-bg-elevated flex items-center justify-center overflow-hidden hover:bg-app-bg-pressed transition-all group flex-shrink-0"
+          data-tauri-drag-region={undefined}
         >
           <User className="w-4 h-4 text-app-text-secondary group-hover:text-app-text-primary transition-colors" />
         </button>

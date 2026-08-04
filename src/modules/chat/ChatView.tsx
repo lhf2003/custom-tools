@@ -3,11 +3,11 @@ import { listen } from '@tauri-apps/api/event';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
+  ArrowLeft,
   ArrowUp,
+  Plus,
   X,
-  Copy,
   Check,
-  Sparkles,
   History,
   MousePointerClick,
 } from 'lucide-react';
@@ -48,6 +48,17 @@ interface ChatSessionSummary {
 function previewText(text: string): string {
   const oneLine = text.replace(/\s+/g, ' ').trim();
   return oneLine.length > 60 ? oneLine.slice(0, 60) + '…' : oneLine;
+}
+
+/** 顶栏标题：首条用户消息单行截断（A2UI 操作回传显示胶囊文案，不显示协议 JSON）；
+ *  空会话显示「新会话」 */
+function sessionTitleOf(messages: ChatMessage[]): string {
+  const first = messages.find((m) => m.role === 'user');
+  if (!first) return '新会话';
+  const action = parseActionMessage(first.content);
+  const raw = action ? `点击了「${action.label}」` : first.content;
+  const oneLine = raw.replace(/\s+/g, ' ').trim();
+  return oneLine.length > 24 ? oneLine.slice(0, 24) + '…' : oneLine;
 }
 
 /**
@@ -117,14 +128,12 @@ const MODES: Record<
   {
     label: string;
     placeholder: string;
-    icon: React.ElementType;
     system: string;
   }
 > = {
   chat: {
     label: '贾维斯',
     placeholder: '聊点什么？你的数据他也知道…',
-    icon: Sparkles,
     // 闲聊走贾维斯 agent 通道（claude CLI + MCP 数据工具），系统提示由后端 persona 体系组装
     system: '',
   },
@@ -250,8 +259,7 @@ export function ChatView() {
   const [isLoading, setIsLoading] = useState(false);
   const [hasResponse, setHasResponse] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  // 取消后终态（状态栏「已停止」）；与完成/错误三分，取消不说成「生成完成」
+  // 取消后终态（副标题「已停止」）；与完成/错误三分，取消不说成「生成完成」
   const [cancelled, setCancelled] = useState(false);
   const [sessionId, setSessionId] = useState<number | null>(null);
   // 贾维斯 agent 的工具活动提示（「贾维斯在翻数据…」）
@@ -520,7 +528,6 @@ export function ChatView() {
     setHasResponse(true);
     setError(null);
     setCancelled(false);
-    setCopied(false);
 
     // 持久化 user 消息
     const sid = sessionIdRef.current;
@@ -612,20 +619,6 @@ export function ChatView() {
       }
     }
   }, [mode]);
-
-  // ── Copy response ─────────────────────────────────────────────────
-  const handleCopy = useCallback(() => {
-    // 复制最近一条文字回复（a2ui 卡片是协议 JSON，不是给人读的文本）
-    const lastAssistant = messages
-      .filter((m) => m.role === 'assistant' && m.contentType !== 'a2ui')
-      .at(-1);
-    const content = lastAssistant?.content ?? streamText;
-    if (!content) return;
-    navigator.clipboard.writeText(content).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
-  }, [messages, streamText]);
 
   // ── New session ──────────────────────────────────────────────────
   const handleNewSession = useCallback(async () => {
@@ -851,29 +844,189 @@ export function ChatView() {
 
   // ── Computed ──────────────────────────────────────────────────────
   const modeConfig = MODES[mode];
-  const ModeIcon = modeConfig.icon;
   const visibleMessages = messages.filter((m) => m.role !== 'system');
+  const sessionTitle = sessionTitleOf(messages);
   const showCursor = isLoading && streamText.length > 0;
   // 空状态：无历史、无加载、无错误、无流式——显示引导而非空白
   const showEmptyState =
     !hasResponse && !isLoading && !error && streamText.length === 0;
-  const statusText = isLoading
-    ? (agentStatus ?? (streamText.length > 0 ? '正在输出...' : '正在思考...'))
-    : error
-      ? '发生错误'
-      : cancelled
-        ? '已停止'
-        : showEmptyState
-          ? '问点什么'
-          : '生成完成';
 
   return (
-    <div className="w-full h-full flex flex-col select-none bg-transparent">
-      {/* ── Input area (single-row) ──────────────────────────────── */}
-      <div className="px-3 py-2.5 shrink-0" data-tauri-drag-region>
+    <div className="w-full h-full flex flex-col select-none bg-zinc-800/50">
+      {/* ── Header：返回 + 会话标题 + 操作组（兼窗口拖拽区） ── */}
+      <div className="px-3 py-2 shrink-0 flex items-center gap-2" data-tauri-drag-region>
+        <button
+          onClick={() => setActiveView('launcher')}
+          className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-zinc-400 hover:text-zinc-200 hover:bg-white/10 transition-all cursor-pointer"
+          aria-label="返回启动器"
+          data-tauri-drag-region={undefined}
+        >
+          <ArrowLeft className="w-4 h-4" />
+        </button>
+
+        <span className="flex-1 min-w-0 text-sm font-semibold text-zinc-100 truncate">
+          {sessionTitle}
+        </span>
+
+        <div className="flex items-center gap-1 shrink-0">
+          {!isLoading && (
+            <>
+              <button
+                onClick={handleNewSession}
+                className="text-xs px-2 h-7 rounded-md text-app-text-tertiary hover:text-app-text-primary hover:bg-white/10 transition-colors cursor-pointer"
+                aria-label="开启新会话"
+                data-tauri-drag-region={undefined}
+              >
+                新会话
+              </button>
+              <button
+                ref={historyBtnRef}
+                onClick={toggleHistory}
+                className={`flex items-center w-7 h-7 justify-center rounded-md transition-colors cursor-pointer ${
+                  historyOpen
+                    ? 'text-app-text-primary bg-white/10'
+                    : 'text-app-text-tertiary hover:text-app-text-primary hover:bg-white/10'
+                }`}
+                aria-label="会话历史"
+                data-tauri-drag-region={undefined}
+              >
+                <History className="w-3.5 h-3.5" />
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* ── Content area：弹性占满窗口剩余高度 ─────────────────────── */}
+      <div
+        ref={responseBodyRef}
+        onScroll={handleResponseScroll}
+        className="px-4 pt-1 pb-4 overflow-y-auto space-y-3 flex-1 min-h-0"
+      >
+        {/* Empty state：居中 hero——18px/600 主标题（守 18px Ceiling）+ 副标题 + 示例 chip（点击代发） */}
+        {showEmptyState && (
+          <div className="h-full flex flex-col items-center justify-center gap-3 select-none">
+            <span className="text-lg font-semibold text-zinc-100">问我你的电脑</span>
+            <span className="text-xs text-app-text-tertiary">
+              数据、习惯、剪贴板，他都知道
+            </span>
+            <div className="flex items-center gap-2 mt-1">
+              <button
+                onClick={() => handleSend('总结我今天的电脑使用情况')}
+                className="text-xs px-3 py-1.5 rounded-md bg-white/5 border border-white/10 text-zinc-300 hover:text-zinc-100 hover:bg-white/10 transition-colors cursor-pointer"
+              >
+                总结我的今天
+              </button>
+              <button
+                onClick={() => handleSend('我最近在忙什么')}
+                className="text-xs px-3 py-1.5 rounded-md bg-white/5 border border-white/10 text-zinc-300 hover:text-zinc-100 hover:bg-white/10 transition-colors cursor-pointer"
+              >
+                最近在忙什么
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Error state */}
+        {error && (
+          <div className="flex items-start gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+            <span className="flex-1 text-sm text-red-400">{error}</span>
+            <button
+              onClick={() => setError(null)}
+              className="shrink-0 text-red-400 hover:text-red-300 transition-colors"
+              aria-label="关闭错误"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
+        {/* History messages */}
+        {visibleMessages.map((msg, idx) => (
+          <div
+            key={msg.contentType === 'a2ui' ? surfaceKey(msg.content) : `${idx}-${msg.role}`}
+            className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+          >
+            {msg.role === 'user' ? (
+              <UserMessageBubble content={msg.content} />
+            ) : msg.contentType === 'a2ui' ? (
+              <div className="max-w-[90%] w-full">
+                <A2uiSurface
+                  payloadJson={msg.content}
+                  onAction={(text) => handleSend(text)}
+                />
+              </div>
+            ) : (
+              <div className="max-w-[90%] prose prose-invert prose-sm max-w-none prose-p:my-1.5 prose-headings:mt-3 prose-headings:mb-1.5 prose-pre:bg-zinc-800 prose-pre:border prose-pre:border-zinc-700 prose-pre:rounded-lg prose-code:text-emerald-300 prose-code:bg-zinc-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-a:text-blue-400 prose-strong:text-zinc-200">
+                <AssistantContent text={msg.content} />
+              </div>
+            )}
+          </div>
+        ))}
+
+        {/* Loading row（回复行位置）：脉冲点 + 工具活动提示/「正在思考」 */}
+        {isLoading && streamText.length === 0 && (
+          <div className="flex items-center gap-2 py-2 px-1">
+            <div className="flex items-center gap-1.5">
+              <span
+                className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-pulse"
+                style={{ animationDelay: '0ms' }}
+              />
+              <span
+                className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-pulse"
+                style={{ animationDelay: '150ms' }}
+              />
+              <span
+                className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-pulse"
+                style={{ animationDelay: '300ms' }}
+              />
+            </div>
+            <span className="text-xs text-app-text-tertiary" aria-live="polite">
+              {agentStatus ?? '正在思考...'}
+            </span>
+          </div>
+        )}
+
+        {/* Streaming assistant response：tool 循环中途的工具活动提示跟在气泡上方 */}
+        {streamText.length > 0 && (
+          <div className="flex justify-start">
+            <div className="max-w-[90%]">
+              {isLoading && agentStatus && (
+                <div
+                  className="flex items-center gap-1.5 mb-1 px-1 text-xs text-app-text-tertiary"
+                  aria-live="polite"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse shrink-0" />
+                  {agentStatus}
+                </div>
+              )}
+              <div className="prose prose-invert prose-sm max-w-none prose-p:my-1.5 prose-headings:mt-3 prose-headings:mb-1.5 prose-pre:bg-zinc-800 prose-pre:border prose-pre:border-zinc-700 prose-pre:rounded-lg prose-code:text-emerald-300 prose-code:bg-zinc-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-a:text-blue-400 prose-strong:text-zinc-200">
+                <AssistantContent text={streamText} />
+                {showCursor && (
+                  <span className="inline-block w-0.5 h-4 bg-indigo-400/80 animate-pulse ml-0.5 align-middle" />
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 取消终态（回复行位置的小字）；完成不显示任何状态——响应内容即终态 */}
+        {cancelled && !isLoading && (
+          <div className="px-1 text-xs text-app-text-tertiary">已停止</div>
+        )}
+      </div>
+
+      {/* ── Input area (bottom) ────────────────────────────────────── */}
+      <div className="px-3 py-2.5 shrink-0 border-t border-zinc-700/30">
         <div className="flex items-center gap-2 px-3 py-1.5">
-          {/* 品牌时刻：唯一一处 Indigo，标识「这是贾维斯」 */}
-          <ModeIcon className="w-4 h-4 text-indigo-400 shrink-0" />
+          {/* TODO: 附件/上下文入口占位，逻辑后续加 */}
+          <button
+            type="button"
+            className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-zinc-400 hover:text-zinc-200 hover:bg-white/10 transition-all cursor-pointer"
+            aria-label="更多功能"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
 
           <textarea
             ref={textareaRef}
@@ -886,7 +1039,6 @@ export function ChatView() {
             rows={1}
             className="flex-1 resize-none bg-transparent text-sm text-zinc-200 placeholder-app-text-placeholder outline-none leading-relaxed self-center disabled:opacity-60"
             style={{ height: '26px' }}
-            data-tauri-drag-region={undefined}
           />
 
           {/* Cancel button (only while loading) */}
@@ -895,7 +1047,6 @@ export function ChatView() {
               onClick={handleCancel}
               className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-zinc-400 hover:text-zinc-200 hover:bg-white/10 transition-all cursor-pointer"
               aria-label="取消生成"
-              data-tauri-drag-region={undefined}
             >
               <X className="w-4 h-4" />
             </button>
@@ -911,181 +1062,13 @@ export function ChatView() {
                 : 'text-zinc-600 cursor-not-allowed'
             }`}
             aria-label="发送消息"
-            data-tauri-drag-region={undefined}
           >
             <ArrowUp className="w-4 h-4" />
           </button>
         </div>
       </div>
 
-      {/* ── Response panel — expands below input ──────────────────── */}
-      {/* flex-1 + minmax(0,1fr)：面板跟随窗口拉伸，内容区高度不再写死 */}
-      <div
-        className="flex-1 min-h-0"
-        style={{
-          display: 'grid',
-          gridTemplateRows: hasResponse || !!error || showEmptyState ? 'minmax(0, 1fr)' : '0fr',
-          transition: 'grid-template-rows 300ms ease',
-        }}
-      >
-        <div className="overflow-hidden h-full flex flex-col">
-          {/* Status bar：左状态（三态语言，进行中 Indigo 脉冲点）/ 右操作组（Ghost 形态） */}
-          <div className="px-4 py-1.5 border-t border-zinc-700/30 flex items-center justify-between shrink-0">
-            <div className="flex items-center gap-1.5">
-              {isLoading && (
-                <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse shrink-0" />
-              )}
-              <span
-                className={`text-xs ${
-                  isLoading ? 'text-app-text-secondary' : 'text-app-text-tertiary'
-                }`}
-              >
-                {statusText}
-              </span>
-            </div>
-            <div className="flex items-center gap-1">
-              {!isLoading && visibleMessages.length > 0 && !error && (
-                <button
-                  onClick={handleCopy}
-                  className="flex items-center w-7 h-7 justify-center rounded-md text-app-text-tertiary hover:text-app-text-primary hover:bg-white/10 transition-colors cursor-pointer"
-                  aria-label="复制回复"
-                >
-                  {copied ? (
-                    <Check className="w-3.5 h-3.5 text-emerald-400" />
-                  ) : (
-                    <Copy className="w-3.5 h-3.5" />
-                  )}
-                </button>
-              )}
-              {!isLoading && (
-                <>
-                  <button
-                    onClick={handleNewSession}
-                    className="text-xs px-2 h-7 rounded-md text-app-text-tertiary hover:text-app-text-primary hover:bg-white/10 transition-colors cursor-pointer"
-                    aria-label="开启新会话"
-                  >
-                    新会话
-                  </button>
-                  <button
-                    ref={historyBtnRef}
-                    onClick={toggleHistory}
-                    className={`flex items-center w-7 h-7 justify-center rounded-md transition-colors cursor-pointer ${
-                      historyOpen
-                        ? 'text-app-text-primary bg-white/10'
-                        : 'text-app-text-tertiary hover:text-app-text-primary hover:bg-white/10'
-                    }`}
-                    aria-label="会话历史"
-                  >
-                    <History className="w-3.5 h-3.5" />
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* Content area：弹性占满窗口剩余高度，随手动拉伸变化 */}
-          <div
-            ref={responseBodyRef}
-            onScroll={handleResponseScroll}
-            className="px-4 pt-1 pb-4 overflow-y-auto space-y-3 flex-1 min-h-0"
-          >
-            {/* Empty state：教界面——引导句 + 示例 chip（点击代发） */}
-            {showEmptyState && (
-              <div className="h-full flex flex-col items-center justify-center gap-4 select-none">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-indigo-400/70 shrink-0" />
-                  <span className="text-sm text-app-text-tertiary">
-                    问我你的电脑——数据、习惯、剪贴板
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => handleSend('总结我今天的电脑使用情况')}
-                    className="text-xs px-3 py-1.5 rounded-md bg-white/5 border border-white/10 text-zinc-300 hover:text-zinc-100 hover:bg-white/10 transition-colors cursor-pointer"
-                  >
-                    总结我的今天
-                  </button>
-                  <button
-                    onClick={() => handleSend('我最近在忙什么')}
-                    className="text-xs px-3 py-1.5 rounded-md bg-white/5 border border-white/10 text-zinc-300 hover:text-zinc-100 hover:bg-white/10 transition-colors cursor-pointer"
-                  >
-                    最近在忙什么
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Error state */}
-            {error && (
-              <div className="flex items-start gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
-                <span className="flex-1 text-sm text-red-400">{error}</span>
-                <button
-                  onClick={() => setError(null)}
-                  className="shrink-0 text-red-400 hover:text-red-300 transition-colors"
-                  aria-label="关闭错误"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            )}
-
-            {/* History messages */}
-            {visibleMessages.map((msg, idx) => (
-              <div
-                key={msg.contentType === 'a2ui' ? surfaceKey(msg.content) : `${idx}-${msg.role}`}
-                className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-              >
-                {msg.role === 'user' ? (
-                  <UserMessageBubble content={msg.content} />
-                ) : msg.contentType === 'a2ui' ? (
-                  <div className="max-w-[90%] w-full">
-                    <A2uiSurface
-                      payloadJson={msg.content}
-                      onAction={(text) => handleSend(text)}
-                    />
-                  </div>
-                ) : (
-                  <div className="max-w-[90%] prose prose-invert prose-sm max-w-none prose-p:my-1.5 prose-headings:mt-3 prose-headings:mb-1.5 prose-pre:bg-zinc-800 prose-pre:border prose-pre:border-zinc-700 prose-pre:rounded-lg prose-code:text-emerald-300 prose-code:bg-zinc-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-a:text-blue-400 prose-strong:text-zinc-200">
-                    <AssistantContent text={msg.content} />
-                  </div>
-                )}
-              </div>
-            ))}
-
-            {/* Loading dots (before stream starts) */}
-            {isLoading && streamText.length === 0 && (
-              <div className="flex items-center gap-1.5 py-2 px-1">
-                <span
-                  className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-pulse"
-                  style={{ animationDelay: '0ms' }}
-                />
-                <span
-                  className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-pulse"
-                  style={{ animationDelay: '150ms' }}
-                />
-                <span
-                  className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-pulse"
-                  style={{ animationDelay: '300ms' }}
-                />
-              </div>
-            )}
-
-            {/* Streaming assistant response */}
-            {streamText.length > 0 && (
-              <div className="flex justify-start">
-                <div className="max-w-[90%] prose prose-invert prose-sm max-w-none prose-p:my-1.5 prose-headings:mt-3 prose-headings:mb-1.5 prose-pre:bg-zinc-800 prose-pre:border prose-pre:border-zinc-700 prose-pre:rounded-lg prose-code:text-emerald-300 prose-code:bg-zinc-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-a:text-blue-400 prose-strong:text-zinc-200">
-                  <AssistantContent text={streamText} />
-                  {showCursor && (
-                    <span className="inline-block w-0.5 h-4 bg-indigo-400/80 animate-pulse ml-0.5 align-middle" />
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* ── Session history dropdown (fixed，绕开外层 overflow-hidden 裁剪) ── */}
+      {/* ── Session history dropdown (fixed 定位，不受布局裁剪影响) ── */}
       {historyOpen && (
         <div
           ref={historyPanelRef}
