@@ -24,6 +24,7 @@ impl Database {
                 content_type TEXT NOT NULL CHECK (content_type IN ('text', 'image', 'file')),
                 content_hash TEXT,
                 source_app TEXT,
+                source_exe TEXT,
                 is_favorite BOOLEAN DEFAULT 0,
                 is_pinned BOOLEAN DEFAULT 0,
                 tags TEXT,
@@ -32,6 +33,14 @@ impl Database {
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )",
             [],
+        )?;
+
+        // Migration: 来源应用 exe 路径（显示名 + 图标均由此派生，老库补列）
+        ensure_column(
+            &self.conn,
+            "clipboard_history",
+            "source_exe",
+            "ALTER TABLE clipboard_history ADD COLUMN source_exe TEXT",
         )?;
 
         // Create indexes

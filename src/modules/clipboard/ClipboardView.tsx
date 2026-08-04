@@ -26,6 +26,7 @@ interface ClipboardItemData {
   content: string;
   content_type: string;
   source_app: string | null;
+  source_exe: string | null;
   is_favorite: boolean;
   created_at: string;
 }
@@ -559,6 +560,26 @@ const ClipboardItem = forwardRef<HTMLDivElement, ClipboardItemProps>(function Cl
 ) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [thumbnail, setThumbnail] = useState<string | null>(null);
+  const [appIcon, setAppIcon] = useState<string | null>(null);
+
+  // Load source app icon (PNG data URL from backend, cached there)
+  useEffect(() => {
+    if (!item.source_exe) {
+      setAppIcon(null);
+      return;
+    }
+    let cancelled = false;
+    invoke<string | null>('get_app_icon', { exePath: item.source_exe })
+      .then((data) => {
+        if (!cancelled) setAppIcon(data);
+      })
+      .catch(() => {
+        if (!cancelled) setAppIcon(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [item.source_exe]);
   const [selectionToolbar, setSelectionToolbar] = useState<{ visible: boolean; x: number; y: number; text: string }>({
     visible: false,
     x: 0,
@@ -815,12 +836,27 @@ const ClipboardItem = forwardRef<HTMLDivElement, ClipboardItemProps>(function Cl
             )}
           </div>
 
-          <div className="flex items-center gap-2 mt-1.5">
-            <span className={`text-[10px] px-1.5 py-0.5 rounded ${config.bgColor} text-app-text-tertiary`}>
+          <div className="flex items-center gap-2 mt-1.5 min-w-0">
+            <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${config.bgColor} text-app-text-tertiary`}>
               {config.label}
             </span>
-            <span className="text-app-bg-pressed text-xs">•</span>
-            <span className="text-app-text-disabled text-xs">{formatTime(item.created_at)}</span>
+            <span className="text-app-bg-pressed text-xs shrink-0">•</span>
+            <span className="text-app-text-disabled text-xs shrink-0">{formatTime(item.created_at)}</span>
+            {item.source_app && item.source_app !== 'Unknown' && (
+              <>
+                <span className="text-app-bg-pressed text-xs shrink-0">•</span>
+                {appIcon && (
+                  <img
+                    src={appIcon}
+                    alt=""
+                    className="w-3.5 h-3.5 rounded-[3px] shrink-0"
+                  />
+                )}
+                <span className="text-app-text-disabled text-xs truncate min-w-0" title={item.source_app}>
+                  {item.source_app}
+                </span>
+              </>
+            )}
           </div>
         </div>
 

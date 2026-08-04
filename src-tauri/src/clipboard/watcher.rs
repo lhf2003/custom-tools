@@ -3,18 +3,24 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 
-use windows::Win32::Foundation::{HGLOBAL, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{CloseHandle, HGLOBAL, HWND, LPARAM, LRESULT, WPARAM};
+use windows_core::PWSTR;
 use windows::Win32::System::DataExchange::{
-    AddClipboardFormatListener, CloseClipboard, GetClipboardData, OpenClipboard,
+    AddClipboardFormatListener, CloseClipboard, GetClipboardData, GetClipboardOwner, OpenClipboard,
     RemoveClipboardFormatListener,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
+use windows::Win32::System::Threading::{
+    OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
+    PROCESS_QUERY_LIMITED_INFORMATION,
+};
 use windows::Win32::UI::Shell::{DragQueryFileW, HDROP};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW, PostQuitMessage,
-    RegisterClassW, TranslateMessage, CS_HREDRAW, CS_VREDRAW, MSG, WM_CLIPBOARDUPDATE, WM_CREATE,
-    WM_DESTROY, WNDCLASSW, WS_OVERLAPPEDWINDOW,
+    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetForegroundWindow,
+    GetMessageW, GetWindowThreadProcessId, PostQuitMessage, RegisterClassW, TranslateMessage,
+    CS_HREDRAW, CS_VREDRAW, MSG, WM_CLIPBOARDUPDATE, WM_CREATE, WM_DESTROY, WNDCLASSW,
+    WS_OVERLAPPEDWINDOW,
 };
 
 use super::{ClipboardContent, ClipboardEvent};
@@ -169,6 +175,11 @@ impl ClipboardWatcher {
         unsafe {
             log::info!("Clipboard update detected");
 
+            // Resolve the source app before opening the clipboard — while the
+            // clipboard is open, ownership may be reported differently.
+            // 只采集 exe 路径；显示名由事件处理线程统一解析（app_cache → 版本信息 → 进程名）
+            let source_exe = Self::get_source_app();
+
             // Open clipboard
             if let Err(e) = OpenClipboard(None) {
                 log::error!("Failed to open clipboard: {:?}", e);
@@ -189,6 +200,7 @@ impl ClipboardWatcher {
                             let event = ClipboardEvent {
                                 content,
                                 source_app: None,
+                                source_exe,
                             };
                             if let Err(e) = sender.try_send(event) {
                                 log::error!("Failed to send clipboard event: {}", e);
@@ -200,6 +212,7 @@ impl ClipboardWatcher {
                         }
                     });
                 }
+
                 Err(e) => {
                     log::warn!("Failed to read clipboard content: {}", e);
                 }
@@ -207,6 +220,53 @@ impl ClipboardWatcher {
 
             Ok(())
         }
+    }
+
+    /// Resolve the exe path of the app that set the clipboard content.
+    ///
+    /// Prefers the clipboard owner window (`GetClipboardOwner`), which is the
+    /// window that put data on the clipboard. Falls back to the foreground
+    /// window when the owner is gone (e.g. the source app destroyed its window
+    /// right after copying) or has no process of its own.
+    unsafe fn get_source_app() -> Option<String> {
+        let candidates = [
+            GetClipboardOwner().ok(),
+            Some(GetForegroundWindow()),
+        ];
+        for hwnd in candidates.into_iter().flatten() {
+            if !hwnd.0.is_null() {
+                if let Some(exe) = Self::source_of_window(hwnd) {
+                    return Some(exe);
+                }
+            }
+        }
+        None
+    }
+
+    /// Resolve the exe path of the process that owns a window.
+    unsafe fn source_of_window(hwnd: HWND) -> Option<String> {
+        let mut pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        if pid == 0 {
+            return None;
+        }
+
+        let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
+            return None;
+        };
+
+        let mut buffer = [0u16; 1024];
+        let mut size = buffer.len() as u32;
+        let queried =
+            QueryFullProcessImageNameW(process, PROCESS_NAME_FORMAT(0), PWSTR(buffer.as_mut_ptr()), &mut size)
+                .is_ok();
+        let _ = CloseHandle(process);
+
+        if !queried || size == 0 {
+            return None;
+        }
+
+        Some(String::from_utf16_lossy(&buffer[..size as usize]))
     }
 
     /// Read HDROP (file list) data from clipboard

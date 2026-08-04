@@ -6,6 +6,24 @@ use tauri::{Manager, State};
 use crate::clipboard::ClipboardSuppressFlag;
 use crate::db::DatabaseState;
 
+#[cfg(windows)]
+use windows::Win32::Foundation::{HWND, POINT, RECT};
+#[cfg(windows)]
+use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
+#[cfg(windows)]
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    MapVirtualKeyW, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT,
+    KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, MAPVK_VK_TO_VSC, MOUSEEVENTF_ABSOLUTE,
+    MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MOVE, MOUSEINPUT, VIRTUAL_KEY,
+    VK_CONTROL, VK_V,
+};
+#[cfg(windows)]
+use windows::Win32::UI::WindowsAndMessaging::{
+    BringWindowToTop, GetCursorPos, GetForegroundWindow, GetGUIThreadInfo, GetSystemMetrics,
+    GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, GUITHREADINFO, IsWindow,
+    IsWindowVisible, SetCursorPos, SetForegroundWindow, SM_CXSCREEN, SM_CYSCREEN,
+};
+
 /// Result type for clipboard read operations
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ClipboardReadResult {
@@ -21,6 +39,7 @@ pub struct ClipboardItem {
     pub content: String,
     pub content_type: String,
     pub source_app: Option<String>,
+    pub source_exe: Option<String>,
     pub is_favorite: bool,
     pub created_at: String,
 }
@@ -32,6 +51,13 @@ pub struct ClipboardQuery {
     pub search: Option<String>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
+}
+
+/// 按 exe 路径获取应用图标（PNG data URL）。
+/// 复用启动器图标链路（IShellItemImageFactory 高清提取 + 内存/磁盘缓存）。
+#[tauri::command]
+pub fn get_app_icon(exe_path: String) -> Result<Option<String>, String> {
+    crate::search::icon::extract_icon(&exe_path).map_err(|e| e.to_string())
 }
 
 /// Get clipboard history
@@ -48,7 +74,7 @@ pub fn get_clipboard_history(
     let offset = query.offset.unwrap_or(0);
 
     let mut sql = String::from(
-        "SELECT id, content, content_type, source_app, is_favorite, created_at
+        "SELECT id, content, content_type, source_app, source_exe, is_favorite, created_at
          FROM clipboard_history WHERE 1=1",
     );
 
@@ -90,8 +116,9 @@ pub fn get_clipboard_history(
                 content: row.get(1)?,
                 content_type: row.get(2)?,
                 source_app: row.get(3)?,
-                is_favorite: row.get::<_, i32>(4)? != 0,
-                created_at: row.get(5)?,
+                source_exe: row.get(4)?,
+                is_favorite: row.get::<_, i32>(5)? != 0,
+                created_at: row.get(6)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -192,7 +219,7 @@ pub fn export_clipboard_history(
 
     let mut stmt = conn
         .prepare(
-            "SELECT id, content, content_type, source_app, is_favorite, created_at
+            "SELECT id, content, content_type, source_app, source_exe, is_favorite, created_at
              FROM clipboard_history ORDER BY created_at DESC",
         )
         .map_err(|e| e.to_string())?;
@@ -204,8 +231,9 @@ pub fn export_clipboard_history(
                 content: row.get(1)?,
                 content_type: row.get(2)?,
                 source_app: row.get(3)?,
-                is_favorite: row.get::<_, i32>(4)? != 0,
-                created_at: row.get(5)?,
+                source_exe: row.get(4)?,
+                is_favorite: row.get::<_, i32>(5)? != 0,
+                created_at: row.get(6)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -923,19 +951,15 @@ pub fn paste_to_clipboard_item(
     Ok(())
 }
 
-/// Simulate Ctrl+V keystrokes to paste clipboard content
-/// Uses the ALT-key trick to reliably SetForegroundWindow on Windows
+/// Simulate Ctrl+V keystrokes to paste clipboard content.
+///
+/// 两个关键技术点（JetBrains IDE 等 Java AWT 应用对无扫描码的注入按键
+/// 会直接丢弃，导致粘贴无效）：
+/// 1. 所有按键带真实扫描码（MapVirtualKeyW 转换），而非纯虚拟键码
+/// 2. 前台激活：ALT trick + AttachThreadInput 兜底，发送前轮询
+///    GetForegroundWindow 确认目标窗口真正拿到前台焦点
 #[cfg(windows)]
 unsafe fn simulate_paste_to_window(target_hwnd: isize) {
-    use windows::Win32::Foundation::HWND;
-    use windows::Win32::UI::Input::KeyboardAndMouse::{
-        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
-        VK_CONTROL, VK_MENU, VK_V,
-    };
-    use windows::Win32::UI::WindowsAndMessaging::{
-        BringWindowToTop, IsWindow, IsWindowVisible, SetForegroundWindow,
-    };
-
     // Validate the window still exists
     let hwnd = HWND(target_hwnd as *mut _);
     if !IsWindow(Some(hwnd)).as_bool() {
@@ -949,101 +973,115 @@ unsafe fn simulate_paste_to_window(target_hwnd: isize) {
         return;
     }
 
-    // The ALT-key trick: Send ALT keypress to unlock SetForegroundWindow restrictions
-    let alt_input = INPUT {
-        r#type: INPUT_KEYBOARD,
-        Anonymous: INPUT_0 {
-            ki: KEYBDINPUT {
-                wVk: VK_MENU,
-                wScan: 0,
-                dwFlags: KEYBD_EVENT_FLAGS(0), // KEYDOWN
-                time: 0,
-                dwExtraInfo: 0,
-            },
-        },
-    };
-    let alt_up_input = INPUT {
-        r#type: INPUT_KEYBOARD,
-        Anonymous: INPUT_0 {
-            ki: KEYBDINPUT {
-                wVk: VK_MENU,
-                wScan: 0,
-                dwFlags: KEYEVENTF_KEYUP,
-                time: 0,
-                dwExtraInfo: 0,
-            },
-        },
-    };
+    // 诊断：确认目标窗口身份（IDEA 多窗口/弹窗场景下句柄可能不是主窗口）
+    let mut title_buf = [0u16; 256];
+    let title_len = GetWindowTextW(hwnd, &mut title_buf);
+    let title = String::from_utf16_lossy(&title_buf[..title_len as usize]);
+    log::info!("Paste target: '{}' (hwnd={})", title, target_hwnd);
 
-    // Send ALT to unlock foreground window restrictions
-    SendInput(
-        &[alt_input, alt_up_input],
-        std::mem::size_of::<INPUT>() as i32,
-    );
+    // 虚拟键码 → 真实扫描码：纯虚拟键码（wScan=0）的注入按键在
+    // Java AWT（JetBrains IDE）里会被丢弃
+    let v_scan = MapVirtualKeyW(VK_V.0 as u32, MAPVK_VK_TO_VSC);
+    let ctrl_scan = MapVirtualKeyW(VK_CONTROL.0 as u32, MAPVK_VK_TO_VSC);
 
-    // Set the target window to foreground
-    if SetForegroundWindow(hwnd).as_bool() {
+    // 激活目标窗口。AttachThreadInput（当前线程 ↔ 目标窗口线程）解锁
+    // SetForegroundWindow 的前台权限（AHK WinActivate 同款做法）。
+    // 不用 ALT trick——注入的 ALT 有残留风险，会让目标应用进入菜单键模式。
+    let cur_thread = GetCurrentThreadId();
+    let target_thread = GetWindowThreadProcessId(hwnd, None);
+    let mut activated = false;
+    if target_thread != 0 {
+        let _ = AttachThreadInput(cur_thread, target_thread, true);
+        activated = SetForegroundWindow(hwnd).as_bool();
+        let _ = AttachThreadInput(cur_thread, target_thread, false);
+    }
+    if !activated {
+        activated = SetForegroundWindow(hwnd).as_bool();
+    }
+    let _ = BringWindowToTop(hwnd);
+    if activated {
         log::info!("Successfully set foreground window");
     } else {
         log::warn!("Failed to set foreground window");
     }
-    let _ = BringWindowToTop(hwnd);
 
-    // Small delay for focus to take effect
-    std::thread::sleep(std::time::Duration::from_millis(50));
+    // 轮询确认前台就绪（IDE 激活慢，固定 sleep 可能不够）
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(300);
+    while std::time::Instant::now() < deadline {
+        if GetForegroundWindow() == hwnd {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
 
-    // Create Ctrl+V input sequence
-    let ctrl_down = INPUT {
-        r#type: INPUT_KEYBOARD,
-        Anonymous: INPUT_0 {
-            ki: KEYBDINPUT {
-                wVk: VK_CONTROL,
-                wScan: 0,
-                dwFlags: KEYBD_EVENT_FLAGS(0),
-                time: 0,
-                dwExtraInfo: 0,
-            },
-        },
+    // 检查前台线程的真实键盘焦点。注意不能用 GetFocus——它只返回调用线程的
+    // 焦点窗口，本线程无窗口时恒为 0，是假象。GetGUIThreadInfo 才能拿到
+    // 前台窗口线程的实际焦点窗口。
+    let fg_thread = GetWindowThreadProcessId(GetForegroundWindow(), None);
+    let mut gui = GUITHREADINFO {
+        cbSize: std::mem::size_of::<GUITHREADINFO>() as u32,
+        ..Default::default()
     };
-    let v_down = INPUT {
-        r#type: INPUT_KEYBOARD,
-        Anonymous: INPUT_0 {
-            ki: KEYBDINPUT {
-                wVk: VK_V,
-                wScan: 0,
-                dwFlags: KEYBD_EVENT_FLAGS(0),
-                time: 0,
-                dwExtraInfo: 0,
-            },
-        },
-    };
-    let v_up = INPUT {
-        r#type: INPUT_KEYBOARD,
-        Anonymous: INPUT_0 {
-            ki: KEYBDINPUT {
-                wVk: VK_V,
-                wScan: 0,
-                dwFlags: KEYEVENTF_KEYUP,
-                time: 0,
-                dwExtraInfo: 0,
-            },
-        },
-    };
-    let ctrl_up = INPUT {
-        r#type: INPUT_KEYBOARD,
-        Anonymous: INPUT_0 {
-            ki: KEYBDINPUT {
-                wVk: VK_CONTROL,
-                wScan: 0,
-                dwFlags: KEYEVENTF_KEYUP,
-                time: 0,
-                dwExtraInfo: 0,
-            },
-        },
-    };
+    let focus_ok = fg_thread != 0
+        && GetGUIThreadInfo(fg_thread, &mut gui).is_ok()
+        && !gui.hwndFocus.0.is_null();
+    log::info!(
+        "Paste preflight: foreground={:?}, focus_hwnd={:?}, focus_ok={}",
+        GetForegroundWindow(),
+        gui.hwndFocus,
+        focus_ok
+    );
 
-    // Send Ctrl+V
-    let inputs = [ctrl_down, v_down, v_up, ctrl_up];
+    // 用户级激活（核心步骤，无条件执行）：点击目标窗口标题栏。
+    // SetForegroundWindow 编程激活只产生 WM_ACTIVATE(WA_ACTIVE)，
+    // Chromium（VS Code）/Java（IDEA）只有在 WA_CLICKACTIVE（鼠标点击激活）
+    // 时才恢复内部键盘焦点——所以 Windows 层焦点正确、Ctrl+V 仍会被吞。
+    // 点击标题栏不改动编辑器光标；点击后还原鼠标坐标，用户无感。
+    let mut cursor_pos = POINT::default();
+    let has_cursor = GetCursorPos(&mut cursor_pos).is_ok();
+    let mut rect = RECT::default();
+    if GetWindowRect(hwnd, &mut rect).is_ok() {
+        let screen_w = GetSystemMetrics(SM_CXSCREEN).max(1);
+        let screen_h = GetSystemMetrics(SM_CYSCREEN).max(1);
+        let mx = ((rect.left + rect.right) / 2 * 65535 / screen_w) as i32;
+        let my = ((rect.top + 10) * 65535 / screen_h) as i32;
+        let click = |flags: windows::Win32::UI::Input::KeyboardAndMouse::MOUSE_EVENT_FLAGS| {
+            INPUT {
+                r#type: INPUT_MOUSE,
+                Anonymous: INPUT_0 {
+                    mi: MOUSEINPUT {
+                        dx: mx,
+                        dy: my,
+                        mouseData: 0,
+                        dwFlags: flags,
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
+                },
+            }
+        };
+        SendInput(
+            &[
+                click(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE),
+                click(MOUSEEVENTF_LEFTDOWN),
+                click(MOUSEEVENTF_LEFTUP),
+            ],
+            std::mem::size_of::<INPUT>() as i32,
+        );
+        // 等窗口完成用户级激活与内部焦点恢复
+        std::thread::sleep(std::time::Duration::from_millis(150));
+    }
+    if has_cursor {
+        let _ = SetCursorPos(cursor_pos.x, cursor_pos.y);
+    }
+
+    // Send Ctrl+V（全部带扫描码）
+    let inputs = [
+        make_key_input(ctrl_scan, KEYEVENTF_SCANCODE),
+        make_key_input(v_scan, KEYEVENTF_SCANCODE),
+        make_key_input(v_scan, KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP),
+        make_key_input(ctrl_scan, KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP),
+    ];
     let sent = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
 
     if sent as usize == inputs.len() {
@@ -1054,6 +1092,23 @@ unsafe fn simulate_paste_to_window(target_hwnd: isize) {
             sent,
             inputs.len()
         );
+    }
+}
+
+/// 构造一个带扫描码的键盘输入事件（wVk 置 0，扫描码模式下由 wScan 表达键位）
+#[cfg(windows)]
+fn make_key_input(scan_code: u32, flags: KEYBD_EVENT_FLAGS) -> INPUT {
+    INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: VIRTUAL_KEY(0),
+                wScan: scan_code as u16,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
     }
 }
 

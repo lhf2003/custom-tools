@@ -11,6 +11,98 @@ pub use watcher::ClipboardWatcher;
 use crate::commands::settings::SettingsState;
 use crate::db::DatabaseState;
 
+/// Read the `FileDescription` field from the exe's version resource — this
+/// is the display name shown in Explorer (e.g. "Google Chrome").
+/// 作为 app_cache 未命中时的名称兜底（绿色软件/无快捷方式应用）。
+fn file_description(exe_path: &str) -> Option<String> {
+    use std::ffi::c_void;
+    use windows::Win32::Storage::FileSystem::{
+        GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW,
+    };
+    use windows_core::PCWSTR;
+
+    unsafe {
+        let path_wide: Vec<u16> = exe_path.encode_utf16().chain(std::iter::once(0)).collect();
+
+        // 返回 0 表示失败（无版本资源等）
+        let size = GetFileVersionInfoSizeW(PCWSTR(path_wide.as_ptr()), None);
+        if size == 0 {
+            return None;
+        }
+        let mut buf = vec![0u8; size as usize];
+        if GetFileVersionInfoW(
+            PCWSTR(path_wide.as_ptr()),
+            None,
+            size,
+            buf.as_mut_ptr() as *mut c_void,
+        )
+        .is_err()
+        {
+            return None;
+        }
+
+        // 遍历 Translation 表所有语言/代码页条目（如 040904b0 / 080404b0）。
+        // 各语言块的描述可能不同（个别 exe 存在短值块），取最长的作为显示名。
+        let mut trans: *mut c_void = std::ptr::null_mut();
+        let mut trans_len: u32 = 0;
+        if !VerQueryValueW(
+            buf.as_ptr() as *const c_void,
+            windows_core::w!("\\VarFileInfo\\Translation"),
+            &mut trans,
+            &mut trans_len,
+        )
+        .as_bool()
+        {
+            return None;
+        }
+        if trans_len < 4 {
+            return None;
+        }
+
+        let entry_count = trans_len / 4; // 每个条目一个 DWORD [lang, codepage]
+        let mut best: Option<String> = None;
+        for i in 0..entry_count {
+            let lang_cp = *(trans as *const u32).add(i as usize);
+            let key = format!(
+                "\\StringFileInfo\\{:04x}{:04x}\\FileDescription",
+                lang_cp & 0xFFFF,
+                lang_cp >> 16
+            );
+            // 必须 null 结尾：VerQueryValueW 按 null 终止读取子块键名
+            let key_wide: Vec<u16> = key.encode_utf16().chain(std::iter::once(0)).collect();
+
+            let mut desc: *mut c_void = std::ptr::null_mut();
+            let mut desc_len: u32 = 0;
+            if !VerQueryValueW(
+                buf.as_ptr() as *const c_void,
+                PCWSTR(key_wide.as_ptr()),
+                &mut desc,
+                &mut desc_len,
+            )
+            .as_bool()
+            {
+                continue;
+            }
+            if desc_len == 0 {
+                continue;
+            }
+            let value_chars = std::slice::from_raw_parts(desc as *const u16, desc_len as usize / 2);
+            let end = value_chars
+                .iter()
+                .position(|&c| c == 0)
+                .unwrap_or(value_chars.len());
+            let name = String::from_utf16_lossy(&value_chars[..end]).trim().to_string();
+            if name.is_empty() {
+                continue;
+            }
+            if best.as_ref().map_or(true, |b| name.len() > b.len()) {
+                best = Some(name);
+            }
+        }
+        best
+    }
+}
+
 /// Shared flag to suppress clipboard recording when the app writes internally.
 /// Set to `true` before an internal clipboard write; the event processor clears it.
 pub struct ClipboardSuppressFlag(pub Arc<AtomicBool>);
@@ -40,7 +132,10 @@ pub enum ClipboardContent {
 #[derive(Debug, Clone)]
 pub struct ClipboardEvent {
     pub content: ClipboardContent,
+    /// 显示名（exe 版本信息的 FileDescription，如 "Google Chrome"）
     pub source_app: Option<String>,
+    /// 来源 exe 完整路径（图标由此派生）
+    pub source_exe: Option<String>,
 }
 
 /// Clipboard manager that handles watching and storing
@@ -97,10 +192,35 @@ impl ClipboardManager {
 
     async fn handle_clipboard_event(
         app_handle: &AppHandle,
-        event: ClipboardEvent,
+        mut event: ClipboardEvent,
     ) -> anyhow::Result<()> {
         let db_state = app_handle.state::<DatabaseState>();
         let conn = rusqlite::Connection::open(&db_state.0)?;
+
+        // 来源显示名解析（按优先级）：
+        // 1. 启动器应用缓存（快捷方式名，如 "Google Chrome"）
+        // 2. exe 版本资源的 FileDescription
+        // 3. 进程文件主干（如 "chrome"）
+        if let Some(exe) = event.source_exe.as_deref() {
+            let name = conn
+                .query_row(
+                    "SELECT name FROM app_cache
+                     WHERE target_path = ?1 COLLATE NOCASE AND is_valid = 1
+                     LIMIT 1",
+                    [exe],
+                    |row| row.get::<_, String>(0),
+                )
+                .ok()
+                .or_else(|| file_description(exe))
+                .or_else(|| {
+                    std::path::Path::new(exe)
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().into_owned())
+                });
+            if let Some(name) = name {
+                event.source_app = Some(name);
+            }
+        }
 
         match event.content {
             ClipboardContent::Text(text) => {
@@ -131,12 +251,13 @@ impl ClipboardManager {
                 // Insert new clipboard item
                 conn.execute(
                     "INSERT INTO clipboard_history
-                     (content, content_type, content_hash, source_app)
-                     VALUES (?1, 'text', ?2, ?3)",
-                    [
+                     (content, content_type, content_hash, source_app, source_exe)
+                     VALUES (?1, 'text', ?2, ?3, ?4)",
+                    rusqlite::params![
                         &text,
                         &hash,
                         event.source_app.as_deref().unwrap_or("Unknown"),
+                        event.source_exe,
                     ],
                 )?;
 
@@ -174,12 +295,13 @@ impl ClipboardManager {
 
                 conn.execute(
                     "INSERT INTO clipboard_history
-                     (content, content_type, content_hash, source_app)
-                     VALUES (?1, 'image', ?2, ?3)",
+                     (content, content_type, content_hash, source_app, source_exe)
+                     VALUES (?1, 'image', ?2, ?3, ?4)",
                     [
                         image_path.to_string_lossy().to_string(),
                         hash,
                         event.source_app.as_deref().unwrap_or("Unknown").to_string(),
+                        event.source_exe.clone().unwrap_or_default(),
                     ],
                 )?;
 
@@ -191,12 +313,13 @@ impl ClipboardManager {
 
                 conn.execute(
                     "INSERT INTO clipboard_history
-                     (content, content_type, content_hash, source_app)
-                     VALUES (?1, 'file', ?2, ?3)",
-                    [
+                     (content, content_type, content_hash, source_app, source_exe)
+                     VALUES (?1, 'file', ?2, ?3, ?4)",
+                    rusqlite::params![
                         &content,
                         &hash,
                         event.source_app.as_deref().unwrap_or("Unknown"),
+                        event.source_exe,
                     ],
                 )?;
 
