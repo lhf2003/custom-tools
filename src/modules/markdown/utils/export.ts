@@ -11,7 +11,8 @@ const EXPORT_CONTAINER_STYLE = {
   color: '#1f2937',
   padding: '40px',
   width: '800px',
-  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+  // 与编辑器正文保持一致的中英同重字体栈（Inter + Noto Sans SC）
+  fontFamily: '"Inter", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif',
   lineHeight: '1.6',
   boxSizing: 'border-box' as const,
 };
@@ -41,6 +42,7 @@ export async function exportNoteAsImage(
     .vditor-reset {
       color: #1f2937 !important;
       background-color: #ffffff !important;
+      font-family: "Inter", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif !important;
       font-size: 16px !important;
       line-height: 1.6 !important;
     }

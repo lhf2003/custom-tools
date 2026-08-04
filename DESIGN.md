@@ -144,11 +144,11 @@ FlowHub 的设计目标是让用户忘记它是一个第三方应用。它驻留
 
 ## 3. Typography
 
-**Display Font:** 系统字体栈（-apple-system / Segoe UI / PingFang SC / Microsoft YaHei）
-**Body Font:** 同一系统字体栈
+**Display Font:** 打包字体栈 Inter + Noto Sans SC（回退 -apple-system / Segoe UI / PingFang SC / Microsoft YaHei）
+**Body Font:** 同一字体栈
 **Label/Mono Font:** 无独立等宽字体（代码场景由 Markdown 编辑器内部处理）
 
-**Character:** 单一字族、字重与字号拉开层级。这是刻意的：唤起速度高于一切，不加载任何 Web 字体；中文渲染依赖 PingFang SC / Microsoft YaHei 回退链，保证跨机器一致。
+**Character:** 单一字族、字重与字号拉开层级。中英混排同重设计：拉丁字母用 Inter、中文用思源黑体（Noto Sans SC），两者笔画粗细匹配，混排不跳眼（2026-08-04 决定，替代纯系统回退）。字体随应用打包为本地 woff2（Inter latin + Noto Sans SC 400/600，约 5MB），无网络加载，跨机器字形一致。
 
 ### Hierarchy
 - **Display** (400, 18px, 1.4): 唯一职责是启动器搜索框。它是全应用最大的字级——这是工具，不是落地页。
@@ -157,7 +157,7 @@ FlowHub 的设计目标是让用户忘记它是一个第三方应用。它驻留
 - **Label** (400, 12px, 1.3): 辅助标签、网格项名称、次级操作。最小用到 10px 仅限聊天 mode 标签等微标识，且必须配 600 字重。
 
 ### Named Rules
-**The System Stack Rule.** 禁止引入 Web 字体。系统字体栈是唤起速度与中文字形一致性的保证；任何"更有设计感"的字体都要用启动延迟来换，不值。
+**The System Stack Rule.** 字体只允许来自两条路径：随应用打包的 woff2（Inter / Noto Sans SC），或系统字体回退链。禁止从网络加载字体——打包字体是静态资源，成本在安装时支付、不在唤起时支付，与"唤起速度优先"不冲突；回退链保证未覆盖字形（生僻字、全量 emoji）仍由系统兜底。
 
 **The 18px Ceiling Rule.** 界面文字上限 18px。需要更强层级时，用字重（400→600）与灰阶（Tertiary→Primary）解决，不是放大字号。
 

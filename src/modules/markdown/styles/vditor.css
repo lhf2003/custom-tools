@@ -132,6 +132,9 @@
 .vditor-container .vditor-ir {
   background: transparent;
   color: var(--vditor-text-primary);
+  /* 中英混排同重字体栈：Inter 管拉丁、Noto Sans SC 管中文（全局字体见 index.css） */
+  font-family: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont,
+               'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   font-size: 15px;
   line-height: 1.75;
   padding: 16px 0;
@@ -162,6 +165,10 @@
 
 .vditor-container .vditor-reset {
   color: var(--vditor-text-primary);
+  /* 覆盖 Vditor 官方 .vditor-reset 自带字体栈：IR 模式下内容渲染在 pre.vditor-reset，
+     不继承 .vditor-ir，必须在此层显式声明（代码块等宽字体由 code 规则另行覆盖） */
+  font-family: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont,
+               'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
 
 /* ============================================
