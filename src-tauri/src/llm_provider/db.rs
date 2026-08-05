@@ -272,7 +272,7 @@ impl LlmProviderDb {
             let model = conn
                 .query_row(
                     "SELECT id, provider_id, model_id, name, description, is_active,
-                        input_price_per_m, output_price_per_m, created_at, updated_at
+                        input_price_per_m, cached_input_price_per_m, output_price_per_m, created_at, updated_at
                  FROM llm_models WHERE provider_id = ?1 AND model_id = ?2",
                     [&provider_id.to_string(), &model_info.id],
                     |row| {
@@ -284,9 +284,10 @@ impl LlmProviderDb {
                             description: row.get(4)?,
                             is_active: row.get(5)?,
                             input_price_per_m: row.get(6)?,
-                            output_price_per_m: row.get(7)?,
-                            created_at: row.get(8)?,
-                            updated_at: row.get(9)?,
+                            cached_input_price_per_m: row.get(7)?,
+                            output_price_per_m: row.get(8)?,
+                            created_at: row.get(9)?,
+                            updated_at: row.get(10)?,
                         })
                     },
                 )
@@ -306,7 +307,7 @@ impl LlmProviderDb {
         let mut stmt = conn
             .prepare(
                 "SELECT id, provider_id, model_id, name, description, is_active,
-                        input_price_per_m, output_price_per_m, created_at, updated_at
+                        input_price_per_m, cached_input_price_per_m, output_price_per_m, created_at, updated_at
                  FROM llm_models WHERE provider_id = ?1 ORDER BY name",
             )
             .map_err(|e| format!("准备查询失败: {}", e))?;
@@ -321,9 +322,10 @@ impl LlmProviderDb {
                     description: row.get(4)?,
                     is_active: row.get(5)?,
                     input_price_per_m: row.get(6)?,
-                    output_price_per_m: row.get(7)?,
-                    created_at: row.get(8)?,
-                    updated_at: row.get(9)?,
+                    cached_input_price_per_m: row.get(7)?,
+                    output_price_per_m: row.get(8)?,
+                    created_at: row.get(9)?,
+                    updated_at: row.get(10)?,
                 })
             })
             .map_err(|e| format!("查询模型列表失败: {}", e))?
@@ -341,7 +343,7 @@ impl LlmProviderDb {
         let mut stmt = conn
             .prepare(
                 "SELECT id, provider_id, model_id, name, description, is_active,
-                        input_price_per_m, output_price_per_m, created_at, updated_at
+                        input_price_per_m, cached_input_price_per_m, output_price_per_m, created_at, updated_at
                  FROM llm_models WHERE id = ?1",
             )
             .map_err(|e| format!("准备查询失败: {}", e))?;
@@ -356,9 +358,10 @@ impl LlmProviderDb {
                     description: row.get(4)?,
                     is_active: row.get(5)?,
                     input_price_per_m: row.get(6)?,
-                    output_price_per_m: row.get(7)?,
-                    created_at: row.get(8)?,
-                    updated_at: row.get(9)?,
+                    cached_input_price_per_m: row.get(7)?,
+                    output_price_per_m: row.get(8)?,
+                    created_at: row.get(9)?,
+                    updated_at: row.get(10)?,
                 })
             })
             .optional()
@@ -367,21 +370,23 @@ impl LlmProviderDb {
         Ok(model)
     }
 
-    /// 更新模型单价（美元/百万 token，None = 清除，成本面板只统计 token 不算金额）
+    /// 更新模型单价（人民币/百万 token，None = 清除，成本面板只统计 token 不算金额）
     pub fn set_model_price(
         &self,
         conn: &Connection,
         model_id: i64,
         input_price: Option<f64>,
         output_price: Option<f64>,
+        cached_input_price: Option<f64>,
     ) -> Result<bool, String> {
         let rows_affected = conn
             .execute(
                 "UPDATE llm_models SET input_price_per_m = ?1, output_price_per_m = ?2,
-                 updated_at = ?3 WHERE id = ?4",
+                 cached_input_price_per_m = ?3, updated_at = ?4 WHERE id = ?5",
                 rusqlite::params![
                     input_price,
                     output_price,
+                    cached_input_price,
                     chrono::Local::now().to_rfc3339(),
                     model_id
                 ],
@@ -527,7 +532,7 @@ impl LlmProviderDb {
                 p.id, p.name, p.label, p.base_url, p.api_key_encrypted, p.provider_type,
                 p.is_active, p.connection_status, p.last_connected_at, p.created_at, p.updated_at,
                 m.id, m.provider_id, m.model_id, m.name, m.description, m.is_active,
-                m.input_price_per_m, m.output_price_per_m, m.created_at, m.updated_at
+                m.input_price_per_m, m.cached_input_price_per_m, m.output_price_per_m, m.created_at, m.updated_at
              FROM llm_scene_configs sc
              JOIN llm_providers p ON sc.provider_id = p.id
              JOIN llm_models m ON sc.provider_id = m.provider_id AND sc.model_id = m.model_id
@@ -559,9 +564,10 @@ impl LlmProviderDb {
                         description: row.get(15)?,
                         is_active: row.get(16)?,
                         input_price_per_m: row.get(17)?,
-                        output_price_per_m: row.get(18)?,
-                        created_at: row.get(19)?,
-                        updated_at: row.get(20)?,
+                        cached_input_price_per_m: row.get(18)?,
+                        output_price_per_m: row.get(19)?,
+                        created_at: row.get(20)?,
+                        updated_at: row.get(21)?,
                     };
 
                     Ok((provider, model))

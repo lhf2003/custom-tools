@@ -318,6 +318,13 @@ impl Database {
             "output_price_per_m",
             "ALTER TABLE llm_models ADD COLUMN output_price_per_m REAL",
         )?;
+        // Migration: 缓存命中输入单价（人民币/百万 token，可选；填了成本计算按缓存价算命中部分）
+        ensure_column(
+            &self.conn,
+            "llm_models",
+            "cached_input_price_per_m",
+            "ALTER TABLE llm_models ADD COLUMN cached_input_price_per_m REAL",
+        )?;
 
         // Migration: 聊天历史增量摘要（回退通道上下文组装用）——
         // summary = 已压缩的历史摘要；summarized_up_to = 摘要覆盖到的消息 id 水位

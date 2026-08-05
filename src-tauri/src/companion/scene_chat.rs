@@ -227,7 +227,10 @@ async fn run_scene_chat(
 
         match result {
             Ok(reply) => {
-                let cost = reply.input_tokens as f64 / 1e6 * model.input_price_per_m.unwrap_or(0.0)
+                let cost = reply.input_tokens.saturating_sub(reply.cached_input_tokens) as f64
+                    / 1e6 * model.input_price_per_m.unwrap_or(0.0)
+                    + reply.cached_input_tokens as f64 / 1e6
+                        * model.cached_input_price_per_m.unwrap_or(0.0)
                     + reply.output_tokens as f64 / 1e6 * model.output_price_per_m.unwrap_or(0.0);
                 total_cost += cost;
                 crate::llm::observe::log_call(
@@ -351,8 +354,11 @@ async fn run_scene_chat(
                     let duration_ms = started.elapsed().as_millis() as u64;
                     match final_result {
                         Ok(reply) => {
-                            let cost = reply.input_tokens as f64 / 1e6
-                                * model.input_price_per_m.unwrap_or(0.0)
+                            let cost = reply.input_tokens.saturating_sub(reply.cached_input_tokens)
+                                as f64
+                                / 1e6 * model.input_price_per_m.unwrap_or(0.0)
+                                + reply.cached_input_tokens as f64 / 1e6
+                                    * model.cached_input_price_per_m.unwrap_or(0.0)
                                 + reply.output_tokens as f64 / 1e6
                                     * model.output_price_per_m.unwrap_or(0.0);
                             total_cost += cost;
@@ -572,7 +578,10 @@ async fn plain_fallback(
 
     match result {
         Ok(reply) => {
-            let cost = reply.input_tokens as f64 / 1e6 * model.input_price_per_m.unwrap_or(0.0)
+            let cost = reply.input_tokens.saturating_sub(reply.cached_input_tokens) as f64
+                / 1e6 * model.input_price_per_m.unwrap_or(0.0)
+                + reply.cached_input_tokens as f64 / 1e6
+                    * model.cached_input_price_per_m.unwrap_or(0.0)
                 + reply.output_tokens as f64 / 1e6 * model.output_price_per_m.unwrap_or(0.0);
             crate::llm::observe::log_call(
                 db_path,

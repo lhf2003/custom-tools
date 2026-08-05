@@ -167,17 +167,18 @@ pub async fn deactivate_llm_model(
         .ok_or_else(|| "模型不存在".to_string())
 }
 
-/// 设置模型单价（美元/百万 token，null = 清除；成本面板据此外算金额）
+/// 设置模型单价（人民币/百万 token，null = 清除；成本面板据此外算金额）
 #[tauri::command]
 pub async fn set_llm_model_price(
     db: State<'_, DatabaseState>,
     model_id: i64,
     input_price: Option<f64>,
     output_price: Option<f64>,
+    cached_input_price: Option<f64>,
 ) -> Result<Model, String> {
     let conn = Connection::open(&db.0).map_err(|e| format!("打开数据库失败: {}", e))?;
     let db_ops = LlmProviderDb;
-    if !db_ops.set_model_price(&conn, model_id, input_price, output_price)? {
+    if !db_ops.set_model_price(&conn, model_id, input_price, output_price, cached_input_price)? {
         return Err("模型不存在".to_string());
     }
     db_ops

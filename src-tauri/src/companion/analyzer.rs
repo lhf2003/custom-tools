@@ -1585,7 +1585,10 @@ pub(crate) async fn call_scene_model_llm(
     match result {
         Ok(reply) => {
             // 单价为可选配置：填了才估算金额，未填 cost 记 0（面板只显示 token）
-            let cost = reply.input_tokens as f64 / 1e6 * model.input_price_per_m.unwrap_or(0.0)
+            let cost = reply.input_tokens.saturating_sub(reply.cached_input_tokens) as f64
+                / 1e6 * model.input_price_per_m.unwrap_or(0.0)
+                + reply.cached_input_tokens as f64 / 1e6
+                    * model.cached_input_price_per_m.unwrap_or(0.0)
                 + reply.output_tokens as f64 / 1e6 * model.output_price_per_m.unwrap_or(0.0);
             crate::llm::observe::log_call(
                 db_path,

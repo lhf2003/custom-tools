@@ -28,6 +28,8 @@ export interface Model {
   is_active: boolean;
   /** 可选单价（人民币/百万 token），null = 未配置（成本面板只统计 token） */
   input_price_per_m: number | null;
+  /** 缓存命中输入单价（人民币/百万 token），null = 未配置（缓存命中按 input_price 计） */
+  cached_input_price_per_m: number | null;
   output_price_per_m: number | null;
   created_at: string;
   updated_at: string;
@@ -98,7 +100,7 @@ interface LlmProviderState {
   // Model actions
   loadModels: (providerId: number) => Promise<Model[]>;
   setModelActive: (modelId: number, isActive: boolean) => Promise<void>;
-  setModelPrice: (modelId: number, inputPrice: number | null, outputPrice: number | null) => Promise<void>;
+  setModelPrice: (modelId: number, inputPrice: number | null, outputPrice: number | null, cachedInputPrice: number | null) => Promise<void>;
 
   // Scene actions
   loadSceneConfigs: () => Promise<void>;
@@ -232,12 +234,13 @@ export const useLlmProviderStore = create<LlmProviderState>((set, get) => ({
     }
   },
 
-  setModelPrice: async (modelId, inputPrice, outputPrice) => {
+  setModelPrice: async (modelId, inputPrice, outputPrice, cachedInputPrice) => {
     try {
       const model = await invoke<Model>('set_llm_model_price', {
         modelId,
         inputPrice,
         outputPrice,
+        cachedInputPrice,
       });
       set((state) => ({
         models: {

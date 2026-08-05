@@ -100,6 +100,8 @@ pub struct Model {
     pub is_active: bool,
     /// 可选单价（人民币/百万 token）：填了成本面板才估算金额，缺省只统计 token
     pub input_price_per_m: Option<f64>,
+    /// 缓存命中输入单价（人民币/百万 token）：null = 未配置（缓存命中按 input_price 计）
+    pub cached_input_price_per_m: Option<f64>,
     pub output_price_per_m: Option<f64>,
     pub created_at: String,
     pub updated_at: String,

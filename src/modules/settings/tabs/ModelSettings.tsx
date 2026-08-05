@@ -25,7 +25,7 @@ import { Tooltip } from '@/components/Tooltip';
 import { useLlmProviderStore, type Provider, type ProviderType, type Model, type Scene, type SceneConfig } from '@/stores/llmProviderStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { Toggle } from '../components/SettingCard';
-import { CustomSelect } from '../components/CustomSelect';
+import { CustomSelect, type SelectGroup } from '../components/CustomSelect';
 
 // Provider type options
 const PROVIDER_TYPES: { value: ProviderType; label: string; baseUrl: string; apiKeyRequired: boolean }[] = [
@@ -131,16 +131,12 @@ export function ModelSettings() {
     const initData = async () => {
       await loadProviders();
       await loadSceneConfigs();
-      // Auto-load models for configured scenes to ensure model dropdowns are populated
-      const { sceneConfigs, models, loadModels } = useLlmProviderStore.getState();
-      const configsToLoad = Object.values(sceneConfigs).filter(
-        (config): config is SceneConfig =>
-          config !== null &&
-          !!config.provider_id &&
-          !models[config.provider_id] // Only load if not already loaded
-      );
-      for (const config of configsToLoad) {
-        await loadModels(config.provider_id);
+      // 场景行模型下拉按提供商分组——加载所有已启用提供商的模型（懒加载会留白组）
+      const { providers, models, loadModels } = useLlmProviderStore.getState();
+      for (const provider of providers.filter((p) => p.is_active)) {
+        if (!models[provider.id]) {
+          await loadModels(provider.id);
+        }
       }
     };
     initData();
@@ -261,17 +257,23 @@ export function ModelSettings() {
   };
 
   // 单价输入（非受控 defaultValue + 失焦提交；空串 = 清除，非法输入不落库）
-  const handlePriceBlur = async (model: Model, field: 'input' | 'output', raw: string) => {
+  const handlePriceBlur = async (model: Model, field: 'input' | 'cached_input' | 'output', raw: string) => {
     const trimmed = raw.trim();
     const value = trimmed === '' ? null : Number(trimmed);
     if (value !== null && (!Number.isFinite(value) || value < 0)) return;
-    const current = field === 'input' ? model.input_price_per_m : model.output_price_per_m;
+    const current =
+      field === 'input'
+        ? model.input_price_per_m
+        : field === 'cached_input'
+          ? model.cached_input_price_per_m
+          : model.output_price_per_m;
     if (value === current) return;
     try {
       await setModelPrice(
         model.id,
         field === 'input' ? value : model.input_price_per_m,
         field === 'output' ? value : model.output_price_per_m,
+        field === 'cached_input' ? value : model.cached_input_price_per_m,
       );
     } catch (e) {
       alert(`保存单价失败: ${e}`);
@@ -539,7 +541,7 @@ export function ModelSettings() {
                                 </div>
                                 <div
                                   className="flex items-center gap-1 mr-1"
-                                  title="单价（人民币/百万 token），成本面板据此估算金额；留空只统计 token"
+                                  title="单价（人民币/百万 token），成本面板据此估算金额；缓存命中输入按缓存价计（未填则按输入价）；留空只统计 token"
                                 >
                                   <input
                                     key={`in-${model.id}-${model.input_price_per_m ?? ''}`}
@@ -548,7 +550,16 @@ export function ModelSettings() {
                                     defaultValue={model.input_price_per_m ?? ''}
                                     placeholder="入¥/M"
                                     onBlur={(e) => handlePriceBlur(model, 'input', e.target.value)}
-                                    className="w-16 bg-zinc-800 text-white/70 text-xs rounded px-1.5 py-1 outline-none border border-zinc-700 focus:border-white/25 placeholder:text-white/20"
+                                    className="w-14 bg-zinc-800 text-white/70 text-xs rounded px-1.5 py-1 outline-none border border-zinc-700 focus:border-white/25 placeholder:text-white/20"
+                                  />
+                                  <input
+                                    key={`cin-${model.id}-${model.cached_input_price_per_m ?? ''}`}
+                                    type="text"
+                                    inputMode="decimal"
+                                    defaultValue={model.cached_input_price_per_m ?? ''}
+                                    placeholder="缓入¥/M"
+                                    onBlur={(e) => handlePriceBlur(model, 'cached_input', e.target.value)}
+                                    className="w-14 bg-zinc-800 text-white/70 text-xs rounded px-1.5 py-1 outline-none border border-zinc-700 focus:border-white/25 placeholder:text-white/20"
                                   />
                                   <input
                                     key={`out-${model.id}-${model.output_price_per_m ?? ''}`}
@@ -557,7 +568,7 @@ export function ModelSettings() {
                                     defaultValue={model.output_price_per_m ?? ''}
                                     placeholder="出¥/M"
                                     onBlur={(e) => handlePriceBlur(model, 'output', e.target.value)}
-                                    className="w-16 bg-zinc-800 text-white/70 text-xs rounded px-1.5 py-1 outline-none border border-zinc-700 focus:border-white/25 placeholder:text-white/20"
+                                    className="w-14 bg-zinc-800 text-white/70 text-xs rounded px-1.5 py-1 outline-none border border-zinc-700 focus:border-white/25 placeholder:text-white/20"
                                   />
                                 </div>
                                 <label className="flex items-center gap-2 cursor-pointer">
@@ -741,76 +752,64 @@ export function ModelSettings() {
                     <div className="text-white/40 text-xs">{SCENE_LABELS[scene].description}</div>
                   </div>
 
-                  {/* Provider & Model Select */}
-                  <div className="flex items-center gap-2">
-                    <CustomSelect
-                      value={config?.provider_id?.toString() || ''}
-                      options={[
-                        { value: '', label: '选择提供商' },
-                        ...providers
-                          .filter((p) => p.is_active)
-                          .map((provider) => ({
-                            value: provider.id.toString(),
-                            label: provider.label,
-                          })),
-                      ]}
-                      onChange={async (value) => {
-                        // 失败必须让用户感知——后端写库被拒（如 CHECK 约束）时
-                        // store 会 throw，不 catch 就是静默失败：下拉回弹、无任何提示
-                        try {
-                          const providerId = parseInt(value);
-                          const currentThinkingMode = config?.thinking_mode ?? false;
-                          const currentReasoningEffort = config?.reasoning_effort ?? 'medium';
-                          if (providerId) {
-                            let providerModels = models[providerId];
-                            if (!providerModels) {
-                              providerModels = await loadModels(providerId);
-                            }
-                            const activeModels = providerModels?.filter((m) => m.is_active);
-                            if (activeModels && activeModels.length > 0) {
-                              await setSceneModel(scene, providerId, activeModels[0].model_id, currentThinkingMode, currentReasoningEffort);
-                            } else if (providerModels && providerModels.length > 0) {
-                              await setSceneModel(scene, providerId, providerModels[0].model_id, currentThinkingMode, currentReasoningEffort);
-                            } else {
-                              await setSceneModel(scene, providerId, '', currentThinkingMode, currentReasoningEffort);
-                            }
-                          } else {
-                            await setSceneModel(scene, 0, '', currentThinkingMode, currentReasoningEffort);
+                  {/* Model Select（按提供商分组，选中即绑定提供商+模型） */}
+                  {(() => {
+                    const modelGroups: SelectGroup[] = [
+                      // 已配置时的清除入口（无组头直出）
+                      ...(config?.provider_id
+                        ? [{ options: [{ value: '__clear__', label: '清除配置' }] }]
+                        : []),
+                      ...providers
+                        .filter((p) => p.is_active)
+                        .map((p) => ({
+                          label: p.label,
+                          options: (models[p.id] ?? [])
+                            .filter((m) => m.is_active)
+                            .map((m) => ({
+                              value: `${p.id}:${m.model_id}`,
+                              label: m.name,
+                            })),
+                        })),
+                    ];
+                    const totalModelOptions = modelGroups.reduce(
+                      (n, g) => n + g.options.length,
+                      0,
+                    );
+                    return (
+                      <CustomSelect
+                        value={
+                          config?.provider_id
+                            ? `${config.provider_id}:${config.model_id}`
+                            : ''
+                        }
+                        groups={modelGroups}
+                        onChange={(value) => {
+                          if (value === '__clear__') {
+                            setSceneModel(
+                              scene,
+                              0,
+                              '',
+                              config?.thinking_mode ?? false,
+                              config?.reasoning_effort ?? 'medium',
+                            );
+                            return;
                           }
-                        } catch (e) {
-                          alert(`应用提供商失败: ${e}`);
-                        }
-                      }}
-                      placeholder="选择提供商"
-                      className="w-28"
-                    />
+                          const [providerIdStr, ...rest] = value.split(':');
+                          const providerId = parseInt(providerIdStr);
+                          const modelId = rest.join(':');
+                          if (!Number.isNaN(providerId) && modelId) {
+                            handleSceneModelChange(scene, providerId, modelId);
+                          }
+                        }}
+                        disabled={totalModelOptions === 0}
+                        placeholder="选择模型"
+                        className="w-44"
+                        menuClassName="w-80 right-0"
+                      />
+                    );
+                  })()}
 
-                    <CustomSelect
-                      value={config?.model_id || ''}
-                      options={
-                        config?.provider_id && models[config.provider_id]
-                          ? [
-                              { value: '', label: '选择模型' },
-                              ...models[config.provider_id]
-                                .filter((m) => m.is_active)
-                                .map((model) => ({
-                                  value: model.model_id,
-                                  label: model.name,
-                                })),
-                            ]
-                          : [{ value: '', label: '选择模型' }]
-                      }
-                      onChange={(value) => {
-                        if (config?.provider_id) {
-                          handleSceneModelChange(scene, config.provider_id, value);
-                        }
-                      }}
-                      disabled={!config?.provider_id}
-                      placeholder="选择模型"
-                      className="w-32"
-                      menuClassName="w-72 right-0"
-                    />
-
+                  <div className="flex items-center gap-2">
                     {/* Thinking Mode Toggle */}
                     <Tooltip content={config?.thinking_mode ? '思考模式已开启' : '思考模式已关闭'} placement="top">
                       <button
