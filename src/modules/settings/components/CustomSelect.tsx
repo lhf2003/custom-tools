@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { Check, ChevronDown, Search, X } from 'lucide-react';
 
 export interface SelectOption {
   value: string;
@@ -193,6 +193,8 @@ export function CustomSelect({
   const renderOption = (option: SelectOption) => {
     optionIndex += 1;
     const index = optionIndex;
+    const isSelected = value === option.value;
+    const isHighlighted = highlightedIndex === index && !option.disabled;
     return (
       <button
         key={option.value}
@@ -208,13 +210,20 @@ export function CustomSelect({
           w-full px-3 py-2 text-left text-sm transition-colors duration-150
           ${option.disabled
             ? 'text-app-text-disabled cursor-not-allowed'
-            : 'text-app-text-secondary hover:text-app-text-primary hover:bg-white/10 cursor-pointer'
+            : isSelected
+              ? 'text-app-brand-primary-light hover:bg-white/10 cursor-pointer'
+              : 'text-app-text-secondary hover:text-app-text-primary hover:bg-white/10 cursor-pointer'
           }
-          ${value === option.value ? 'bg-white/5 text-app-brand-primary-light' : ''}
-          ${highlightedIndex === index && !option.disabled ? 'bg-white/10' : ''}
+          ${isSelected ? 'bg-white/5' : ''}
+          ${isHighlighted ? 'bg-white/10' : ''}
         `}
       >
-        {option.label}
+        <span className="flex items-center gap-2">
+          <span className="w-4 flex-shrink-0 flex items-center justify-center">
+            {isSelected && <Check size={14} className="text-app-brand-primary-light" />}
+          </span>
+          <span className="truncate">{option.label}</span>
+        </span>
       </button>
     );
   };
@@ -240,7 +249,7 @@ export function CustomSelect({
           border transition-all duration-200 ease-out
           ${disabled
             ? 'bg-app-bg-tertiary/50 border-app-border-subtle text-app-text-disabled cursor-not-allowed'
-            : 'bg-app-bg-tertiary border-app-border text-app-text-primary hover:border-app-border-emphasis focus:border-app-status-info focus:ring-2 focus:ring-app-status-info/20 cursor-pointer'
+            : 'bg-app-bg-tertiary border-app-border text-app-text-primary hover:border-app-border-emphasis hover:bg-white/5 focus:border-app-status-info focus:ring-2 focus:ring-app-status-info/20 cursor-pointer'
           }
           ${isOpen ? 'border-app-status-info ring-2 ring-app-status-info/20' : ''}
         `}
@@ -260,8 +269,8 @@ export function CustomSelect({
         className={`
           absolute z-50 py-1 rounded-lg overflow-hidden
           bg-app-bg-elevated
-          border border-app-border-emphasis shadow-xl shadow-black/50
-          transition-all duration-200 ease-out
+          border border-app-border-emphasis shadow-[var(--app-shadow-lg)]
+          transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none
           ${menuClassName}
           ${dropdownPosition === 'top'
             ? 'bottom-full mb-1 origin-bottom'
@@ -274,14 +283,26 @@ export function CustomSelect({
       >
         {isOpen && isSearchable && (
           <div className="px-2 pb-1.5 mb-1 border-b border-white/10">
-            <input
-              ref={searchInputRef}
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="输入以筛选…"
-              className="w-full bg-transparent text-app-text-primary text-sm px-1 py-1 outline-none placeholder:text-app-text-placeholder"
-            />
+            <div className="flex items-center gap-1.5 px-1 py-0.5">
+              <Search size={14} className="text-app-text-tertiary flex-shrink-0" />
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="输入以筛选…"
+                className="flex-1 min-w-0 bg-transparent text-app-text-primary text-sm px-1 py-0.5 outline-none placeholder:text-app-text-placeholder"
+              />
+              {query && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  tabIndex={-1}
+                  className="text-app-text-tertiary hover:text-app-text-primary transition-colors flex-shrink-0 cursor-pointer"
+                >
+                  <X size={13} />
+                </button>
+              )}
+            </div>
           </div>
         )}
         <div
