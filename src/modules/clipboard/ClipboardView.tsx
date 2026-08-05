@@ -1,45 +1,33 @@
-import { useState, useEffect, useCallback, useMemo, useRef, forwardRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Search,
-  Trash2,
   Star,
-  Copy,
   Loader2,
   FileText,
-  Image,
+  Image as ImageIcon,
   Folder,
   X,
   Filter,
-  ChevronDown,
-  ChevronUp,
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { Tooltip } from '@/components/Tooltip';
 import { THEME } from '../../constants/theme';
 import { WINDOW_SIZE } from '../../constants/window';
 import { immediateResize } from '../../utils/tauri';
 import { imageCache } from './imageCache';
+import { isImageFile } from './utils';
+import type { ClipboardItemData, ClipboardQuery, TabType } from './types';
+import { ClipboardListItem } from './ClipboardListItem';
+import { ClipboardDetail } from './ClipboardDetail';
+import { useClipboardSelectionStore } from '@/stores/clipboardSelectionStore';
 
-interface ClipboardItemData {
-  id: number;
-  content: string;
-  content_type: string;
-  source_app: string | null;
-  source_exe: string | null;
-  is_favorite: boolean;
-  created_at: string;
+/** 焦点在输入框/文本域时不响应单键快捷键（F 收藏 / Del 删除），避免与输入冲突 */
+function isTypingTarget(): boolean {
+  const el = document.activeElement;
+  return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
 }
-
-interface ClipboardQuery {
-  content_type?: string;
-  is_favorite?: boolean;
-  search?: string;
-  limit?: number;
-  offset?: number;
-}
-
-type TabType = 'all' | 'text' | 'image' | 'file' | 'favorite';
 
 export function ClipboardView() {
   // Resize window when view mounts — use immediateResize to cancel any
@@ -54,7 +42,6 @@ export function ClipboardView() {
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const [offset, setOffset] = useState(0);
@@ -73,7 +60,7 @@ export function ClipboardView() {
     () => [
       { id: 'all' as TabType, label: '全部', icon: Filter },
       { id: 'text' as TabType, label: '文本', icon: FileText },
-      { id: 'image' as TabType, label: '图片', icon: Image },
+      { id: 'image' as TabType, label: '图片', icon: ImageIcon },
       { id: 'file' as TabType, label: '文件', icon: Folder },
       { id: 'favorite' as TabType, label: '收藏', icon: Star },
     ],
@@ -135,6 +122,8 @@ export function ClipboardView() {
       } else {
         setItems(result);
         setOffset(PAGE_SIZE);
+        // 双栏布局：刷新后自动选中首条，让详情面板始终有内容
+        setSelectedId(result.length > 0 ? result[0].id : null);
       }
 
       // If we got less than PAGE_SIZE items, there are no more
@@ -158,7 +147,6 @@ export function ClipboardView() {
 
     const setupListener = async () => {
       unlisten = await listen('clipboard-updated', () => {
-        console.log('Clipboard updated event received, refreshing...');
         // Reset to first page when new item arrives
         fetchClipboardHistory(false);
       });
@@ -173,7 +161,7 @@ export function ClipboardView() {
     };
   }, [fetchClipboardHistory]);
 
-  const handleToggleFavorite = async (id: number) => {
+  const handleToggleFavorite = useCallback(async (id: number) => {
     try {
       await invoke('toggle_clipboard_favorite', { id });
       fetchClipboardHistory(false);
@@ -182,9 +170,9 @@ export function ClipboardView() {
       console.error('Failed to toggle favorite:', err);
       setError(`收藏操作失败: ${message}`);
     }
-  };
+  }, [fetchClipboardHistory]);
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = useCallback(async (id: number) => {
     try {
       await invoke('delete_clipboard_item', { id });
       imageCache.remove(id);
@@ -194,7 +182,7 @@ export function ClipboardView() {
       console.error('Failed to delete clipboard item:', err);
       setError(`删除失败: ${message}`);
     }
-  };
+  }, [fetchClipboardHistory]);
 
   const handleCopyToClipboard = useCallback(async (id: number) => {
     try {
@@ -220,31 +208,26 @@ export function ClipboardView() {
     }
   };
 
-  const handlePreviewImage = async (item: ClipboardItemData) => {
-    const cached = imageCache.get(item.id);
-    if (cached) {
-      setPreviewImage(cached);
-      return;
+  // 粘贴到上一窗口（后端处理窗口切换与模拟粘贴）；失败时回退为仅复制
+  const handlePasteItem = useCallback(async (id: number) => {
+    try {
+      await invoke('paste_to_clipboard_item', { id });
+    } catch (err) {
+      console.error('Failed to paste clipboard item:', err);
+      handleCopyToClipboard(id);
     }
+  }, [handleCopyToClipboard]);
 
-    if (item.content_type === 'image') {
-      try {
-        const base64 = await invoke<string>('get_clipboard_image_base64', { id: item.id });
-        imageCache.set(item.id, base64);
-        setPreviewImage(base64);
-      } catch (err) {
-        console.error('Failed to load image:', err);
-      }
-    } else if (item.content_type === 'file' && isImageFile(item.content)) {
-      try {
-        const base64 = await invoke<string>('read_image_file_as_base64', { path: item.content });
-        imageCache.set(item.id, base64);
-        setPreviewImage(base64);
-      } catch (err) {
-        console.error('Failed to load image preview:', err);
-      }
+  // 图片条目（image 类型 content 即 PNG 落盘路径；文件类型的图片同理）在资源管理器中打开
+  const handleRevealInExplorer = useCallback(async () => {
+    const item = items.find((i) => i.id === selectedId);
+    if (!item) return;
+    try {
+      await revealItemInDir(item.content);
+    } catch (err) {
+      console.error('Failed to reveal in explorer:', err);
     }
-  };
+  }, [items, selectedId]);
 
   // Group items by date
   const groupedItems = useMemo(() => {
@@ -270,6 +253,48 @@ export function ClipboardView() {
     return groups;
   }, [items]);
 
+  const selectedItem = useMemo(
+    () => items.find((item) => item.id === selectedId) ?? null,
+    [items, selectedId]
+  );
+
+  // 同步选中状态到 store，供 TopNavigationBar 动作菜单使用；卸载时清空
+  const setSelection = useClipboardSelectionStore((s) => s.setSelection);
+  useEffect(() => {
+    setSelection({
+      hasSelection: selectedItem !== null,
+      isFavorite: selectedItem?.is_favorite ?? false,
+      isImage: selectedItem
+        ? selectedItem.content_type === 'image' ||
+          (selectedItem.content_type === 'file' && isImageFile(selectedItem.content))
+        : false,
+    });
+  }, [selectedItem, setSelection]);
+  useEffect(() => {
+    return () => setSelection({ hasSelection: false, isFavorite: false, isImage: false });
+  }, [setSelection]);
+
+  // TopNavigationBar 动作菜单 / 右键菜单的条目级动作（custom event 下发）
+  useEffect(() => {
+    const onPaste = () => { if (selectedId != null) handlePasteItem(selectedId); };
+    const onCopy = () => { if (selectedId != null) handleCopyToClipboard(selectedId); };
+    const onFavorite = () => { if (selectedId != null) handleToggleFavorite(selectedId); };
+    const onDelete = () => { if (selectedId != null) handleDelete(selectedId); };
+    const onReveal = () => { handleRevealInExplorer(); };
+    window.addEventListener('clipboard:paste-selected', onPaste);
+    window.addEventListener('clipboard:copy-selected', onCopy);
+    window.addEventListener('clipboard:favorite-selected', onFavorite);
+    window.addEventListener('clipboard:delete-selected', onDelete);
+    window.addEventListener('clipboard:reveal-selected', onReveal);
+    return () => {
+      window.removeEventListener('clipboard:paste-selected', onPaste);
+      window.removeEventListener('clipboard:copy-selected', onCopy);
+      window.removeEventListener('clipboard:favorite-selected', onFavorite);
+      window.removeEventListener('clipboard:delete-selected', onDelete);
+      window.removeEventListener('clipboard:reveal-selected', onReveal);
+    };
+  }, [selectedId, handlePasteItem, handleCopyToClipboard, handleToggleFavorite, handleDelete, handleRevealInExplorer]);
+
   // Keyboard navigation for clipboard list
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -286,24 +311,33 @@ export function ClipboardView() {
         const nextIndex = currentIndex < flatIds.length - 1 ? currentIndex + 1 : 0;
         const nextId = flatIds[nextIndex];
         setSelectedId(nextId);
-        // Scroll item into view
         itemRefs.current.get(nextId)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         const prevIndex = currentIndex > 0 ? currentIndex - 1 : flatIds.length - 1;
         const prevId = flatIds[prevIndex];
         setSelectedId(prevId);
-        // Scroll item into view
         itemRefs.current.get(prevId)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       } else if (e.key === 'Enter' && selectedId) {
         e.preventDefault();
-        handleCopyToClipboard(selectedId);
+        // Enter = 粘贴到上一窗口；Ctrl+Enter = 仅复制
+        if (e.ctrlKey || e.metaKey) {
+          handleCopyToClipboard(selectedId);
+        } else {
+          handlePasteItem(selectedId);
+        }
+      } else if (!isTypingTarget() && (e.key === 'f' || e.key === 'F') && selectedId) {
+        e.preventDefault();
+        handleToggleFavorite(selectedId);
+      } else if (!isTypingTarget() && e.key === 'Delete' && selectedId) {
+        e.preventDefault();
+        handleDelete(selectedId);
       }
     };
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [items, groupedItems, selectedId, handleCopyToClipboard]);
+  }, [items, groupedItems, selectedId, handleCopyToClipboard, handlePasteItem, handleToggleFavorite, handleDelete]);
 
   // Infinite scroll - auto load more when scrolling near bottom
   useEffect(() => {
@@ -317,7 +351,6 @@ export function ClipboardView() {
         window.requestAnimationFrame(() => {
           if (!isLoadingMore && hasMore) {
             const { scrollTop, scrollHeight, clientHeight } = listElement;
-            // Load more when within 50px of bottom
             if (scrollHeight - scrollTop - clientHeight < 10) {
               fetchClipboardHistory(true);
             }
@@ -332,138 +365,161 @@ export function ClipboardView() {
     return () => listElement.removeEventListener('scroll', handleScroll);
   }, [isLoadingMore, hasMore, fetchClipboardHistory]);
 
+  // 整窗状态：加载中 / 错误 /（非搜索态的）空列表
+  if (isLoading) {
+    return (
+      <div className="w-full h-full flex flex-col items-center justify-center text-app-text-disabled" style={{ backgroundColor: THEME.BG_PRIMARY }}>
+        <Loader2 size={32} className="animate-spin mb-3" />
+        <span className="text-sm">加载中...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="w-full h-full flex flex-col items-center justify-center text-app-text-disabled" style={{ backgroundColor: THEME.BG_PRIMARY }}>
+        <p className="text-app-status-error mb-2">{error}</p>
+        <button
+          onClick={() => fetchClipboardHistory(false)}
+          className="px-4 py-2 rounded-lg bg-app-bg-pressed/50 hover:bg-app-bg-elevated/50 text-sm text-app-text-primary transition-colors cursor-pointer"
+        >
+          重试
+        </button>
+      </div>
+    );
+  }
+
+  if (items.length === 0 && !searchQuery.trim()) {
+    return (
+      <div className="w-full h-full flex" style={{ backgroundColor: THEME.BG_PRIMARY }}>
+        <EmptyState activeTab={activeTab} />
+      </div>
+    );
+  }
+
   return (
     <div className="w-full h-full flex" style={{ backgroundColor: THEME.BG_PRIMARY }}>
-      {/* Left Sidebar - Tabs */}
-      <aside className="w-16 border-r border-app-border flex flex-col items-center py-4 gap-1">
-        {tabs.map((tab) => {
-          const Icon = tab.icon;
-          return (
-            <Tooltip key={tab.id} content={tab.label} placement="right">
-              <button
-                onClick={() => setActiveTab(tab.id)}
-                className={`w-12 h-12 rounded-xl flex flex-col items-center justify-center gap-0.5 transition-all duration-200 cursor-pointer ${
-                  activeTab === tab.id
-                    ? 'bg-app-bg-pressed/50 text-app-text-primary'
-                    : 'text-app-text-disabled hover:text-app-text-secondary hover:bg-app-bg-elevated/30'
-                }`}
-              >
-                <Icon size={18} />
-                <span className="text-[10px]">{tab.label}</span>
-              </button>
-            </Tooltip>
-          );
-        })}
-      </aside>
-
-      {/* Main Content */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Header with Search */}
-        <div className="w-full flex items-center px-4 py-3 border-b border-app-border-subtle">
-          <Search className="w-5 h-5 text-app-text-tertiary mr-3 flex-shrink-0" />
+      {/* 左栏：搜索 + 过滤 + 紧凑列表 */}
+      <aside
+        className="w-[300px] flex-shrink-0 flex flex-col border-r border-app-border-subtle"
+        style={{ backgroundColor: THEME.BG_SECONDARY }}
+      >
+        {/* Search（与右栏详情头同高 h-11） */}
+        <div className="flex items-center px-3 h-11 border-b border-app-border-subtle">
+          <Search className="w-4 h-4 text-app-text-tertiary mx-2 flex-shrink-0" />
           <input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="搜索剪贴板历史..."
-            className="flex-1 bg-transparent text-lg text-app-text-primary placeholder-app-text-placeholder outline-none"
+            className="flex-1 min-w-0 bg-transparent text-sm text-app-text-primary placeholder-app-text-placeholder outline-none"
           />
           {searchQuery && (
             <button
               onClick={() => setSearchQuery('')}
-              className="ml-3 w-8 h-8 rounded-lg hover:bg-white/10 flex items-center justify-center text-app-text-tertiary hover:text-app-text-primary transition-colors cursor-pointer"
+              className="ml-2 w-6 h-6 rounded-md hover:bg-white/10 flex items-center justify-center text-app-text-tertiary hover:text-app-text-primary transition-colors cursor-pointer"
             >
-              <X size={16} />
+              <X size={14} />
             </button>
           )}
         </div>
 
-        {/* Clipboard List */}
-        <div ref={listRef} className="flex-1 overflow-y-auto px-4 pb-4 pt-2">
-          {isLoading ? (
-            <div className="flex flex-col items-center justify-center h-full text-app-text-disabled">
-              <Loader2 size={32} className="animate-spin mb-3" />
-              <span className="text-sm">加载中...</span>
-            </div>
-          ) : error ? (
-            <div className="flex flex-col items-center justify-center h-full text-app-text-disabled">
-              <p className="text-app-status-error mb-2">{error}</p>
-              <button
-                onClick={() => fetchClipboardHistory(false)}
-                className="px-4 py-2 rounded-lg bg-app-bg-pressed/50 hover:bg-app-bg-elevated/50 text-sm text-app-text-primary transition-colors cursor-pointer"
-              >
-                重试
-              </button>
-            </div>
-          ) : items.length === 0 ? (
-            <EmptyState activeTab={activeTab} />
-          ) : (
-            <div className="space-y-4">
-              {Object.entries(groupedItems).map(([date, dateItems]) => (
-                <div key={date}>
-                  <h3 className="text-app-text-disabled text-[11px] font-medium mb-1.5 px-1 -mt-2 pt-2 pb-0.5 sticky -top-2 tracking-wide z-10" style={{ backgroundColor: THEME.BG_PRIMARY }}>
-                    {date}
-                  </h3>
-                  <div className="space-y-2">
-                    {dateItems.map((item) => (
-                      <ClipboardItem
-                        key={item.id}
-                        ref={(el) => {
-                          if (el) {
-                            itemRefs.current.set(item.id, el);
-                          } else {
-                            itemRefs.current.delete(item.id);
-                          }
-                        }}
-                        item={item}
-                        isSelected={selectedId === item.id}
-                        onToggleFavorite={() => handleToggleFavorite(item.id)}
-                        onDelete={() => handleDelete(item.id)}
-                        onCopy={() => handleCopyToClipboard(item.id)}
-                        onCopyPartial={handleCopyPartialText}
-                        onPreview={() => handlePreviewImage(item)}
-                        onSelect={() => setSelectedId(item.id)}
-                      />
-                    ))}
-                  </div>
-                </div>
-              ))}
+        {/* Filter chips（图标 + Tooltip） */}
+        <div className="flex items-center gap-1 px-3 py-2 border-b border-app-border-subtle">
+          {tabs.map((tab) => {
+            const Icon = tab.icon;
+            const active = activeTab === tab.id;
+            return (
+              <Tooltip key={tab.id} content={tab.label} placement="bottom">
+                <button
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`w-[30px] h-[30px] rounded-md flex items-center justify-center transition-colors duration-150 cursor-pointer ${
+                    active
+                      ? 'bg-white/10 text-app-text-primary'
+                      : 'text-app-text-tertiary hover:text-app-text-secondary hover:bg-white/5'
+                  }`}
+                >
+                  <Icon size={14} />
+                </button>
+              </Tooltip>
+            );
+          })}
+        </div>
 
-              {/* Load More Hint */}
-              {hasMore && (
-                <div className="text-center py-3 text-app-text-disabled text-xs">
-                  {isLoadingMore ? (
-                    <span className="flex items-center justify-center gap-1">
-                      <Loader2 size={12} className="animate-spin" />
-                      加载中...
-                    </span>
-                  ) : (
-                    <span>下滑查看更多</span>
-                  )}
-                </div>
+        {/* List */}
+        <div ref={listRef} className="flex-1 overflow-y-auto px-1.5 pb-3 pt-1">
+          {items.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-app-text-disabled px-4 text-center">
+              <p className="text-sm">没有匹配「{searchQuery.trim()}」的记录</p>
+            </div>
+          ) : (
+            Object.entries(groupedItems).map(([date, dateItems]) => (
+              <div key={date}>
+                <h3
+                  className="text-app-text-tertiary text-xs font-medium px-2.5 pt-2 pb-1.5 sticky top-0 z-10"
+                  style={{ backgroundColor: THEME.BG_SECONDARY }}
+                >
+                  {date}
+                </h3>
+                {dateItems.map((item) => (
+                  <ClipboardListItem
+                    key={item.id}
+                    ref={(el) => {
+                      if (el) {
+                        itemRefs.current.set(item.id, el);
+                      } else {
+                        itemRefs.current.delete(item.id);
+                      }
+                    }}
+                    item={item}
+                    isSelected={selectedId === item.id}
+                    onSelect={() => setSelectedId(item.id)}
+                    onPaste={() => handlePasteItem(item.id)}
+                    onContextMenu={() => setSelectedId(item.id)}
+                  />
+                ))}
+              </div>
+            ))
+          )}
+
+          {hasMore && items.length > 0 && (
+            <div className="text-center py-2.5 text-app-text-disabled text-xs">
+              {isLoadingMore ? (
+                <span className="flex items-center justify-center gap-1">
+                  <Loader2 size={12} className="animate-spin" />
+                  加载中...
+                </span>
+              ) : (
+                <span>下滑查看更多</span>
               )}
             </div>
           )}
         </div>
-      </div>
+      </aside>
 
-      {/* Image Preview Modal */}
-      {previewImage && (
-        <ImagePreviewModal
-          src={previewImage}
-          onClose={() => setPreviewImage(null)}
-        />
-      )}
+      {/* 右栏：详情面板 */}
+      <section className="flex-1 min-w-0 flex flex-col">
+        {selectedItem ? (
+          <ClipboardDetail
+            item={selectedItem}
+            onCopyPartial={handleCopyPartialText}
+          />
+        ) : (
+          <div className="flex-1 flex items-center justify-center text-app-text-disabled text-sm">
+            选择左侧条目查看详情
+          </div>
+        )}
+      </section>
     </div>
   );
 }
 
-// Empty State Component
+// Empty State Component（非搜索态的空列表，整窗呈现）
 function EmptyState({ activeTab }: { activeTab: TabType }) {
   const messages: Record<TabType, { icon: React.ElementType; title: string; desc: string }> = {
     all: { icon: Filter, title: '暂无剪贴板记录', desc: '复制内容后将自动保存' },
     text: { icon: FileText, title: '暂无文本记录', desc: '复制文本后将显示在这里' },
-    image: { icon: Image, title: '暂无图片记录', desc: '复制图片后将显示在这里' },
+    image: { icon: ImageIcon, title: '暂无图片记录', desc: '复制图片后将显示在这里' },
     file: { icon: Folder, title: '暂无文件记录', desc: '复制文件后将显示在这里' },
     favorite: { icon: Star, title: '暂无收藏', desc: '点击星标收藏常用内容' },
   };
@@ -471,7 +527,7 @@ function EmptyState({ activeTab }: { activeTab: TabType }) {
   const { icon: Icon, title, desc } = messages[activeTab];
 
   return (
-    <div className="flex flex-col items-center justify-center h-full text-app-text-disabled py-20">
+    <div className="flex-1 flex flex-col items-center justify-center text-app-text-disabled py-20">
       <div className="w-16 h-16 rounded-2xl bg-app-bg-elevated/30 flex items-center justify-center mb-4">
         <Icon size={32} className="opacity-50" />
       </div>
@@ -479,528 +535,4 @@ function EmptyState({ activeTab }: { activeTab: TabType }) {
       <p className="text-sm mt-1 text-app-text-disabled">{desc}</p>
     </div>
   );
-}
-
-// Clipboard Item Props
-interface ClipboardItemProps {
-  item: ClipboardItemData;
-  isSelected: boolean;
-  onToggleFavorite: () => void;
-  onDelete: () => void;
-  onCopy: () => void;
-  onCopyPartial: (text: string) => void;
-  onPreview: () => void;
-  onSelect: () => void;
-}
-
-// Check if a file path is an image
-function isImageFile(path: string): boolean {
-  const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico', '.svg'];
-  const lowerPath = path.toLowerCase();
-  return imageExtensions.some(ext => lowerPath.endsWith(ext));
-}
-
-// Get type config
-function getTypeConfig(type: string, content?: string) {
-  // If it's a file type but the content is an image path, treat it as image
-  if (type === 'file' && content && isImageFile(content)) {
-    return {
-      icon: Image,
-      color: 'from-purple-500/30 to-pink-500/30',
-      bgColor: 'bg-purple-500/10',
-      label: '图片',
-    };
-  }
-
-  switch (type) {
-    case 'text':
-      return {
-        icon: FileText,
-        color: 'from-blue-500/30 to-cyan-500/30',
-        bgColor: 'bg-blue-500/10',
-        label: '文本',
-      };
-    case 'image':
-      return {
-        icon: Image,
-        color: 'from-purple-500/30 to-pink-500/30',
-        bgColor: 'bg-purple-500/10',
-        label: '图片',
-      };
-    case 'file':
-      return {
-        icon: Folder,
-        color: 'from-amber-500/30 to-orange-500/30',
-        bgColor: 'bg-amber-500/10',
-        label: '文件',
-      };
-    default:
-      return {
-        icon: FileText,
-        color: 'from-gray-500/30 to-slate-500/30',
-        bgColor: 'bg-gray-500/10',
-        label: '未知',
-      };
-  }
-}
-
-// Clipboard Item Component
-const ClipboardItem = forwardRef<HTMLDivElement, ClipboardItemProps>(function ClipboardItem(
-  {
-    item,
-    isSelected,
-    onToggleFavorite,
-    onDelete,
-    onCopy,
-    onCopyPartial,
-    onPreview,
-    onSelect,
-  },
-  ref
-) {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [thumbnail, setThumbnail] = useState<string | null>(null);
-  const [appIcon, setAppIcon] = useState<string | null>(null);
-
-  // Load source app icon (PNG data URL from backend, cached there)
-  useEffect(() => {
-    if (!item.source_exe) {
-      setAppIcon(null);
-      return;
-    }
-    let cancelled = false;
-    invoke<string | null>('get_app_icon', { exePath: item.source_exe })
-      .then((data) => {
-        if (!cancelled) setAppIcon(data);
-      })
-      .catch(() => {
-        if (!cancelled) setAppIcon(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [item.source_exe]);
-  const [selectionToolbar, setSelectionToolbar] = useState<{ visible: boolean; x: number; y: number; text: string }>({
-    visible: false,
-    x: 0,
-    y: 0,
-    text: '',
-  });
-  const textRef = useRef<HTMLParagraphElement>(null);
-
-  // Handle text selection
-  useEffect(() => {
-    const handleSelectionChange = () => {
-      const selection = window.getSelection();
-      if (!selection || selection.isCollapsed || !textRef.current) {
-        setSelectionToolbar(prev => ({ ...prev, visible: false }));
-        return;
-      }
-
-      // Check if selection is within our text element
-      const range = selection.getRangeAt(0);
-      if (!textRef.current.contains(range.commonAncestorContainer)) {
-        setSelectionToolbar(prev => ({ ...prev, visible: false }));
-        return;
-      }
-
-      const selectedText = selection.toString().trim();
-      if (selectedText.length === 0) {
-        setSelectionToolbar(prev => ({ ...prev, visible: false }));
-        return;
-      }
-
-      // Calculate toolbar position
-      const rect = range.getBoundingClientRect();
-      const containerRect = textRef.current.getBoundingClientRect();
-
-      // Position above the selection, centered
-      const x = rect.left + rect.width / 2 - 40; // 40 is half of toolbar width (~80px)
-      const y = rect.top - 45; // 45px above the selection
-
-      setSelectionToolbar({
-        visible: true,
-        x: x - containerRect.left + textRef.current.offsetLeft,
-        y: y - containerRect.top + textRef.current.offsetTop,
-        text: selectedText,
-      });
-    };
-
-    document.addEventListener('selectionchange', handleSelectionChange);
-    return () => document.removeEventListener('selectionchange', handleSelectionChange);
-  }, []);
-
-  // Hide toolbar on click outside
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (textRef.current && !textRef.current.contains(e.target as Node)) {
-        setSelectionToolbar(prev => ({ ...prev, visible: false }));
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  // Load image thumbnail for image type or image files, with LRU cache
-  useEffect(() => {
-    if (item.content_type === 'image') {
-      const cached = imageCache.get(item.id);
-      if (cached) {
-        setThumbnail(cached);
-        return;
-      }
-      invoke<string>('get_clipboard_image_base64', { id: item.id })
-        .then((data) => {
-          imageCache.set(item.id, data);
-          setThumbnail(data);
-        })
-        .catch((err) => console.error('Failed to load thumbnail:', err));
-    } else if (item.content_type === 'file' && isImageFile(item.content)) {
-      const cached = imageCache.get(item.id);
-      if (cached) {
-        setThumbnail(cached);
-        return;
-      }
-      const loadImageFromFile = async () => {
-        try {
-          const base64 = await invoke<string>('read_image_file_as_base64', { path: item.content });
-          imageCache.set(item.id, base64);
-          setThumbnail(base64);
-        } catch (err) {
-          console.error('Failed to load image from file:', err);
-        }
-      };
-      loadImageFromFile();
-    }
-  }, [item.id, item.content_type, item.content]);
-
-  // Constants for expansion
-  const MAX_PREVIEW_CHARS = 150;
-  const isLongText = item.content_type === 'text' && item.content.length > MAX_PREVIEW_CHARS;
-
-  // Parse SQLite datetime string (format: "YYYY-MM-DD HH:MM:SS") to Date
-  const parseSqliteDate = (dateStr: string): Date => {
-    // SQLite returns "YYYY-MM-DD HH:MM:SS", convert to ISO format "YYYY-MM-DDTHH:MM:SSZ"
-    if (dateStr.includes(' ')) {
-      const [date, time] = dateStr.split(' ');
-      return new Date(`${date}T${time}Z`);
-    }
-    return new Date(dateStr);
-  };
-
-  // Custom format time with precise units (minutes, hours, days)
-  const formatTime = (dateStr: string) => {
-    try {
-      const date = parseSqliteDate(dateStr);
-      const now = new Date();
-      const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
-
-      // Handle negative diff (clock skew) or future dates
-      if (diffInSeconds < 0) {
-        return '刚刚';
-      }
-
-      if (diffInSeconds < 60) {
-        return '刚刚';
-      } else if (diffInSeconds < 3600) {
-        const minutes = Math.floor(diffInSeconds / 60);
-        return `${minutes}分钟前`;
-      } else if (diffInSeconds < 86400) {
-        const hours = Math.floor(diffInSeconds / 3600);
-        return `${hours}小时前`;
-      } else {
-        const days = Math.floor(diffInSeconds / 86400);
-        if (days <= 30) {
-          return `${days}天前`;
-        } else {
-          // For older dates, show actual date
-          return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
-        }
-      }
-    } catch (e) {
-      console.error('[Clipboard Time Error]', { dateStr, error: e });
-      return dateStr;
-    }
-  };
-
-  const config = getTypeConfig(item.content_type, item.content);
-
-  // Check if this is an image (either image type or image file)
-  const isImage = item.content_type === 'image' ||
-    (item.content_type === 'file' && isImageFile(item.content));
-
-  // Handle click: only select the item
-  const handleClick = () => {
-    // Check if user has selected text - if so, don't interfere
-    const selection = window.getSelection();
-    if (selection && selection.toString().trim().length > 0) {
-      // User is selecting text, don't interfere
-      return;
-    }
-
-    // Just select on click, don't copy
-    onSelect();
-  };
-
-  // Handle double click: copy to clipboard and auto-paste to previous window
-  const handleDoubleClick = async () => {
-    try {
-      // Use paste_to_clipboard_item which handles:
-      // 1. Copy to clipboard
-      // 2. Hide window
-      // 3. Restore focus to previous window
-      // 4. Simulate Ctrl+V (if auto-paste is enabled)
-      await invoke('paste_to_clipboard_item', { id: item.id });
-    } catch (err) {
-      console.error('Failed to paste clipboard item:', err);
-      // Fallback to just copying if paste fails
-      onCopy();
-    }
-  };
-
-  // List View
-  return (
-    <div
-      ref={ref}
-      className={`rounded-lg p-3 transition-all duration-200 cursor-pointer group ${
-        isSelected
-          ? 'bg-app-brand-primary/20 hover:bg-app-brand-primary/25'
-          : 'bg-app-bg-elevated/30 hover:bg-app-bg-elevated/50'
-      }`}
-      onClick={handleClick}
-      onDoubleClick={handleDoubleClick}
-    >
-      <div className="flex items-start gap-3">
-        {/* Content */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-start gap-2">
-            {isImage ? (
-              <div className="flex items-center gap-3">
-                {thumbnail ? (
-                  <img
-                    src={thumbnail}
-                    alt="剪贴板图片"
-                    className="h-16 w-auto max-w-[120px] rounded-md object-cover border border-app-border"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onPreview();
-                    }}
-                  />
-                ) : (
-                  <div className="h-16 w-20 rounded-md bg-app-bg-elevated/50 flex items-center justify-center">
-                    <Loader2 size={16} className="animate-spin text-app-text-disabled" />
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="relative">
-                <p
-                  ref={textRef}
-                  className={`text-app-text-primary text-sm break-all select-text ${isExpanded ? '' : 'line-clamp-2'}`}
-                  style={{ userSelect: 'text' }}
-                >
-                  {isExpanded ? item.content : truncateContent(item.content, MAX_PREVIEW_CHARS)}
-                </p>
-                {/* Selection Toolbar */}
-                {selectionToolbar.visible && (
-                  <div
-                    className="absolute z-20 flex items-center gap-1 px-2 py-1.5 bg-app-bg-primary rounded-lg shadow-lg border border-app-border animate-in fade-in zoom-in-95 duration-150"
-                    style={{
-                      left: `${Math.max(0, Math.min(selectionToolbar.x, 200))}px`,
-                      top: `${selectionToolbar.y}px`,
-                      transform: 'translateX(-50%)',
-                    }}
-                    onClick={(e) => e.stopPropagation()}
-                    onMouseDown={(e) => {
-                      e.preventDefault(); // Prevent clearing text selection
-                      e.stopPropagation();
-                    }}
-                  >
-                    <span className="text-app-text-tertiary text-xs whitespace-nowrap mr-1">
-                      {selectionToolbar.text.length} 字符
-                    </span>
-                    <button
-                      onClick={() => {
-                        onCopyPartial(selectionToolbar.text);
-                        setSelectionToolbar(prev => ({ ...prev, visible: false }));
-                        window.getSelection()?.removeAllRanges();
-                      }}
-                      className="flex items-center gap-1 px-2 py-1 bg-app-brand-primary/20 hover:bg-app-brand-primary/30 text-app-brand-primary text-xs rounded transition-colors cursor-pointer"
-                    >
-                      <Copy size={12} />
-                      复制选中
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          <div className="flex items-center gap-2 mt-1.5 min-w-0">
-            <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${config.bgColor} text-app-text-tertiary`}>
-              {config.label}
-            </span>
-            <span className="text-app-bg-pressed text-xs shrink-0">•</span>
-            <span className="text-app-text-disabled text-xs shrink-0">{formatTime(item.created_at)}</span>
-            {item.source_app && item.source_app !== 'Unknown' && (
-              <>
-                <span className="text-app-bg-pressed text-xs shrink-0">•</span>
-                {appIcon && (
-                  <img
-                    src={appIcon}
-                    alt=""
-                    className="w-3.5 h-3.5 rounded-[3px] shrink-0"
-                  />
-                )}
-                <span className="text-app-text-disabled text-xs truncate min-w-0" title={item.source_app}>
-                  {item.source_app}
-                </span>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* Actions */}
-        <div className="flex flex-col items-end gap-1">
-          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-            <ActionButton
-              icon={Copy}
-              onClick={(e) => {
-                e.stopPropagation();
-                onCopy();
-              }}
-              tooltip="复制"
-            />
-            <ActionButton
-              icon={Star}
-              active={item.is_favorite}
-              activeColor="text-yellow-400"
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleFavorite();
-              }}
-              fill={item.is_favorite}
-              tooltip={item.is_favorite ? '取消收藏' : '收藏'}
-            />
-            <ActionButton
-              icon={Trash2}
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete();
-              }}
-              tooltip="删除"
-            />
-          </div>
-          <span className="text-app-text-disabled text-xs">
-            {item.content_type === 'text' ? `${item.content.length} 字符` : ''}
-          </span>
-        </div>
-      </div>
-
-      {/* Expand/Collapse Arrow for long text */}
-      {isLongText && (
-        <div className="flex justify-center mt-2">
-          <Tooltip content={isExpanded ? '收起' : '展开'} placement="bottom">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setIsExpanded(!isExpanded);
-              }}
-              className="p-1 rounded-md text-app-text-disabled hover:text-app-text-secondary hover:bg-app-bg-pressed/50 transition-colors cursor-pointer"
-            >
-              {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-            </button>
-          </Tooltip>
-        </div>
-      )}
-    </div>
-  );
-});
-
-// Action Button Component
-interface ActionButtonProps {
-  icon: React.ElementType;
-  onClick: (e: React.MouseEvent) => void;
-  active?: boolean;
-  activeColor?: string;
-  fill?: boolean;
-  tooltip?: string;
-}
-
-function ActionButton({
-  icon: Icon,
-  onClick,
-  active,
-  activeColor = 'text-app-text-primary',
-  fill,
-  tooltip,
-}: ActionButtonProps) {
-  const button = (
-    <button
-      onClick={onClick}
-      className={`p-1.5 rounded-md transition-all duration-200 cursor-pointer ${
-        active
-          ? activeColor
-          : 'text-app-text-disabled hover:text-app-text-secondary hover:bg-app-bg-pressed/50'
-      }`}
-    >
-      <Icon size={15} fill={fill ? 'currentColor' : 'none'} />
-    </button>
-  );
-
-  if (tooltip) {
-    return (
-      <Tooltip content={tooltip} placement="top">
-        {button}
-      </Tooltip>
-    );
-  }
-
-  return button;
-}
-
-// Image Preview Modal
-interface ImagePreviewModalProps {
-  src: string;
-  onClose: () => void;
-}
-
-function ImagePreviewModal({ src, onClose }: ImagePreviewModalProps) {
-  useEffect(() => {
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('keydown', handleEsc);
-    return () => window.removeEventListener('keydown', handleEsc);
-  }, [onClose]);
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div
-        className="relative max-w-[90vw] max-h-[90vh]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button
-          onClick={onClose}
-          className="absolute -top-10 right-0 p-2 rounded-lg bg-white/10 hover:bg-white/20 text-white transition-colors cursor-pointer"
-        >
-          <X size={20} />
-        </button>
-        <img
-          src={src}
-          alt="Preview"
-          className="max-w-full max-h-[85vh] rounded-lg shadow-2xl"
-        />
-      </div>
-    </div>
-  );
-}
-
-// Utility function
-function truncateContent(content: string, maxLength: number = 90): string {
-  if (content.length <= maxLength) return content;
-  return content.slice(0, maxLength) + '...';
 }

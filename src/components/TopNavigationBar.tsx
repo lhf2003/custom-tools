@@ -4,16 +4,29 @@ import { ActionMenu } from './ActionMenu';
 import { Tooltip } from './Tooltip';
 import type { MenuItem } from '@/types';
 
+/** 导航栏右侧的主操作（Raycast 式：主动作外露 + 其余收进动作菜单） */
+export interface PrimaryAction {
+  label: string;
+  shortcut?: string;
+  disabled?: boolean;
+  onClick: () => void;
+}
+
 interface TopNavigationBarProps {
   title: string;
   menuItems: MenuItem[];
   onBack: () => void;
+  primaryAction?: PrimaryAction;
+  /** 动作菜单入口的文字标签（不传则为三点图标） */
+  menuLabel?: string;
 }
 
 export function TopNavigationBar({
                                    title,
                                    menuItems,
                                    onBack,
+                                   primaryAction,
+                                   menuLabel,
                                  }: TopNavigationBarProps) {
   return (
       <header
@@ -40,9 +53,23 @@ export function TopNavigationBar({
           <h1 className="text-sm font-semibold text-app-text-primary">{title}</h1>
         </div>
 
-        {/* Right: Action menu - no-drag 确保菜单可点击 */}
+        {/* Right: Primary action + Action menu - no-drag 确保可点击 */}
         <div className="flex items-center gap-1" style={{ 'app-region': 'no-drag' } as React.CSSProperties}>
-          <ActionMenu items={menuItems} />
+          {primaryAction && (
+            <button
+              onClick={primaryAction.onClick}
+              disabled={primaryAction.disabled}
+              className="flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-sm text-app-text-secondary hover:text-app-text-primary hover:bg-app-bg-elevated/50 transition-all duration-200 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-app-text-secondary"
+            >
+              {primaryAction.label}
+              {primaryAction.shortcut && (
+                <kbd className="min-w-[18px] px-1 py-px text-center rounded border border-white/10 bg-white/5 text-[10px] font-medium text-app-text-tertiary">
+                  {primaryAction.shortcut}
+                </kbd>
+              )}
+            </button>
+          )}
+          <ActionMenu items={menuItems} label={menuLabel} />
         </div>
       </header>
   );

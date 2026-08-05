@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useCallback, useState } from 'react';
+import { useEffect, useMemo, useCallback, useState, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { save } from '@tauri-apps/plugin-dialog';
@@ -14,10 +14,14 @@ import {
   RotateCcw,
   Info,
   Pin,
+  Copy,
+  ClipboardPaste,
+  FolderOpen,
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useToastStore } from '@/stores/toastStore';
+import { useClipboardSelectionStore } from '@/stores/clipboardSelectionStore';
 import { LauncherView } from '@/modules/launcher/LauncherView';
 import { ClipboardView } from '@/modules/clipboard/ClipboardView';
 import { MarkdownView } from '@/modules/markdown/MarkdownView';
@@ -27,6 +31,8 @@ import { EverythingView } from '@/modules/everything/EverythingView';
 import { JsonFormatterView } from '@/modules/json_formatter';
 import { ChatView } from '@/modules/chat/ChatView';
 import { TopNavigationBar } from '@/components/TopNavigationBar';
+import type { PrimaryAction } from '@/components/TopNavigationBar';
+import { MenuPanel } from '@/components/ActionMenu';
 import { UpdateNotification } from '@/components/UpdateNotification';
 import { ChangelogDialog } from '@/components/ChangelogDialog';
 import { AboutDialog } from '@/components/AboutDialog';
@@ -149,20 +155,72 @@ function App() {
     },
   ], [always_on_top, handleToggleAlwaysOnTop, setActiveView]);
 
+  // 剪贴板选中项的菜单状态（由 ClipboardView 写入 store）
+  const clipboardSelection = useClipboardSelectionStore();
+  // 条目级动作通过 custom event 下发给 ClipboardView 执行（与 markdown:new-note 等同一模式）
+  const dispatchClipboardAction = useCallback((action: 'paste' | 'copy' | 'favorite' | 'delete' | 'reveal') => {
+    window.dispatchEvent(new CustomEvent(`clipboard:${action}-selected`));
+  }, []);
+
   // View configurations for navigation bar
   const viewConfigs = useMemo(() => {
     const configs: Record<
       Exclude<ViewMode, 'launcher' | 'chat'>,
-      { title: string; menuItems: MenuItem[] }
+      { title: string; menuItems: MenuItem[]; primaryAction?: PrimaryAction; menuLabel?: string }
     > & Record<'chat', { title: string; menuItems: MenuItem[] }> = {
       clipboard: {
         title: '剪贴板历史',
+        menuLabel: '操作',
         menuItems: [
+          {
+            id: 'paste',
+            label: '粘贴',
+            icon: ClipboardPaste,
+            shortcut: '⏎',
+            disabled: !clipboardSelection.hasSelection,
+            onClick: () => dispatchClipboardAction('paste'),
+          },
+          {
+            id: 'copy',
+            label: '复制',
+            icon: Copy,
+            shortcut: 'Ctrl+⏎',
+            disabled: !clipboardSelection.hasSelection,
+            onClick: () => dispatchClipboardAction('copy'),
+          },
+          {
+            id: 'favorite',
+            label: clipboardSelection.isFavorite ? '取消收藏' : '收藏',
+            icon: Star,
+            shortcut: 'F',
+            disabled: !clipboardSelection.hasSelection,
+            separator: true,
+            onClick: () => dispatchClipboardAction('favorite'),
+          },
+          {
+            id: 'delete',
+            label: '删除',
+            icon: Trash2,
+            shortcut: 'Del',
+            danger: true,
+            disabled: !clipboardSelection.hasSelection,
+            onClick: () => dispatchClipboardAction('delete'),
+          },
+          ...(clipboardSelection.isImage
+            ? [{
+                id: 'reveal',
+                label: '在资源管理器中打开',
+                icon: FolderOpen,
+                separator: true,
+                onClick: () => dispatchClipboardAction('reveal'),
+              }]
+            : []),
           {
             id: 'clear-all',
             label: '清空历史',
             icon: Trash2,
             danger: true,
+            separator: true,
             onClick: () => handleClearClipboard(false),
           },
           {
@@ -274,7 +332,7 @@ function App() {
       },
     };
     return configs;
-  }, [always_on_top, commonMenuItems, handleToggleAlwaysOnTop, handleClearClipboard, handleExportClipboard, handleResetSettings]);
+  }, [always_on_top, commonMenuItems, clipboardSelection, dispatchClipboardAction, handleToggleAlwaysOnTop, handleClearClipboard, handleExportClipboard, handleResetSettings]);
 
   // Load settings on mount
   useEffect(() => {
@@ -414,6 +472,46 @@ function App() {
   const isHome = activeView === 'launcher' || activeView === 'chat';
   const currentConfig = isHome ? null : viewConfigs[activeView as Exclude<ViewMode, 'launcher' | 'chat'>];
 
+  // 剪贴板视图的右键菜单：复用动作菜单内容，在光标处浮出
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+
+  // 视图切换时关闭右键菜单
+  useEffect(() => {
+    setContextMenu(null);
+  }, [activeView]);
+
+  // 点击菜单外 / Esc 关闭
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handleMouseDown = (e: MouseEvent) => {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
+        setContextMenu(null);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu(null);
+    };
+    document.addEventListener('mousedown', handleMouseDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [contextMenu]);
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    // 输入框/文本域内保留 WebView 原生编辑菜单（剪切/复制/粘贴）
+    if ((e.target as HTMLElement).closest('input, textarea')) return;
+    e.preventDefault();
+    const MENU_WIDTH = 240;
+    const menuHeight = (currentConfig?.menuItems.length ?? 6) * 37 + 20;
+    setContextMenu({
+      x: Math.min(e.clientX, window.innerWidth - MENU_WIDTH),
+      y: Math.min(e.clientY, window.innerHeight - menuHeight),
+    });
+  };
+
   return (
     <div
       className="w-full h-full flex flex-col relative select-none selection:bg-blue-500/30 rounded-lg overflow-hidden bg-transparent"
@@ -429,10 +527,39 @@ function App() {
               title={currentConfig?.title || ''}
               menuItems={currentConfig?.menuItems || []}
               onBack={handleBack}
+              primaryAction={currentConfig?.primaryAction}
+              menuLabel={currentConfig?.menuLabel}
             />
           </div>
-          <main className="flex-1 overflow-hidden isolate">{renderView()}</main>
+          <main
+            className="flex-1 overflow-hidden isolate"
+            onContextMenu={activeView === 'clipboard' ? handleContextMenu : undefined}
+          >{renderView()}</main>
         </>
+      )}
+
+      {/* 剪贴板右键菜单（与「操作」下拉同一内容，浮现在光标处） */}
+      {contextMenu && (
+        <div
+          ref={contextMenuRef}
+          className="fixed z-[100] min-w-[220px] bg-app-bg-primary/80 border border-app-border rounded-xl shadow-2xl animate-in fade-in duration-100"
+          style={{
+            left: contextMenu.x,
+            top: contextMenu.y,
+            WebkitBackdropFilter: 'blur(20px)',
+            backdropFilter: 'blur(20px)',
+          }}
+        >
+          <MenuPanel
+            items={currentConfig?.menuItems || []}
+            onItemClick={(item) => {
+              if (!item.disabled) {
+                item.onClick();
+                setContextMenu(null);
+              }
+            }}
+          />
+        </div>
       )}
 
       {/* Update Notification */}
