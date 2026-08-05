@@ -58,6 +58,8 @@ export default {
       animation: {
         'fade-in': 'fadeIn 0.2s ease-out',
         'slide-up': 'slideUp 0.2s ease-out',
+        // 下拉选项入场：配合 --option-enter-offset 感知菜单展开方向，both 让 delay 期间保持初始帧
+        'option-in': 'optionIn 150ms ease-out both',
       },
       keyframes: {
         fadeIn: {
@@ -66,6 +68,10 @@ export default {
         },
         slideUp: {
           '0%': { transform: 'translateY(10px)', opacity: '0' },
+          '100%': { transform: 'translateY(0)', opacity: '1' },
+        },
+        optionIn: {
+          '0%': { transform: 'translateY(var(--option-enter-offset, 4px))', opacity: '0' },
           '100%': { transform: 'translateY(0)', opacity: '1' },
         },
       },

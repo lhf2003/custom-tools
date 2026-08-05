@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Search, Plus, Copy, Eye, EyeOff, Lock, Trash2, X, Globe, Shield, LayoutGrid, MoreHorizontal, ExternalLink } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { Tooltip } from '@/components/Tooltip';
+import { CustomSelect } from '@/modules/settings/components/CustomSelect';
 import { WINDOW_SIZE } from '../../constants/window';
 import { THEME } from '../../constants/theme';
 import { immediateResize } from '@/utils/tauri';
@@ -432,16 +433,12 @@ export function PasswordView() {
               placeholder="网址"
               className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-4 py-2 text-zinc-200 placeholder:text-zinc-600 outline-none transition-all duration-200 focus:border-zinc-500 focus:bg-zinc-800 focus:ring-2 focus:ring-zinc-600/20"
             />
-            <select
-              value={newEntry.category_id || ''}
-              onChange={(e) => setNewEntry(prev => ({ ...prev, category_id: e.target.value ? parseInt(e.target.value) : undefined }))}
-              className="w-full bg-zinc-800/50 border border-zinc-700 rounded-lg px-4 py-2 text-zinc-200 outline-none transition-all duration-200 focus:border-zinc-500 focus:bg-zinc-800 focus:ring-2 focus:ring-zinc-600/20"
-            >
-              <option value="" className="bg-zinc-800">选择分类</option>
-              {categories.map((cat) => (
-                <option key={cat.id} value={cat.id} className="bg-zinc-800">{cat.name}</option>
-              ))}
-            </select>
+            <CustomSelect
+              value={newEntry.category_id ? String(newEntry.category_id) : ''}
+              onChange={(v) => setNewEntry(prev => ({ ...prev, category_id: v ? parseInt(v) : undefined }))}
+              options={categories.map((cat) => ({ value: String(cat.id), label: cat.name }))}
+              placeholder="选择分类"
+            />
             <textarea
               value={newEntry.notes || ''}
               onChange={(e) => setNewEntry(prev => ({ ...prev, notes: e.target.value }))}

@@ -12,6 +12,7 @@ import {
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useToastStore } from '@/stores/toastStore';
 import { SettingCard, Toggle } from '../components/SettingCard';
+import { CustomSelect } from '../components/CustomSelect';
 import { MemoryCenter } from './MemoryCenter';
 import { SuggestionCenter } from './SuggestionCenter';
 import { EvolutionGovernance } from './EvolutionGovernance';
@@ -159,27 +160,19 @@ export function CompanionSettings() {
   };
 
   const retentionOptions = [
-    { value: 7, label: '7 天' },
-    { value: 30, label: '30 天' },
-    { value: 90, label: '90 天' },
-    { value: 180, label: '180 天' },
+    { value: '7', label: '7 天' },
+    { value: '30', label: '30 天' },
+    { value: '90', label: '90 天' },
+    { value: '180', label: '180 天' },
   ];
 
   const longWorkOptions = [
-    { value: 45, label: '45 分钟' },
-    { value: 60, label: '1 小时' },
-    { value: 90, label: '1.5 小时' },
-    { value: 120, label: '2 小时' },
-    { value: 180, label: '3 小时' },
+    { value: '45', label: '45 分钟' },
+    { value: '60', label: '1 小时' },
+    { value: '90', label: '1.5 小时' },
+    { value: '120', label: '2 小时' },
+    { value: '180', label: '3 小时' },
   ];
-
-  const selectStyle = {
-    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='white'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
-    backgroundRepeat: 'no-repeat',
-    backgroundPosition: 'right 8px center',
-    backgroundSize: '16px',
-    paddingRight: '32px',
-  } as const;
 
   const maxTotal = todaySummary.length > 0 ? todaySummary[0][1] : 1;
   const visiblePatterns = expandPatterns ? patterns : patterns.slice(0, PREVIEW_COUNT);
@@ -220,39 +213,25 @@ export function CompanionSettings() {
         </SettingCard>
 
         <SettingCard title="数据保留时长" description="活动数据超过保留期后自动清理">
-          <select
-            value={companion_retention_days}
-            onChange={(e) => setCompanionRetentionDays(Number(e.target.value))}
-            className="bg-zinc-700 text-white text-sm rounded-lg px-3 py-2 outline-none cursor-pointer border border-zinc-600 hover:border-zinc-500 transition-colors appearance-none min-w-[100px]"
-            style={selectStyle}
-          >
-            {retentionOptions.map((opt) => (
-              <option key={opt.value} value={opt.value} className="bg-zinc-700 text-white">
-                {opt.label}
-              </option>
-            ))}
-          </select>
+          <CustomSelect
+            value={String(companion_retention_days)}
+            onChange={(v) => setCompanionRetentionDays(Number(v))}
+            options={retentionOptions}
+            className="min-w-[100px]"
+          />
         </SettingCard>
 
         <SettingCard
           title="长时工作提醒"
           description="同一应用连续使用超过该时长时提醒休息"
         >
-          <div className="flex items-center gap-2">
-            <Clock size={16} className="text-white/30" />
-            <select
-              value={companion_long_work_minutes}
-              onChange={(e) => setCompanionLongWorkMinutes(Number(e.target.value))}
-              className="bg-zinc-700 text-white text-sm rounded-lg px-3 py-2 outline-none cursor-pointer border border-zinc-600 hover:border-zinc-500 transition-colors appearance-none min-w-[100px]"
-              style={selectStyle}
-            >
-              {longWorkOptions.map((opt) => (
-                <option key={opt.value} value={opt.value} className="bg-zinc-700 text-white">
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
+          <CustomSelect
+            value={String(companion_long_work_minutes)}
+            onChange={(v) => setCompanionLongWorkMinutes(Number(v))}
+            options={longWorkOptions}
+            icon={<Clock size={16} />}
+            className="min-w-[100px]"
+          />
         </SettingCard>
 
         <SettingCard

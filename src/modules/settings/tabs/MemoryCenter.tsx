@@ -13,6 +13,7 @@ import {
   Brain,
 } from 'lucide-react';
 import { useToastStore } from '@/stores/toastStore';
+import { CustomSelect } from '../components/CustomSelect';
 
 interface MemoryFact {
   id: number;
@@ -186,17 +187,12 @@ export function MemoryCenter({ onBack }: MemoryCenterProps) {
               autoFocus
             />
             <div className="flex items-center gap-2">
-              <select
+              <CustomSelect
                 value={editCategory}
-                onChange={(e) => setEditCategory(e.target.value)}
-                className="bg-zinc-700 text-white text-xs rounded-lg px-2 py-1.5 outline-none border border-zinc-600 cursor-pointer"
-              >
-                {CATEGORIES.map((c) => (
-                  <option key={c.key} value={c.key} className="bg-zinc-700 text-white">
-                    {c.label}
-                  </option>
-                ))}
-              </select>
+                onChange={setEditCategory}
+                options={CATEGORIES.map((c) => ({ value: c.key, label: c.label }))}
+                className="w-32 flex-shrink-0"
+              />
               <button
                 onClick={handleSaveEdit}
                 className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 text-xs border border-emerald-500/30 hover:bg-emerald-500/30 transition-colors cursor-pointer"

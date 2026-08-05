@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useId, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Check, ChevronDown, Search, X } from 'lucide-react';
 
 export interface SelectOption {
@@ -32,7 +33,8 @@ interface CustomSelectProps {
 
 /**
  * 设置页通用下拉框：键盘全可达（↑↓/Enter/Esc）、选项多时自动带搜索、
- * 空间不足自动上翻。交互色用 Action Blue（DESIGN.md 操作色），选中态文字用 Indigo Light。
+ * 空间不足自动上翻。菜单 portal 到 body + fixed 定位，祖先 overflow 不会裁剪。
+ * 交互色用 Action Blue（DESIGN.md 操作色），选中态文字用 Indigo Light。
  */
 export function CustomSelect({
   value,
@@ -50,11 +52,21 @@ export function CustomSelect({
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [searchQuery, setSearchQuery] = useState('');
   const [dropdownPosition, setDropdownPosition] = useState<'top' | 'bottom'>('bottom');
-  const [dropdownMaxHeight, setDropdownMaxHeight] = useState(192);
+  // 菜单 portal 到 body + fixed 定位（逃逸祖先 overflow 裁剪），几何全部用视口坐标
+  const [menuBox, setMenuBox] = useState<{
+    left?: number;
+    right?: number;
+    top?: number;
+    bottom?: number;
+    width?: number;
+    maxHeight: number;
+  }>({ maxHeight: 192 });
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const listboxId = useId();
 
   // 统一成分组结构，渲染与键盘导航共用一份扁平淡出索引
   const normalizedGroups: SelectGroup[] =
@@ -91,9 +103,11 @@ export function CustomSelect({
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
+      const target = event.target as Node;
+      if (containerRef.current?.contains(target)) return;
+      // 菜单 portal 在 body 下、不在 containerRef 内，需单独判定
+      if (menuRef.current?.contains(target)) return;
+      setIsOpen(false);
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -112,27 +126,67 @@ export function CustomSelect({
       ?.scrollIntoView({ block: 'nearest' });
   }, [highlightedIndex, isOpen]);
 
+  // fixed 定位的几何计算：上翻/下翻、水平对齐、可用高度收缩。
+  // menuClassName 的两类宽度意图：默认 w-full = 与触发器同宽（fixed 下换算成内联像素）；
+  // right-0 = 菜单右缘对齐触发器右缘（fixed 下换算成视口 right 偏移）
+  const updateMenuPosition = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const itemHeight = 36; // Estimated height per option
+    const padding = 8; // py-1 = 4px * 2
+    const estimatedHeight = Math.min(totalCount * itemHeight + padding, 192);
+    const gap = 4; // 原 mt-1 / mb-1
+
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+
+    const horizontal = menuClassName.includes('right-0')
+      ? { right: window.innerWidth - rect.right }
+      : { left: rect.left };
+    const width = menuClassName === 'w-full' ? rect.width : undefined;
+
+    // If space below is insufficient and space above is sufficient, expand upward
+    if (spaceBelow < estimatedHeight && spaceAbove > estimatedHeight) {
+      setDropdownPosition('top');
+      setMenuBox({
+        ...horizontal,
+        width,
+        bottom: window.innerHeight - rect.top + gap,
+        maxHeight: Math.min(spaceAbove - 16, 192),
+      });
+    } else {
+      setDropdownPosition('bottom');
+      setMenuBox({
+        ...horizontal,
+        width,
+        top: rect.bottom + gap,
+        maxHeight: Math.min(spaceBelow - 16, 192),
+      });
+    }
+  }, [totalCount, menuClassName]);
+
   // Calculate dropdown position based on available space
   useEffect(() => {
-    if (isOpen && containerRef.current) {
-      const rect = containerRef.current.getBoundingClientRect();
-      const itemHeight = 36; // Estimated height per option
-      const padding = 8; // py-1 = 4px * 2
-      const estimatedHeight = Math.min(totalCount * itemHeight + padding, 192);
+    if (isOpen) updateMenuPosition();
+  }, [isOpen, updateMenuPosition]);
 
-      const spaceBelow = window.innerHeight - rect.bottom;
-      const spaceAbove = rect.top;
-
-      // If space below is insufficient and space above is sufficient, expand upward
-      if (spaceBelow < estimatedHeight && spaceAbove > estimatedHeight) {
-        setDropdownPosition('top');
-        setDropdownMaxHeight(Math.min(spaceAbove - 16, 192));
-      } else {
-        setDropdownPosition('bottom');
-        setDropdownMaxHeight(Math.min(spaceBelow - 16, 192));
-      }
-    }
-  }, [isOpen, totalCount]);
+  // 滚动/缩放时跟随触发器重新定位（设置页在内部容器滚动，需 capture 阶段才能捕获）
+  useEffect(() => {
+    if (!isOpen) return;
+    let raf = 0;
+    const handler = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(updateMenuPosition);
+    };
+    window.addEventListener('scroll', handler, true);
+    window.addEventListener('resize', handler);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('scroll', handler, true);
+      window.removeEventListener('resize', handler);
+    };
+  }, [isOpen, updateMenuPosition]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (disabled) return;
@@ -199,6 +253,9 @@ export function CustomSelect({
       <button
         key={option.value}
         type="button"
+        id={`${listboxId}-opt-${index}`}
+        role="option"
+        aria-selected={isSelected}
         data-option-index={index}
         onClick={() => {
           onChange(option.value);
@@ -206,8 +263,12 @@ export function CustomSelect({
         }}
         disabled={option.disabled}
         onMouseEnter={() => setHighlightedIndex(index)}
+        // 入场 stagger：前 7 项依次延迟 18ms，总时长控制在设计词表 300ms 内；
+        // 仅打开时挂载动画类——关闭走菜单整体的淡出，选项不各自重播
+        style={{ animationDelay: `${Math.min(index, 6) * 18}ms` }}
         className={`
           w-full px-3 py-2 text-left text-sm transition-colors duration-150
+          ${isOpen ? 'animate-option-in motion-reduce:animate-none' : ''}
           ${option.disabled
             ? 'text-app-text-disabled cursor-not-allowed'
             : isSelected
@@ -234,10 +295,16 @@ export function CustomSelect({
       className={`relative ${className}`}
       onKeyDown={handleKeyDown}
       tabIndex={disabled ? -1 : 0}
+      aria-activedescendant={
+        isOpen && highlightedIndex >= 0 ? `${listboxId}-opt-${highlightedIndex}` : undefined
+      }
     >
       <button
         ref={triggerRef}
         type="button"
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        aria-controls={listboxId}
         onClick={() => {
           if (disabled) return;
           if (isOpen) setIsOpen(false);
@@ -249,7 +316,7 @@ export function CustomSelect({
           border transition-all duration-200 ease-out
           ${disabled
             ? 'bg-app-bg-tertiary/50 border-app-border-subtle text-app-text-disabled cursor-not-allowed'
-            : 'bg-app-bg-tertiary border-app-border text-app-text-primary hover:border-app-border-emphasis hover:bg-white/5 focus:border-app-status-info focus:ring-2 focus:ring-app-status-info/20 cursor-pointer'
+            : 'bg-app-bg-tertiary border-app-border text-app-text-primary hover:border-app-border-emphasis hover:bg-white/5 focus:border-app-status-info focus:ring-2 focus:ring-app-status-info/20 cursor-pointer active:scale-[0.98]'
           }
           ${isOpen ? 'border-app-status-info ring-2 ring-app-status-info/20' : ''}
         `}
@@ -264,70 +331,85 @@ export function CustomSelect({
         />
       </button>
 
-      {/* Dropdown Menu */}
-      <div
-        className={`
-          absolute z-50 py-1 rounded-lg overflow-hidden
-          bg-app-bg-elevated
-          border border-app-border-emphasis shadow-[var(--app-shadow-lg)]
-          transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none
-          ${menuClassName}
-          ${dropdownPosition === 'top'
-            ? 'bottom-full mb-1 origin-bottom'
-            : 'top-full mt-1 origin-top'
-          }
-          ${isOpen ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 pointer-events-none'}
-          ${dropdownPosition === 'top' && !isOpen ? 'translate-y-2' : ''}
-          ${dropdownPosition === 'bottom' && !isOpen ? '-translate-y-2' : ''}
-        `}
-      >
-        {isOpen && isSearchable && (
-          <div className="px-2 pb-1.5 mb-1 border-b border-white/10">
-            <div className="flex items-center gap-1.5 px-1 py-0.5">
-              <Search size={14} className="text-app-text-tertiary flex-shrink-0" />
-              <input
-                ref={searchInputRef}
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="输入以筛选…"
-                className="flex-1 min-w-0 bg-transparent text-app-text-primary text-sm px-1 py-0.5 outline-none placeholder:text-app-text-placeholder"
-              />
-              {query && (
-                <button
-                  onClick={() => setSearchQuery('')}
-                  tabIndex={-1}
-                  className="text-app-text-tertiary hover:text-app-text-primary transition-colors flex-shrink-0 cursor-pointer"
-                >
-                  <X size={13} />
-                </button>
-              )}
-            </div>
-          </div>
-        )}
+      {/* Dropdown Menu：portal 到 body，逃逸祖先 overflow 裁剪（如统计页卡片 overflow-hidden） */}
+      {createPortal(
         <div
-          ref={listRef}
-          style={{ maxHeight: dropdownMaxHeight }}
-          className="overflow-y-auto scrollbar-thin scrollbar-thumb-zinc-600 scrollbar-track-transparent"
+          ref={menuRef}
+          // --option-enter-offset 传给选项入场动画：菜单向上翻时选项从下方浮入，保持物理方向感
+          style={{
+            ...menuBox,
+            '--option-enter-offset': dropdownPosition === 'top' ? '-4px' : '4px',
+          } as React.CSSProperties}
+          className={`
+            fixed z-50 py-1 rounded-lg overflow-hidden
+            bg-app-bg-elevated
+            border border-app-border-emphasis shadow-[var(--app-shadow-lg)]
+            transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none
+            ${menuClassName}
+            ${dropdownPosition === 'top' ? 'origin-bottom' : 'origin-top'}
+            ${isOpen ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 pointer-events-none'}
+            ${dropdownPosition === 'top' && !isOpen ? 'translate-y-2' : ''}
+            ${dropdownPosition === 'bottom' && !isOpen ? '-translate-y-2' : ''}
+          `}
         >
-          {filteredOptions.length === 0 ? (
-            <div className="px-3 py-2 text-app-text-placeholder text-sm text-center">
-              {query ? '无匹配结果' : '暂无选项'}
-            </div>
-          ) : (
-            filteredGroups.map((group, gi) => (
-              <div key={group.label ?? gi}>
-                {group.label && (
-                  <div className="px-3 pt-1.5 pb-0.5 text-xs text-app-text-tertiary">
-                    {group.label}
-                  </div>
+          {isOpen && isSearchable && (
+            <div className="px-2 pb-1.5 mb-1 border-b border-white/10 animate-option-in motion-reduce:animate-none">
+              <div className="flex items-center gap-1.5 px-1 py-0.5">
+                <Search size={14} className="text-app-text-tertiary flex-shrink-0" />
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="输入以筛选…"
+                  className="flex-1 min-w-0 bg-transparent text-app-text-primary text-sm px-1 py-0.5 outline-none placeholder:text-app-text-placeholder"
+                />
+                {query && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    tabIndex={-1}
+                    className="text-app-text-tertiary hover:text-app-text-primary transition-colors flex-shrink-0 cursor-pointer"
+                  >
+                    <X size={13} />
+                  </button>
                 )}
-                {group.options.map(renderOption)}
               </div>
-            ))
+            </div>
           )}
-        </div>
-      </div>
+          <div
+            ref={listRef}
+            id={listboxId}
+            role="listbox"
+            style={{ maxHeight: menuBox.maxHeight }}
+            className="overflow-y-auto overscroll-contain scrollbar-thin scrollbar-thumb-zinc-600 scrollbar-track-transparent"
+          >
+            {filteredOptions.length === 0 ? (
+              <div className={`px-3 py-2 text-app-text-placeholder text-sm text-center ${isOpen ? 'animate-option-in motion-reduce:animate-none' : ''}`}>
+                {query ? '无匹配结果' : '暂无选项'}
+              </div>
+            ) : (
+              filteredGroups.map((group, gi) => {
+                // 分组头与其后第一个选项同一拍入场（此处 optionIndex 还是上一组最后一项）
+                const headerDelay = Math.min(optionIndex + 1, 6) * 18;
+                return (
+                  <div key={group.label ?? gi} role={group.label ? 'group' : undefined} aria-label={group.label}>
+                    {group.label && (
+                      <div
+                        className={`px-3 pt-1.5 pb-0.5 text-xs text-app-text-tertiary ${isOpen ? 'animate-option-in motion-reduce:animate-none' : ''}`}
+                        style={{ animationDelay: `${headerDelay}ms` }}
+                      >
+                        {group.label}
+                      </div>
+                    )}
+                    {group.options.map(renderOption)}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }
