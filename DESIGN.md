@@ -7,40 +7,41 @@ colors:
   secondary-violet: "#a855f7"
   action-blue: "#2563eb"
   action-blue-deep: "#1d4ed8"
-  surface-base: "#27272a"
-  surface-sidebar: "#2a2a2a"
-  surface-card: "#2d2d2d"
-  surface-elevated: "#3f3f46"
-  surface-pressed: "#52525b"
+  surface-base: "#1e1e21"
+  surface-sidebar: "#26262a"
+  surface-card: "#2e2e33"
+  surface-elevated: "#38383e"
+  surface-pressed: "#45454c"
   ink-primary: "#f4f4f5"
   ink-secondary: "#d4d4d8"
   ink-tertiary: "#a1a1aa"
   ink-disabled: "#71717a"
-  ink-placeholder: "#8e8e96"
+  ink-placeholder: "#9a9aa2"
   status-success: "#22c55e"
   status-warning: "#f59e0b"
   status-error: "#ef4444"
+  status-error-text: "#f87171"
   status-info: "#2563eb"
   scrim-white-5: "#ffffff0d"
   scrim-white-10: "#ffffff1a"
 typography:
   display:
-    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif"
+    fontFamily: "'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif"
     fontSize: "18px"
     fontWeight: 400
     lineHeight: 1.4
   title:
-    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif"
+    fontFamily: "'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif"
     fontSize: "14px"
     fontWeight: 600
     lineHeight: 1.4
   body:
-    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif"
+    fontFamily: "'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif"
     fontSize: "14px"
     fontWeight: 400
     lineHeight: 1.6
   label:
-    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif"
+    fontFamily: "'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif"
     fontSize: "12px"
     fontWeight: 400
     lineHeight: 1.3
@@ -86,7 +87,7 @@ components:
     rounded: "5px"
     padding: "4px 8px"
   panel-glass:
-    backgroundColor: "#27272ab3"
+    backgroundColor: "#1e1e21b3"
     rounded: "{rounded.lg}"
 ---
 
@@ -94,14 +95,14 @@ components:
 
 ## 1. Overview
 
-**Creative North Star: "The System Native"**
+**Creative North Star: "The Crafted Native"**
 
-FlowHub 的设计目标是让用户忘记它是一个第三方应用。它驻留在 Windows 桌面，靠全局快捷键唤起，窗口材质、动效、字体渲染都向 Windows 11 Fluent 与 macOS 的系统级质感看齐——Mica/Acrylic 材质是界面的一部分，而不是一层装饰皮肤。设计服务于"唤起 → 输入 → 回车 → 完成"这条肌肉记忆链路，任何减慢这条链路的视觉决策都是错的。
+系统原生的形，手工打磨的心。FlowHub 的设计目标是让用户忘记它是一个第三方应用——它驻留在 Windows 桌面，靠全局快捷键唤起，窗口材质、动效、字体渲染都向 Windows 11 Fluent 与 macOS 的系统级质感看齐，Mica/Acrylic 材质是界面的一部分，而不是一层装饰皮肤。但"原生"只是底线，不是终点：面板的打磨程度向 Arc 看齐——每一档灰阶、每一个圆角、每一次 hover 反馈都经过手工推敲，像操作系统里被最讲究的团队打磨过的那一部分。设计服务于"唤起 → 输入 → 回车 → 完成"这条肌肉记忆链路，任何减慢这条链路的视觉决策都是错的。
 
-这套系统是深色单色的：zinc 灰阶构成连续的表面，品牌色只做点睛。它明确拒绝 SaaS 营销风的大标题大圆角、AI 花哨感的渐变与霓虹、企业后台感的控件堆叠，以及卡片套卡片的层级滥用。层级靠字重、字号、间距与灰阶建立；边框和阴影是最后手段。
+这套系统是深色单色的：zinc 灰阶构成连续的表面，品牌色只做点睛。灰阶保持中性无色相，层次完全靠明度差建立——五档表面的明度均匀拉开，面板从背景中"浮出"而非"贴上"。它明确拒绝 SaaS 营销风的大标题大圆角、AI 花哨感的渐变与霓虹、企业后台感的控件堆叠、卡片套卡片的层级滥用，以及游戏外设软件式的灯效堆砌。层级靠字重、字号、间距与灰阶建立；边框和阴影是最后手段。
 
 **Key Characteristics:**
-- 深色一体表面（zinc-800 基座），面板从背景中浮出而非贴上
+- 深色一体表面（#1e1e21 基座），五档表面明度均匀拉开（相邻档差 ≥0.03 OKLCH L）
 - OS 窗口材质（Mica/Acrylic/Blur）即分层的第一手段
 - Signal Indigo 点睛，面积 ≤10%
 - 无营销级大字号；最大字级是 18px 搜索框
@@ -110,37 +111,39 @@ FlowHub 的设计目标是让用户忘记它是一个第三方应用。它驻留
 
 ## 2. Colors
 
-一套以 zinc 灰阶为体、Signal Indigo 为睛的克制深色方案。
+一套以 zinc 灰阶为体、Signal Indigo 为睛的克制深色方案。灰阶保持中性无色相，靠明度差而非色温变化分层（2026-08-05 重定档差）。
 
 ### Primary
 - **Signal Indigo** (#6366f1): 品牌点睛色。只用于品牌时刻——启动器选中项文字、品牌标识、关键强调。不出现在大色块、背景或渐变中。
-- **Signal Indigo Light** (#818cf8): Signal Indigo 的深色表面安全变体（实测 5.0:1）。深色背景上需要靛蓝文字（如选中态名称）时永远用它，不用原色（原色文字仅 3.34:1，不达标）。
+- **Signal Indigo Light** (#818cf8): Signal Indigo 的深色表面安全变体（实测 5.6:1 on Surface Base）。深色背景上需要靛蓝文字（如选中态名称）时永远用它，不用原色（原色文字对比度不达标）。
 - **Secondary Violet** (#a855f7): Signal Indigo 的辅助色，仅用于需要第二品牌色相的场合（如内置工具图标底）。使用频率低于 Indigo。
 
 ### Secondary
 - **Action Blue** (#2563eb): 系统级操作色。主按钮、选中态、链接、info 状态。语义是"这是一个可执行的操作"，与 Indigo 的"这是品牌"分工明确。Hover 加深至 Action Blue Deep (#1d4ed8)。白字对比度 5.17:1，WCAG AA 达标（原 #3b82f6 仅 3.68:1，2026-07-22 降档）。
 
 ### Neutral
-- **Surface Base** (#27272a): 应用主背景，一切表面的基座。
-- **Surface Sidebar** (#2a2a2a): 侧边栏背景，与主背景仅一档之差，靠 1px 灰阶差暗示分区。
-- **Surface Card** (#2d2d2d): 卡片、输入框、内嵌容器。
-- **Surface Elevated** (#3f3f46): 悬浮层——下拉、tooltip、浮起按钮。
-- **Surface Pressed** (#52525b): 按压/选中态表面。
+- **Surface Base** (#1e1e21, OKLCH L≈0.24): 应用主背景，一切表面的基座。2026-08-05 从 #27272a 加深一档——基座更沉，深色氛围更稳，浮层才有处可浮。
+- **Surface Sidebar** (#26262a, L≈0.27): 侧边栏背景。与基座保持可感知的明度差，分区靠这一档之差暗示，不加边框。
+- **Surface Card** (#2e2e33, L≈0.30): 卡片、输入框、内嵌容器。
+- **Surface Elevated** (#38383e, L≈0.34): 悬浮层——下拉、tooltip、浮起按钮。
+- **Surface Pressed** (#45454c, L≈0.39): 按压/选中态表面。
 - **Ink Primary** (#f4f4f5): 主文字，深色表面上的最高对比。
 - **Ink Secondary** (#d4d4d8): 次要文字、正文。
-- **Ink Tertiary** (#a1a1aa): 辅助说明、图标默认色。
+- **Ink Tertiary** (#a1a1aa): 辅助说明、图标默认色（在 Elevated 上实测 4.54:1，刚好守住 4.5:1——不得再往暗调）。
 - **Ink Disabled** (#71717a): 禁用态文字。仅用于真正的禁用元素（WCAG 豁免）；可交互文字禁用此色。
-- **Ink Placeholder** (#8e8e96): 输入框 placeholder 专用（实测 4.6:1 on Surface Base）。介于 disabled 与 tertiary 之间，既满足 4.5:1 又保持"提示非正文"的质感。
+- **Ink Placeholder** (#9a9aa2): 输入框 placeholder 专用（实测 5.95:1 on Surface Base、4.84:1 on Surface Card，双达标）。2026-08-05 从 #8e8e96 提亮：旧值在 Card 表面上仅 4.15:1，低于 4.5:1 底线。
 - **Scrim White 5/10** (#ffffff0d / #ffffff1a): 白色透明度纱层，用于列表选中、hover 底色——玻璃体系里"提亮"的唯一方式。
 
 ### 状态色
 - Success (#22c55e) / Warning (#f59e0b) / Error (#ef4444) / Info (#2563eb)：仅用于语义状态，不做装饰。
-- **Error Text** (#f87171): 深色表面上需要错误「文字」时（内联错误条、加载失败说明）使用的提亮变体（实测约 5.9:1 on Surface Base）；Error 原色直接作文字仅约 4.0:1，仅用于图标/底色语义，不作正文。
+- **Error Text** (#f87171): 深色表面上需要错误「文字」时（内联错误条、加载失败说明）使用的提亮变体（实测 ≥5.9:1 on Surface Base）；Error 原色直接作文字对比度不达标，仅用于图标/底色语义，不作正文。
 
 ### Named Rules
 **The One Voice Rule.** Signal Indigo 在任何单屏面积 ≤10%。它的稀缺性就是它的意义——满屏靛蓝等于没有品牌。
 
 **The Zinc Monolith Rule.** 背景分层只允许在 zinc 灰阶内上下浮动一档（base → sidebar → card → elevated）。禁止引入灰阶以外的表面色；需要"更亮"时用白色纱层（Scrim White 5/10），不是新颜色。
+
+**The Even Tiers Rule.** 相邻表面档的明度差必须可感知（OKLCH L 差 ≥0.03）。档位挤在一起的灰阶等于没有分层——如果要眯眼才能分清 sidebar 和 base，该做的是拉开档差，不是加边框。
 
 ## 3. Typography
 
@@ -197,8 +200,8 @@ FlowHub 的设计目标是让用户忘记它是一个第三方应用。它驻留
 - **Internal Padding:** 12–16px。
 
 ### Inputs / Fields
-- 搜索框是无框的：透明底、18px Display 字级、placeholder 用 Ink Disabled，焦点靠存在本身而非边框发光。
-- 表单输入框：Surface Card 底 + 1px 灰阶边框，focus 时边框提亮至 50% 灰阶或 Action Blue；Error 态用 Error 红边框 + 红字说明。
+- 搜索框是无框的：透明底、18px Display 字级、placeholder 用 Ink Placeholder，焦点靠存在本身而非边框发光。
+- 表单输入框：Surface Card 底 + 1px 灰阶边框，focus 时边框提亮至 50% 灰阶或 Action Blue；Error 态用 Error 红边框 + Error Text 红字说明。
 
 ### Navigation
 - 应用内导航当前为即时切换；视图过渡的目标形态是 300ms 透明度 + 0.98→1 缩放（Fluent 连贯感），尚未接线实现。
@@ -218,6 +221,7 @@ FlowHub 的设计目标是让用户忘记它是一个第三方应用。它驻留
 
 ### Do:
 - **Do** 用字重与灰阶建立层级；Ink Tertiary 的 14px 600 比 20px 大标题更符合本系统。
+- **Do** 让表面分层可感知：相邻档明度差 ≥0.03 OKLCH L（The Even Tiers Rule）。分层看不出来等于没有分层，但永远用明度差解决，不用新颜色。
 - **Do** 让选中态统一用 Scrim White 10 铺底——列表、侧边栏、网格项共用同一种"被选中的样子"。
 - **Do** 把品牌时刻留给 Signal Indigo：选中项文字、关键确认、品牌标识。一屏一处。
 - **Do** 动画控制在 150–300ms、ease-out 或 cubic-bezier(0.4,0,0.2,1)；`prefers-reduced-motion` 下降级为交叉淡入或即时切换。
@@ -228,6 +232,7 @@ FlowHub 的设计目标是让用户忘记它是一个第三方应用。它驻留
 - **Don't** 引入 SaaS 营销风：大标题、大圆角（>16px）、大面积留白构图、hero 区。这是工具，不是落地页。
 - **Don't** 制造 AI 花哨感：渐变文字（background-clip: text）、满屏渐变、霓虹色、无目的玻璃拟态、装饰性粒子。
 - **Don't** 滑向企业后台感：密不透风的表格控件堆叠、无边距的表单墙、12 列栅格式仪表盘。
+- **Don't** 滑向游戏外设软件感：RGB 控制中心式的高对比撞色、发光边框、性能仪表盘式面板堆砌。这是效率工具，不是灯控台。
 - **Don't** 卡片套卡片。容器内需要分区时用间距与灰阶差，嵌套卡片永远错误。**例外**：承载状态语义的行内底色（如「待处理/需行动」条目的 `bg-white/5` 强调）不是装饰嵌套，允许使用——它回答的是「这条需要我处理」，而非「让层级更立体」。
 - **Don't** 用侧边色条（border-left/right >1px 的彩色条纹）标示选中或分类。
 - **Don't** 给静止元素加常驻阴影；违反 Flat-At-Rest Rule。

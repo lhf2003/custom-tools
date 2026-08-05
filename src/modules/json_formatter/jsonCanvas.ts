@@ -86,8 +86,8 @@ function flatten(
 // ─── Color palette (mirrors Tailwind classes used in JsonTreeView) ────────────
 
 const C = {
-  bg:         '#27272a', // app-bg-primary（与界面树视图底色一致）
-  lineNum:    '#8e8e96', // app-text-placeholder（与界面行号一致）
+  bg:         '#1e1e21', // app-bg-primary（与界面树视图底色一致）
+  lineNum:    '#9a9aa2', // app-text-placeholder（与界面行号一致）
   keyObj:     '#7dd3fc', // sky-300
   keyIdx:     '#a1a1aa', // app-text-tertiary（下标是内容，zinc-500 不达标）
   sep:        '#71717a', // zinc-500

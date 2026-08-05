@@ -111,7 +111,7 @@ function SortableTreeItem({
             {...attributes}
             {...listeners}
             className="cursor-grab active:cursor-grabbing py-0.5 px-0.5 rounded inline-flex items-center touch-none"
-            style={{ color: '#52525b' }}
+            style={{ color: '#45454c' }}
             aria-label={`拖拽移动 ${item.name.replace(/\.md$/, '')}`}
             onMouseEnter={(e) => {
               e.currentTarget.style.backgroundColor = 'rgba(82, 82, 91, 0.3)';

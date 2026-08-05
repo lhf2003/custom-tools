@@ -13,12 +13,12 @@
    与 tailwind.config.js 和 THEME 常量保持同步
    ============================================ */
 :root {
-  /* 背景色 */
-  --app-bg-primary: #27272a;
-  --app-bg-secondary: #2a2a2a;
-  --app-bg-tertiary: #2d2d2d;
-  --app-bg-elevated: #3f3f46;
-  --app-bg-pressed: #52525b;
+  /* 背景色（2026-08-05 新灰阶：五档明度均匀拉开，相邻档 OKLCH L 差 ≥0.03，见 DESIGN.md The Even Tiers Rule） */
+  --app-bg-primary: #1e1e21;
+  --app-bg-secondary: #26262a;
+  --app-bg-tertiary: #2e2e33;
+  --app-bg-elevated: #38383e;
+  --app-bg-pressed: #45454c;
   --app-bg-hover: rgba(82, 82, 91, 0.5);
   --app-bg-active: rgba(82, 82, 91, 0.5);
 
@@ -27,7 +27,7 @@
   --app-text-secondary: #d4d4d8;
   --app-text-tertiary: #a1a1aa;
   --app-text-disabled: #71717a;
-  --app-text-placeholder: #8e8e96;  /* 实测 4.6:1 on #27272a，满足 WCAG AA */
+  --app-text-placeholder: #9a9aa2;  /* 实测 5.95:1 on #1e1e21 / 4.84:1 on #2e2e33，满足 WCAG AA */
 
   /* 边框色 */
   --app-border-default: rgba(82, 82, 91, 0.3);
@@ -61,7 +61,7 @@
   --app-shadow-tooltip: 0 4px 12px rgba(0, 0, 0, 0.2);
 
   /* Tooltip 样式变量 */
-  --tooltip-bg: #3f3f46;
+  --tooltip-bg: #38383e;
   --tooltip-text: #d4d4d8;
   --tooltip-border: rgba(82, 82, 91, 0.3);
   --tooltip-radius: 5px;
@@ -75,7 +75,7 @@
 
   /* Window Effect Variables */
   --window-bg: transparent;
-  --panel-bg: rgba(39, 39, 42, 0.7);
+  --panel-bg: rgba(30, 30, 33, 0.7);
   --panel-border: rgba(255, 255, 255, 0.05);
 }
 
@@ -91,7 +91,7 @@
   background: rgba(24, 24, 27, 0.95) !important;
   background: linear-gradient(
     135deg,
-    rgba(39, 39, 42, 0.98) 0%,
+    rgba(30, 30, 33, 0.98) 0%,
     rgba(24, 24, 27, 0.95) 100%
   ) !important;
 }
@@ -117,14 +117,14 @@
 /* Acrylic 效果专用样式 - Windows 10 */
 .acrylic-active {
   --window-bg: transparent;
-  --panel-bg: rgba(39, 39, 42, 0.6);
+  --panel-bg: rgba(30, 30, 33, 0.6);
   --panel-border: rgba(255, 255, 255, 0.08);
 }
 
 /* Blur 效果专用样式 */
 .blur-active {
   --window-bg: transparent;
-  --panel-bg: rgba(39, 39, 42, 0.7);
+  --panel-bg: rgba(30, 30, 33, 0.7);
   --panel-border: rgba(255, 255, 255, 0.05);
 }
 
@@ -137,7 +137,7 @@
 
 /* 应用 CSS 变量 */
 .glass-panel-adaptive {
-  background: var(--panel-bg, rgba(39, 39, 42, 0.7));
+  background: var(--panel-bg, rgba(30, 30, 33, 0.7));
   border: 1px solid var(--panel-border, rgba(255, 255, 255, 0.05));
   border-radius: 12px;
 }
@@ -361,7 +361,7 @@ a:focus-visible {
 }
 
 [data-color-mode="dark"] .wmde-markdown pre {
-  background-color: #1a1a1a !important;
+  background-color: var(--app-bg-primary) !important;
 }
 
 [data-color-mode="dark"] .wmde-markdown blockquote {
@@ -383,7 +383,7 @@ a:focus-visible {
 }
 
 [data-color-mode="dark"] .wmde-markdown table tr:nth-child(2n) {
-  background-color: rgba(82, 82, 91, 0.2) !important;
+  background-color: var(--app-alpha-white-5) !important;
 }
 
 [data-color-mode="dark"] .wmde-markdown ul > li::marker,

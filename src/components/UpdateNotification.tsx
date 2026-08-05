@@ -76,7 +76,7 @@ export function UpdateNotification() {
     const isLatest = checkResult.status === 'latest';
     return (
       <div className="fixed bottom-4 right-4 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
-        <div className="bg-[#2d2d2d] border border-white/10 rounded-xl shadow-2xl p-4 min-w-[280px] max-w-[360px]">
+        <div className="bg-app-bg-tertiary border border-white/10 rounded-xl shadow-2xl p-4 min-w-[280px] max-w-[360px]">
           <div className="flex items-center gap-3">
             <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isLatest ? 'bg-green-500/20' : 'bg-red-500/20'}`}>
               {isLatest ? (
@@ -109,7 +109,7 @@ export function UpdateNotification() {
 
   return (
     <div className="fixed bottom-4 right-4 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
-      <div className="bg-[#2d2d2d] border border-white/10 rounded-xl shadow-2xl p-4 min-w-[320px] max-w-[400px]">
+      <div className="bg-app-bg-tertiary border border-white/10 rounded-xl shadow-2xl p-4 min-w-[320px] max-w-[400px]">
         {/* Header */}
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">

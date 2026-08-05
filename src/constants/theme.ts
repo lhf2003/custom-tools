@@ -47,15 +47,15 @@ export const THEME = {
   // 背景色 (Backgrounds)
   // -----------------------------------------
   /** 主背景 - 应用最底层 */
-  BG_PRIMARY: PRIMITIVE.ZINC[800], // #27272a
+  BG_PRIMARY: '#1e1e21', // 2026-08-05 新灰阶基座（OKLCH L≈0.24，五档均匀拉开）
   /** 次背景 - 侧边栏、面板 */
-  BG_SECONDARY: '#2a2a2a', // 保持原有值
+  BG_SECONDARY: '#26262a', // L≈0.27
   /** 三级背景 - 卡片、输入框 */
-  BG_TERTIARY: '#2d2d2d',
+  BG_TERTIARY: '#2e2e33', // L≈0.30
   /** 提升背景 - 悬浮、下拉菜单 */
-  BG_ELEVATED: PRIMITIVE.ZINC[700], // #3f3f46
+  BG_ELEVATED: '#38383e', // L≈0.34
   /** 按压背景 - 选中状态 */
-  BG_PRESSED: PRIMITIVE.ZINC[600], // #52525b
+  BG_PRESSED: '#45454c', // L≈0.39
   /** 悬停背景 */
   BG_HOVER: 'rgba(82, 82, 91, 0.5)', // zinc-600/50
   /** 激活背景 */
@@ -72,8 +72,8 @@ export const THEME = {
   TEXT_TERTIARY: PRIMITIVE.ZINC[400], // #a1a1aa
   /** 禁用文字 */
   TEXT_DISABLED: PRIMITIVE.ZINC[500], // #71717a
-  /** 占位符文字 */
-  TEXT_PLACEHOLDER: PRIMITIVE.ZINC[500], // #71717a
+  /** 占位符文字（实测 5.95:1 on BG_PRIMARY / 4.84:1 on BG_TERTIARY） */
+  TEXT_PLACEHOLDER: '#9a9aa2',
 
   // -----------------------------------------
   // 边框色 (Borders)
@@ -88,10 +88,10 @@ export const THEME = {
   // -----------------------------------------
   // 按钮色 (Buttons)
   // -----------------------------------------
-  /** 次要按钮背景 */
-  BTN_BG: '#3a3a3a',
-  /** 次要按钮悬停 */
-  BTN_BG_HOVER: '#444444',
+  /** 次要按钮背景（对齐 surface-elevated） */
+  BTN_BG: '#38383e',
+  /** 次要按钮悬停（对齐 surface-pressed） */
+  BTN_BG_HOVER: '#45454c',
   /** 主按钮渐变开始 */
   BTN_PRIMARY_FROM: PRIMITIVE.BRAND.GRADIENT_START,
   /** 主按钮渐变结束 */
@@ -114,7 +114,7 @@ export const THEME = {
   WARNING: PRIMITIVE.FUNCTIONAL.WARNING,
   ERROR: PRIMITIVE.FUNCTIONAL.ERROR,
   INFO: PRIMITIVE.FUNCTIONAL.INFO,
-  /** 深色表面上的错误文字（red-400，#27272a 上约 5.9:1，满足 4.5:1） */
+  /** 深色表面上的错误文字（red-400，BG_PRIMARY 上 ≥5.9:1，满足 4.5:1） */
   ERROR_TEXT: '#f87171',
 
   // -----------------------------------------

@@ -4,10 +4,10 @@
    主题 CSS 变量（映射自 src/constants/theme.ts）
    ============================================ */
 .vditor-container {
-  --vditor-bg-primary: #27272a;
+  --vditor-bg-primary: #1e1e21;
   --vditor-bg-secondary: rgba(63, 63, 70, 0.4);
-  --vditor-bg-tertiary: #2d2d2d;
-  --vditor-bg-elevated: #3f3f46;
+  --vditor-bg-tertiary: #2e2e33;
+  --vditor-bg-elevated: #38383e;
   --vditor-bg-hover: rgba(82, 82, 91, 0.5);
   --vditor-bg-active: rgba(59, 130, 246, 0.15);
 
@@ -102,7 +102,7 @@
    工具栏按钮提示 - 使用全局 Tooltip 样式
    ============================================ */
 .vditor-container .vditor-toolbar__tip {
-  background: var(--tooltip-bg, #3f3f46);
+  background: var(--tooltip-bg, #38383e);
   color: var(--tooltip-text, #d4d4d8);
   border: 1px solid var(--tooltip-border, rgba(82, 82, 91, 0.3));
   border-radius: var(--tooltip-radius, 5px);
@@ -114,11 +114,11 @@
 }
 
 .vditor-container .vditor-toolbar__tip--s::after {
-  border-top-color: var(--tooltip-bg, #3f3f46);
+  border-top-color: var(--tooltip-bg, #38383e);
 }
 
 .vditor-container .vditor-toolbar__tip--n::after {
-  border-bottom-color: var(--tooltip-bg, #3f3f46);
+  border-bottom-color: var(--tooltip-bg, #38383e);
 }
 
 /* ============================================
