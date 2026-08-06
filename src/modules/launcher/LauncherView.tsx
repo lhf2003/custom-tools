@@ -41,12 +41,8 @@ const SEARCH_COLLAPSED_COUNT = ITEMS_PER_ROW;
 // 避免一次渲染全部索引应用、触发大量图标提取
 const RECENT_FALLBACK_COUNT = 18;
 
-// 搜索框 placeholder 轮换：让隐藏能力（记/Ctrl+J/粘贴 JSON）被自然发现
-const PLACEHOLDER_HINTS = [
-  '搜索应用 / 粘贴 JSON 文本',
-  '输入「记 + 内容」快速记下备忘',
-  'tab 切换到 AI 视图'
-];
+// 搜索框固定提示（不做轮播：稳定文案降低认知噪音，@命令能力靠联想列表自我发现）
+const PLACEHOLDER_HINT = '搜索应用 / @命令';
 
 export function LauncherView() {
   const { searchQuery, setSearchQuery, setActiveView } = useAppStore();
@@ -56,15 +52,6 @@ export function LauncherView() {
   const [recentItems, setRecentItems] = useState<AppItemData[]>([]);
   const [isExpanded, setIsExpanded] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [hintIndex, setHintIndex] = useState(0);
-
-  // placeholder 低频轮换（8s），只在输入为空时可见，不打扰输入过程
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setHintIndex(prev => (prev + 1) % PLACEHOLDER_HINTS.length);
-    }, 3000);
-    return () => clearInterval(timer);
-  }, []);
 
   // Compute displayed items before using in effects
   const displayedItems = isExpanded ? recentItems : recentItems.slice(0, ITEMS_PER_ROW);
@@ -560,7 +547,7 @@ export function LauncherView() {
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           onPaste={handlePaste}
-          placeholder={PLACEHOLDER_HINTS[hintIndex]}
+          placeholder={PLACEHOLDER_HINT}
           aria-label="搜索应用和指令"
           role="combobox"
           aria-expanded={!isNoteMode}
