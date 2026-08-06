@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "interface-details": {
+      "source": "detaildotdesign/skill",
+      "sourceType": "github",
+      "skillPath": "skills/SKILL.md",
+      "computedHash": "56e94fe27efda777844ee49da5a9ec0dd66396dce8daa9641afb5848e3505d55"
+    }
+  }
+}
