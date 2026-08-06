@@ -26,22 +26,22 @@ colors:
   scrim-white-10: "#ffffff1a"
 typography:
   display:
-    fontFamily: "'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif"
+    fontFamily: "'HarmonyOS Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif"
     fontSize: "18px"
     fontWeight: 400
     lineHeight: 1.4
   title:
-    fontFamily: "'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif"
+    fontFamily: "'HarmonyOS Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif"
     fontSize: "14px"
     fontWeight: 600
     lineHeight: 1.4
   body:
-    fontFamily: "'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif"
+    fontFamily: "'HarmonyOS Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif"
     fontSize: "14px"
     fontWeight: 400
     lineHeight: 1.6
   label:
-    fontFamily: "'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif"
+    fontFamily: "'HarmonyOS Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif"
     fontSize: "12px"
     fontWeight: 400
     lineHeight: 1.3
@@ -147,11 +147,11 @@ components:
 
 ## 3. Typography
 
-**Display Font:** 打包字体栈 Inter + Noto Sans SC（回退 -apple-system / Segoe UI / PingFang SC / Microsoft YaHei）
+**Display Font:** 打包字体 HarmonyOS Sans SC（中英一体；回退 -apple-system / Segoe UI / PingFang SC / Microsoft YaHei）
 **Body Font:** 同一字体栈
 **Label/Mono Font:** 无独立等宽字体（代码场景由 Markdown 编辑器内部处理）
 
-**Character:** 单一字族、字重与字号拉开层级。中英混排同重设计：拉丁字母用 Inter、中文用思源黑体（Noto Sans SC），两者笔画粗细匹配，混排不跳眼（2026-08-04 决定，替代纯系统回退）。字体随应用打包为本地 woff2（Inter latin + Noto Sans SC 400/600，约 5MB），无网络加载，跨机器字形一致。
+**Character:** 单一字族、字重与字号拉开层级。中英同源设计：拉丁与中文同属 HarmonyOS Sans 家族，混排无接缝（2026-08-06 决定，替代 2026-08-04 的 Inter + Noto Sans SC 拼装方案——拼装存在拉丁/中文笔画灰度差，一体家族从根上消除）。字重映射 400→Regular、500→Medium、600/700→Bold（该家族无 Semibold，标题档由 Bold 承担）。字体随应用打包为**原版 TTF**（Regular/Medium/Bold 三档共约 24MB）：华为 HarmonyOS Sans Fonts License 禁止修改字体文件，故不转 woff2、不子集化，许可文本随包附带（`src/styles/fonts/harmonyos-sans-LICENSE.txt`），关于页含使用声明。无网络加载，跨机器字形一致。
 
 ### Hierarchy
 - **Display** (400, 18px, 1.4): 唯一职责是启动器搜索框。它是全应用最大的字级——这是工具，不是落地页。
@@ -160,7 +160,7 @@ components:
 - **Label** (400, 12px, 1.3): 辅助标签、网格项名称、次级操作。最小用到 10px 仅限聊天 mode 标签等微标识，且必须配 600 字重。
 
 ### Named Rules
-**The System Stack Rule.** 字体只允许来自两条路径：随应用打包的 woff2（Inter / Noto Sans SC），或系统字体回退链。禁止从网络加载字体——打包字体是静态资源，成本在安装时支付、不在唤起时支付，与"唤起速度优先"不冲突；回退链保证未覆盖字形（生僻字、全量 emoji）仍由系统兜底。
+**The System Stack Rule.** 字体只允许来自两条路径：随应用打包的 TTF（HarmonyOS Sans SC），或系统字体回退链。禁止从网络加载字体——打包字体是静态资源，成本在安装时支付、不在唤起时支付，与"唤起速度优先"不冲突；回退链保证未覆盖字形（全量 emoji 等）仍由系统兜底。
 
 **The 18px Ceiling Rule.** 界面文字上限 18px。需要更强层级时，用字重（400→600）与灰阶（Tertiary→Primary）解决，不是放大字号。
 

@@ -1,8 +1,5 @@
-/* 打包字体：Inter（拉丁）+ Noto Sans SC（中文）— 中英混排同重设计，见 DESIGN.md Typography */
-@import './styles/fonts/inter-latin-400.css';
-@import './styles/fonts/inter-latin-600.css';
-@import './styles/fonts/noto-sans-sc-400.css';
-@import './styles/fonts/noto-sans-sc-600.css';
+/* 打包字体：HarmonyOS Sans SC（中英一体，原版 TTF，许可禁止修改字体文件）— 见 DESIGN.md Typography */
+@import './styles/fonts/harmonyos-sans-sc.css';
 
 @tailwind base;
 @tailwind components;
@@ -245,8 +242,8 @@ html, body, #root {
 }
 
 body {
-  /* 打包字体优先，系统字体兜底：Inter 管拉丁，Noto Sans SC 管中文（见 DESIGN.md Typography） */
-  font-family: 'Inter', 'Noto Sans SC', -apple-system, BlinkMacSystemFont,
+  /* 打包字体优先，系统字体兜底：HarmonyOS Sans SC 中英一体（见 DESIGN.md Typography） */
+  font-family: 'HarmonyOS Sans SC', -apple-system, BlinkMacSystemFont,
                'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;

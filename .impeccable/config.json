@@ -1,7 +1,9 @@
 {
   "detector": {
     "ignoreRules": [],
-    "ignoreFiles": [],
+    "ignoreFiles": [
+      "Temp/fonts-compare/font-compare.html"
+    ],
     "ignoreValues": [
       {
         "rule": "ai-color-palette",

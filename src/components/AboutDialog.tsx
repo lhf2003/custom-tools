@@ -63,6 +63,10 @@ export function AboutDialog({ isOpen, onClose }: AboutDialogProps) {
             Windows 桌面效率中枢——启动器、剪贴板、密码本、笔记与陪伴，唤起即用。
           </p>
           <p className="text-xs text-app-text-disabled mt-4">Tauri · React · Rust</p>
+          {/* HarmonyOS Sans Fonts License 2.1 要求的显著声明 */}
+          <p className="text-xs text-app-text-disabled mt-1">
+            界面字体：HarmonyOS Sans © 2021 Huawei Device Co., Ltd.
+          </p>
         </div>
       </div>
     </div>

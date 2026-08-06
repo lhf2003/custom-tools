@@ -1,0 +1,28 @@
+/* HarmonyOS Sans SC 打包字体（中英一体，全量字符集）
+   许可约束：华为 HarmonyOS Sans Fonts License 禁止修改字体文件，
+   故打包原版 TTF（不转 woff2、不子集化）；许可文本见同目录 harmonyos-sans-LICENSE.txt。
+   字重映射：400→Regular、500→Medium、600/700→Bold（该家族无 Semibold/Bold 之外的中粗档）。
+   应用内需显著声明使用了 HarmonyOS Sans Fonts（AboutDialog）。 */
+@font-face {
+  font-family: 'HarmonyOS Sans SC';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400;
+  src: url(./files/harmonyos-sans-sc-400-normal.ttf) format('truetype');
+}
+
+@font-face {
+  font-family: 'HarmonyOS Sans SC';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 500;
+  src: url(./files/harmonyos-sans-sc-500-normal.ttf) format('truetype');
+}
+
+@font-face {
+  font-family: 'HarmonyOS Sans SC';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 600 700;
+  src: url(./files/harmonyos-sans-sc-600-normal.ttf) format('truetype');
+}
