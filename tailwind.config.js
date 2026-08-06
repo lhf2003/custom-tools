@@ -46,9 +46,11 @@ export default {
         'app-status': {
           success: '#22c55e',
           warning: '#f59e0b',
+          'warning-text': '#fcd34d', // 深色表面上的警告文字（amber-300，对齐 error-text 提亮变体）
           error: '#ef4444',
           'error-text': '#f87171',  // 深色表面上的错误文字（实测 ≥5.9:1）
           info: '#2563eb',
+          'info-deep': '#1d4ed8',   // Action Blue Deep（主按钮 hover）
         },
         // 保留原有的 glass 颜色
         glass: {

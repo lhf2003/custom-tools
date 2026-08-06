@@ -344,10 +344,10 @@ export function CustomSelect({
             fixed z-50 py-1 rounded-lg overflow-hidden
             bg-app-bg-elevated
             border border-app-border-emphasis shadow-[var(--app-shadow-lg)]
-            transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none
+            transition-[opacity,transform,visibility] duration-200 ease-out motion-reduce:transition-none
             ${menuClassName}
             ${dropdownPosition === 'top' ? 'origin-bottom' : 'origin-top'}
-            ${isOpen ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 pointer-events-none'}
+            ${isOpen ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 pointer-events-none invisible'}
             ${dropdownPosition === 'top' && !isOpen ? 'translate-y-2' : ''}
             ${dropdownPosition === 'bottom' && !isOpen ? '-translate-y-2' : ''}
           `}

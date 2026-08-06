@@ -34,7 +34,7 @@ export function TopNavigationBar({
           data-tauri-drag-region
       >
         {/* Left: Back button - no-drag 确保按钮可点击 */}
-        <div className="flex items-stretch self-stretch" style={{ 'app-region': 'no-drag' } as React.CSSProperties}>
+        <div className="flex items-stretch self-stretch" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
           <Tooltip content="返回主页 (Esc)" placement="bottom">
             <button
                 onClick={onBack}
@@ -54,7 +54,7 @@ export function TopNavigationBar({
         </div>
 
         {/* Right: Primary action + Action menu - no-drag 确保可点击 */}
-        <div className="flex items-center gap-1" style={{ 'app-region': 'no-drag' } as React.CSSProperties}>
+        <div className="flex items-center gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
           {primaryAction && (
             <button
               onClick={primaryAction.onClick}

@@ -72,7 +72,8 @@ export function PasswordView() {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const itemRefs = useRef(new Map<number, HTMLButtonElement>());
   const copyTimerRef = useRef<number | null>(null);
-  const hideTimerRef = useRef<number | null>(null);
+  // 每条目独立的 30 秒自动遮蔽定时器：显示条目 B 不会清掉条目 A 的倒计时
+  const hideTimersRef = useRef(new Map<number, number>());
 
   // 搜索防抖：输入 300ms 后才触发后端查询
   useEffect(() => {
@@ -82,11 +83,18 @@ export function PasswordView() {
 
   // 组件卸载时清理定时器
   useEffect(() => {
+    const hideTimers = hideTimersRef.current;
     return () => {
       if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
-      if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current);
+      hideTimers.forEach((t) => window.clearTimeout(t));
+      hideTimers.clear();
     };
   }, []);
+
+  // 切换条目时清除复制反馈，避免对勾残留到另一条目上
+  useEffect(() => {
+    setCopiedField(null);
+  }, [selectedEntryId]);
 
   // Check unlock status
   const checkUnlockStatus = useCallback(async () => {
@@ -117,6 +125,8 @@ export function PasswordView() {
       setIsUnlocked(false);
       setDecryptedPasswords({});
       setShowPasswordMap({});
+      hideTimersRef.current.forEach((t) => window.clearTimeout(t));
+      hideTimersRef.current.clear();
       setSelectedEntryId(null);
       setSearchInput('');
       setListError(null);
@@ -206,7 +216,8 @@ export function PasswordView() {
         setMasterPassword('');
       }
     } catch (err: unknown) {
-      setUnlockError(err instanceof Error ? err.message : '解锁失败');
+      // Tauri 命令的错误以 string 形式到达，instanceof Error 永不命中
+      setUnlockError(typeof err === 'string' ? err : err instanceof Error ? err.message : '解锁失败');
     } finally {
       setIsUnlocking(false);
     }
@@ -314,10 +325,28 @@ export function PasswordView() {
     }
   }, [loadEntries]);
 
+  const scheduleAutoHide = useCallback((id: number) => {
+    const timers = hideTimersRef.current;
+    const existing = timers.get(id);
+    if (existing) window.clearTimeout(existing);
+    timers.set(id, window.setTimeout(() => {
+      setShowPasswordMap((prev) => ({ ...prev, [id]: false }));
+      hideTimersRef.current.delete(id);
+    }, 30000));
+  }, []);
+
+  const cancelAutoHide = useCallback((id: number) => {
+    const existing = hideTimersRef.current.get(id);
+    if (existing) {
+      window.clearTimeout(existing);
+      hideTimersRef.current.delete(id);
+    }
+  }, []);
+
   const handleShowPassword = async (id: number) => {
     if (showPasswordMap[id]) {
       setShowPasswordMap((prev) => ({ ...prev, [id]: false }));
-      if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current);
+      cancelAutoHide(id);
       return;
     }
 
@@ -328,11 +357,8 @@ export function PasswordView() {
         setDecryptedPasswords((prev) => ({ ...prev, [id]: password }));
       }
       setShowPasswordMap((prev) => ({ ...prev, [id]: true }));
-      // 30 秒后自动重新遮蔽，降低肩窥暴露窗口
-      if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current);
-      hideTimerRef.current = window.setTimeout(() => {
-        setShowPasswordMap((prev) => ({ ...prev, [id]: false }));
-      }, 30000);
+      // 30 秒后自动重新遮蔽，降低肩窥暴露窗口（per-id 定时器，互不干扰）
+      scheduleAutoHide(id);
     } catch (err: unknown) {
       console.error('[Password] Failed to decrypt password:', err);
       const message = err instanceof Error ? err.message : String(err);
@@ -340,19 +366,36 @@ export function PasswordView() {
     }
   };
 
-  // 敏感复制：走后端专用命令——抑制剪贴板历史记录 + 60 秒定时清除
+  // 复制反馈：对勾图标 2 秒后复位
+  const flashCopied = useCallback((field: CopyField) => {
+    if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
+    setCopiedField(field);
+    copyTimerRef.current = window.setTimeout(() => setCopiedField(null), 2000);
+  }, []);
+
+  // 敏感复制（仅密码）：走后端专用命令——抑制剪贴板历史记录 + 60 秒定时清除
   const copySensitive = useCallback(async (text: string, field: CopyField) => {
     try {
       await invoke('copy_password_to_clipboard', { text });
-      if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
-      setCopiedField(field);
-      copyTimerRef.current = window.setTimeout(() => setCopiedField(null), 2000);
+      flashCopied(field);
     } catch (err: unknown) {
       console.error('Failed to copy:', err);
       const message = err instanceof Error ? err.message : String(err);
       setListError(`复制失败: ${message}`);
     }
-  }, []);
+  }, [flashCopied]);
+
+  // 普通复制（用户名/网址）：记入剪贴板历史、不定时清除——行为可预期
+  const copyPlain = useCallback(async (text: string, field: CopyField) => {
+    try {
+      await invoke('copy_text_to_clipboard', { text });
+      flashCopied(field);
+    } catch (err: unknown) {
+      console.error('Failed to copy:', err);
+      const message = err instanceof Error ? err.message : String(err);
+      setListError(`复制失败: ${message}`);
+    }
+  }, [flashCopied]);
 
   // 复制密码无需先显示：点击即解密直写剪贴板
   const copyPassword = useCallback(async (entry: PasswordEntry) => {
@@ -391,7 +434,8 @@ export function PasswordView() {
         const prevId = flatIds[prevIndex];
         setSelectedEntryId(prevId);
         itemRefs.current.get(prevId)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      } else if (e.key === 'Enter' && selectedEntryId && !isTypingTarget()) {
+      } else if (e.key === 'Enter' && selectedEntryId) {
+        // 与 ClipboardView 一致：Enter 在搜索框聚焦时也复制当前选中项（搜索→↓→Enter 旗舰链路）
         e.preventDefault();
         const entry = entries.find((item) => item.id === selectedEntryId);
         if (entry) copyPassword(entry);
@@ -431,12 +475,12 @@ export function PasswordView() {
           </div>
 
           {/* Title */}
-          <h3 className="text-lg font-semibold text-app-text-primary mb-2">密码保险库</h3>
+          <h2 className="text-lg font-semibold text-app-text-primary mb-2">密码保险库</h2>
           <p className="text-app-text-tertiary text-sm mb-6">请输入主密码解锁</p>
 
           {/* Error Message */}
           {unlockError && (
-            <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+            <div className="mb-4 p-3 rounded-lg bg-app-status-error/10 border border-app-status-error/20">
               <p className="text-sm text-app-status-error-text">{unlockError}</p>
             </div>
           )}
@@ -445,6 +489,9 @@ export function PasswordView() {
           <div className="relative mb-4">
             <input
               type="password"
+              id="master-password"
+              name="master-password"
+              aria-label="主密码"
               value={masterPassword}
               onChange={(e) => setMasterPassword(e.target.value)}
               placeholder="主密码"
@@ -458,7 +505,7 @@ export function PasswordView() {
           <button
             onClick={handleUnlock}
             disabled={!masterPassword || isUnlocking}
-            className="w-full py-3 rounded-lg bg-blue-600 text-white font-medium cursor-pointer transition-colors duration-200 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            className="w-full py-3 rounded-lg bg-app-status-info text-white font-medium cursor-pointer transition-colors duration-200 hover:bg-app-status-info-deep disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {isUnlocking && <Loader2 size={16} className="animate-spin" />}
             {isUnlocking ? '解锁中...' : '解锁'}
@@ -477,7 +524,7 @@ export function PasswordView() {
     <div className="w-full h-full flex flex-col" style={{ backgroundColor: THEME.BG_PRIMARY }}>
       {/* 主视图错误条：load/delete/decrypt 失败在这里可见，可重试可关闭 */}
       {listError && (
-        <div className="flex items-center gap-3 px-4 py-2 bg-red-500/10 border-b border-red-500/20 flex-shrink-0">
+        <div className="flex items-center gap-3 px-4 py-2 bg-app-status-error/10 border-b border-app-status-error/20 flex-shrink-0">
           <span className="flex-1 text-sm text-app-status-error-text">{listError}</span>
           <button
             onClick={() => { setListError(null); loadCategories(); loadEntries(); }}
@@ -498,27 +545,17 @@ export function PasswordView() {
       <div className="flex-1 flex min-h-0">
         {/* Left Sidebar - Password List Only */}
         <aside className="w-64 border-r border-app-border flex flex-col flex-shrink-0" style={{ backgroundColor: THEME.BG_SECONDARY }}>
-          {/* Header with Search */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-app-border">
-            <h3 className="text-app-text-tertiary text-sm font-medium">密码保险库</h3>
-            <Tooltip content="新增密码" placement="bottom">
-              <button
-                onClick={openCreateModal}
-                aria-label="新增密码"
-                className="p-1.5 rounded-lg text-app-text-tertiary hover:text-app-text-primary hover:bg-white/10 transition-colors duration-200 cursor-pointer"
-              >
-                <Plus size={16} />
-              </button>
-            </Tooltip>
-          </div>
-
-          {/* Search Bar */}
-          <div className="p-3">
-            <div className="flex items-center gap-2 bg-app-bg-tertiary rounded-lg px-3 py-2 border border-app-border">
+          {/* Search Bar（侧栏不再重复标题——TopNavigationBar 已有「密码保险库」） */}
+          <div className="p-3 flex items-center gap-2">
+            <div className="flex-1 flex items-center gap-2 bg-app-bg-tertiary rounded-lg px-3 py-2 border border-app-border">
               <Search size={16} className="text-app-text-tertiary" />
               <input
                 ref={searchInputRef}
                 type="text"
+                role="combobox"
+                aria-expanded="true"
+                aria-controls="pw-listbox"
+                aria-activedescendant={selectedEntryId ? `pw-option-${selectedEntryId}` : undefined}
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 placeholder="搜索密码..."
@@ -534,6 +571,15 @@ export function PasswordView() {
                 </button>
               )}
             </div>
+            <Tooltip content="新增密码" placement="bottom">
+              <button
+                onClick={openCreateModal}
+                aria-label="新增密码"
+                className="p-2 rounded-lg text-app-text-tertiary hover:text-app-text-primary hover:bg-white/10 transition-colors duration-200 cursor-pointer"
+              >
+                <Plus size={16} />
+              </button>
+            </Tooltip>
           </div>
 
           {/* Category Filter */}
@@ -588,7 +634,7 @@ export function PasswordView() {
                 </div>
               )
             ) : (
-              <div className="space-y-1" role="listbox" aria-label="密码列表">
+              <div className="space-y-1" role="listbox" id="pw-listbox" aria-label="密码列表">
                 {entries.map((item) => (
                   <PasswordListItem
                     key={item.id}
@@ -627,8 +673,8 @@ export function PasswordView() {
             copiedField={copiedField}
             onTogglePassword={() => handleShowPassword(selectedEntry.id)}
             onCopyPassword={() => copyPassword(selectedEntry)}
-            onCopyUsername={() => selectedEntry.username && copySensitive(selectedEntry.username, 'username')}
-            onCopyUrl={() => selectedEntry.url && copySensitive(selectedEntry.url, 'url')}
+            onCopyUsername={() => selectedEntry.username && copyPlain(selectedEntry.username, 'username')}
+            onCopyUrl={() => selectedEntry.url && copyPlain(selectedEntry.url, 'url')}
             onToggleFavorite={() => handleToggleFavorite(selectedEntry)}
             onDelete={() => { setModalError(null); setDeletingEntry(selectedEntry); }}
             onEdit={() => openEditModal(selectedEntry)}
@@ -694,6 +740,7 @@ function PasswordListItem({ item, isSelected, onClick, itemRef }: PasswordListIt
   return (
     <button
       ref={itemRef}
+      id={`pw-option-${item.id}`}
       type="button"
       role="option"
       aria-selected={isSelected}
@@ -710,7 +757,7 @@ function PasswordListItem({ item, isSelected, onClick, itemRef }: PasswordListIt
           {item.favorite && (
             <Star size={12} className="text-app-status-warning flex-shrink-0" fill="currentColor" />
           )}
-          <span className="text-app-text-primary font-medium truncate">{item.title}</span>
+          <span className={`font-medium truncate ${isSelected ? 'text-app-text-primary' : 'text-app-text-secondary'}`}>{item.title}</span>
         </div>
         <span className="text-app-text-tertiary text-xs truncate block">
           {item.username || '无用户名'}
@@ -850,7 +897,7 @@ function PasswordDetail({
               <div className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0">
                 <Lock size={18} className="text-app-text-tertiary" />
               </div>
-              <code className="flex-1 text-app-text-primary text-sm font-mono truncate" aria-live="polite">
+              <code className={`flex-1 text-app-text-primary text-sm font-mono ${showPassword ? 'break-all' : 'truncate'}`} aria-live="polite">
                 {showPassword ? decryptedPassword || '••••••••' : '••••••••••••••••'}
               </code>
               <Tooltip content={showPassword ? '隐藏密码' : '显示密码'} placement="top">

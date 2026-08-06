@@ -128,9 +128,9 @@ export function EntryFormModal({
 
   return (
     <Modal onClose={requestClose} ariaLabel={mode === 'edit' ? '编辑密码' : '新增密码'}>
-      <h3 className="text-app-text-primary font-medium mb-4">
+      <h2 className="text-app-text-primary font-medium mb-4">
         {mode === 'edit' ? '编辑密码' : '新增密码'}
-      </h3>
+      </h2>
       <button
         onClick={requestClose}
         aria-label="关闭"
@@ -140,7 +140,7 @@ export function EntryFormModal({
       </button>
 
       {error && (
-        <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-app-status-error-text">
+        <div className="mb-4 p-3 rounded-lg bg-app-status-error/10 border border-app-status-error/20 text-sm text-app-status-error-text">
           {error}
         </div>
       )}
@@ -148,6 +148,9 @@ export function EntryFormModal({
       <div className="space-y-3">
         <input
           type="text"
+          id="entry-title"
+          name="title"
+          aria-label="标题（必填）"
           value={form.title}
           onChange={(e) => update({ title: e.target.value })}
           placeholder="标题 *"
@@ -156,6 +159,9 @@ export function EntryFormModal({
         />
         <input
           type="text"
+          id="entry-username"
+          name="username"
+          aria-label="用户名"
           value={form.username}
           onChange={(e) => update({ username: e.target.value })}
           placeholder="用户名"
@@ -163,6 +169,9 @@ export function EntryFormModal({
         />
         <input
           type="password"
+          id="entry-password"
+          name="entry-password"
+          aria-label="密码（必填）"
           value={form.password}
           onChange={(e) => update({ password: e.target.value })}
           placeholder="密码 *"
@@ -171,6 +180,9 @@ export function EntryFormModal({
         />
         <input
           type="text"
+          id="entry-url"
+          name="url"
+          aria-label="网址"
           value={form.url}
           onChange={(e) => update({ url: e.target.value })}
           placeholder="网址"
@@ -183,6 +195,9 @@ export function EntryFormModal({
           placeholder="选择分类"
         />
         <textarea
+          id="entry-notes"
+          name="notes"
+          aria-label="备注"
           value={form.notes}
           onChange={(e) => update({ notes: e.target.value })}
           placeholder="备注"
@@ -192,8 +207,8 @@ export function EntryFormModal({
       </div>
 
       {confirmDiscard && (
-        <div className="mt-4 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-between gap-2">
-          <span className="text-sm text-amber-300">放弃未保存的修改？</span>
+        <div className="mt-4 p-3 rounded-lg bg-app-status-warning/10 border border-app-status-warning/20 flex items-center justify-between gap-2">
+          <span className="text-sm text-app-status-warning-text">放弃未保存的修改？</span>
           <div className="flex gap-2">
             <button
               onClick={() => setConfirmDiscard(false)}
@@ -203,7 +218,7 @@ export function EntryFormModal({
             </button>
             <button
               onClick={onClose}
-              className="px-3 py-1 rounded-md text-sm text-amber-300 hover:bg-amber-500/20 transition-colors cursor-pointer"
+              className="px-3 py-1 rounded-md text-sm text-app-status-warning-text hover:bg-app-status-warning/20 transition-colors cursor-pointer"
             >
               放弃
             </button>
@@ -221,7 +236,7 @@ export function EntryFormModal({
         <button
           onClick={() => onSubmit(form)}
           disabled={!canSubmit}
-          className="px-4 py-2 rounded-lg bg-blue-600 text-white transition-colors duration-200 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center gap-2"
+          className="px-4 py-2 rounded-lg bg-app-status-info text-white transition-colors duration-200 hover:bg-app-status-info-deep disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center gap-2"
         >
           {saving && <Loader2 size={14} className="animate-spin" />}
           保存
@@ -243,7 +258,7 @@ export function CategoryModal({ saving, error, onSubmit, onClose }: CategoryModa
 
   return (
     <Modal onClose={onClose} ariaLabel="新建分类">
-      <h3 className="text-app-text-primary font-medium mb-4">新建分类</h3>
+      <h2 className="text-app-text-primary font-medium mb-4">新建分类</h2>
       <button
         onClick={onClose}
         aria-label="关闭"
@@ -253,13 +268,16 @@ export function CategoryModal({ saving, error, onSubmit, onClose }: CategoryModa
       </button>
 
       {error && (
-        <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-app-status-error-text">
+        <div className="mb-4 p-3 rounded-lg bg-app-status-error/10 border border-app-status-error/20 text-sm text-app-status-error-text">
           {error}
         </div>
       )}
 
       <input
         type="text"
+        id="category-name"
+        name="category-name"
+        aria-label="分类名称"
         value={name}
         onChange={(e) => setName(e.target.value)}
         onKeyDown={(e) => e.key === 'Enter' && name.trim() && onSubmit(name.trim())}
@@ -278,7 +296,7 @@ export function CategoryModal({ saving, error, onSubmit, onClose }: CategoryModa
         <button
           onClick={() => onSubmit(name.trim())}
           disabled={!name.trim() || saving}
-          className="px-4 py-2 rounded-lg bg-blue-600 text-white transition-colors duration-200 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center gap-2"
+          className="px-4 py-2 rounded-lg bg-app-status-info text-white transition-colors duration-200 hover:bg-app-status-info-deep disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center gap-2"
         >
           {saving && <Loader2 size={14} className="animate-spin" />}
           创建
@@ -305,14 +323,14 @@ export function ConfirmDeleteModal({
 }: ConfirmDeleteModalProps) {
   return (
     <Modal onClose={onClose} ariaLabel="删除确认">
-      <h3 className="text-app-text-primary font-medium mb-2">删除密码</h3>
+      <h2 className="text-app-text-primary font-medium mb-2">删除密码</h2>
       <p className="text-sm text-app-text-tertiary mb-1">
         确定要删除「{entryTitle}」吗？
       </p>
       <p className="text-xs text-app-text-tertiary mb-4">此操作无法撤销。</p>
 
       {error && (
-        <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-sm text-app-status-error-text">
+        <div className="mb-4 p-3 rounded-lg bg-app-status-error/10 border border-app-status-error/20 text-sm text-app-status-error-text">
           {error}
         </div>
       )}
