@@ -29,6 +29,9 @@ dist-ssr
 # Playwright MCP temporary files
 .playwright-mcp/
 
+# 临时工作区（截图、对比页、脚本、补丁等实验产物）
+Temp/
+
 # Debug screenshots
 markdown-*.png
 mdeditor-*.png
