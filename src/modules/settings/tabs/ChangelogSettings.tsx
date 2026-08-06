@@ -1,4 +1,4 @@
-import { History } from 'lucide-react';
+import { PageHeader } from '../components/SettingsPrimitives';
 
 interface ChangelogEntry {
   version: string;
@@ -176,15 +176,15 @@ const CHANGELOG: ChangelogEntry[] = [
 ];
 
 const TAG_STYLE: Record<ChangelogEntry['tag'], string> = {
-  feat: 'bg-blue-500/15 text-blue-400 border-blue-500/25',
-  fix: 'bg-amber-500/15 text-amber-400 border-amber-500/25',
-  refactor: 'bg-purple-500/15 text-purple-400 border-purple-500/25',
-  docs: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/25',
-  chore: 'bg-gray-500/15 text-gray-400 border-gray-500/25',
-  perf: 'bg-rose-500/15 text-rose-400 border-rose-500/25',
-  test: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/25',
-  ci: 'bg-orange-500/15 text-orange-400 border-orange-500/25',
-  build: 'bg-indigo-500/15 text-indigo-400 border-indigo-500/25',
+  feat: 'bg-blue-500/15 text-blue-400',
+  fix: 'bg-amber-500/15 text-amber-400',
+  refactor: 'bg-purple-500/15 text-purple-400',
+  docs: 'bg-emerald-500/15 text-emerald-400',
+  chore: 'bg-zinc-500/15 text-zinc-400',
+  perf: 'bg-rose-500/15 text-rose-400',
+  test: 'bg-cyan-500/15 text-cyan-400',
+  ci: 'bg-orange-500/15 text-orange-400',
+  build: 'bg-indigo-500/15 text-indigo-400',
 };
 
 const TAG_LABEL: Record<ChangelogEntry['tag'], string> = {
@@ -202,42 +202,32 @@ const TAG_LABEL: Record<ChangelogEntry['tag'], string> = {
 export function ChangelogSettings() {
   return (
     <>
-      <div className="flex items-center gap-3 mb-6">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-500/30 to-sky-600/20 flex items-center justify-center">
-          <History size={20} className="text-sky-400" />
-        </div>
-        <div>
-          <h2 className="text-white text-lg font-semibold">更新日志</h2>
-          <p className="text-white/40 text-xs">版本迭代记录</p>
-        </div>
-      </div>
+      <PageHeader title="更新日志" description="版本迭代记录" />
 
-      <div className="space-y-4">
+      <div>
         {CHANGELOG.map((entry, index) => (
-          <div
-            key={entry.version}
-            className="rounded-xl border border-white/10 bg-white/[0.02] overflow-hidden"
-          >
-            <div className="flex items-center gap-3 px-4 py-3 border-b border-white/5">
-              <div className="flex items-center gap-2 flex-1">
-                <span className="text-white/90 text-sm font-semibold font-mono">
-                  v{entry.version}
+          <div key={entry.version} className="mb-6">
+            <div className="flex items-center gap-2.5 px-3 mb-2">
+              <span className="text-app-text-primary text-sm font-semibold font-mono">
+                v{entry.version}
+              </span>
+              {index === 0 && (
+                <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-app-status-success/15 text-app-status-success">
+                  最新
                 </span>
-                {index === 0 && (
-                  <span className="px-1.5 py-0.5 text-[10px] rounded bg-green-500/15 text-green-400 border border-green-500/20">
-                    最新
-                  </span>
-                )}
-                <span className={`px-1.5 py-0.5 text-[10px] rounded border ${TAG_STYLE[entry.tag]}`}>
-                  {TAG_LABEL[entry.tag]}
-                </span>
-              </div>
-              <span className="text-white/30 text-xs">{entry.date}</span>
+              )}
+              <span className={`px-1.5 py-0.5 text-[10px] font-semibold rounded ${TAG_STYLE[entry.tag]}`}>
+                {TAG_LABEL[entry.tag]}
+              </span>
+              <span className="text-app-text-disabled text-xs ml-auto">{entry.date}</span>
             </div>
-            <ul className="px-4 py-3 space-y-2">
+            <ul>
               {entry.items.map((item) => (
-                <li key={item} className="flex items-start gap-2 text-xs text-white/55 leading-relaxed">
-                  <span className="mt-1.5 w-1 h-1 rounded-full bg-white/25 flex-shrink-0" />
+                <li
+                  key={item}
+                  className="flex items-start gap-2.5 px-3 py-1 text-xs text-app-text-secondary leading-relaxed"
+                >
+                  <span className="mt-[7px] w-1 h-1 rounded-full bg-app-text-disabled flex-shrink-0" />
                   {item}
                 </li>
               ))}

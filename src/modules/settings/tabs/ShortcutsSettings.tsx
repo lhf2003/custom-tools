@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Keyboard, RotateCcw, AlertCircle } from 'lucide-react';
+import { RotateCcw, AlertCircle } from 'lucide-react';
 import { Tooltip } from '@/components/Tooltip';
 import { useSettingsStore, type ShortcutConfig } from '@/stores/settingsStore';
 import { KeyRecorder } from '../components/KeyRecorder';
+import { PageHeader } from '../components/SettingsPrimitives';
 
 export function ShortcutsSettings() {
   const { shortcuts, shortcutsLoading, loadShortcuts, resetAllShortcuts } = useSettingsStore();
@@ -29,34 +30,29 @@ export function ShortcutsSettings() {
 
   return (
     <>
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500/30 to-blue-600/20 flex items-center justify-center">
-            <Keyboard size={20} className="text-blue-400" />
-          </div>
-          <div>
-            <h2 className="text-white text-lg font-semibold">全局快捷键</h2>
-            <p className="text-white/40 text-xs">自定义您的快捷操作</p>
-          </div>
-        </div>
-        <Tooltip content="恢复默认" placement="bottom">
-          <button
-            onClick={handleResetAll}
-            className="px-4 py-2 rounded-lg bg-white/5 text-white/60 text-sm hover:bg-white/10 hover:text-white transition-all duration-200 flex items-center gap-2 cursor-pointer border border-white/10"
-          >
-            <RotateCcw size={14} />
-            恢复默认
-          </button>
-        </Tooltip>
-      </div>
+      <PageHeader
+        title="快捷键"
+        description="自定义全局快捷操作"
+        actions={
+          <Tooltip content="恢复默认" placement="bottom">
+            <button
+              onClick={handleResetAll}
+              className="px-3 py-1.5 rounded-lg text-app-text-tertiary text-xs hover:bg-white/10 hover:text-app-text-primary transition-colors cursor-pointer flex items-center gap-1.5"
+            >
+              <RotateCcw size={13} />
+              恢复默认
+            </button>
+          </Tooltip>
+        }
+      />
 
       {shortcutsLoading ? (
-        <div className="text-white/40 text-center py-12">
-          <div className="inline-block w-6 h-6 border-2 border-white/20 border-t-blue-400 rounded-full animate-spin mb-3" />
+        <div className="text-app-text-disabled text-center py-12">
+          <div className="inline-block w-6 h-6 border-2 border-white/20 border-t-app-brand-primary-light rounded-full animate-spin mb-3" />
           <p className="text-sm">加载中...</p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div>
           {shortcuts.map((shortcut) => (
             <ShortcutItem
               key={shortcut.id}
@@ -77,12 +73,9 @@ export function ShortcutsSettings() {
         </div>
       )}
 
-      <div className="mt-6 p-4 rounded-xl bg-blue-500/5 border border-blue-500/20">
-        <p className="text-blue-200/60 text-xs leading-relaxed">
-          💡 提示：点击快捷键区域即可编辑。支持 Ctrl、Shift、Alt、Meta 组合键。
-          修改后系统快捷键会立即生效。
-        </p>
-      </div>
+      <p className="mt-5 px-3 text-app-text-tertiary text-xs leading-relaxed">
+        点击快捷键区域即可编辑，支持 Ctrl、Shift、Alt、Meta 组合键，修改后立即生效。
+      </p>
     </>
   );
 }
@@ -138,11 +131,11 @@ function ShortcutItem({
 
   if (isEditing) {
     return (
-      <div className="rounded-xl p-4 border border-blue-500/40 bg-blue-500/5">
+      <div className="rounded-lg px-3 py-2.5 bg-white/5">
         <div className="flex items-center gap-4">
           <div className="flex-1 min-w-0">
-            <p className="text-white/90 text-sm font-medium">{config.name}</p>
-            <p className="text-white/40 text-xs mt-0.5">{config.description}</p>
+            <p className="text-app-text-primary text-sm font-medium">{config.name}</p>
+            <p className="text-app-text-tertiary text-xs mt-0.5">{config.description}</p>
           </div>
           <KeyRecorder
             onSave={handleSave}
@@ -150,7 +143,7 @@ function ShortcutItem({
           />
         </div>
         {conflict && (
-          <div className="mt-3 flex items-center gap-2 text-amber-400 text-xs bg-amber-500/10 px-3 py-2 rounded-lg">
+          <div className="mt-3 flex items-center gap-2 text-app-status-warning text-xs bg-app-status-warning/10 px-3 py-2 rounded-lg">
             <AlertCircle size={14} />
             与 "{conflict.name}" 冲突
           </div>
@@ -161,24 +154,22 @@ function ShortcutItem({
 
   return (
     <div
-      className="group rounded-xl p-4 flex items-center gap-4 border border-white/10 bg-white/[0.02] hover:bg-white/[0.05] hover:border-white/20 transition-all duration-200 cursor-pointer"
+      className="group rounded-lg px-3 py-2.5 flex items-center gap-4 hover:bg-white/5 transition-colors cursor-pointer"
       onClick={onEdit}
     >
       <div className="flex-1 min-w-0">
-        <p className="text-white/80 text-sm font-medium group-hover:text-white transition-colors">
-          {config.name}
-        </p>
-        <p className="text-white/40 text-xs mt-0.5">{config.description}</p>
+        <p className="text-app-text-primary text-sm font-medium">{config.name}</p>
+        <p className="text-app-text-tertiary text-xs mt-0.5">{config.description}</p>
       </div>
       <div className="flex items-center gap-2">
-        <kbd className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white/70 text-sm font-mono min-w-[100px] text-center group-hover:bg-white/10 group-hover:text-white transition-all">
+        <kbd className="px-3 py-1 rounded-md bg-app-bg-elevated border border-white/10 text-app-text-secondary text-xs font-mono min-w-[96px] text-center group-hover:text-app-text-primary transition-colors">
           {effectiveKeys}
         </kbd>
         {isCustom && (
           <Tooltip content="恢复默认" placement="top">
             <button
               onClick={handleReset}
-              className="p-2 rounded-lg text-white/30 hover:text-amber-400 hover:bg-amber-400/10 transition-all cursor-pointer"
+              className="p-1.5 rounded-lg text-app-text-disabled hover:text-app-status-warning hover:bg-app-status-warning/10 transition-colors cursor-pointer"
             >
               <RotateCcw size={14} />
             </button>

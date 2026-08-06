@@ -24,7 +24,7 @@ import {
 import { Tooltip } from '@/components/Tooltip';
 import { useLlmProviderStore, type Provider, type ProviderType, type Model, type Scene, type SceneConfig } from '@/stores/llmProviderStore';
 import { useSettingsStore } from '@/stores/settingsStore';
-import { Toggle } from '../components/SettingCard';
+import { PageHeader, Toggle } from '../components/SettingsPrimitives';
 import { CustomSelect, type SelectGroup } from '../components/CustomSelect';
 
 // Provider type options
@@ -296,15 +296,7 @@ export function ModelSettings() {
 
   return (
     <>
-      <div className="flex items-center gap-3 mb-6">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-app-brand-primary/30 to-app-brand-primary/20 flex items-center justify-center">
-          <Bot size={20} className="text-app-brand-primary-light" />
-        </div>
-        <div>
-          <h2 className="text-white text-lg font-semibold">AI 模型</h2>
-          <p className="text-white/40 text-xs">配置多提供商 LLM 服务</p>
-        </div>
-      </div>
+      <PageHeader title="模型配置" description="配置多提供商 LLM 服务" />
 
       <div className="space-y-4">
         {/* Claude Code 全局配置 */}

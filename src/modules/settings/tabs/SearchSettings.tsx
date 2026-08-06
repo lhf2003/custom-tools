@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Search } from 'lucide-react';
 import { safeInvoke } from '@/utils/tauri';
-import { SettingCard } from '../components/SettingCard';
+import { PageHeader, SettingGroup, SettingRow } from '../components/SettingsPrimitives';
 
 export function SearchSettings() {
   const [dirs, setDirs] = useState<string[]>([]);
@@ -41,70 +40,64 @@ export function SearchSettings() {
 
   return (
     <>
-      <div className="flex items-center gap-3 mb-6">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-green-500/30 to-green-600/20 flex items-center justify-center">
-          <Search size={20} className="text-green-400" />
-        </div>
-        <div>
-          <h2 className="text-white text-lg font-semibold">搜索设置</h2>
-          <p className="text-white/40 text-xs">配置额外的应用扫描目录</p>
-        </div>
-      </div>
+      <PageHeader title="搜索" description="配置启动器的应用索引来源" />
 
-      <div className="space-y-3">
-        <SettingCard title="注册表应用" description="自动扫描已安装软件（绿色软件）">
-          <span className="text-xs text-green-400 font-medium">已启用</span>
-        </SettingCard>
+      <SettingGroup title="索引来源">
+        <SettingRow title="注册表应用" description="自动扫描已安装软件（绿色软件）">
+          <span className="flex items-center gap-1.5 text-xs text-app-text-tertiary">
+            <span className="w-1.5 h-1.5 rounded-full bg-app-status-success" />
+            已启用
+          </span>
+        </SettingRow>
+        <SettingRow title="Microsoft Store 应用" description="自动扫描 UWP 应用">
+          <span className="flex items-center gap-1.5 text-xs text-app-text-tertiary">
+            <span className="w-1.5 h-1.5 rounded-full bg-app-status-success" />
+            已启用
+          </span>
+        </SettingRow>
+      </SettingGroup>
 
-        <SettingCard title="Microsoft Store 应用" description="自动扫描 UWP 应用">
-          <span className="text-xs text-green-400 font-medium">已启用</span>
-        </SettingCard>
+      <SettingGroup title="自定义扫描目录">
+        <SettingRow title="扫描目录" description="添加包含 .lnk 快捷方式的自定义目录">
+          <button
+            onClick={addDir}
+            disabled={loading}
+            className={`px-3 py-1.5 text-xs rounded-lg transition-colors cursor-pointer ${
+              loading
+                ? 'text-app-text-disabled cursor-not-allowed'
+                : 'text-app-text-tertiary hover:bg-white/10 hover:text-app-text-primary'
+            }`}
+          >
+            + 添加目录
+          </button>
+        </SettingRow>
 
-        <div className="rounded-xl p-4 border border-white/10 bg-white/[0.02]">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <p className="text-white/90 text-sm font-medium">自定义扫描目录</p>
-              <p className="text-white/40 text-xs mt-0.5">添加包含 .lnk 快捷方式的自定义目录</p>
-            </div>
-            <button
-              onClick={addDir}
-              disabled={loading}
-              className={`px-3 py-1.5 text-xs rounded-lg transition-colors cursor-pointer ${
-                loading
-                  ? 'bg-white/5 text-white/30 cursor-not-allowed'
-                  : 'bg-blue-500/20 hover:bg-blue-500/30 text-blue-400'
-              }`}
+        {loading ? (
+          <p className="px-3 py-2 text-app-text-disabled text-xs">加载中...</p>
+        ) : dirs.length === 0 ? (
+          <p className="px-3 py-2 text-app-text-disabled text-xs">暂无自定义目录</p>
+        ) : (
+          dirs.map((dir) => (
+            <div
+              key={dir}
+              className="group flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 transition-colors"
             >
-              + 添加目录
-            </button>
-          </div>
-
-          {loading ? (
-            <p className="text-white/30 text-xs">加载中...</p>
-          ) : dirs.length === 0 ? (
-            <p className="text-white/30 text-xs">暂无自定义目录</p>
-          ) : (
-            <div className="space-y-2">
-              {dirs.map((dir) => (
-                <div
-                  key={dir}
-                  className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-white/5"
-                >
-                  <span className="text-white/70 text-xs truncate flex-1" title={dir}>
-                    {dir}
-                  </span>
-                  <button
-                    onClick={() => removeDir(dir)}
-                    className="text-white/30 hover:text-red-400 transition-colors text-xs cursor-pointer flex-shrink-0"
-                  >
-                    删除
-                  </button>
-                </div>
-              ))}
+              <span
+                className="text-app-text-secondary text-xs truncate flex-1 font-mono"
+                title={dir}
+              >
+                {dir}
+              </span>
+              <button
+                onClick={() => removeDir(dir)}
+                className="text-app-text-disabled hover:text-app-status-error-text transition-colors text-xs cursor-pointer flex-shrink-0 opacity-0 group-hover:opacity-100"
+              >
+                删除
+              </button>
             </div>
-          )}
-        </div>
-      </div>
+          ))
+        )}
+      </SettingGroup>
     </>
   );
 }
