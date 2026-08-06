@@ -33,7 +33,7 @@ colors:
   light-ink-secondary: "#3f3f46"
   light-ink-tertiary: "#52525b"
   light-ink-disabled: "#a1a1aa"
-  light-ink-placeholder: "#71717a"
+  light-ink-placeholder: "#65656e"
   light-signal-indigo: "#6366f1"
   light-signal-indigo-light: "#4f46e5"
   light-status-success: "#16a34a"
@@ -41,6 +41,21 @@ colors:
   light-status-error: "#dc2626"
   light-scrim-black-5: "#0000000d"
   light-scrim-black-10: "#0000001a"
+  light-syntax-blue: "#2563eb"
+  light-syntax-green: "#16a34a"
+  light-syntax-emerald: "#059669"
+  light-syntax-red: "#dc2626"
+  light-syntax-amber: "#d97706"
+  light-syntax-yellow: "#b45309"
+  light-syntax-violet: "#7c3aed"
+  light-syntax-purple: "#9333ea"
+  light-syntax-rose: "#e11d48"
+  light-syntax-cyan: "#0891b2"
+  light-syntax-teal: "#0d9488"
+  light-syntax-orange: "#ea580c"
+  light-syntax-sky: "#0284c7"
+  light-syntax-pink: "#db2777"
+  light-syntax-slate: "#64748b"
 typography:
   display:
     fontFamily: "'HarmonyOS Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif"
@@ -167,10 +182,27 @@ components:
 - **Light Surface Base** (#fafafa, zinc-50): 浅色主背景基座。与深色基座 (#1e1e21, zinc 深档) 同系同差。
 - **Light Surface Sidebar / Card / Elevated / Pressed** (#f4f4f5 / #e4e4e7 / #d4d4d8 / #a1a1aa): 五档表面反向映射，档差与深色对称（相邻差 ≥0.03 OKLCH L，镜像 Even Tiers）。
 - **Light Ink Primary / Secondary / Tertiary** (#18181b / #3f3f46 / #52525b): 浅底上的文字档，Tertiary 在 Card 上实测 ≥5.4:1。
+- **Light Ink Placeholder** (#65656e): 浅色 placeholder 专用（实测 5.53:1 on Base、4.55:1 on Card，双达标）。2026-08-06 从 #71717a 加深：旧值在 Card 表面上仅 3.81:1。
 - **Light Signal Indigo** (#6366f1): 品牌色在浅色下保持原值（白底 4.8:1 达标）。
 - **Light Signal Indigo Light** (#4f46e5, indigo-600): **浅色下品牌文字必须用深档**——原 #818cf8 在浅底对比不足，禁止跨主题复用。
 - **Light Scrim Black 5/10** (#0000000d / #0000001a): 浅色纱层镜像——"提亮"在浅底不可用，翻转为黑色透明度系。存量 `bg-white/N`、`border-white/N` 类在浅色下经类级覆盖自动翻黑（见 Do's）。
 - **Light 状态色**: Success (#16a34a) / Warning (#d97706) / Error (#dc2626)：功能色换深档保证浅底 ≥4.5:1；Error Text 在浅色下直接用深档 (#dc2626)。
+- **Light 语法/分类深档色**（light-syntax-*）: 存量彩色浅档文字（blue-300/400、emerald-300、amber-300 等）与分类图形色（文件类型图标、数据圆点、JSON 语法高亮）的浅色深档映射：blue #2563eb、green #16a34a、emerald #059669、red #dc2626、amber #d97706、yellow #b45309、violet #7c3aed、purple #9333ea、rose #e11d48、cyan #0891b2、teal #0d9488、orange #ea580c、sky #0284c7、pink #db2777、slate #64748b。文字场景 ≥4.5:1，图形场景 ≥3:1。
+
+### 浅色类级覆盖机制（2026-08-06 全面补齐）
+浅色兼容不走逐组件改写，而是在 index.css 用 `[data-theme='light']` 类级覆盖集中翻转存量深色类：
+
+- **白纱文字**：`text-white/N`（含 hover/placeholder 变体）按档位映射语义墨阶——80~90→Ink Primary、60~70→Secondary、40~50→Tertiary、25~35→Placeholder；纯 `text-white` 翻 Primary，但品牌/状态色按钮（`bg-blue-600`、`bg-violet-500`、`bg-app-status-info`、`bg-app-status-error/90`）与暗幕（`bg-black/80` 图片放大态）内的白字由恢复规则保留。
+- **彩色浅档文字**：`text-{blue|green|red|yellow|amber|emerald|violet|purple|rose|cyan|orange|sky}-200~400`（含 hover、alpha、任意值 `text-[#...]`、prose 变体）统一换 light-syntax-* 深档。
+- **深色纱底徽章**：`bg-{red|emerald}-900/30` 翻同色相 12% 浅纱，配深档文字。
+- **分隔线/边框**：`divide-white/5`、`focus:border-white/20~25` 翻黑纱。
+- **text-zinc-500**：浅色下对齐 Placeholder。
+- **prose-invert 回翻**：聊天 Markdown 的 invert 变量换回浅底墨阶，行内代码底换黑纱。
+- **prose 之外的 JSON 语法色**：`--json-*` 变量承载（ClipboardDetail 内联引用），与 JsonTreeView 的 Tailwind 类覆盖同值，两处 JSON 渲染保持同一副面孔。
+- **分类/图形标识色**：`--cat-*` 变量承载（Everything 文件图标、数据空间圆点），浅色换深档。
+- **阴影**：tailwind.config.js 把 `shadow-lg/xl/2xl` 映射 `--app-shadow-*` 词表，浅色自动降档。
+- **原生控件**：`:root` 声明 `color-scheme`，日期选择器等系统控件随主题。
+- **防闪屏**：index.html 内联脚本在 React 挂载前预读 localStorage 缓存的主题模式（`flowhub-theme-mode`，由 ThemeController 写入）并解析 `prefers-color-scheme`，消除首帧深色闪屏。
 
 ### Named Rules
 **The One Voice Rule.** Signal Indigo 在任何单屏面积 ≤10%。它的稀缺性就是它的意义——满屏靛蓝等于没有品牌。
