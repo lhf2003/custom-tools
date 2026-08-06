@@ -32,6 +32,11 @@ dist-ssr
 # 临时工作区（截图、对比页、脚本、补丁等实验产物）
 Temp/
 
+# AI 工具链产物（机器本地配置、skill 安装产物、评审快照）
+.claude/
+.impeccable/
+.agents/
+
 # Debug screenshots
 markdown-*.png
 mdeditor-*.png

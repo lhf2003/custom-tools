@@ -1,6 +1,0 @@
-{
-  "files": ["index.html", "companion-toast.html"],
-  "insertBefore": "</body>",
-  "commentSyntax": "html",
-  "cspChecked": true
-}
