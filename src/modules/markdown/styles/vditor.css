@@ -1,24 +1,26 @@
 /* Vditor 自定义主题 - 与项目 THEME 统一 */
 
 /* ============================================
-   主题 CSS 变量（映射自 src/constants/theme.ts）
+   主题 CSS 变量（映射自 index.css 的 --app-* 语义变量，
+   随 data-theme 自动切换深/浅；accent 高亮色在浅色主题下换深档见文件尾部覆盖）
    ============================================ */
 .vditor-container {
-  --vditor-bg-primary: #1e1e21;
-  --vditor-bg-secondary: rgba(63, 63, 70, 0.4);
-  --vditor-bg-tertiary: #2e2e33;
-  --vditor-bg-elevated: #38383e;
-  --vditor-bg-hover: rgba(82, 82, 91, 0.5);
-  --vditor-bg-active: rgba(59, 130, 246, 0.15);
+  --vditor-bg-primary: var(--app-bg-primary);
+  --vditor-bg-secondary: var(--app-bg-secondary);
+  --vditor-bg-tertiary: var(--app-bg-tertiary);
+  --vditor-bg-elevated: var(--app-bg-elevated);
+  --vditor-bg-hover: var(--app-bg-hover);
+  --vditor-bg-active: var(--app-alpha-white-10);
 
-  --vditor-text-primary: #f4f4f5;
-  --vditor-text-secondary: #d4d4d8;
-  --vditor-text-tertiary: #a1a1aa;
-  --vditor-text-disabled: #71717a;
+  --vditor-text-primary: var(--app-text-primary);
+  --vditor-text-secondary: var(--app-text-secondary);
+  --vditor-text-tertiary: var(--app-text-tertiary);
+  --vditor-text-disabled: var(--app-text-disabled);
 
-  --vditor-border-default: rgba(82, 82, 91, 0.3);
-  --vditor-border-emphasis: rgba(82, 82, 91, 0.5);
+  --vditor-border-default: var(--app-border-default);
+  --vditor-border-emphasis: var(--app-border-emphasis);
 
+  /* 深色主题高亮色（浅色主题深档覆盖见文件尾部） */
   --vditor-accent-blue: #3b82f6;
   --vditor-accent-blue-light: #93c5fd;
   --vditor-accent-purple: #c084fc;
@@ -45,6 +47,19 @@
   --hljs-literal: var(--vditor-accent-amber);
 
   --vditor-toolbar-height: 40px;
+}
+
+/* 浅色主题：高亮色换深档，保证浅底对比（对齐 GitHub light 语法色策略） */
+[data-theme='light'] .vditor-container {
+  --vditor-accent-blue: #2563eb;
+  --vditor-accent-blue-light: #3b82f6;
+  --vditor-accent-purple: #9333ea;
+  --vditor-accent-green: #16a34a;
+  --vditor-accent-cyan: #0891b2;
+  --vditor-accent-amber: #d97706;
+  --vditor-accent-orange: #ea580c;
+  --vditor-accent-pink: #db2777;
+  --vditor-accent-red: #dc2626;
 }
 
 /* ============================================

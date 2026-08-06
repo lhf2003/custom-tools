@@ -1,7 +1,15 @@
 import { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import Vditor from 'vditor';
 import 'vditor/dist/index.css';
+import { useSettingsStore } from '@/stores/settingsStore';
 import '../styles/vditor.css';
+
+/** 用户主题模式解析为 vditor 实际主题（与 ThemeController 同规则） */
+function resolveThemeMode(mode: string): 'dark' | 'light' {
+  if (mode === 'light') return 'light';
+  if (mode === 'dark') return 'dark';
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
 
 interface VditorEditorProps {
   value: string;
@@ -24,6 +32,10 @@ export const VditorEditor = forwardRef<VditorEditorRef, VditorEditorProps>(
     const onChangeRef = useRef(onChange);
     const onReadyRef = useRef(onReady);
     const placeholderRef = useRef(placeholder);
+
+    // 主题跟随：读用户配置模式，解析为实际深/浅；切换时 setTheme 同步
+    const themeMode = useSettingsStore((s) => s.theme);
+    const resolvedTheme = resolveThemeMode(themeMode);
 
     // 保持回调与 value 引用最新（初始化 effect 只运行一次，经 ref 读取最新值）
     useEffect(() => {
@@ -91,11 +103,14 @@ export const VditorEditor = forwardRef<VditorEditorRef, VditorEditorProps>(
       if (!containerRef.current || vditorRef.current) return;
 
       try {
+        // 挂载时读取当前主题（初始化 effect 只跑一次，经 getState 取最新值）
+        const initialTheme = resolveThemeMode(useSettingsStore.getState().theme);
+        const isDark = initialTheme === 'dark';
         const vditor = new Vditor(containerRef.current, {
           mode: 'ir',
           value: valueRef.current,
           placeholder: placeholderRef.current,
-          theme: 'dark',
+          theme: isDark ? 'dark' : 'classic',
           height: '100%',
           minHeight: 300,
           lang: 'zh_CN',
@@ -123,18 +138,18 @@ export const VditorEditor = forwardRef<VditorEditorRef, VditorEditorProps>(
           ],
           preview: {
             theme: {
-              current: 'dark',
+              current: initialTheme,
               path: '/node_modules/vditor/dist/css/content-theme',
             },
             hljs: {
               enable: true,
               lineNumber: false,
-              style: 'github-dark',
+              style: isDark ? 'github-dark' : 'github',
             },
           },
           after: () => {
             vditorRef.current = vditor;
-            vditor.setTheme('dark', 'dark', 'github-dark');
+            vditor.setTheme(isDark ? 'dark' : 'classic', initialTheme, isDark ? 'github-dark' : 'github');
             if (valueRef.current) {
               vditor.setValue(valueRef.current);
             }
@@ -176,6 +191,18 @@ export const VditorEditor = forwardRef<VditorEditorRef, VditorEditorProps>(
         console.error('[Vditor] Set value error:', err);
       }
     }, [value]);
+
+    // 主题切换：resolvedTheme 变化时同步 vditor 三件套（编辑器/内容/代码高亮）
+    useEffect(() => {
+      const editor = vditorRef.current;
+      if (!editor) return;
+      const isDark = resolvedTheme === 'dark';
+      try {
+        editor.setTheme(isDark ? 'dark' : 'classic', resolvedTheme, isDark ? 'github-dark' : 'github');
+      } catch (err) {
+        console.error('[Vditor] Set theme error:', err);
+      }
+    }, [resolvedTheme]);
 
     if (error) {
       return (

@@ -422,7 +422,7 @@ fn render_ui_def() -> ToolDef {
         display_name: "界面渲染",
         group: ToolGroup::Interface,
         core: true,
-        description: r##"把回答渲染成界面卡片展示给用户（A2UI v0.9 协议）。适用：数据统计/对比/清单、需要按钮确认或表单填写的场景；纯聊天、一句话问答不要用。
+        description: r##"把回答渲染成界面卡片展示给用户（A2UI v0.9 协议）。适用：数据统计/对比/清单、需要按钮确认或表单填写的场景；纯聊天、一句话问答不要用。界面配色由渲染层统一跟随应用深浅色主题自动适配，你无需也不要在内容里描述或指定颜色。
 
 messages 是消息数组，每条为四种之一：
 1. {"version":"v0.9","createSurface":{"surfaceId":"<surface_id>","catalogId":"basic","theme":{"primaryColor":"#6366F1","agentDisplayName":"贾维斯"}}} —— 首次创建该 surface 时必须包含

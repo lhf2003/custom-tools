@@ -54,6 +54,8 @@ interface SettingsState extends AppSettings {
   toggleStartupLaunch: () => Promise<boolean>;
   setSetting: (key: string, value: string) => Promise<void>;
   setClipboardKeepDays: (days: number) => Promise<void>;
+  /** 设置主题模式（system/dark/light）：落库；即时生效由 ThemeController 负责 */
+  setTheme: (theme: string) => Promise<void>;
   setAutoUpdate: (enabled: boolean) => Promise<void>;
   toggleAutoUpdate: () => Promise<boolean>;
   toggleDebugMode: () => Promise<boolean>;
@@ -208,6 +210,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       set({ clipboard_keep_days: days });
     } catch (err) {
       console.error('Failed to set clipboard_keep_days:', err);
+    }
+  },
+
+  setTheme: async (theme: string) => {
+    try {
+      await invoke('set_setting', { key: 'theme', value: theme });
+      set({ theme });
+    } catch (err) {
+      console.error('Failed to set theme:', err);
     }
   },
 

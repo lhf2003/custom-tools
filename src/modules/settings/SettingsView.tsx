@@ -10,7 +10,6 @@ import {
   Sparkles,
   BarChart3,
   Wrench,
-  Palette,
   Store,
 } from 'lucide-react';
 import { immediateResize } from '@/utils/tauri';
@@ -19,7 +18,6 @@ import { WINDOW_SIZE } from '@/constants/window';
 import { GeneralSettings } from './tabs/GeneralSettings';
 import { ShortcutsSettings } from './tabs/ShortcutsSettings';
 import { SearchSettings } from './tabs/SearchSettings';
-import { AppearanceSettings } from './tabs/AppearanceSettings';
 import { ModelSettings } from './tabs/ModelSettings';
 import { CompanionSettings } from './tabs/CompanionSettings';
 import { ToolsSettings } from './tabs/ToolsSettings';
@@ -36,7 +34,6 @@ const NAV_GROUPS = [
       { id: 'general', name: '通用', icon: Settings },
       { id: 'shortcuts', name: '快捷键', icon: Command },
       { id: 'search', name: '搜索', icon: Search },
-      { id: 'appearance', name: '外观', icon: Palette, soon: true },
     ],
   },
   {
@@ -68,7 +65,6 @@ const TAB_CONTENT: Record<TabId, React.ReactNode> = {
   general: <GeneralSettings />,
   shortcuts: <ShortcutsSettings />,
   search: <SearchSettings />,
-  appearance: <AppearanceSettings />,
   model: <ModelSettings />,
   tools: <ToolsSettings />,
   companion: <CompanionSettings />,
@@ -100,7 +96,6 @@ export function SettingsView() {
               {group.items.map((tab) => {
                 const Icon = tab.icon;
                 const isActive = activeTab === tab.id;
-                const soon = 'soon' in tab && tab.soon;
                 return (
                   <button
                     key={tab.id}
@@ -118,11 +113,6 @@ export function SettingsView() {
                       }`}
                     />
                     <span className="flex-1 text-left truncate">{tab.name}</span>
-                    {soon && (
-                      <span className="text-[10px] font-semibold text-app-text-disabled bg-white/5 px-1.5 py-0.5 rounded flex-shrink-0">
-                        即将推出
-                      </span>
-                    )}
                   </button>
                 );
               })}

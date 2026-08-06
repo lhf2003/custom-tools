@@ -40,8 +40,11 @@
   /* 状态色 */
   --app-status-success: #22c55e;
   --app-status-warning: #f59e0b;
+  --app-status-warning-text: #fcd34d;  /* 深色表面上的警告文字（amber-300） */
   --app-status-error: #ef4444;
+  --app-status-error-text: #f87171;    /* 深色表面上的错误文字（实测 ≥5.9:1） */
   --app-status-info: #2563eb;
+  --app-status-info-deep: #1d4ed8;     /* Action Blue Deep（主按钮 hover） */
 
   /* 透明度变体 */
   --app-alpha-white-5: rgba(255, 255, 255, 0.05);
@@ -74,6 +77,74 @@
   --window-bg: transparent;
   --panel-bg: rgba(30, 30, 33, 0.7);
   --panel-border: rgba(255, 255, 255, 0.05);
+}
+
+/* ============================================
+   Light Theme Tokens
+   浅色主题：与深色基座同源（zinc）明度反向映射，
+   遵守 DESIGN.md Even Tiers Rule（五档均匀拉开）。
+   通过 html[data-theme='light'] 切换，Tailwind 类全部走 var() 自动跟随。
+   ============================================ */
+[data-theme='light'] {
+  /* 背景色五档（zinc-50/100/200/300/400 反向映射） */
+  --app-bg-primary: #fafafa;
+  --app-bg-secondary: #f4f4f5;
+  --app-bg-tertiary: #e4e4e7;
+  --app-bg-elevated: #d4d4d8;
+  --app-bg-pressed: #a1a1aa;
+  --app-bg-hover: rgba(0, 0, 0, 0.05);
+  --app-bg-active: rgba(0, 0, 0, 0.08);
+
+  /* 文字色（zinc-900/700/600/400/500） */
+  --app-text-primary: #18181b;
+  --app-text-secondary: #3f3f46;
+  --app-text-tertiary: #52525b;
+  --app-text-disabled: #a1a1aa;
+  --app-text-placeholder: #71717a;
+
+  /* 边框色（黑色低透明度） */
+  --app-border-default: rgba(0, 0, 0, 0.10);
+  --app-border-emphasis: rgba(0, 0, 0, 0.16);
+  --app-border-subtle: rgba(0, 0, 0, 0.06);
+
+  /* 品牌色：primary 不变；primary-light（选中文字）换深档 indigo-600，白底实测 ≥6.6:1 */
+  --app-brand-primary: #6366f1;
+  --app-brand-primary-light: #4f46e5;
+  --app-brand-secondary: #a855f7;
+  --app-brand-selected: #2563eb;
+
+  /* 状态色：功能色换深档保证浅底对比；error-text/warning-text 换深档 */
+  --app-status-success: #16a34a;
+  --app-status-warning: #d97706;
+  --app-status-warning-text: #b45309;
+  --app-status-error: #dc2626;
+  --app-status-error-text: #dc2626;
+  --app-status-info: #2563eb;
+  --app-status-info-deep: #1e40af;
+
+  /* 透明度变体：浅色表面用黑色叠加系（变量名保持 white 前缀，值语义为叠加层） */
+  --app-alpha-white-5: rgba(0, 0, 0, 0.05);
+  --app-alpha-white-10: rgba(0, 0, 0, 0.08);
+  --app-alpha-white-15: rgba(0, 0, 0, 0.12);
+  --app-alpha-white-25: rgba(0, 0, 0, 0.20);
+  --app-alpha-white-50: rgba(0, 0, 0, 0.45);
+
+  /* 阴影：浅色背景下阴影可见度更高，alpha 微降防脏 */
+  --app-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --app-shadow-md: 0 4px 24px rgba(0, 0, 0, 0.10);
+  --app-shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.12);
+  --app-shadow-xl: 0 25px 60px rgba(0, 0, 0, 0.20);
+  --app-shadow-tooltip: 0 4px 12px rgba(0, 0, 0, 0.08);
+
+  /* Tooltip */
+  --tooltip-bg: #f4f4f5;
+  --tooltip-text: #18181b;
+  --tooltip-border: rgba(0, 0, 0, 0.10);
+
+  /* Window Effect：面板底色换浅色半透明、边框换黑系 */
+  --window-bg: transparent;
+  --panel-bg: rgba(250, 250, 250, 0.72);
+  --panel-border: rgba(0, 0, 0, 0.08);
 }
 
 /* ============================================
@@ -137,6 +208,120 @@
   background: var(--panel-bg, rgba(30, 30, 33, 0.7));
   border: 1px solid var(--panel-border, rgba(255, 255, 255, 0.05));
   border-radius: 12px;
+}
+
+/* ============================================
+   Light Theme Window Effect Overrides
+   浅色主题下 OS 效果类样式的硬编码深色值覆盖
+   ============================================ */
+
+/* 纯 CSS 毛玻璃兜底：浅色渐变 */
+[data-theme='light'] .css-glass-fallback {
+  background: rgba(250, 250, 250, 0.95) !important;
+  background: linear-gradient(
+    135deg,
+    rgba(250, 250, 250, 0.98) 0%,
+    rgba(244, 244, 245, 0.95) 100%
+  ) !important;
+}
+
+/* Mica/Acrylic/Blur 的 --panel-bg 硬编码值 → 浅色半透明；边框换黑系 */
+[data-theme='light'] .mica-active {
+  --panel-bg: var(--app-alpha-white-5);
+  --panel-border: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme='light'] .acrylic-active {
+  --panel-bg: rgba(250, 250, 250, 0.6);
+  --panel-border: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme='light'] .blur-active {
+  --panel-bg: rgba(250, 250, 250, 0.72);
+  --panel-border: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme='light'] .no-effect-active {
+  --window-bg: rgba(250, 250, 250, 0.95);
+}
+
+/* ============================================
+   Light Theme White-Alpha Utility Overrides
+   存量代码大量使用 Tailwind 编译的白纱层类（bg-white/N、border-white/N，
+   浅色下白 on 浅 = 不可见）。类级覆盖为黑纱层，让存量组件浅色下自动跟随，
+   避免逐文件改动（text-white 不覆盖：用于品牌/状态色按钮上的白字，浅色下依然正确）。
+   ============================================ */
+[data-theme='light'] .bg-white\/5 {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+[data-theme='light'] .hover\:bg-white\/5:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+[data-theme='light'] .bg-white\/10 {
+  background-color: rgba(0, 0, 0, 0.10);
+}
+
+[data-theme='light'] .hover\:bg-white\/10:hover {
+  background-color: rgba(0, 0, 0, 0.10);
+}
+
+[data-theme='light'] .active\:bg-white\/10:active {
+  background-color: rgba(0, 0, 0, 0.10);
+}
+
+[data-theme='light'] .bg-white\/15 {
+  background-color: rgba(0, 0, 0, 0.12);
+}
+
+[data-theme='light'] .border-white\/5 {
+  border-color: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme='light'] .border-white\/10 {
+  border-color: rgba(0, 0, 0, 0.12);
+}
+
+[data-theme='light'] .border-white\/15 {
+  border-color: rgba(0, 0, 0, 0.15);
+}
+
+[data-theme='light'] .border-white\/20 {
+  border-color: rgba(0, 0, 0, 0.18);
+}
+
+[data-theme='light'] .border-white\/25 {
+  border-color: rgba(0, 0, 0, 0.22);
+}
+
+/* ============================================
+   Light Theme Indigo Utility Overrides
+   a2ui surface 的选中态用 indigo 浅档（indigo-200/300 等），
+   浅色下几乎不可见 → 换深档品牌色（对齐 --app-brand-primary）
+   ============================================ */
+[data-theme='light'] .text-indigo-200 {
+  color: #4f46e5;
+}
+
+[data-theme='light'] .text-indigo-300 {
+  color: #6366f1;
+}
+
+[data-theme='light'] .text-indigo-400 {
+  color: #6366f1;
+}
+
+[data-theme='light'] .border-indigo-400 {
+  border-color: #6366f1;
+}
+
+[data-theme='light'] .border-indigo-500\/50 {
+  border-color: rgba(99, 102, 241, 0.35);
+}
+
+[data-theme='light'] .bg-indigo-500\/20 {
+  background-color: rgba(99, 102, 241, 0.15);
 }
 
 /* ============================================

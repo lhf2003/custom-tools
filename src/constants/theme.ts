@@ -1,8 +1,11 @@
 /**
- * 扩展的应用主题设计令牌 (Design Tokens)
+ * 应用主题设计令牌 (Design Tokens)
  *
- * 语义化颜色命名，替代硬编码的 Tailwind zinc 颜色
- * 所有颜色值对应 Dark 主题（工具类应用定位）
+ * 语义化颜色命名，替代硬编码的 Tailwind zinc 颜色。
+ * 所有颜色值引用 index.css 的 --app-* CSS 变量：
+ *   - :root（深色，默认）
+ *   - [data-theme='light']（浅色覆盖）
+ * 切主题只改变量值，THEME 常量与 Tailwind 类自动跟随。
  */
 
 // ============================================
@@ -39,101 +42,102 @@ const PRIMITIVE = {
 
 // ============================================
 // 语义化令牌 (Semantic Tokens)
+// 颜色值 = var(--app-*)，定义于 index.css；z-index 为纯 JS 数字，无 CSS 变量
 // ============================================
 export const THEME = {
   // -----------------------------------------
   // 背景色 (Backgrounds)
   // -----------------------------------------
   /** 主背景 - 应用最底层 */
-  BG_PRIMARY: '#1e1e21', // 2026-08-05 新灰阶基座（OKLCH L≈0.24，五档均匀拉开）
+  BG_PRIMARY: 'var(--app-bg-primary)',
   /** 次背景 - 侧边栏、面板 */
-  BG_SECONDARY: '#26262a', // L≈0.27
+  BG_SECONDARY: 'var(--app-bg-secondary)',
   /** 三级背景 - 卡片、输入框 */
-  BG_TERTIARY: '#2e2e33', // L≈0.30
+  BG_TERTIARY: 'var(--app-bg-tertiary)',
   /** 提升背景 - 悬浮、下拉菜单 */
-  BG_ELEVATED: '#38383e', // L≈0.34
+  BG_ELEVATED: 'var(--app-bg-elevated)',
   /** 按压背景 - 选中状态 */
-  BG_PRESSED: '#45454c', // L≈0.39
+  BG_PRESSED: 'var(--app-bg-pressed)',
   /** 悬停背景 */
-  BG_HOVER: 'rgba(82, 82, 91, 0.5)', // zinc-600/50
+  BG_HOVER: 'var(--app-bg-hover)',
   /** 激活背景 */
-  BG_ACTIVE: 'rgba(82, 82, 91, 0.5)',
+  BG_ACTIVE: 'var(--app-bg-active)',
 
   // -----------------------------------------
   // 文字色 (Text)
   // -----------------------------------------
   /** 主要文字 - 标题、重要内容 */
-  TEXT_PRIMARY: PRIMITIVE.ZINC[100], // #f4f4f5
+  TEXT_PRIMARY: 'var(--app-text-primary)',
   /** 次要文字 - 正文 */
-  TEXT_SECONDARY: PRIMITIVE.ZINC[300], // #d4d4d8
+  TEXT_SECONDARY: 'var(--app-text-secondary)',
   /** 三级文字 - 辅助说明 */
-  TEXT_TERTIARY: PRIMITIVE.ZINC[400], // #a1a1aa
+  TEXT_TERTIARY: 'var(--app-text-tertiary)',
   /** 禁用文字 */
-  TEXT_DISABLED: PRIMITIVE.ZINC[500], // #71717a
-  /** 占位符文字（实测 5.95:1 on BG_PRIMARY / 4.84:1 on BG_TERTIARY） */
-  TEXT_PLACEHOLDER: '#9a9aa2',
+  TEXT_DISABLED: 'var(--app-text-disabled)',
+  /** 占位符文字 */
+  TEXT_PLACEHOLDER: 'var(--app-text-placeholder)',
 
   // -----------------------------------------
   // 边框色 (Borders)
   // -----------------------------------------
   /** 默认边框 */
-  BORDER_DEFAULT: 'rgba(82, 82, 91, 0.3)', // zinc-600/30
+  BORDER_DEFAULT: 'var(--app-border-default)',
   /** 强调边框 */
-  BORDER_EMPHASIS: 'rgba(82, 82, 91, 0.5)', // zinc-600/50
+  BORDER_EMPHASIS: 'var(--app-border-emphasis)',
   /** 微妙边框 - 分割线 */
-  BORDER_SUBTLE: 'rgba(63, 63, 70, 0.5)', // zinc-700/50
+  BORDER_SUBTLE: 'var(--app-border-subtle)',
 
   // -----------------------------------------
   // 按钮色 (Buttons)
   // -----------------------------------------
   /** 次要按钮背景（对齐 surface-elevated） */
-  BTN_BG: '#38383e',
+  BTN_BG: 'var(--app-bg-elevated)',
   /** 次要按钮悬停（对齐 surface-pressed） */
-  BTN_BG_HOVER: '#45454c',
+  BTN_BG_HOVER: 'var(--app-bg-pressed)',
 
   // -----------------------------------------
   // 强调色 (Accents)
   // -----------------------------------------
   /** 品牌主色 */
-  BRAND_PRIMARY: PRIMITIVE.BRAND.PRIMARY,
+  BRAND_PRIMARY: 'var(--app-brand-primary)',
   /** 品牌次色 */
-  BRAND_SECONDARY: PRIMITIVE.BRAND.SECONDARY,
+  BRAND_SECONDARY: 'var(--app-brand-secondary)',
   /** 选中状态 */
-  SELECTED: '#3b82f6', // blue-500
+  SELECTED: 'var(--app-brand-selected)',
 
   // -----------------------------------------
   // 状态色 (States)
   // -----------------------------------------
-  SUCCESS: PRIMITIVE.FUNCTIONAL.SUCCESS,
-  WARNING: PRIMITIVE.FUNCTIONAL.WARNING,
-  ERROR: PRIMITIVE.FUNCTIONAL.ERROR,
-  INFO: PRIMITIVE.FUNCTIONAL.INFO,
-  /** 深色表面上的错误文字（red-400，BG_PRIMARY 上 ≥5.9:1，满足 4.5:1） */
-  ERROR_TEXT: '#f87171',
+  SUCCESS: 'var(--app-status-success)',
+  WARNING: 'var(--app-status-warning)',
+  ERROR: 'var(--app-status-error)',
+  INFO: 'var(--app-status-info)',
+  /** 表面上的错误文字（深色=提亮变体 / 浅色=深档） */
+  ERROR_TEXT: 'var(--app-status-error-text)',
 
   // -----------------------------------------
   // 透明度变体 (Alpha Variants)
   // -----------------------------------------
   ALPHA: {
-    WHITE_5: 'rgba(255, 255, 255, 0.05)',
-    WHITE_10: 'rgba(255, 255, 255, 0.10)',
-    WHITE_15: 'rgba(255, 255, 255, 0.15)',
-    WHITE_25: 'rgba(255, 255, 255, 0.25)',
-    WHITE_50: 'rgba(255, 255, 255, 0.50)',
+    WHITE_5: 'var(--app-alpha-white-5)',
+    WHITE_10: 'var(--app-alpha-white-10)',
+    WHITE_15: 'var(--app-alpha-white-15)',
+    WHITE_25: 'var(--app-alpha-white-25)',
+    WHITE_50: 'var(--app-alpha-white-50)',
   },
 
   // -----------------------------------------
   // 阴影 (Shadows)
   // -----------------------------------------
   SHADOW: {
-    SM: '0 2px 8px rgba(0, 0, 0, 0.2)',
-    MD: '0 4px 24px rgba(0, 0, 0, 0.2)',
-    LG: '0 8px 32px rgba(0, 0, 0, 0.3)',
-    XL: '0 25px 60px rgba(0, 0, 0, 0.6)',
+    SM: 'var(--app-shadow-sm)',
+    MD: 'var(--app-shadow-md)',
+    LG: 'var(--app-shadow-lg)',
+    XL: 'var(--app-shadow-xl)',
   },
 
   // -----------------------------------------
-  // Z-Index 层级
+  // Z-Index 层级（纯 JS 数字）
   // -----------------------------------------
   Z_INDEX: {
     BASE: 0,
