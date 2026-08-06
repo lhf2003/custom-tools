@@ -153,7 +153,7 @@ export function CompanionSettings() {
     // 备忘已迁 memos 表（DB 唯一真源）：打开笔记模块的备忘视图而非旧 md 文件
     window.dispatchEvent(
       new CustomEvent<OpenViewDetail>('app:open-view', {
-        detail: { view: 'markdown', notePath: MEMO_VIEW_PATH },
+        detail: { view: 'markdown', payload: { notePath: MEMO_VIEW_PATH } },
       })
     );
   };

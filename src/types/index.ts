@@ -1,11 +1,16 @@
-// View modes
-type ViewMode = 'launcher' | 'clipboard' | 'markdown' | 'password' | 'settings' | 'everything' | 'json_formatter' | 'chat';
+// 壳视图：App 对它们有真实分支逻辑（无导航栏 home 布局等），保持字面量
+export type ShellView = 'launcher' | 'chat' | 'settings';
 
-// `app:open-view` custom event 的 detail：请求切换到指定视图，可携带定位参数
+// 全量视图 id：壳字面量 + 任意插件 id。
+// (string & {}) 保留字面量自动补全，同时接受注册表里的插件 id 字符串；
+// 插件 id 的运行时校验收敛在 src/plugins/registry.ts 的 isPluginView。
+export type ViewMode = ShellView | (string & {});
+
+// `app:open-view` custom event 的 detail：请求切换到指定视图，可携带载荷。
+// 载荷形状由目标视图自己定义并 narrow（如 markdown 的 { notePath: string }），壳不感知。
 export interface OpenViewDetail {
   view: ViewMode;
-  /** 可选：打开笔记视图后定位到该笔记（相对路径，如「陪伴日报/备忘.md」） */
-  notePath?: string;
+  payload?: unknown;
 }
 
 // Navigation menu item
@@ -94,7 +99,6 @@ export interface RecentItem {
   icon: string;
   type: 'app' | 'tool';
 }
-
 // Settings
 export interface Settings {
   theme: 'light' | 'dark' | 'system';
@@ -104,5 +108,3 @@ export interface Settings {
   passwordAutoLock: number;
   noteAutoSave: boolean;
 }
-
-export type { ViewMode };

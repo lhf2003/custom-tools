@@ -8,23 +8,9 @@ import { useSearch } from '@/hooks/useSearch';
 import type { ViewMode } from '@/types';
 import { safeInvoke, debouncedResize } from '../../utils/tauri';
 import { WINDOW_SIZE } from '../../constants/window';
-import { BUILT_IN_TOOLS } from '../../constants/tools';
+import { listLauncherEntries, isLauncherEntryId, entryIdToViewMode } from '@/plugins/launcherEntries';
+import { matchTrigger, listPlugins } from '@/plugins/registry';
 import { getCachedIcon, setCachedIcon } from './iconCache';
-
-const VIEW_MODES: readonly ViewMode[] = [
-  'launcher',
-  'clipboard',
-  'markdown',
-  'password',
-  'settings',
-  'everything',
-  'json_formatter',
-  'chat',
-] as const;
-
-function isViewMode(value: string): value is ViewMode {
-  return (VIEW_MODES as readonly string[]).includes(value);
-}
 
 
 interface AppItemData {
@@ -32,6 +18,15 @@ interface AppItemData {
   path: string;
   isBuiltIn?: boolean;
   toolId?: string;
+}
+
+// 启动器内置入口枚举（插件注册表 + 壳入口，一次取用）
+const LAUNCHER_ENTRIES = listLauncherEntries();
+const PLUGIN_IDS = new Set(listPlugins().map((p) => p.id));
+
+/** 判断 id 是否为内置入口（插件或壳视图），用于 builtin:// 路径打开 */
+function isBuiltInEntryId(id: string | undefined): id is string {
+  return !!id && isLauncherEntryId(id);
 }
 
 const ITEMS_PER_ROW = 9;
@@ -49,7 +44,7 @@ const PLACEHOLDER_HINTS = [
 ];
 
 export function LauncherView() {
-  const { searchQuery, setSearchQuery, setActiveView, setJsonFormatterData } = useAppStore();
+  const { searchQuery, setSearchQuery, setActiveView } = useAppStore();
   const { addToast } = useToastStore();
   const { apps, searchApps, launchApp, getRecentApps, recordAppUsage, searchError } = useSearch();
   const [recentItems, setRecentItems] = useState<AppItemData[]>([]);
@@ -74,7 +69,7 @@ export function LauncherView() {
     if (!searchQuery) return displayedItems;
     const q = searchQuery.toLowerCase();
     // 单字符查询只做名称匹配：别名在此长度下噪音过大（'a' 会命中 'ai'/'format'/'paste'）
-    const filteredTools = BUILT_IN_TOOLS.filter(tool =>
+    const filteredTools = LAUNCHER_ENTRIES.filter(tool =>
       tool.name.toLowerCase().includes(q) || (q.length >= 2 && tool.aliases?.some(alias => alias.includes(q)))
     );
     const toolItems: AppItemData[] = filteredTools.map(tool => ({
@@ -102,14 +97,29 @@ export function LauncherView() {
   })();
   const isNoteMode = noteContent !== null;
 
+  // Trigger 前缀路由：查询行首命中某插件 trigger 时进入独占态，
+  // 结果区只渲染该插件一行，回车以剩余文本为载荷打开（@json xxx / 裸 @json）
+  const triggerMatch = !isNoteMode && searchQuery ? matchTrigger(searchQuery.trim()) : null;
+  const isTriggerMode = triggerMatch !== null;
+
+  // trigger 独占结果：单行 AppItemData（path = builtin://<id>，toolId 复用打开逻辑）
+  const triggerResult: AppItemData | null = useMemo(
+    () => triggerMatch
+      ? { name: triggerMatch.plugin.name, path: `builtin://${triggerMatch.plugin.id}`, isBuiltIn: true, toolId: triggerMatch.plugin.id }
+      : null,
+    [triggerMatch]
+  );
+
   // 键盘导航集合与渲染集合必须一致：折叠态只渲染前 N 条，选中不可越界（防盲启动）
-  // 备忘模式无结果网格，导航集合为空
+  // 备忘模式无结果网格，导航集合为空；trigger 独占态导航集合只有独占结果
   const navItems = useMemo(() => isNoteMode
     ? []
-    : searchQuery && !isExpanded
-      ? allResults.slice(0, SEARCH_COLLAPSED_COUNT)
-      : allResults,
-  [isNoteMode, searchQuery, isExpanded, allResults]);
+    : isTriggerMode
+      ? (triggerResult ? [triggerResult] : [])
+      : searchQuery && !isExpanded
+        ? allResults.slice(0, SEARCH_COLLAPSED_COUNT)
+        : allResults,
+  [isNoteMode, isTriggerMode, triggerResult, searchQuery, isExpanded, allResults]);
 
   // Reset selection when items change
   useEffect(() => {
@@ -220,7 +230,7 @@ export function LauncherView() {
 
       // Fallback: if still empty, show built-in tools
       if (items.length === 0) {
-        items = BUILT_IN_TOOLS.map(tool => ({
+        items = LAUNCHER_ENTRIES.map(tool => ({
           name: tool.name,
           path: `builtin://${tool.id}`,
           isBuiltIn: true,
@@ -232,7 +242,7 @@ export function LauncherView() {
     } catch (err) {
       console.error('Failed to load recent items:', err);
       // On error, fallback to built-in tools
-      setRecentItems(BUILT_IN_TOOLS.map(tool => ({
+      setRecentItems(LAUNCHER_ENTRIES.map(tool => ({
         name: tool.name,
         path: `builtin://${tool.id}`,
         isBuiltIn: true,
@@ -265,9 +275,9 @@ export function LauncherView() {
     // If the pasted content looks like JSON, open the JSON formatter
     if (detectJson(rawText)) {
       e.preventDefault();
-      setJsonFormatterData(rawText);
       setSearchQuery('');
-      setActiveView('json_formatter');
+      // 打开插件并投递载荷（与 '@json' trigger 同一通道 openPluginView）
+      useAppStore.getState().openPluginView('json_formatter', rawText);
       return;
     }
 
@@ -311,7 +321,7 @@ export function LauncherView() {
       console.error('Failed to handle paste:', err);
       await handleBrowserPaste(e);
     }
-  }, [detectJson, setJsonFormatterData, setSearchQuery, setActiveView]);
+  }, [detectJson, setSearchQuery]);
 
   // Browser fallback for file paste (when files are dropped or pasted from file manager)
   const handleBrowserPaste = async (e: React.ClipboardEvent) => {
@@ -342,10 +352,10 @@ export function LauncherView() {
       setRecentItems(prev => [item, ...prev.filter(i => i.path !== item.path)]);
     };
 
-    if (item.isBuiltIn && item.toolId && isViewMode(item.toolId)) {
+    if (item.isBuiltIn && isBuiltInEntryId(item.toolId)) {
       // For built-in tools, switch view and record usage
       promoteToRecent();
-      setActiveView(item.toolId);
+      setActiveView(entryIdToViewMode(item.toolId));
       // Record usage in background (built-in tools don't go through launch_app)
       recordAppUsage(item.path, item.name).catch(err => {
         console.error('Failed to record built-in tool usage:', err);
@@ -490,12 +500,17 @@ export function LauncherView() {
               freshItems[Math.min(selectedIndex, freshItems.length - 1)];
             if (target) handleItemClick(target);
           })();
+        } else if (isTriggerMode && triggerMatch && triggerResult) {
+          // trigger 独占：以剩余文本为载荷打开插件（裸 @json 载荷 undefined = 空开）
+          setSearchQuery('');
+          useAppStore.getState().openPluginView(triggerMatch.plugin.id, triggerMatch.arg || undefined);
+          handleItemClick(triggerResult);
         } else if (items[selectedIndex]) {
           handleItemClick(items[selectedIndex]);
         }
         break;
     }
-  }, [searchQuery, navItems, selectedIndex, setActiveView, addToast, setSearchQuery, searchApps, buildResults, handleItemClick, isNoteMode, noteContent, focusSettingsButton, focusExpandButton, focusGridItem]);
+  }, [searchQuery, navItems, selectedIndex, setActiveView, addToast, setSearchQuery, searchApps, buildResults, handleItemClick, isNoteMode, noteContent, isTriggerMode, triggerMatch, triggerResult, focusSettingsButton, focusExpandButton, focusGridItem]);
 
   return (
     <div
@@ -537,6 +552,18 @@ export function LauncherView() {
       <div className="w-full flex-1 px-4 pb-4 overflow-hidden">
         {isNoteMode ? (
           <NoteActionPreview content={noteContent} />
+        ) : isTriggerMode && triggerResult ? (
+          <TriggerResultCard
+            result={triggerResult}
+            arg={triggerMatch?.arg ?? ''}
+            argHint={triggerMatch?.trigger.argHint}
+            isSelected={selectedIndex === 0}
+            onClick={() => {
+              setSearchQuery('');
+              useAppStore.getState().openPluginView(triggerMatch!.plugin.id, triggerMatch!.arg || undefined);
+              handleItemClick(triggerResult);
+            }}
+          />
         ) : searchQuery ? (
           <SearchResults
             query={searchQuery}
@@ -642,7 +669,7 @@ function ItemCard({
   // hover 变色只作用于未选中项，避免与选中态颜色分叉（鼠标/键盘选中必须同色）
   // For built-in tools, use Lucide icon
   if (item.isBuiltIn) {
-    const tool = BUILT_IN_TOOLS.find(t => t.id === item.toolId);
+    const tool = LAUNCHER_ENTRIES.find(t => t.id === item.toolId);
     if (tool) {
       const Icon = tool.icon;
       return (
@@ -800,6 +827,59 @@ function SearchResults({
             onHover={() => onSelect(index)}
           />
         ))}
+      </div>
+    </section>
+  );
+}
+
+// Trigger 前缀路由的独占结果行：命中 @json 等插件 trigger 时的反馈
+function TriggerResultCard({
+  result,
+  arg,
+  argHint,
+  isSelected,
+  onClick,
+}: {
+  result: AppItemData;
+  arg: string;
+  argHint?: string;
+  isSelected: boolean;
+  onClick: () => void;
+}) {
+  const entry = LAUNCHER_ENTRIES.find((t) => t.id === result.toolId);
+  const Icon = entry?.icon;
+  return (
+    <section className="h-full flex flex-col">
+      <div
+        role="option"
+        aria-selected={isSelected}
+        onClick={onClick}
+        className={`flex items-center gap-3 px-3 py-3 rounded-lg transition-colors cursor-pointer ${
+          isSelected ? 'bg-white/10' : 'hover:bg-white/5'
+        }`}
+      >
+        {Icon && (
+          <div className="w-8 h-8 rounded-lg bg-app-bg-elevated flex items-center justify-center flex-shrink-0">
+            <Icon className="w-4 h-4 text-app-text-secondary" />
+          </div>
+        )}
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-app-text-primary truncate">
+            回车打开 {result.name}
+            {arg ? (
+              <span className="text-app-text-tertiary"> — {arg}</span>
+            ) : (
+              argHint && <span className="text-app-text-tertiary"> — {argHint}</span>
+            )}
+          </p>
+          <p className="text-xs text-app-text-tertiary mt-0.5 truncate">
+            {arg
+              ? `将 ${argHint ?? '输入内容'} 发送给 ${result.name}`
+              : argHint
+                ? `输入内容作为 ${argHint}，如 ${result.name} 会直接处理`
+                : `回车打开 ${result.name}`}
+          </p>
+        </div>
       </div>
     </section>
   );

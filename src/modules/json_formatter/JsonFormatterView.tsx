@@ -8,7 +8,7 @@ import {
   type ParseErrorCode, type ParseError,
 } from 'jsonc-parser';
 import { Tooltip } from '@/components/Tooltip';
-import { useAppStore } from '@/stores/appStore';
+import { usePluginPayload } from '@/plugins/usePluginPayload';
 import { useToastStore } from '@/stores/toastStore';
 import { THEME } from '../../constants/theme';
 import { WINDOW_SIZE } from '../../constants/window';
@@ -16,6 +16,8 @@ import { immediateResize } from '../../utils/tauri';
 import { JsonTreeView } from './JsonTreeView';
 import { renderJsonToCanvas } from './jsonCanvas';
 import { JsonExportPreviewModal } from './JsonExportPreviewModal';
+import jsonFormatterPlugin from './plugin';
+import { useJsonFormatterStore } from './store';
 
 type DisplayMode = 'tree' | 'text';
 
@@ -116,8 +118,14 @@ function JsonEditor({
 }
 
 export function JsonFormatterView() {
-  const { jsonFormatterData, setJsonFormatterData } = useAppStore();
+  // 工作文本归插件自有 store（跨视图切换存活）；打开载荷只负责注入
+  const { text: jsonText, setText: setJsonText } = useJsonFormatterStore();
   const { addToast } = useToastStore();
+
+  // 打开载荷（粘贴 JSON 联动 / '@json' trigger）：注入即解析，形状为 string
+  usePluginPayload(jsonFormatterPlugin.id, useCallback((payload: unknown) => {
+    if (typeof payload === 'string') setJsonText(payload);
+  }, [setJsonText]));
 
   const [displayMode, setDisplayMode] = useState<DisplayMode>('tree');
   const [parsedJson, setParsedJson] = useState<unknown>(null);
@@ -142,7 +150,7 @@ export function JsonFormatterView() {
 
   // Parse JSON data on mount or when data changes
   useEffect(() => {
-    const data = jsonFormatterData ?? '';
+    const data = jsonText ?? '';
     setRawText(data);
 
     if (!data.trim()) {
@@ -170,7 +178,7 @@ export function JsonFormatterView() {
         offset: first.offset,
       });
     }
-  }, [jsonFormatterData]);
+  }, [jsonText]);
 
   // Resize window to fit content
   useEffect(() => {
@@ -194,11 +202,11 @@ export function JsonFormatterView() {
       const formatted = applyEdits(rawText, edits);
       if (formatted !== rawText) {
         setRawText(formatted);
-        setJsonFormatterData(formatted);
+        setJsonText(formatted);
       }
     }
     setDisplayMode('text');
-  }, [parsedJson, rawText, setJsonFormatterData]);
+  }, [parsedJson, rawText, setJsonText]);
 
   // 点击错误 banner：切到文本视图并把光标放到出错偏移处
   const handleErrorJump = useCallback(() => {
@@ -287,14 +295,14 @@ export function JsonFormatterView() {
   // 清空全部内容（残留数据的显式出口）
   const handleClear = useCallback(() => {
     setRawText('');
-    setJsonFormatterData('');
-  }, [setJsonFormatterData]);
+    setJsonText('');
+  }, [setJsonText]);
 
   const handleTextChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     setRawText(val);
-    setJsonFormatterData(val);
-  }, [setJsonFormatterData]);
+    setJsonText(val);
+  }, [setJsonText]);
 
   // ── Rendering ──────────────────────────────────────────────────────────────
 

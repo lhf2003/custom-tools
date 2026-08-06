@@ -1,67 +1,28 @@
-import { useEffect, useMemo, useCallback, useState, useRef } from 'react';
+import { useEffect, useMemo, useCallback, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
-import { save } from '@tauri-apps/plugin-dialog';
-import {
-  Trash2,
-  Star,
-  Download,
-  Settings,
-  FileText,
-  Folder,
-  Plus,
-  Lock,
-  RotateCcw,
-  Info,
-  Pin,
-  Copy,
-  ClipboardPaste,
-  FolderOpen,
-  Sparkles,
-} from 'lucide-react';
+import { Info, Pin, RotateCcw, Settings } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useToastStore } from '@/stores/toastStore';
-import { useClipboardSelectionStore } from '@/stores/clipboardSelectionStore';
 import { LauncherView } from '@/modules/launcher/LauncherView';
-import { ClipboardView } from '@/modules/clipboard/ClipboardView';
-import { MarkdownView } from '@/modules/markdown/MarkdownView';
-import { PasswordView } from '@/modules/password/PasswordView';
 import { SettingsView } from '@/modules/settings/SettingsView';
-import { EverythingView } from '@/modules/everything/EverythingView';
-import { JsonFormatterView } from '@/modules/json_formatter';
 import { ChatView } from '@/modules/chat/ChatView';
 import { TopNavigationBar } from '@/components/TopNavigationBar';
-import type { PrimaryAction } from '@/components/TopNavigationBar';
-import { MenuPanel } from '@/components/ActionMenu';
 import { UpdateNotification } from '@/components/UpdateNotification';
 import { ChangelogDialog } from '@/components/ChangelogDialog';
 import { AboutDialog } from '@/components/AboutDialog';
 import { ToastContainer } from '@/components/Toast';
 import type { VersionCheckResult } from '@/components/ChangelogDialog';
-import type { ViewMode, MenuItem, OpenViewDetail } from '@/types';
+import type { MenuItem, OpenViewDetail, ShellView } from '@/types';
+import { getPlugin, getPluginByShortcutModule, isPluginView, preloadPlugins } from '@/plugins/registry';
+import { PluginHost } from '@/plugins/PluginHost';
 
-// Map backend module id to frontend ViewMode — static, no runtime dependencies
-const MODULE_VIEW_MAP: Record<string, ViewMode> = {
-  clipboard: 'clipboard',
-  notes: 'markdown',
-  passwords: 'password',
-  settings: 'settings',
-  everything: 'everything',
-};
+const SHELL_VIEWS: readonly ShellView[] = ['launcher', 'chat', 'settings'];
 
-// Runtime guard for `app:open-view` custom event targets (detail 来自 dispatch 方，不受类型约束)。
-// 注意：ViewMode 新增视图时需同步补充此列表，否则新视图会被静默拒绝。
-const OPEN_VIEW_TARGETS: readonly ViewMode[] = [
-  'launcher',
-  'clipboard',
-  'markdown',
-  'password',
-  'settings',
-  'everything',
-  'json_formatter',
-  'chat',
-];
+function isShellView(view: string): view is ShellView {
+  return (SHELL_VIEWS as readonly string[]).includes(view);
+}
 
 function App() {
   const { activeView, setActiveView, toggleWindow } = useAppStore();
@@ -80,49 +41,6 @@ function App() {
     }
   }, [toggleAlwaysOnTop]);
 
-  // 清空剪贴板历史（keepFavorites=true 时仅删除非收藏记录）
-  const handleClearClipboard = useCallback(async (keepFavorites: boolean) => {
-    const confirmed = confirm(
-      keepFavorites
-        ? '确定要删除所有非收藏的剪贴板记录吗？'
-        : '确定要清空所有剪贴板历史吗？（含收藏）'
-    );
-    if (!confirmed) return;
-    try {
-      const count = await invoke<number>('clear_clipboard_history', { keepFavorites });
-      addToast({
-        type: 'success',
-        title: keepFavorites ? '已删除非收藏记录' : '已清空历史',
-        message: `已删除 ${count} 条记录`,
-      });
-    } catch (err) {
-      addToast({
-        type: 'error',
-        title: '清空失败',
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }, [addToast]);
-
-  // 导出剪贴板历史为 JSON 文件
-  const handleExportClipboard = useCallback(async () => {
-    try {
-      const path = await save({
-        defaultPath: 'clipboard-history.json',
-        filters: [{ name: 'JSON', extensions: ['json'] }],
-      });
-      if (!path) return;
-      const count = await invoke<number>('export_clipboard_history', { path });
-      addToast({ type: 'success', title: '导出完成', message: `已导出 ${count} 条记录` });
-    } catch (err) {
-      addToast({
-        type: 'error',
-        title: '导出失败',
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }, [addToast]);
-
   // 恢复所有设置为默认值
   const handleResetSettings = useCallback(async () => {
     if (!confirm('确定要恢复所有设置为默认值吗？（包括 LLM 配置）')) return;
@@ -139,213 +57,46 @@ function App() {
     }
   }, [addToast, loadSettings]);
 
-  // Common menu items shared across all views
-  const commonMenuItems = useMemo((): MenuItem[] => [
-    {
-      id: 'always-on-top',
-      label: always_on_top ? '取消置顶' : '窗口置顶',
-      icon: Pin,
-      onClick: handleToggleAlwaysOnTop,
-    },
-    {
-      id: 'settings',
-      label: '设置',
-      icon: Settings,
-      separator: true,
-      onClick: () => setActiveView('settings'),
-    },
-  ], [always_on_top, handleToggleAlwaysOnTop, setActiveView]);
+  // 公共菜单项：壳统一追加到所有带导航栏的视图（插件项之后）。
+  // 「设置」项在设置视图自过滤；「关于」为公共项。
+  const commonMenuItems = useMemo((): MenuItem[] => {
+    const items: MenuItem[] = [
+      {
+        id: 'always-on-top',
+        label: always_on_top ? '取消置顶' : '窗口置顶',
+        icon: Pin,
+        separator: true,
+        onClick: handleToggleAlwaysOnTop,
+      },
+    ];
+    if (activeView !== 'settings') {
+      items.push({
+        id: 'settings',
+        label: '设置',
+        icon: Settings,
+        onClick: () => setActiveView('settings'),
+      });
+    }
+    items.push({
+      id: 'about',
+      label: '关于',
+      icon: Info,
+      onClick: () => setShowAbout(true),
+    });
+    return items;
+  }, [always_on_top, activeView, handleToggleAlwaysOnTop, setActiveView]);
 
-  // 剪贴板选中项的菜单状态（由 ClipboardView 写入 store）
-  const clipboardSelection = useClipboardSelectionStore();
-  // 条目级动作通过 custom event 下发给 ClipboardView 执行（与 markdown:new-note 等同一模式）
-  const dispatchClipboardAction = useCallback((action: 'paste' | 'copy' | 'favorite' | 'delete' | 'reveal' | 'send-to-ai') => {
-    window.dispatchEvent(new CustomEvent(`clipboard:${action}-selected`));
-  }, []);
-
-  // 剪贴板条目级动作：右键菜单只显示这组；顶部「操作」下拉在此基础上追加列表级与通用项
-  const clipboardItemMenuItems = useMemo<MenuItem[]>(() => [
+  // 设置是壳视图：菜单配置留在壳里（自有项 + 公共项）
+  const settingsMenuItems = useMemo((): MenuItem[] => [
     {
-      id: 'paste',
-      label: '粘贴',
-      icon: ClipboardPaste,
-      shortcut: '⏎',
-      disabled: !clipboardSelection.hasSelection,
-      onClick: () => dispatchClipboardAction('paste'),
-    },
-    {
-      id: 'copy',
-      label: '复制',
-      icon: Copy,
-      shortcut: 'Ctrl+⏎',
-      disabled: !clipboardSelection.hasSelection,
-      onClick: () => dispatchClipboardAction('copy'),
-    },
-    {
-      id: 'send-to-ai',
-      label: '发送给AI',
-      icon: Sparkles,
-      disabled: !clipboardSelection.hasSelection,
-      onClick: () => dispatchClipboardAction('send-to-ai'),
-    },
-    {
-      id: 'favorite',
-      label: clipboardSelection.isFavorite ? '取消收藏' : '收藏',
-      icon: Star,
-      shortcut: 'F',
-      disabled: !clipboardSelection.hasSelection,
-      separator: true,
-      onClick: () => dispatchClipboardAction('favorite'),
-    },
-    {
-      id: 'delete',
-      label: '删除',
-      icon: Trash2,
-      shortcut: 'Del',
+      id: 'reset-defaults',
+      label: '恢复默认',
+      icon: RotateCcw,
       danger: true,
-      disabled: !clipboardSelection.hasSelection,
-      onClick: () => dispatchClipboardAction('delete'),
+      onClick: handleResetSettings,
     },
-    ...(clipboardSelection.isImage
-      ? [{
-          id: 'reveal',
-          label: '在资源管理器中打开',
-          icon: FolderOpen,
-          separator: true,
-          onClick: () => dispatchClipboardAction('reveal'),
-        }]
-      : []),
-  ], [clipboardSelection, dispatchClipboardAction]);
-
-  // View configurations for navigation bar
-  const viewConfigs = useMemo(() => {
-    const configs: Record<
-      Exclude<ViewMode, 'launcher' | 'chat'>,
-      { title: string; menuItems: MenuItem[]; primaryAction?: PrimaryAction; menuLabel?: string }
-    > & Record<'chat', { title: string; menuItems: MenuItem[] }> = {
-      clipboard: {
-        title: '剪贴板历史',
-        menuLabel: '操作',
-        menuItems: [
-          ...clipboardItemMenuItems,
-          {
-            id: 'clear-all',
-            label: '清空历史',
-            icon: Trash2,
-            danger: true,
-            separator: true,
-            onClick: () => handleClearClipboard(false),
-          },
-          {
-            id: 'keep-favorites',
-            label: '仅保留收藏',
-            icon: Star,
-            onClick: () => handleClearClipboard(true),
-          },
-          {
-            id: 'export',
-            label: '导出数据',
-            icon: Download,
-            separator: true,
-            onClick: handleExportClipboard,
-          },
-          ...commonMenuItems,
-        ],
-      },
-      markdown: {
-        title: 'Markdown 笔记',
-        menuItems: [
-          {
-            id: 'new-note',
-            label: '新建笔记',
-            icon: FileText,
-            onClick: () => {
-              // Dispatch custom event for markdown view
-              window.dispatchEvent(new CustomEvent('markdown:new-note'));
-            },
-          },
-          {
-            id: 'new-folder',
-            label: '新建文件夹',
-            icon: Folder,
-            onClick: () => {
-              window.dispatchEvent(new CustomEvent('markdown:new-folder'));
-            },
-          },
-          ...commonMenuItems,
-        ],
-      },
-      password: {
-        title: '密码保险库',
-        menuItems: [
-          {
-            id: 'new-entry',
-            label: '新增密码',
-            icon: Plus,
-            onClick: () => {
-              window.dispatchEvent(new CustomEvent('password:new-entry'));
-            },
-          },
-          {
-            id: 'new-category',
-            label: '新建分类',
-            icon: Folder,
-            onClick: () => {
-              window.dispatchEvent(new CustomEvent('password:new-category'));
-            },
-          },
-          {
-            id: 'lock',
-            label: '锁定保险库',
-            icon: Lock,
-            separator: true,
-            onClick: () => {
-              window.dispatchEvent(new CustomEvent('password:lock'));
-            },
-          },
-          ...commonMenuItems,
-        ],
-      },
-      settings: {
-        title: '设置',
-        menuItems: [
-          {
-            id: 'reset-defaults',
-            label: '恢复默认',
-            icon: RotateCcw,
-            danger: true,
-            onClick: handleResetSettings,
-          },
-          {
-            id: 'always-on-top',
-            label: always_on_top ? '取消置顶' : '窗口置顶',
-            icon: Pin,
-            separator: true,
-            onClick: handleToggleAlwaysOnTop,
-          },
-          {
-            id: 'about',
-            label: '关于',
-            icon: Info,
-            onClick: () => setShowAbout(true),
-          },
-        ],
-      },
-      everything: {
-        title: '文件搜索',
-        menuItems: [...commonMenuItems],
-      },
-      json_formatter: {
-        title: 'JSON 格式化',
-        menuItems: [...commonMenuItems],
-      },
-      chat: {
-        title: 'AI 对话',
-        menuItems: [...commonMenuItems],
-      },
-    };
-    return configs;
-  }, [always_on_top, commonMenuItems, clipboardItemMenuItems, handleToggleAlwaysOnTop, handleClearClipboard, handleExportClipboard, handleResetSettings]);
+    ...commonMenuItems,
+  ], [handleResetSettings, commonMenuItems]);
 
   // Load settings on mount
   useEffect(() => {
@@ -378,6 +129,12 @@ function App() {
     });
   }, []);
 
+  // 启动空闲时预加载全部插件 chunk：消灭首次进入插件的加载态（本地并行，不阻塞）
+  useEffect(() => {
+    const timer = setTimeout(preloadPlugins, 1000);
+    return () => clearTimeout(timer);
+  }, []);
+
   // Handle keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -394,13 +151,19 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [toggleWindow, activeView, setActiveView]);
 
-  // Listen for global shortcut events from backend
+  // Listen for global shortcut events from backend（shortcutModuleId → 插件映射由注册表吸收）
   useEffect(() => {
     const unlisten = listen('shortcut:open_module', (event) => {
       const moduleId = event.payload as string;
-      const viewMode = MODULE_VIEW_MAP[moduleId];
-      if (viewMode) {
-        setActiveView(viewMode);
+      if (moduleId === 'settings') {
+        setActiveView('settings');
+        return;
+      }
+      const plugin = getPluginByShortcutModule(moduleId);
+      if (plugin) {
+        setActiveView(plugin.id);
+      } else {
+        console.warn(`[plugins] 快捷键事件未知 moduleId「${moduleId}」，已忽略`);
       }
     });
 
@@ -426,15 +189,21 @@ function App() {
     };
   }, [setActiveView]);
 
-  // Listen for in-app view switch requests (e.g. 陪伴设置「在笔记中查看」→ 笔记视图)
+  // 应用内视图切换请求（如陪伴设置「在笔记中查看」→ 笔记视图）：
+  // 插件视图走载荷通道 openPluginView，壳视图直接 setActiveView；未知 id warn + 忽略
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<OpenViewDetail>).detail;
-      if (!detail || !OPEN_VIEW_TARGETS.includes(detail.view)) return;
-      if (detail.view === 'markdown' && detail.notePath) {
-        useAppStore.getState().setPendingOpenNotePath(detail.notePath);
+      if (!detail) return;
+      if (isPluginView(detail.view)) {
+        useAppStore.getState().openPluginView(detail.view, detail.payload);
+        return;
       }
-      setActiveView(detail.view);
+      if (isShellView(detail.view)) {
+        setActiveView(detail.view);
+        return;
+      }
+      console.warn(`[plugins] app:open-view 未知视图「${detail.view}」，已忽略`);
     };
     window.addEventListener('app:open-view', handler);
     return () => window.removeEventListener('app:open-view', handler);
@@ -459,122 +228,58 @@ function App() {
     setActiveView('launcher');
   }, [setActiveView]);
 
+  const activePlugin = isPluginView(activeView) ? getPlugin(activeView) : undefined;
+  const isHome = activeView === 'launcher' || activeView === 'chat';
+
   // Render current view
   const renderView = () => {
-    switch (activeView) {
-      case 'launcher':
-        return <LauncherView />;
-      case 'clipboard':
-        return <ClipboardView />;
-      case 'markdown':
-        return <MarkdownView />;
-      case 'password':
-        return <PasswordView />;
-      case 'settings':
-        return <SettingsView />;
-      case 'everything':
-        return <EverythingView />;
-      case 'json_formatter':
-        return <JsonFormatterView />;
-      case 'chat':
-        return <ChatView />;
-      default:
-        return <LauncherView />;
+    if (activePlugin) {
+      return (
+        <PluginHost
+          key={activePlugin.id}
+          plugin={activePlugin}
+          commonMenuItems={commonMenuItems}
+          onBack={handleBack}
+        />
+      );
     }
-  };
-
-  const isHome = activeView === 'launcher' || activeView === 'chat';
-  const currentConfig = isHome ? null : viewConfigs[activeView as Exclude<ViewMode, 'launcher' | 'chat'>];
-
-  // 剪贴板视图的右键菜单：复用动作菜单内容，在光标处浮出
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
-  const contextMenuRef = useRef<HTMLDivElement>(null);
-
-  // 视图切换时关闭右键菜单
-  useEffect(() => {
-    setContextMenu(null);
-  }, [activeView]);
-
-  // 点击菜单外 / Esc 关闭
-  useEffect(() => {
-    if (!contextMenu) return;
-    const handleMouseDown = (e: MouseEvent) => {
-      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node)) {
-        setContextMenu(null);
-      }
-    };
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setContextMenu(null);
-    };
-    document.addEventListener('mousedown', handleMouseDown);
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('mousedown', handleMouseDown);
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [contextMenu]);
-
-  const handleContextMenu = (e: React.MouseEvent) => {
-    // 输入框/文本域内保留 WebView 原生编辑菜单（剪切/复制/粘贴）
-    if ((e.target as HTMLElement).closest('input, textarea')) return;
-    e.preventDefault();
-    const MENU_WIDTH = 240;
-    const menuHeight = clipboardItemMenuItems.length * 37 + 20;
-    setContextMenu({
-      x: Math.min(e.clientX, window.innerWidth - MENU_WIDTH),
-      y: Math.min(e.clientY, window.innerHeight - menuHeight),
-    });
+    if (isHome) {
+      return (
+        <main className="flex-1 overflow-hidden">
+          {activeView === 'chat' ? <ChatView /> : <LauncherView />}
+        </main>
+      );
+    }
+    if (activeView === 'settings') {
+      return (
+        <>
+          <div className="relative z-50">
+            <TopNavigationBar
+              title="设置"
+              menuItems={settingsMenuItems}
+              onBack={handleBack}
+            />
+          </div>
+          <main className="flex-1 overflow-hidden isolate">
+            <SettingsView />
+          </main>
+        </>
+      );
+    }
+    // 未知视图 id：warn + 回退启动器（替代旧 OPEN_VIEW_TARGETS 的静默拒绝）
+    console.warn(`[plugins] 未知视图「${activeView}」，回退启动器`);
+    return (
+      <main className="flex-1 overflow-hidden">
+        <LauncherView />
+      </main>
+    );
   };
 
   return (
     <div
       className="w-full h-full flex flex-col relative select-none selection:bg-blue-500/30 rounded-lg overflow-hidden bg-transparent"
     >
-      {isHome ? (
-        // Launcher view - no navigation bar
-        <main className="flex-1 overflow-hidden">{renderView()}</main>
-      ) : (
-        // Other views - with navigation bar
-        <>
-          <div className="relative z-50">
-            <TopNavigationBar
-              title={currentConfig?.title || ''}
-              menuItems={currentConfig?.menuItems || []}
-              onBack={handleBack}
-              primaryAction={currentConfig?.primaryAction}
-              menuLabel={currentConfig?.menuLabel}
-            />
-          </div>
-          <main
-            className="flex-1 overflow-hidden isolate"
-            onContextMenu={activeView === 'clipboard' ? handleContextMenu : undefined}
-          >{renderView()}</main>
-        </>
-      )}
-
-      {/* 剪贴板右键菜单（条目级动作子集，浮现在光标处；列表级/通用项只在顶部「操作」下拉） */}
-      {contextMenu && (
-        <div
-          ref={contextMenuRef}
-          className="fixed z-[100] min-w-[220px] bg-app-bg-primary/80 border border-app-border rounded-xl shadow-2xl animate-in fade-in duration-100"
-          style={{
-            left: contextMenu.x,
-            top: contextMenu.y,
-            WebkitBackdropFilter: 'blur(20px)',
-            backdropFilter: 'blur(20px)',
-          }}
-        >
-          <MenuPanel
-            items={clipboardItemMenuItems}
-            onItemClick={(item) => {
-              if (!item.disabled) {
-                item.onClick();
-                setContextMenu(null);
-              }
-            }}
-          />
-        </div>
-      )}
+      {renderView()}
 
       {/* Update Notification */}
       <UpdateNotification />

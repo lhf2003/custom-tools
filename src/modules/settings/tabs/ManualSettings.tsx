@@ -1,11 +1,9 @@
 import { Search, Command as CommandIcon } from 'lucide-react';
-import { BUILT_IN_TOOLS } from '@/constants/tools';
+import { listLauncherEntriesWithDescription } from '@/plugins/launcherEntries';
 import { PageHeader, SettingGroup } from '../components/SettingsPrimitives';
 
 export function ManualSettings() {
-  const toolsWithDescription = BUILT_IN_TOOLS.filter(
-    (tool): tool is typeof tool & { description: string } => tool.description !== undefined,
-  );
+  const toolsWithDescription = listLauncherEntriesWithDescription();
 
   return (
     <>
