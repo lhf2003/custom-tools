@@ -46,7 +46,6 @@ export function ClipboardView() {
   const [hasMore, setHasMore] = useState(true);
   const [offset, setOffset] = useState(0);
   const offsetRef = useRef(offset);
-  const listRef = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<Map<number, HTMLDivElement>>(new Map());
 
   const PAGE_SIZE = 100;
@@ -97,24 +96,9 @@ export function ClipboardView() {
         query.search = searchQuery.trim();
       }
 
-      let result = await invoke<ClipboardItemData[]>('get_clipboard_history', { query });
-
-      // For image tab, also include image files (type='file' but path is image)
-      if (activeTab === 'image') {
-        const fileQuery: ClipboardQuery = {
-          limit: PAGE_SIZE,
-          offset: currentOffset,
-          content_type: 'file',
-        };
-        if (searchQuery.trim()) {
-          fileQuery.search = searchQuery.trim();
-        }
-        const fileResult = await invoke<ClipboardItemData[]>('get_clipboard_history', { query: fileQuery });
-        const imageFiles = fileResult.filter(item => isImageFile(item.content));
-        result = [...result, ...imageFiles].sort((a, b) =>
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        ).slice(0, PAGE_SIZE);
-      }
+      // 图片 tab 的「file 类型里的图片路径」由后端在 SQL 层合并（content_type='image' 特殊化），
+      // 单一口径翻页；不要前端双查询合并——两个 offset 口径不一致，会重复/漏条
+      const result = await invoke<ClipboardItemData[]>('get_clipboard_history', { query });
 
       if (loadMore) {
         setItems(prev => [...prev, ...result]);
@@ -258,6 +242,14 @@ export function ClipboardView() {
     [items, selectedId]
   );
 
+  // 固定组头槽位的当前组：滚动时由 handleListScroll 更新。
+  // 数据变化时保留仍存在的组（加载更多会追加分组，不能无条件重置），否则回退首组
+  const [currentGroup, setCurrentGroup] = useState<string | null>(null);
+  useEffect(() => {
+    const keys = Object.keys(groupedItems);
+    setCurrentGroup((prev) => (prev && keys.includes(prev) ? prev : keys[0] ?? null));
+  }, [groupedItems]);
+
   // 同步选中状态到 store，供 TopNavigationBar 动作菜单使用；卸载时清空
   const setSelection = useClipboardSelectionStore((s) => s.setSelection);
   useEffect(() => {
@@ -339,31 +331,42 @@ export function ClipboardView() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [items, groupedItems, selectedId, handleCopyToClipboard, handlePasteItem, handleToggleFavorite, handleDelete]);
 
-  // Infinite scroll - auto load more when scrolling near bottom
-  useEffect(() => {
-    const listElement = listRef.current;
-    if (!listElement) return;
-
-    let ticking = false;
-
-    const handleScroll = () => {
-      if (!ticking) {
-        window.requestAnimationFrame(() => {
-          if (!isLoadingMore && hasMore) {
-            const { scrollTop, scrollHeight, clientHeight } = listElement;
-            if (scrollHeight - scrollTop - clientHeight < 10) {
-              fetchClipboardHistory(true);
-            }
-          }
-          ticking = false;
-        });
-        ticking = true;
+  // Infinite scroll - 滑近底部自动加载下一页。
+  // 用 onScroll 而非 useEffect+addEventListener：列表要等首屏加载完才渲染，
+  // 若首屏恰好返回满页（hasMore 不变、effect 依赖不变、不重跑），
+  // ref 上的监听永远挂不上——表现为「下滑查看更多」还在但滑动无反应。
+  const loadingMoreRef = useRef(false);
+  const handleListScroll = useCallback(
+    (e: React.UIEvent<HTMLDivElement>) => {
+      if (!loadingMoreRef.current && hasMore) {
+        const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+        if (scrollHeight - scrollTop - clientHeight < 10) {
+          loadingMoreRef.current = true;
+          fetchClipboardHistory(true).finally(() => {
+            loadingMoreRef.current = false;
+          });
+        }
       }
-    };
-
-    listElement.addEventListener('scroll', handleScroll, { passive: true });
-    return () => listElement.removeEventListener('scroll', handleScroll);
-  }, [isLoadingMore, hasMore, fetchClipboardHistory]);
+      // 跟踪当前日期组：槽位底边（32px）落在哪个分组上，槽位就显示哪个组；
+      // 滚到底时兜底取最后一组（末组不足一屏高时，其顶边永远到不了切换线）
+      const el = e.currentTarget;
+      const switchLine = el.getBoundingClientRect().top + 32;
+      const groups = el.querySelectorAll('[data-group]');
+      let current: string | null = null;
+      for (const g of groups) {
+        if (g.getBoundingClientRect().top <= switchLine) {
+          current = g.getAttribute('data-group');
+        } else {
+          break;
+        }
+      }
+      if (groups.length > 0 && el.scrollTop + el.clientHeight >= el.scrollHeight - 2) {
+        current = groups[groups.length - 1].getAttribute('data-group');
+      }
+      if (current) setCurrentGroup(current);
+    },
+    [hasMore, fetchClipboardHistory]
+  );
 
   // 整窗状态：加载中 / 错误 /（非搜索态的）空列表
   if (isLoading) {
@@ -446,52 +449,65 @@ export function ClipboardView() {
           })}
         </div>
 
-        {/* List */}
-        <div ref={listRef} className="flex-1 overflow-y-auto px-1.5 pb-3 pt-1">
-          {items.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-app-text-disabled px-4 text-center">
-              <p className="text-sm">没有匹配「{searchQuery.trim()}」的记录</p>
-            </div>
-          ) : (
-            Object.entries(groupedItems).map(([date, dateItems]) => (
-              <div key={date}>
-                <h3
-                  className="text-app-text-tertiary text-xs font-medium px-2.5 pt-2 pb-1.5 sticky top-0 z-10"
-                  style={{ backgroundColor: THEME.BG_SECONDARY }}
-                >
-                  {date}
-                </h3>
-                {dateItems.map((item) => (
-                  <ClipboardListItem
-                    key={item.id}
-                    ref={(el) => {
-                      if (el) {
-                        itemRefs.current.set(item.id, el);
-                      } else {
-                        itemRefs.current.delete(item.id);
-                      }
-                    }}
-                    item={item}
-                    isSelected={selectedId === item.id}
-                    onSelect={() => setSelectedId(item.id)}
-                    onPaste={() => handlePasteItem(item.id)}
-                    onContextMenu={() => setSelectedId(item.id)}
-                  />
-                ))}
+        {/* List（外层 relative 容器承载固定组头槽位） */}
+        <div className="relative flex-1 min-h-0">
+          {/* 滚动层顶部留出槽位高度（pt-8=32px）：静态时首条与槽位相接，
+              滚动后内容从槽位下方滑过被遮盖 */}
+          <div className="h-full overflow-y-auto px-1.5 pb-3 pt-8" onScroll={handleListScroll}>
+            {items.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full text-app-text-disabled px-4 text-center">
+                <p className="text-sm">没有匹配「{searchQuery.trim()}」的记录</p>
               </div>
-            ))
-          )}
+            ) : (
+              // 分组边界只用组间距表达（mt-4），当前日期由固定槽位常驻显示。
+              // 不用 position:sticky——透明 WebView2 窗口下 sticky 有合成层
+              // 残影/错位怪癖（滚动时日期头与条目错序绘制），静态覆盖层天然免疫
+              Object.entries(groupedItems).map(([date, dateItems], groupIndex) => (
+                <div key={date} data-group={date} className={groupIndex === 0 ? undefined : 'mt-4'}>
+                  {dateItems.map((item) => (
+                    <ClipboardListItem
+                      key={item.id}
+                      ref={(el) => {
+                        if (el) {
+                          itemRefs.current.set(item.id, el);
+                        } else {
+                          itemRefs.current.delete(item.id);
+                        }
+                      }}
+                      item={item}
+                      isSelected={selectedId === item.id}
+                      onSelect={() => setSelectedId(item.id)}
+                      onPaste={() => handlePasteItem(item.id)}
+                      onContextMenu={() => setSelectedId(item.id)}
+                    />
+                  ))}
+                </div>
+              ))
+            )}
 
-          {hasMore && items.length > 0 && (
-            <div className="text-center py-2.5 text-app-text-disabled text-xs">
-              {isLoadingMore ? (
-                <span className="flex items-center justify-center gap-1">
-                  <Loader2 size={12} className="animate-spin" />
-                  加载中...
-                </span>
-              ) : (
-                <span>下滑查看更多</span>
-              )}
+            {hasMore && items.length > 0 && (
+              <div className="text-center py-2.5 text-app-text-disabled text-xs">
+                {isLoadingMore ? (
+                  <span className="flex items-center justify-center gap-1">
+                    <Loader2 size={12} className="animate-spin" />
+                    加载中...
+                  </span>
+                ) : (
+                  <span>下滑查看更多</span>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* 固定组头槽位：常驻显示当前日期组（滚动时由 handleListScroll 跟踪切换），
+              高 32px、文字左缘与条目文字对齐（16px）。
+              pointer-events-none 让点击/滚动穿透到列表 */}
+          {currentGroup && (
+            <div
+              className="absolute top-0 inset-x-0 px-4 pt-2.5 pb-1.5 text-xs font-medium text-app-text-tertiary pointer-events-none"
+              style={{ backgroundColor: THEME.BG_SECONDARY }}
+            >
+              {currentGroup}
             </div>
           )}
         </div>

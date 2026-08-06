@@ -67,44 +67,11 @@ pub fn get_clipboard_history(
 ) -> Result<Vec<ClipboardItem>, String> {
     let conn = Connection::open(&db_state.0).map_err(|e| e.to_string())?;
 
-    // Build query with optional filters
     let search_pattern = query.search.as_ref().map(|s| format!("%{}%", s));
     let limit = query.limit.unwrap_or(50);
     let offset = query.offset.unwrap_or(0);
 
-    let mut sql = String::from(
-        "SELECT id, content, content_type, source_app, source_exe, is_favorite, created_at
-         FROM clipboard_history WHERE 1=1",
-    );
-
-    let mut param_index = 1;
-    let mut params_vec: Vec<&dyn rusqlite::ToSql> = Vec::new();
-
-    if query.content_type.is_some() {
-        sql.push_str(&format!(" AND content_type = ?{}", param_index));
-        params_vec.push(&query.content_type);
-        param_index += 1;
-    }
-
-    if query.is_favorite.is_some() {
-        sql.push_str(&format!(" AND is_favorite = ?{}", param_index));
-        params_vec.push(&query.is_favorite);
-        param_index += 1;
-    }
-
-    if search_pattern.is_some() {
-        sql.push_str(&format!(" AND content LIKE ?{}", param_index));
-        params_vec.push(&search_pattern);
-        param_index += 1;
-    }
-
-    sql.push_str(&format!(
-        " ORDER BY created_at DESC LIMIT ?{} OFFSET ?{}",
-        param_index,
-        param_index + 1
-    ));
-    params_vec.push(&limit);
-    params_vec.push(&offset);
+    let (sql, params_vec) = build_history_query(&query, &search_pattern, &limit, &offset);
 
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
 
@@ -125,6 +92,65 @@ pub fn get_clipboard_history(
         .map_err(|e| e.to_string())?;
 
     Ok(items)
+}
+
+/// 拼接历史查询的 SQL 与有序参数（抽成纯函数以便单测）。
+///
+/// content_type='image' 特殊化：图片 tab 的语义 = image 类型 ∪ file 类型中的图片路径，
+/// 扩展名集合与前端 isImageFile 一致（后缀 LIKE 匹配；多路径 content 仅末尾路径参与判断，
+/// 与前端 endsWith 行为对齐）。合并下推到 SQL 后翻页口径统一，前端不再双查询合并
+/// （旧写法 image/file 各查一页再合并截断，offset 口径不一致，会重复/漏条）。
+fn build_history_query<'a>(
+    query: &'a ClipboardQuery,
+    search_pattern: &'a Option<String>,
+    limit: &'a i64,
+    offset: &'a i64,
+) -> (String, Vec<&'a dyn rusqlite::ToSql>) {
+    let mut sql = String::from(
+        "SELECT id, content, content_type, source_app, source_exe, is_favorite, created_at
+         FROM clipboard_history WHERE 1=1",
+    );
+
+    let mut param_index = 1;
+    let mut params_vec: Vec<&dyn rusqlite::ToSql> = Vec::new();
+
+    if let Some(content_type) = &query.content_type {
+        if content_type == "image" {
+            sql.push_str(
+                " AND (content_type = 'image' OR (content_type = 'file' AND (\
+                 lower(content) LIKE '%.png' OR lower(content) LIKE '%.jpg' OR \
+                 lower(content) LIKE '%.jpeg' OR lower(content) LIKE '%.gif' OR \
+                 lower(content) LIKE '%.webp' OR lower(content) LIKE '%.bmp' OR \
+                 lower(content) LIKE '%.ico' OR lower(content) LIKE '%.svg')))",
+            );
+        } else {
+            sql.push_str(&format!(" AND content_type = ?{}", param_index));
+            params_vec.push(content_type);
+            param_index += 1;
+        }
+    }
+
+    if query.is_favorite.is_some() {
+        sql.push_str(&format!(" AND is_favorite = ?{}", param_index));
+        params_vec.push(&query.is_favorite);
+        param_index += 1;
+    }
+
+    if search_pattern.is_some() {
+        sql.push_str(&format!(" AND content LIKE ?{}", param_index));
+        params_vec.push(search_pattern);
+        param_index += 1;
+    }
+
+    sql.push_str(&format!(
+        " ORDER BY created_at DESC LIMIT ?{} OFFSET ?{}",
+        param_index,
+        param_index + 1
+    ));
+    params_vec.push(limit);
+    params_vec.push(offset);
+
+    (sql, params_vec)
 }
 
 /// Toggle favorite status
@@ -1198,6 +1224,51 @@ mod tests {
         .unwrap();
 
         (conn, temp_dir)
+    }
+
+    #[test]
+    fn test_build_history_query_image_merges_image_files() {
+        let query = ClipboardQuery {
+            content_type: Some("image".to_string()),
+            is_favorite: None,
+            search: None,
+            limit: Some(100),
+            offset: Some(0),
+        };
+        let search_pattern = None;
+        let limit = 100_i64;
+        let offset = 0_i64;
+
+        let (sql, params) = build_history_query(&query, &search_pattern, &limit, &offset);
+
+        assert!(sql.contains("content_type = 'image' OR"));
+        assert!(sql.contains("content_type = 'file'"));
+        assert!(sql.contains("lower(content) LIKE '%.png'"));
+        assert!(sql.contains("lower(content) LIKE '%.svg'"));
+        // image 分支走字面值、不占参数位：参数只剩 limit/offset
+        assert_eq!(params.len(), 2);
+    }
+
+    #[test]
+    fn test_build_history_query_filters_and_param_order() {
+        let query = ClipboardQuery {
+            content_type: Some("text".to_string()),
+            is_favorite: Some(true),
+            search: Some("foo".to_string()),
+            limit: Some(100),
+            offset: Some(200),
+        };
+        let search_pattern = Some("%foo%".to_string());
+        let limit = 100_i64;
+        let offset = 200_i64;
+
+        let (sql, params) = build_history_query(&query, &search_pattern, &limit, &offset);
+
+        assert!(sql.contains("AND content_type = ?1"));
+        assert!(sql.contains("AND is_favorite = ?2"));
+        assert!(sql.contains("AND content LIKE ?3"));
+        assert!(sql.contains("LIMIT ?4 OFFSET ?5"));
+        assert_eq!(params.len(), 5);
     }
 
     #[test]

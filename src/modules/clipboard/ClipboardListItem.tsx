@@ -28,7 +28,7 @@ export const ClipboardListItem = forwardRef<HTMLDivElement, ClipboardListItemPro
         onClick={onSelect}
         onDoubleClick={onPaste}
         onContextMenu={onContextMenu}
-        className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer transition-colors duration-150 ${
+        className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer transition-colors duration-150 scroll-mt-10 ${
           isSelected ? 'bg-white/10' : 'hover:bg-white/5'
         }`}
       >
