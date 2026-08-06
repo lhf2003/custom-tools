@@ -17,6 +17,7 @@ import {
   Copy,
   ClipboardPaste,
   FolderOpen,
+  Sparkles,
 } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
 import { useSettingsStore } from '@/stores/settingsStore';
@@ -158,9 +159,63 @@ function App() {
   // 剪贴板选中项的菜单状态（由 ClipboardView 写入 store）
   const clipboardSelection = useClipboardSelectionStore();
   // 条目级动作通过 custom event 下发给 ClipboardView 执行（与 markdown:new-note 等同一模式）
-  const dispatchClipboardAction = useCallback((action: 'paste' | 'copy' | 'favorite' | 'delete' | 'reveal') => {
+  const dispatchClipboardAction = useCallback((action: 'paste' | 'copy' | 'favorite' | 'delete' | 'reveal' | 'send-to-ai') => {
     window.dispatchEvent(new CustomEvent(`clipboard:${action}-selected`));
   }, []);
+
+  // 剪贴板条目级动作：右键菜单只显示这组；顶部「操作」下拉在此基础上追加列表级与通用项
+  const clipboardItemMenuItems = useMemo<MenuItem[]>(() => [
+    {
+      id: 'paste',
+      label: '粘贴',
+      icon: ClipboardPaste,
+      shortcut: '⏎',
+      disabled: !clipboardSelection.hasSelection,
+      onClick: () => dispatchClipboardAction('paste'),
+    },
+    {
+      id: 'copy',
+      label: '复制',
+      icon: Copy,
+      shortcut: 'Ctrl+⏎',
+      disabled: !clipboardSelection.hasSelection,
+      onClick: () => dispatchClipboardAction('copy'),
+    },
+    {
+      id: 'send-to-ai',
+      label: '发送给AI',
+      icon: Sparkles,
+      disabled: !clipboardSelection.hasSelection,
+      onClick: () => dispatchClipboardAction('send-to-ai'),
+    },
+    {
+      id: 'favorite',
+      label: clipboardSelection.isFavorite ? '取消收藏' : '收藏',
+      icon: Star,
+      shortcut: 'F',
+      disabled: !clipboardSelection.hasSelection,
+      separator: true,
+      onClick: () => dispatchClipboardAction('favorite'),
+    },
+    {
+      id: 'delete',
+      label: '删除',
+      icon: Trash2,
+      shortcut: 'Del',
+      danger: true,
+      disabled: !clipboardSelection.hasSelection,
+      onClick: () => dispatchClipboardAction('delete'),
+    },
+    ...(clipboardSelection.isImage
+      ? [{
+          id: 'reveal',
+          label: '在资源管理器中打开',
+          icon: FolderOpen,
+          separator: true,
+          onClick: () => dispatchClipboardAction('reveal'),
+        }]
+      : []),
+  ], [clipboardSelection, dispatchClipboardAction]);
 
   // View configurations for navigation bar
   const viewConfigs = useMemo(() => {
@@ -172,49 +227,7 @@ function App() {
         title: '剪贴板历史',
         menuLabel: '操作',
         menuItems: [
-          {
-            id: 'paste',
-            label: '粘贴',
-            icon: ClipboardPaste,
-            shortcut: '⏎',
-            disabled: !clipboardSelection.hasSelection,
-            onClick: () => dispatchClipboardAction('paste'),
-          },
-          {
-            id: 'copy',
-            label: '复制',
-            icon: Copy,
-            shortcut: 'Ctrl+⏎',
-            disabled: !clipboardSelection.hasSelection,
-            onClick: () => dispatchClipboardAction('copy'),
-          },
-          {
-            id: 'favorite',
-            label: clipboardSelection.isFavorite ? '取消收藏' : '收藏',
-            icon: Star,
-            shortcut: 'F',
-            disabled: !clipboardSelection.hasSelection,
-            separator: true,
-            onClick: () => dispatchClipboardAction('favorite'),
-          },
-          {
-            id: 'delete',
-            label: '删除',
-            icon: Trash2,
-            shortcut: 'Del',
-            danger: true,
-            disabled: !clipboardSelection.hasSelection,
-            onClick: () => dispatchClipboardAction('delete'),
-          },
-          ...(clipboardSelection.isImage
-            ? [{
-                id: 'reveal',
-                label: '在资源管理器中打开',
-                icon: FolderOpen,
-                separator: true,
-                onClick: () => dispatchClipboardAction('reveal'),
-              }]
-            : []),
+          ...clipboardItemMenuItems,
           {
             id: 'clear-all',
             label: '清空历史',
@@ -332,7 +345,7 @@ function App() {
       },
     };
     return configs;
-  }, [always_on_top, commonMenuItems, clipboardSelection, dispatchClipboardAction, handleToggleAlwaysOnTop, handleClearClipboard, handleExportClipboard, handleResetSettings]);
+  }, [always_on_top, commonMenuItems, clipboardItemMenuItems, handleToggleAlwaysOnTop, handleClearClipboard, handleExportClipboard, handleResetSettings]);
 
   // Load settings on mount
   useEffect(() => {
@@ -401,7 +414,8 @@ function App() {
   // Listen for companion "AI 分析" requests: prefill chat and switch to chat view
   useEffect(() => {
     const unlisten = listen<string>('companion:analyze', (event) => {
-      useAppStore.getState().setChatPrefill(event.payload);
+      // 错误日志的分析包装文案在这里组装，chatPrefill 通道本身只承载「填入输入框的原文」
+      useAppStore.getState().setChatPrefill(`请分析以下错误日志的原因和解决方案：\n\n${event.payload}`);
       setActiveView('chat');
     });
 
@@ -505,7 +519,7 @@ function App() {
     if ((e.target as HTMLElement).closest('input, textarea')) return;
     e.preventDefault();
     const MENU_WIDTH = 240;
-    const menuHeight = (currentConfig?.menuItems.length ?? 6) * 37 + 20;
+    const menuHeight = clipboardItemMenuItems.length * 37 + 20;
     setContextMenu({
       x: Math.min(e.clientX, window.innerWidth - MENU_WIDTH),
       y: Math.min(e.clientY, window.innerHeight - menuHeight),
@@ -538,7 +552,7 @@ function App() {
         </>
       )}
 
-      {/* 剪贴板右键菜单（与「操作」下拉同一内容，浮现在光标处） */}
+      {/* 剪贴板右键菜单（条目级动作子集，浮现在光标处；列表级/通用项只在顶部「操作」下拉） */}
       {contextMenu && (
         <div
           ref={contextMenuRef}
@@ -551,7 +565,7 @@ function App() {
           }}
         >
           <MenuPanel
-            items={currentConfig?.menuItems || []}
+            items={clipboardItemMenuItems}
             onItemClick={(item) => {
               if (!item.disabled) {
                 item.onClick();

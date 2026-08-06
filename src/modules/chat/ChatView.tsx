@@ -285,10 +285,10 @@ export function ChatView() {
   const historyBtnRef = useRef<HTMLButtonElement>(null);
   const historyPanelRef = useRef<HTMLDivElement>(null);
 
-  // Consume companion prefill: wrap raw error content into an analysis prompt
+  // Consume prefill: 原文填入输入框（companion 错误分析 / 剪贴板「发送给AI」共用通道，包装文案由发送方组装）
   useEffect(() => {
     if (chatPrefill) {
-      setInput(`请分析以下错误日志的原因和解决方案：\n\n${chatPrefill}`);
+      setInput(chatPrefill);
       setChatPrefill(null);
       setMode('chat');
       // 等视图切换渲染完成后聚焦

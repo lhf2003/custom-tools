@@ -22,6 +22,7 @@ import type { ClipboardItemData, ClipboardQuery, TabType } from './types';
 import { ClipboardListItem } from './ClipboardListItem';
 import { ClipboardDetail } from './ClipboardDetail';
 import { useClipboardSelectionStore } from '@/stores/clipboardSelectionStore';
+import { useAppStore } from '@/stores/appStore';
 
 /** 焦点在输入框/文本域时不响应单键快捷键（F 收藏 / Del 删除），避免与输入冲突 */
 function isTypingTarget(): boolean {
@@ -213,6 +214,16 @@ export function ClipboardView() {
     }
   }, [items, selectedId]);
 
+  // 发送给AI：条目内容原文填入聊天输入框并切到聊天视图（不自动发送，用户可补充指令）
+  // 文本发原文；图片发 PNG 落盘路径；文件发换行分隔的路径列表（与详情面板展示口径一致）
+  const handleSendToAI = useCallback(() => {
+    const item = items.find((i) => i.id === selectedId);
+    if (!item) return;
+    const { setChatPrefill, setActiveView } = useAppStore.getState();
+    setChatPrefill(item.content);
+    setActiveView('chat');
+  }, [items, selectedId]);
+
   // Group items by date
   const groupedItems = useMemo(() => {
     const groups: { [key: string]: ClipboardItemData[] } = {};
@@ -273,19 +284,22 @@ export function ClipboardView() {
     const onFavorite = () => { if (selectedId != null) handleToggleFavorite(selectedId); };
     const onDelete = () => { if (selectedId != null) handleDelete(selectedId); };
     const onReveal = () => { handleRevealInExplorer(); };
+    const onSendToAI = () => { handleSendToAI(); };
     window.addEventListener('clipboard:paste-selected', onPaste);
     window.addEventListener('clipboard:copy-selected', onCopy);
     window.addEventListener('clipboard:favorite-selected', onFavorite);
     window.addEventListener('clipboard:delete-selected', onDelete);
     window.addEventListener('clipboard:reveal-selected', onReveal);
+    window.addEventListener('clipboard:send-to-ai-selected', onSendToAI);
     return () => {
       window.removeEventListener('clipboard:paste-selected', onPaste);
       window.removeEventListener('clipboard:copy-selected', onCopy);
       window.removeEventListener('clipboard:favorite-selected', onFavorite);
       window.removeEventListener('clipboard:delete-selected', onDelete);
       window.removeEventListener('clipboard:reveal-selected', onReveal);
+      window.removeEventListener('clipboard:send-to-ai-selected', onSendToAI);
     };
-  }, [selectedId, handlePasteItem, handleCopyToClipboard, handleToggleFavorite, handleDelete, handleRevealInExplorer]);
+  }, [selectedId, handlePasteItem, handleCopyToClipboard, handleToggleFavorite, handleDelete, handleRevealInExplorer, handleSendToAI]);
 
   // Keyboard navigation for clipboard list
   useEffect(() => {
