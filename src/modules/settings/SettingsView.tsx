@@ -4,7 +4,6 @@ import {
   Settings,
   Bot,
   BookOpen,
-  History,
   Info,
   Sparkles,
   BarChart3,
@@ -22,7 +21,6 @@ import { ToolsSettings } from './tabs/ToolsSettings';
 import { StatsSettings } from './tabs/StatsSettings';
 import { ManualSettings } from './tabs/ManualSettings';
 import { PluginMarketSettings } from './tabs/PluginMarketSettings';
-import { ChangelogSettings } from './tabs/ChangelogSettings';
 import { AboutSettings } from './tabs/AboutSettings';
 
 const NAV_GROUPS = [
@@ -51,7 +49,6 @@ const NAV_GROUPS = [
     items: [
       { id: 'manual', name: '操作手册', icon: BookOpen },
       { id: 'about', name: '关于我们', icon: Info },
-      { id: 'changelog', name: '更新日志', icon: History },
     ],
   },
 ] as const;
@@ -68,7 +65,6 @@ const TAB_CONTENT: Record<TabId, React.ReactNode> = {
   manual: <ManualSettings />,
   'plugin-market': <PluginMarketSettings />,
   about: <AboutSettings />,
-  changelog: <ChangelogSettings />,
 };
 
 export function SettingsView() {
@@ -84,9 +80,9 @@ export function SettingsView() {
       <aside className="w-52 flex flex-col flex-shrink-0">
         <h3 className="text-base font-semibold text-app-text-primary px-3.5 pt-4 pb-2">设置</h3>
         <nav className="flex-1 overflow-y-auto px-2 pb-4">
-          {NAV_GROUPS.map((group) => (
-            <div key={group.label}>
-              <div className="text-xs font-semibold text-app-text-tertiary px-2.5 mt-4 mb-1 first:mt-1">
+          {NAV_GROUPS.map((group, groupIndex) => (
+            <div key={group.label} className={groupIndex === 0 ? 'mt-1' : 'mt-4'}>
+              <div className="text-xs font-semibold text-app-text-tertiary px-2.5 mb-1">
                 {group.label}
               </div>
               {group.items.map((tab) => {

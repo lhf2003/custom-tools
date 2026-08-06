@@ -44,7 +44,8 @@ export function useUpdater() {
       const msg = err instanceof Error ? err.message : '检查更新失败';
       setError(msg);
       console.error('Failed to check for update:', err);
-      return null;
+      // 抛出让调用方区分「已是最新」（resolve null）与「检查失败」（reject）
+      throw err;
     } finally {
       setIsChecking(false);
     }

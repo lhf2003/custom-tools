@@ -1,3 +1,8 @@
+import { useEffect } from 'react';
+import { X } from 'lucide-react';
+
+/* ==================== 更新日志数据（静态历史版本记录） ==================== */
+
 interface ChangelogEntry {
   version: string;
   date: string;
@@ -197,40 +202,81 @@ const TAG_LABEL: Record<ChangelogEntry['tag'], string> = {
   build: '构建',
 };
 
-export function ChangelogSettings() {
+/* ==================== 弹窗 ==================== */
+
+interface ChangelogModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+/** 更新日志弹窗：静态历史版本记录（关于页「更新日志」行触发），Esc/遮罩点击关闭 */
+export function ChangelogModal({ isOpen, onClose }: ChangelogModalProps) {
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, onClose]);
+
+  if (!isOpen) return null;
+
   return (
-    <>
-      <div>
-        {CHANGELOG.map((entry, index) => (
-          <div key={entry.version} className="mb-6">
-            <div className="flex items-center gap-2.5 px-3 mb-2">
-              <span className="text-app-text-primary text-sm font-semibold font-mono">
-                v{entry.version}
-              </span>
-              {index === 0 && (
-                <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-app-status-success/15 text-app-status-success">
-                  最新
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="w-[520px] max-h-[80vh] bg-app-bg-tertiary rounded-xl shadow-2xl border border-white/10 overflow-hidden flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-app-border-subtle flex-shrink-0">
+          <h2 className="text-base font-semibold text-app-text-primary">更新日志</h2>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-app-text-tertiary hover:text-app-text-primary hover:bg-white/10 transition-colors cursor-pointer"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Content：版本块间 hairline 分隔 */}
+        <div className="flex-1 overflow-y-auto px-5 divide-y divide-app-border-subtle">
+          {CHANGELOG.map((entry, index) => (
+            <div key={entry.version} className="py-4">
+              <div className="flex items-center gap-2.5 mb-2">
+                <span className="text-app-text-primary text-sm font-semibold font-mono">
+                  v{entry.version}
                 </span>
-              )}
-              <span className={`px-1.5 py-0.5 text-[10px] font-semibold rounded ${TAG_STYLE[entry.tag]}`}>
-                {TAG_LABEL[entry.tag]}
-              </span>
-              <span className="text-app-text-disabled text-xs ml-auto">{entry.date}</span>
-            </div>
-            <ul>
-              {entry.items.map((item) => (
-                <li
-                  key={item}
-                  className="flex items-start gap-2.5 px-3 py-1 text-xs text-app-text-secondary leading-relaxed"
+                {index === 0 && (
+                  <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-app-status-success/15 text-app-status-success">
+                    最新
+                  </span>
+                )}
+                <span
+                  className={`px-1.5 py-0.5 text-[10px] font-semibold rounded ${TAG_STYLE[entry.tag]}`}
                 >
-                  <span className="mt-[7px] w-1 h-1 rounded-full bg-app-text-disabled flex-shrink-0" />
-                  {item}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
+                  {TAG_LABEL[entry.tag]}
+                </span>
+                <span className="text-app-text-disabled text-xs ml-auto">{entry.date}</span>
+              </div>
+              <ul>
+                {entry.items.map((item) => (
+                  <li
+                    key={item}
+                    className="flex items-start gap-2.5 py-1 text-xs text-app-text-secondary leading-relaxed"
+                  >
+                    <span className="mt-[7px] w-1 h-1 rounded-full bg-app-text-disabled flex-shrink-0" />
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
       </div>
-    </>
+    </div>
   );
 }
