@@ -35,6 +35,17 @@ pub fn record_search(conn: &Connection, path: &str, name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Delete usage record for a path (app uninstalled/removed).
+/// COLLATE NOCASE:与 app_cache 的 mark_invalid 一致,Windows 路径大小写不敏感。
+pub fn delete_by_path(conn: &Connection, path: &str) -> Result<()> {
+    conn.execute(
+        "DELETE FROM app_usage WHERE path COLLATE NOCASE = ?1",
+        [path],
+    )?;
+
+    Ok(())
+}
+
 /// Get app usage stats for a specific app
 pub fn get_usage(conn: &Connection, path: &str) -> Result<Option<AppUsage>> {
     let mut stmt = conn.prepare(

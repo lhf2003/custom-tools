@@ -746,8 +746,22 @@ pub(crate) fn show_main_window(app_handle: &tauri::AppHandle) {
 
         let _ = window.show();
         let _ = window.set_focus();
-        // 通知前端窗口已唤起（用于重置启动器搜索状态）
-        let _ = app_handle.emit("window:shown", ());
+        emit_window_shown(app_handle);
+    }
+}
+
+/// 唤起窗口后统一通知前端（所有"窗口显示"路径的收口），并触发应用索引
+/// 有效性校验——被删除的应用（含卸载的 Store 应用/绿色软件、删掉的快捷方式
+/// 文件夹）在下次唤起时即从索引移除，不再依赖 24h 全量扫描兜底。
+/// 校验在后台线程执行，不阻塞窗口显示与搜索。
+pub(crate) fn emit_window_shown(app_handle: &tauri::AppHandle) {
+    use tauri::Emitter;
+
+    // 通知前端窗口已唤起（用于重置启动器搜索状态）
+    let _ = app_handle.emit("window:shown", ());
+
+    if let Some(state) = app_handle.try_state::<commands::search::SearchState>() {
+        commands::search::verify_app_index(commands::search::SearchState(state.0.clone()));
     }
 }
 

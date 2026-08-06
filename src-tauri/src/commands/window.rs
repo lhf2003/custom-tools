@@ -1,4 +1,4 @@
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 
 /// Position window at top of screen with padding on the monitor with cursor
 fn position_window_at_top(window: &tauri::WebviewWindow) -> Result<(), String> {
@@ -39,7 +39,7 @@ pub async fn show_window(app_handle: tauri::AppHandle) -> Result<(), String> {
         position_window_at_top(&window)?;
         window.show().map_err(|e| e.to_string())?;
         window.set_focus().map_err(|e| e.to_string())?;
-        let _ = app_handle.emit("window:shown", ());
+        crate::emit_window_shown(&app_handle);
     }
     Ok(())
 }
@@ -65,7 +65,7 @@ pub async fn toggle_window(app_handle: tauri::AppHandle) -> Result<bool, String>
             position_window_at_top(&window)?;
             window.show().map_err(|e| e.to_string())?;
             window.set_focus().map_err(|e| e.to_string())?;
-            let _ = app_handle.emit("window:shown", ());
+            crate::emit_window_shown(&app_handle);
             Ok(true)
         }
     } else {

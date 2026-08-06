@@ -7,6 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub mod everything;
 pub mod icon;
 pub mod registry;
+pub mod system_features;
 pub mod uwp;
 pub mod watcher;
 
@@ -139,6 +140,9 @@ pub struct SearchIndex {
     /// 避免两个线程并发执行 collect_all_apps。
     scanning: bool,
     db_state: Option<Arc<DatabaseState>>,
+    /// 上次 UWP 条目全量重扫时间。Get-StartApps 走 PowerShell 进程
+    /// （数百毫秒~秒级），唤起时校验不能每次都跑，按间隔节流。
+    last_uwp_verify: Option<std::time::Instant>,
 }
 
 impl SearchIndex {
@@ -148,6 +152,7 @@ impl SearchIndex {
             indexed: false,
             scanning: false,
             db_state: None,
+            last_uwp_verify: None,
         }
     }
 
@@ -157,6 +162,7 @@ impl SearchIndex {
             indexed: false,
             scanning: false,
             db_state: Some(db_state),
+            last_uwp_verify: None,
         }
     }
 
@@ -175,8 +181,13 @@ impl SearchIndex {
 
             if app_cache::has_cache(&conn)? {
                 let entries = app_cache::load_all(&conn)?;
+                // 历史脏数据修复：旧版本缓存里跨来源重复条目（同 target /
+                // 同 name 不同 path），按与 collect_all_apps 一致的规则去重，
+                // 否则重启后短时间内仍能看到"两个一模一样的应用"
+                let entries = dedup_cache_entries(entries);
                 self.apps = entries.into_iter().map(AppItem::from).collect();
                 self.indexed = true;
+                self.merge_system_features();
 
                 log::info!("Loaded {} applications from cache", self.apps.len());
                 return Ok(true);
@@ -194,33 +205,43 @@ impl SearchIndex {
         let start = std::time::Instant::now();
 
         let mut apps = Vec::new();
-        let mut seen = HashSet::new();
+        // 双重去重（修复跨来源重复，如"暴雪战网"的两条记录）：
+        // - seen_targets: 按解析后的目标路径去重——同一 exe 的多个快捷方式/
+        //   来源（"向日葵远程控制.lnk" 与 "卸载向日葵远程控制.lnk" 同指
+        //   AweSun.exe）只保留先到的 .lnk；
+        // - seen_names: 按名称去重——同应用的不同 exe（.lnk 指向
+        //   Battle.net Launcher.exe、注册表指向 Battle.net.exe）只保留
+        //   先到的 .lnk。name 维度有误杀同名不同应用的风险（罕见），
+        //   换来的收益是搜索结果不再出现"两个一模一样的应用"。
+        let mut seen_targets = HashSet::new();
+        let mut seen_names = HashSet::new();
 
         // System start menu
         let system_start_menu =
             PathBuf::from("C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs");
-        scan_dir_if_local(&system_start_menu, &mut apps, &mut seen);
+        scan_dir_if_local(&system_start_menu, &mut apps, &mut seen_targets);
 
         // User start menu & Desktop shortcuts
         if let Ok(user_profile) = std::env::var("USERPROFILE") {
             let user_start_menu = PathBuf::from(user_profile.clone())
                 .join("AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs");
-            scan_dir_if_local(&user_start_menu, &mut apps, &mut seen);
+            scan_dir_if_local(&user_start_menu, &mut apps, &mut seen_targets);
 
             let desktop = PathBuf::from(user_profile).join("Desktop");
-            scan_dir_if_local(&desktop, &mut apps, &mut seen);
+            scan_dir_if_local(&desktop, &mut apps, &mut seen_targets);
         }
 
-        // Registry apps (green software without Start Menu shortcuts)
+        // Registry apps (green software without Start Menu shortcuts)。
+        // 与 .lnk 目标重复（同一应用）或同名（同应用不同 exe）都跳过——
+        // .lnk 先扫描，来源优先级上 .lnk 胜出，保证启动行为与开始菜单一致。
         let registry_apps = registry::scan();
         log::info!("Registry scan found {} apps", registry_apps.len());
         for reg_app in registry_apps {
-            let key = format!(
-                "{}|{}",
-                reg_app.name.to_lowercase(),
-                reg_app.exe_path.to_lowercase()
-            );
-            if seen.insert(key) {
+            let target_key = reg_app.exe_path.to_lowercase();
+            if !seen_targets.contains(&target_key)
+                && seen_names.insert(reg_app.name.to_lowercase())
+            {
+                seen_targets.insert(target_key);
                 let pinyin = to_pinyin_initials(&reg_app.name);
                 apps.push(AppItem {
                     name: reg_app.name,
@@ -236,8 +257,11 @@ impl SearchIndex {
         log::info!("UWP scan found {} apps", uwp_apps.len());
         for uwp_app in uwp_apps {
             let launch = uwp::launch_path(&uwp_app.app_id);
-            let key = format!("{}|{}", uwp_app.name.to_lowercase(), launch.to_lowercase());
-            if seen.insert(key) {
+            let target_key = launch.to_lowercase();
+            if !seen_targets.contains(&target_key)
+                && seen_names.insert(uwp_app.name.to_lowercase())
+            {
+                seen_targets.insert(target_key);
                 let pinyin = to_pinyin_initials(&uwp_app.name);
                 apps.push(AppItem {
                     name: uwp_app.name,
@@ -252,7 +276,7 @@ impl SearchIndex {
         let custom_dirs = load_custom_dirs(db_state);
         for dir_path in custom_dirs {
             let dir = PathBuf::from(&dir_path);
-            scan_dir_if_local(&dir, &mut apps, &mut seen);
+            scan_dir_if_local(&dir, &mut apps, &mut seen_targets);
         }
 
         // Sort by name alphabetically
@@ -301,6 +325,26 @@ impl SearchIndex {
         self.apps = apps;
         self.indexed = true;
         self.scanning = false;
+        self.merge_system_features();
+    }
+
+    /// 合入 Windows 系统功能（ms-settings 设置页）到内存索引。
+    /// 静态清单不进缓存（无缓存意义），每次索引就绪（缓存加载/全量扫描/
+    /// 后台刷新）后调用——设置页条目由此常驻索引，不依赖文件系统与外部
+    /// 进程，也无需 watcher。按 name 去重：同 URI 可有多条（如"已安装的
+    /// 应用"与"卸载应用"同指 ms-settings:appsfeatures，不同搜索词都要命中）。
+    pub fn merge_system_features(&mut self) {
+        let mut seen: HashSet<String> = self.apps.iter().map(|a| a.name.clone()).collect();
+        for feat in system_features::scan() {
+            if seen.insert(feat.name.to_string()) {
+                self.apps.push(AppItem {
+                    name: feat.name.to_string(),
+                    path: feat.uri.to_string(),
+                    icon: None,
+                    pinyin_initials: to_pinyin_initials(feat.name),
+                });
+            }
+        }
     }
 
     /// 标记一次全量扫描开始（在锁内调用；collect_all_apps 本身不持锁执行）。
@@ -350,6 +394,7 @@ impl SearchIndex {
         let apps = Self::collect_all_apps(&self.db_state)?;
         self.apps = apps;
         self.indexed = true;
+        self.merge_system_features();
 
         log::info!("Refreshed {} applications", self.apps.len());
 
@@ -368,21 +413,22 @@ impl SearchIndex {
     /// Incremental update for a single file
     pub fn add_or_update_app(&mut self, path: &Path) -> anyhow::Result<()> {
         if let Some((app, target_path)) = parse_shortcut(path) {
-            // Check for duplicates
-            let key = format!("{}|{}", app.name.to_lowercase(), target_path.to_lowercase());
+            // 去重与 collect_all_apps 一致：先按目标路径找已有条目（更新），
+            // 再按名称找（同名跳过——同应用不同 exe 不新增），否则新增。
+            let target_key = target_path.to_lowercase();
 
             // Update in-memory list
             if let Some(existing) = self.apps.iter_mut().find(|a| {
                 let existing_target =
                     parse_shortcut_target(Path::new(&a.path)).unwrap_or_else(|| a.path.clone());
-                format!(
-                    "{}|{}",
-                    a.name.to_lowercase(),
-                    existing_target.to_lowercase()
-                ) == key
+                existing_target.to_lowercase() == target_key
             }) {
                 *existing = app.clone();
-            } else {
+            } else if !self
+                .apps
+                .iter()
+                .any(|a| a.name.eq_ignore_ascii_case(&app.name))
+            {
                 self.apps.push(app.clone());
                 self.apps
                     .sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
@@ -415,7 +461,9 @@ impl SearchIndex {
         let path_str = path.to_string_lossy().to_string();
 
         // Remove from in-memory list
-        self.apps.retain(|a| a.path != path_str);
+        // eq_ignore_ascii_case:Windows 路径大小写不敏感,watcher 报告的
+        // 路径大小写可能与扫描时存储的不一致,精确比较会静默漏删
+        self.apps.retain(|a| !a.path.eq_ignore_ascii_case(&path_str));
 
         // Mark as invalid in cache
         if let Some(ref db_state) = self.db_state {
@@ -432,6 +480,92 @@ impl SearchIndex {
 
         Ok(())
     }
+
+    /// Remove all apps under a directory (whole-folder deletion).
+    /// 卸载程序常直接删除整个快捷方式文件夹,ReadDirectoryChangesW 只报告
+    /// 目录本身的删除、子 .lnk 不会逐个触发 Remove——按路径前缀批量失效。
+    /// 边界判断:目录 `...\Cursor` 只命中其下的条目,不误伤 `...\Cursor2\`。
+    pub fn remove_app_by_prefix(&mut self, dir: &Path) -> anyhow::Result<()> {
+        let prefix = dir.to_string_lossy().to_lowercase();
+        let prefix_len = prefix.len();
+
+        self.apps.retain(|a| {
+            let p = a.path.to_lowercase();
+            !(p.starts_with(&prefix)
+                && (p.len() == prefix_len || p[prefix_len..].starts_with('\\')))
+        });
+
+        if let Some(ref db_state) = self.db_state {
+            if let Ok(conn) = rusqlite::Connection::open(&db_state.0) {
+                if let Err(e) = app_cache::mark_invalid_by_prefix(&conn, &dir.to_string_lossy()) {
+                    log::warn!(
+                        "Failed to mark {} subtree as invalid in cache: {}",
+                        dir.display(),
+                        e
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// UWP 条目全量重扫的最短间隔。Get-StartApps 每次启动 PowerShell 进程,
+    /// 在慢环境可达秒级——唤起校验不能每次都跑,间隔内 UWP 条目跳过校验。
+    const UWP_VERIFY_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
+    /// 查询 UWP 条目是否到期该重扫（锁内调用,微秒级）。到期则更新计时。
+    pub fn uwp_verify_due(&mut self) -> bool {
+        let due = self
+            .last_uwp_verify
+            .map_or(true, |t| t.elapsed() >= Self::UWP_VERIFY_INTERVAL);
+        if due {
+            self.last_uwp_verify = Some(std::time::Instant::now());
+        }
+        due
+    }
+
+    /// 校验条目是否仍然有效。纯函数:不持锁、不碰 self,由调用方在锁外执行。
+    ///
+    /// - `shell:AppsFolder\` 前缀（UWP 条目）:文件系统不存在该路径,只能重扫
+    ///   Get-StartApps 做 diff;`uwp_rescan` 为 false 时跳过（未到期）;
+    /// - 其他条目（.lnk / 注册表来源的 .exe）:文件存在性检查,毫秒级;
+    /// - UNC 路径跳过:断网网络盘上 stat 会阻塞数秒,与扫描侧行为一致。
+    ///
+    /// 返回失效条目的 path 列表。
+    pub fn verify_apps_on_disk(apps: &[AppItem], uwp_rescan: bool) -> Vec<String> {
+        let uwp_valid: HashSet<String> = if uwp_rescan {
+            uwp::scan()
+                .iter()
+                .map(|u| uwp::launch_path(&u.app_id))
+                .collect()
+        } else {
+            HashSet::new()
+        };
+
+        apps.iter()
+            .filter_map(|app| {
+                let p = &app.path;
+                if p.starts_with("shell:AppsFolder\\") {
+                    if uwp_rescan && !uwp_valid.contains(p) {
+                        Some(p.clone())
+                    } else {
+                        None
+                    }
+                } else if p.starts_with("\\\\") {
+                    None
+                } else if p.starts_with("ms-settings:") {
+                    // 系统功能条目（ms-settings URI）：非文件路径，
+                    // Path::exists() 恒为 false，必须跳过否则被误删
+                    None
+                } else if !Path::new(p).exists() {
+                    Some(p.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
 }
 
 /// 目录递归扫描的最大深度（开始菜单/桌面正常不超过 3 层，限制深度防御异常目录树）
@@ -439,7 +573,7 @@ const MAX_SCAN_DEPTH: usize = 5;
 
 /// Scan a local directory for shortcuts. UNC paths are skipped outright — a
 /// disconnected network drive can block `read_dir` for tens of seconds.
-fn scan_dir_if_local(dir: &Path, apps: &mut Vec<AppItem>, seen: &mut HashSet<String>) {
+fn scan_dir_if_local(dir: &Path, apps: &mut Vec<AppItem>, seen_targets: &mut HashSet<String>) {
     if dir.as_os_str().to_string_lossy().starts_with("\\\\") {
         log::warn!("Skipping UNC scan directory: {}", dir.display());
         return;
@@ -447,7 +581,7 @@ fn scan_dir_if_local(dir: &Path, apps: &mut Vec<AppItem>, seen: &mut HashSet<Str
     if !dir.exists() {
         return;
     }
-    if let Err(e) = scan_directory(dir, apps, seen, 0) {
+    if let Err(e) = scan_directory(dir, apps, seen_targets, 0) {
         log::warn!("Failed to scan directory {}: {}", dir.display(), e);
     }
 }
@@ -455,7 +589,7 @@ fn scan_dir_if_local(dir: &Path, apps: &mut Vec<AppItem>, seen: &mut HashSet<Str
 fn scan_directory(
     dir: &Path,
     apps: &mut Vec<AppItem>,
-    seen: &mut HashSet<String>,
+    seen_targets: &mut HashSet<String>,
     depth: usize,
 ) -> anyhow::Result<()> {
     if depth > MAX_SCAN_DEPTH {
@@ -480,15 +614,17 @@ fn scan_directory(
 
         if file_type.is_dir() && !file_type.is_symlink() {
             // 单个子目录失败(权限/网络超时)不拖垮整个扫描
-            if let Err(e) = scan_directory(&path, apps, seen, depth + 1) {
+            if let Err(e) = scan_directory(&path, apps, seen_targets, depth + 1) {
                 log::warn!("Failed to scan subdirectory {}: {}", path.display(), e);
             }
         } else if let Some(ext) = path.extension() {
             if ext.eq_ignore_ascii_case("lnk") {
                 if let Some((app, target_path)) = parse_shortcut(&path) {
-                    // Use target path for deduplication
-                    let key = format!("{}|{}", app.name.to_lowercase(), target_path.to_lowercase());
-                    if seen.insert(key) {
+                    // 按目标路径去重（不含 name）：同一 exe 的多个快捷方式
+                    // （如"向日葵远程控制.lnk"与"卸载向日葵远程控制.lnk"）
+                    // 只保留先扫到的条目
+                    let key = target_path.to_lowercase();
+                    if seen_targets.insert(key) {
                         apps.push(app);
                     }
                 }
@@ -529,6 +665,55 @@ fn parse_shortcut(path: &Path) -> Option<(AppItem, String)> {
     };
 
     Some((app, target_path))
+}
+
+/// 缓存条目按 collect_all_apps 的双重去重规则去重（target 维度 + name 维度），
+/// 冲突时优先保留 .lnk 条目（启动行为与开始菜单一致）。用于修复历史缓存
+/// 里已存在的跨来源重复记录——全量扫描会在 24h 内用 replace_batch 重建缓存，
+/// 但去重应即时生效，不依赖重建时机。
+fn dedup_cache_entries(entries: Vec<AppCacheEntry>) -> Vec<AppCacheEntry> {
+    fn is_lnk(path: &str) -> bool {
+        path.to_lowercase().ends_with(".lnk")
+    }
+
+    // 第一轮：按 target_path 去重
+    let mut by_target: Vec<AppCacheEntry> = Vec::new();
+    let mut target_idx: HashMap<String, usize> = HashMap::new();
+    for entry in entries {
+        let key = entry.target_path.to_lowercase();
+        match target_idx.get(&key) {
+            None => {
+                target_idx.insert(key, by_target.len());
+                by_target.push(entry);
+            }
+            Some(&i) => {
+                // .lnk 优先：新条目是 .lnk 且已有条目不是 → 替换
+                if !is_lnk(&by_target[i].path) && is_lnk(&entry.path) {
+                    by_target[i] = entry;
+                }
+            }
+        }
+    }
+
+    // 第二轮：按 name 去重
+    let mut by_name: Vec<AppCacheEntry> = Vec::new();
+    let mut name_idx: HashMap<String, usize> = HashMap::new();
+    for entry in by_target {
+        let key = entry.name.to_lowercase();
+        match name_idx.get(&key) {
+            None => {
+                name_idx.insert(key, by_name.len());
+                by_name.push(entry);
+            }
+            Some(&i) => {
+                if !is_lnk(&by_name[i].path) && is_lnk(&entry.path) {
+                    by_name[i] = entry;
+                }
+            }
+        }
+    }
+
+    by_name
 }
 
 /// Read custom scan directories from the database settings table.
@@ -669,6 +854,13 @@ impl SearchIndex {
 
     pub fn is_indexed(&self) -> bool {
         self.indexed
+    }
+
+    /// 打开索引关联的数据库连接（供调用方连带清理其他表，如 app_usage）。
+    pub fn db_connection(&self) -> Option<rusqlite::Connection> {
+        self.db_state
+            .as_ref()
+            .and_then(|s| rusqlite::Connection::open(&s.0).ok())
     }
 }
 

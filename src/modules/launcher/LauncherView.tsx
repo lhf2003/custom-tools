@@ -1,4 +1,4 @@
-import { Search, User, PenLine } from 'lucide-react';
+import { Search, User, PenLine, Settings } from 'lucide-react';
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { parse as parseJsonc, type ParseError } from 'jsonc-parser';
@@ -641,7 +641,7 @@ function ItemCard({
 
   // Load icon for external apps (with module-level cache to survive view switches)
   useEffect(() => {
-    if (item.isBuiltIn || iconRequestedRef.current) return;
+    if (item.isBuiltIn || item.path.startsWith('ms-settings:') || iconRequestedRef.current) return;
     iconRequestedRef.current = true;
 
     const cached = getCachedIcon(item.path);
@@ -695,6 +695,33 @@ function ItemCard({
         </button>
       );
     }
+  }
+
+  // Windows 系统功能（ms-settings: URI，后端 system_features 清单）：
+  // 统一设置图标，与内置工具同一视觉纪律，不请求 extract_app_icon
+  if (item.path.startsWith('ms-settings:')) {
+    return (
+      <button
+        ref={cardRef}
+        id={id}
+        onClick={onClick}
+        onMouseEnter={onHover}
+        role="option"
+        aria-selected={isSelected}
+        tabIndex={-1}
+        className={`flex flex-col items-center group py-2 rounded-lg transition-colors ${isSelected ? 'bg-white/10' : ''}`}
+      >
+        <div className="w-8 h-8 rounded-lg bg-app-bg-elevated flex items-center justify-center mb-1.5 group-hover:scale-105 transition-transform">
+          <Settings className="w-4 h-4 text-app-text-secondary" />
+        </div>
+        <span
+          title={item.name}
+          className={`line-clamp-2 text-xs w-full text-center transition-colors leading-tight ${isSelected ? 'text-app-text-primary font-medium' : 'text-app-text-tertiary group-hover:text-app-text-primary'}`}
+        >
+          {item.name}
+        </span>
+      </button>
+    );
   }
 
   // For external apps with loaded icon

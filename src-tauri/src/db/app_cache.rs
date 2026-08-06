@@ -205,10 +205,29 @@ pub fn save_batch(conn: &mut Connection, entries: &[AppCacheEntry]) -> Result<()
 }
 
 /// Mark entries as invalid (soft delete)
+/// COLLATE NOCASE:Windows 路径大小写不敏感,watcher 报告的路径大小写
+/// 可能与扫描时存储的不一致,精确比较会静默漏删
 pub fn mark_invalid(conn: &Connection, path: &str) -> Result<()> {
     conn.execute(
-        "UPDATE app_cache SET is_valid = 0, updated_at = CURRENT_TIMESTAMP WHERE path = ?1",
+        "UPDATE app_cache SET is_valid = 0, updated_at = CURRENT_TIMESTAMP
+         WHERE path COLLATE NOCASE = ?1",
         [path],
+    )?;
+
+    Ok(())
+}
+
+/// Mark all entries under a directory prefix as invalid (soft delete).
+/// 用于整个目录被删除的场景（卸载程序常直接删掉整个快捷方式文件夹，
+/// ReadDirectoryChangesW 只报告目录本身的删除，子 .lnk 不会逐个触发）。
+/// 用 substr 前缀比较而非 LIKE——路径中的 `_` 会被 LIKE 当通配符误匹配；
+/// 尾部边界判断防止 `...\Cursor` 误伤 `...\Cursor2\`。
+pub fn mark_invalid_by_prefix(conn: &Connection, dir: &str) -> Result<()> {
+    conn.execute(
+        "UPDATE app_cache SET is_valid = 0, updated_at = CURRENT_TIMESTAMP
+         WHERE substr(path, 1, length(?1)) = ?1
+           AND (length(path) = length(?1) OR substr(path, length(?1) + 1, 1) = '\')",
+        [dir],
     )?;
 
     Ok(())

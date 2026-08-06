@@ -17,6 +17,8 @@ pub enum WatcherEvent {
     Add(PathBuf),
     /// File removed
     Remove(PathBuf),
+    /// Directory removed (all shortcuts under it are stale)
+    RemoveDir(PathBuf),
     /// Batch update (debounced)
     BatchUpdate,
 }
@@ -26,13 +28,14 @@ pub struct AppWatcher {
     #[allow(dead_code)]
     watcher: RecommendedWatcher,
     event_sender: mpsc::Sender<WatcherEvent>,
+    db_state: Arc<DatabaseState>,
 }
 
 impl AppWatcher {
     /// Start watching application directories
     pub fn start(
         index: Arc<Mutex<SearchIndex>>,
-        _db_state: Arc<DatabaseState>,
+        db_state: Arc<DatabaseState>,
     ) -> anyhow::Result<Self> {
         let (tx, rx) = mpsc::channel::<WatcherEvent>();
         let event_sender = tx.clone();
@@ -61,6 +64,11 @@ impl AppWatcher {
                             for path in &event.paths {
                                 if is_lnk_file(path) {
                                     let _ = event_sender.send(WatcherEvent::Remove(path.clone()));
+                                } else if path.extension().is_none() {
+                                    // 目录被整个删除：ReadDirectoryChangesW 对目录
+                                    // 删除只报告目录本身，子 .lnk 不会逐个触发 Remove。
+                                    // 无扩展名按目录处理，按前缀批量失效。
+                                    let _ = event_sender.send(WatcherEvent::RemoveDir(path.clone()));
                                 }
                             }
                         }
@@ -79,6 +87,7 @@ impl AppWatcher {
         let mut app_watcher = Self {
             watcher,
             event_sender: tx,
+            db_state,
         };
 
         // Watch directories
@@ -125,6 +134,23 @@ impl AppWatcher {
             }
         }
 
+        // 自定义扫描目录（数据库 custom_scan_dirs）：没有 watcher 覆盖时，
+        // 其中的应用增删只能等 24h 全量扫描——必须纳入监听
+        for dir_path in super::load_custom_dirs(&Some(self.db_state.clone())) {
+            let dir = PathBuf::from(dir_path);
+            if dir.as_os_str().to_string_lossy().starts_with("\\\\") {
+                log::warn!("Skipping UNC watch directory: {}", dir.display());
+                continue;
+            }
+            if !dir.exists() {
+                continue;
+            }
+            match self.watcher.watch(&dir, RecursiveMode::Recursive) {
+                Ok(()) => log::info!("Watching custom dir: {}", dir.display()),
+                Err(e) => log::warn!("Failed to watch custom dir {}: {}", dir.display(), e),
+            }
+        }
+
         Ok(())
     }
 
@@ -139,6 +165,7 @@ impl AppWatcher {
 fn process_events(index: Arc<Mutex<SearchIndex>>, receiver: mpsc::Receiver<WatcherEvent>) {
     let mut pending_adds = Vec::new();
     let mut pending_removes = Vec::new();
+    let mut pending_remove_dirs = Vec::new();
     let mut last_update = Instant::now();
 
     while let Ok(event) = receiver.recv() {
@@ -148,6 +175,9 @@ fn process_events(index: Arc<Mutex<SearchIndex>>, receiver: mpsc::Receiver<Watch
             }
             WatcherEvent::Remove(path) => {
                 pending_removes.push(path);
+            }
+            WatcherEvent::RemoveDir(path) => {
+                pending_remove_dirs.push(path);
             }
             WatcherEvent::BatchUpdate => {
                 // Debounce:事件流可能还在持续,先睡到 debounce 期满合并窗口内的
@@ -161,6 +191,21 @@ fn process_events(index: Arc<Mutex<SearchIndex>>, receiver: mpsc::Receiver<Watch
 
                 // Process pending changes
                 if let Ok(mut idx) = index.lock() {
+                    // 目录删除最先处理：整个目录下所有条目批量失效。之后单文件
+                    // Remove/Add 再按自身语义处理（Add 对已删条目会因文件不存在
+                    // 解析失败而不产生添加，不会把僵尸条目加回来）。
+                    for dir in &pending_remove_dirs {
+                        if let Err(e) = idx.remove_app_by_prefix(dir) {
+                            log::warn!(
+                                "Failed to remove app dir {}: {}",
+                                dir.display(),
+                                e
+                            );
+                        } else {
+                            log::info!("Removed app dir: {}", dir.display());
+                        }
+                    }
+
                     // Handle removals first
                     for path in &pending_removes {
                         if let Err(e) = idx.remove_app(path) {
@@ -182,6 +227,7 @@ fn process_events(index: Arc<Mutex<SearchIndex>>, receiver: mpsc::Receiver<Watch
 
                 pending_adds.clear();
                 pending_removes.clear();
+                pending_remove_dirs.clear();
                 last_update = Instant::now();
             }
         }

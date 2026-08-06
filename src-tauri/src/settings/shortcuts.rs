@@ -505,7 +505,7 @@ fn handle_shortcut_action(app_handle: &AppHandle, action_id: &str) {
                 let _ = window.show();
                 let _ = window.set_focus();
             }
-            let _ = app_handle.emit("window:shown", ());
+            crate::emit_window_shown(app_handle);
             let module = match action_id {
                 "open_clipboard" => "clipboard",
                 "open_notes" => "notes",

@@ -2,9 +2,64 @@ use crate::db::app_usage;
 use crate::db::DatabaseState;
 use crate::search::{everything, icon, AppItem, SearchIndex};
 use rusqlite::Connection;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 pub struct SearchState(pub Arc<Mutex<SearchIndex>>);
+
+/// 唤起时校验应用索引的有效性（窗口显示后由 emit_window_shown 触发）：
+/// 文件类条目检查存在性（毫秒级），UWP 条目按 10 分钟间隔重扫 Get-StartApps
+/// 做 diff——卸载的 Store 应用在下次唤起时即消失，不再依赖 24h 全量扫描。
+/// 后台线程执行：PowerShell 重扫可达秒级，不能阻塞窗口显示或搜索。
+/// 设计：锁内快照 → 锁外校验 → 锁内移除，锁内只做微秒级操作。
+pub fn verify_app_index(state: SearchState) {
+    std::thread::spawn(move || {
+        // 1. 锁内快照 + UWP 重扫周期判定（微秒级）
+        let (snapshot, uwp_rescan) = match state.0.lock() {
+            Ok(mut idx) => (idx.get_all(), idx.uwp_verify_due()),
+            Err(e) => {
+                log::error!("Search index lock poisoned in verify: {}", e);
+                return;
+            }
+        };
+        if snapshot.is_empty() {
+            return;
+        }
+
+        // 2. 锁外校验（文件 stat + 可能的 PowerShell 重扫，毫秒~秒级）
+        let stale = SearchIndex::verify_apps_on_disk(&snapshot, uwp_rescan);
+        if stale.is_empty() {
+            return;
+        }
+
+        // 3. 锁内移除（微秒级）
+        let mut idx = match state.0.lock() {
+            Ok(g) => g,
+            Err(e) => {
+                log::error!("Search index lock poisoned in verify: {}", e);
+                return;
+            }
+        };
+        for p in &stale {
+            if let Err(e) = idx.remove_app(Path::new(p)) {
+                log::warn!("Failed to remove stale app {}: {}", p, e);
+                continue;
+            }
+            // 连带清理使用记录：已删除应用留在 app_usage 会让"最近使用"
+            // 区继续展示它（回车启动失败），且持续污染排序
+            let db_conn = idx.db_connection();
+            if let Some(conn) = db_conn {
+                if let Err(e) = app_usage::delete_by_path(&conn, p) {
+                    log::warn!("Failed to delete usage record for {}: {}", p, e);
+                }
+            }
+        }
+        log::info!(
+            "App index verification removed {} stale entries",
+            stale.len()
+        );
+    });
+}
 
 fn get_db_conn(db_state: &tauri::State<'_, DatabaseState>) -> Result<Connection, String> {
     Connection::open(&db_state.0).map_err(|e| e.to_string())
