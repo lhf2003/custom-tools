@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { FolderOpen, MoreHorizontal, Package, Settings2, Sparkles, Trash2 } from 'lucide-react';
-import { PageHeader, SettingGroup, SettingRow, Toggle } from '../components/SettingsPrimitives';
+import { SettingGroup, SettingRow, Toggle } from '../components/SettingsPrimitives';
 import { MenuPanel } from '@/components/ActionMenu';
 import { useToastStore } from '@/stores/toastStore';
 import { listPlugins, listExternalPluginIds } from '@/plugins/registry';
@@ -39,7 +39,7 @@ function TrustConfirmModal({
         if (e.target === e.currentTarget) onCancel();
       }}
     >
-      <div className="w-[400px] bg-app-bg-card border border-app-border rounded-xl shadow-2xl p-5 animate-in fade-in duration-100">
+      <div className="w-[400px] bg-app-bg-tertiary border border-app-border rounded-xl shadow-2xl p-5 animate-in fade-in duration-100">
         <h3 className="text-sm font-semibold text-app-text-primary mb-2">启用插件「{name}」？</h3>
         <p className="text-xs text-app-text-tertiary leading-relaxed mb-1">
           该插件与本应用同权限运行，可访问本应用的剪贴板、笔记、密码等全部数据与功能。
@@ -100,7 +100,10 @@ function MoreMenu({
         <MoreHorizontal size={16} />
       </button>
       {isOpen && (
-        <div className="absolute right-0 top-full mt-1 min-w-[180px] bg-app-bg-primary/80 border border-app-border rounded-xl shadow-2xl z-50 animate-in fade-in slide-in-from-top-1 duration-100">
+        <div
+          className="absolute right-0 top-full mt-2 min-w-[180px] bg-app-bg-primary/80 border border-app-border rounded-xl shadow-2xl z-50 animate-in fade-in slide-in-from-top-1 duration-150"
+          style={{ WebkitBackdropFilter: 'blur(20px)', backdropFilter: 'blur(20px)' }}
+        >
           <MenuPanel
             items={[
               ...(hasSettings
@@ -254,20 +257,6 @@ export function PluginMarketSettings() {
 
   return (
     <>
-      <PageHeader
-        title="插件市场"
-        description="管理本地插件，或让 AI 帮你生成新插件"
-        actions={
-          <button
-            onClick={handleAiGenerate}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-white bg-app-status-info hover:bg-blue-700 transition-colors cursor-pointer"
-          >
-            <Sparkles size={14} />
-            AI 生成
-          </button>
-        }
-      />
-
       {/* 内置插件：系统能力，锁定展示 */}
       <SettingGroup title="内置插件">
         {builtInPlugins.map((plugin) => {
@@ -281,7 +270,18 @@ export function PluginMarketSettings() {
       </SettingGroup>
 
       {/* 外部插件：可启停 / 打开目录 / 卸载 */}
-      <SettingGroup title="已安装插件">
+      <SettingGroup
+        title="已安装插件"
+        actions={
+          <button
+            onClick={handleAiGenerate}
+            className="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs text-app-text-tertiary hover:bg-white/10 hover:text-app-text-primary transition-colors cursor-pointer"
+          >
+            <Sparkles size={13} />
+            AI 生成
+          </button>
+        }
+      >
         {loading ? (
           <div className="px-3 py-8 text-center text-xs text-app-text-tertiary">加载中…</div>
         ) : items.length === 0 ? (

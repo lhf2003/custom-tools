@@ -267,16 +267,16 @@ export function CustomSelect({
         // 仅打开时挂载动画类——关闭走菜单整体的淡出，选项不各自重播
         style={{ animationDelay: `${Math.min(index, 6) * 18}ms` }}
         className={`
-          w-full px-3 py-2 text-left text-sm transition-colors duration-150
+          w-full px-3 py-2 text-left text-sm rounded-lg transition-colors duration-150 ease-out
           ${isOpen ? 'animate-option-in motion-reduce:animate-none' : ''}
           ${option.disabled
             ? 'text-app-text-disabled cursor-not-allowed'
             : isSelected
-              ? 'text-app-brand-primary-light hover:bg-white/10 cursor-pointer'
-              : 'text-app-text-secondary hover:text-app-text-primary hover:bg-white/10 cursor-pointer'
+              ? 'text-app-brand-primary-light hover:bg-app-bg-hover cursor-pointer'
+              : 'text-app-text-secondary hover:text-app-text-primary hover:bg-app-bg-hover cursor-pointer'
           }
           ${isSelected ? 'bg-white/5' : ''}
-          ${isHighlighted ? 'bg-white/10' : ''}
+          ${isHighlighted ? 'bg-app-bg-hover' : ''}
         `}
       >
         <span className="flex items-center gap-2">
@@ -316,9 +316,9 @@ export function CustomSelect({
           border transition-all duration-200 ease-out
           ${disabled
             ? 'bg-app-bg-tertiary/50 border-app-border-subtle text-app-text-disabled cursor-not-allowed'
-            : 'bg-app-bg-tertiary border-app-border text-app-text-primary hover:border-app-border-emphasis hover:bg-white/5 focus:border-app-status-info focus:ring-2 focus:ring-app-status-info/20 cursor-pointer active:scale-[0.98]'
+            : 'bg-app-bg-tertiary border-app-border text-app-text-primary hover:border-app-border-emphasis hover:bg-white/5 cursor-pointer active:scale-[0.98]'
           }
-          ${isOpen ? 'border-app-status-info ring-2 ring-app-status-info/20' : ''}
+          ${isOpen ? 'border-app-border-emphasis' : ''}
         `}
       >
         {icon && <span className="text-app-text-tertiary">{icon}</span>}
@@ -339,11 +339,13 @@ export function CustomSelect({
           style={{
             ...menuBox,
             '--option-enter-offset': dropdownPosition === 'top' ? '-4px' : '4px',
+            WebkitBackdropFilter: 'blur(20px)',
+            backdropFilter: 'blur(20px)',
           } as React.CSSProperties}
           className={`
-            fixed z-50 py-1 rounded-lg overflow-hidden
-            bg-app-bg-elevated
-            border border-app-border-emphasis shadow-[var(--app-shadow-lg)]
+            fixed z-50 py-1 rounded-xl overflow-hidden
+            bg-app-bg-primary/80
+            border border-app-border shadow-2xl
             transition-[opacity,transform,visibility] duration-200 ease-out motion-reduce:transition-none
             ${menuClassName}
             ${dropdownPosition === 'top' ? 'origin-bottom' : 'origin-top'}
@@ -381,7 +383,7 @@ export function CustomSelect({
             id={listboxId}
             role="listbox"
             style={{ maxHeight: menuBox.maxHeight }}
-            className="overflow-y-auto overscroll-contain scrollbar-thin scrollbar-thumb-zinc-600 scrollbar-track-transparent"
+            className="overflow-y-auto overscroll-contain px-1.5 scrollbar-thin scrollbar-thumb-zinc-600 scrollbar-track-transparent"
           >
             {filteredOptions.length === 0 ? (
               <div className={`px-3 py-2 text-app-text-placeholder text-sm text-center ${isOpen ? 'animate-option-in motion-reduce:animate-none' : ''}`}>

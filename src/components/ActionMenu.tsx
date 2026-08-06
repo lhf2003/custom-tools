@@ -107,7 +107,7 @@ export function MenuPanel({
   });
 
   return (
-    <div className="py-1.5">
+    <div className="p-1.5">
       {groupedItems.map((item, index) => {
         if (item === 'separator') {
           return (
@@ -124,12 +124,12 @@ export function MenuPanel({
             key={item.id}
             onClick={() => onItemClick(item)}
             disabled={item.disabled}
-            className={`w-full px-3 py-2 flex items-center justify-between text-sm transition-colors ${
+            className={`w-full px-3 py-2 flex items-center justify-between rounded-lg text-sm transition-colors duration-150 ease-out ${
               item.disabled
                 ? 'text-app-text-disabled cursor-not-allowed'
                 : item.danger
                 ? 'text-app-status-error hover:bg-app-status-error/10'
-                : 'text-app-text-secondary hover:bg-app-bg-elevated/50'
+                : 'text-app-text-secondary hover:bg-app-bg-hover hover:text-app-text-primary'
             }`}
           >
             <div className="flex items-center gap-2.5">

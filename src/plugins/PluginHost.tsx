@@ -119,7 +119,7 @@ export function PluginHost({ plugin, commonMenuItems, onBack }: PluginHostProps)
       {contextMenu && (
         <div
           ref={contextMenuRef}
-          className="fixed z-[100] min-w-[220px] bg-app-bg-primary/80 border border-app-border rounded-xl shadow-2xl animate-in fade-in duration-100"
+          className="fixed z-[100] min-w-[220px] bg-app-bg-primary/80 border border-app-border rounded-xl shadow-2xl animate-in fade-in duration-150"
           style={{
             left: contextMenu.x,
             top: contextMenu.y,

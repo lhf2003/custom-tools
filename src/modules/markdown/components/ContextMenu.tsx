@@ -1,5 +1,4 @@
 import { useEffect, useRef } from 'react';
-import { THEME } from '@/constants/theme';
 
 export interface MenuItem {
   id: string;
@@ -93,43 +92,25 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
   return (
     <div
       ref={menuRef}
-      className="py-1 rounded-lg shadow-lg min-w-[160px]"
+      className="min-w-[160px] bg-app-bg-primary/80 border border-app-border rounded-xl shadow-2xl p-1.5 animate-in fade-in duration-150"
       style={{
         ...getMenuStyle(),
-        backgroundColor: THEME.BG_SECONDARY,
-        border: `1px solid ${THEME.BORDER_DEFAULT}`,
+        WebkitBackdropFilter: 'blur(20px)',
+        backdropFilter: 'blur(20px)',
       }}
     >
       {items.map((item, index) => (
         <div key={item.id}>
           {item.separator && index > 0 && (
-            <div
-              className="my-1 mx-2 h-px"
-              style={{ backgroundColor: THEME.BORDER_DEFAULT }}
-            />
+            <div className="my-1.5 border-t border-app-border-subtle" />
           )}
           <button
             onClick={() => handleItemClick(item)}
-            className="w-full flex items-center gap-2 px-3 py-1.5 text-xs transition-colors cursor-pointer"
-            style={{
-              color: item.danger ? THEME.ERROR : THEME.TEXT_SECONDARY,
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = item.danger
-                ? 'rgba(239, 68, 68, 0.1)'
-                : 'rgba(63, 63, 70, 0.5)';
-              if (item.danger) {
-                e.currentTarget.style.color = THEME.ERROR;
-              } else {
-                e.currentTarget.style.color = THEME.TEXT_PRIMARY;
-              }
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = 'transparent';
-              e.currentTarget.style.color = item.danger
-                ? THEME.ERROR
-                : THEME.TEXT_SECONDARY;
-            }}
+            className={`w-full px-3 py-2 flex items-center gap-2.5 rounded-lg text-sm transition-colors duration-150 ease-out ${
+              item.danger
+                ? 'text-app-status-error hover:bg-app-status-error/10'
+                : 'text-app-text-secondary hover:bg-app-bg-hover hover:text-app-text-primary'
+            }`}
           >
             {item.icon && <span className="shrink-0">{item.icon}</span>}
             <span>{item.label}</span>

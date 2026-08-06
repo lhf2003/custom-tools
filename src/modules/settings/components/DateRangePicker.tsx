@@ -225,7 +225,7 @@ export function DateRangePicker({
         onClick={() => (isOpen ? close() : openPicker())}
         className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm border transition-all duration-200 ease-out cursor-pointer
           bg-app-bg-tertiary border-app-border text-app-text-primary hover:border-app-border-emphasis
-          ${isOpen ? 'border-app-status-info ring-2 ring-app-status-info/20' : ''}`}
+          ${isOpen ? 'border-app-border-emphasis' : ''}`}
       >
         <Calendar size={14} className="text-app-text-tertiary" />
         <span>{triggerLabel}</span>
@@ -239,7 +239,10 @@ export function DateRangePicker({
         <>
           {/* 点击遮罩关闭（草稿丢弃，与取消等价） */}
           <div className="fixed inset-0 z-40" onClick={close} />
-          <div className="absolute right-0 top-full mt-1 z-50 w-[560px] rounded-xl border border-app-border-emphasis bg-app-bg-elevated shadow-xl shadow-black/50 p-3 animate-slide-up">
+          <div
+            className="absolute right-0 top-full mt-2 z-50 w-[560px] rounded-xl border border-app-border bg-app-bg-primary/80 shadow-2xl p-3 animate-slide-up"
+            style={{ WebkitBackdropFilter: 'blur(20px)', backdropFilter: 'blur(20px)' }}
+          >
             {/* 预设 */}
             <div className="flex gap-1.5 mb-3">
               {PRESETS.map((p) => (
@@ -249,7 +252,7 @@ export function DateRangePicker({
                   className={`px-3 py-1 rounded-lg text-xs border transition-all cursor-pointer ${
                     draft.preset === p.key
                       ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
-                      : 'bg-white/5 text-white/40 border-white/10 hover:bg-white/10'
+                      : 'bg-white/5 text-white/40 border-white/10 hover:bg-app-bg-hover hover:text-app-text-primary'
                   }`}
                 >
                   {p.chip}
@@ -384,7 +387,7 @@ export function DateRangePicker({
                             : inRange
                               ? 'bg-blue-500/15 text-blue-200'
                               : inMonth
-                                ? 'text-app-text-secondary hover:bg-white/10'
+                                ? 'text-app-text-secondary hover:bg-app-bg-hover hover:text-app-text-primary'
                                 : 'text-app-text-disabled hover:bg-white/5'
                         } ${isToday && !isEndpoint ? 'ring-1 ring-inset ring-blue-500/40' : ''}`}
                       >

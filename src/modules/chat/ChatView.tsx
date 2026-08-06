@@ -1076,10 +1076,15 @@ export function ChatView() {
           role="listbox"
           aria-label="会话历史"
           onKeyDown={handleHistoryKeyDown}
-          className={`fixed z-50 w-80 max-h-80 overflow-y-auto rounded-lg border border-zinc-700/60 bg-zinc-800 shadow-xl shadow-black/40 outline-none transition-all duration-150 ease-out motion-reduce:transition-none ${
+          className={`fixed z-50 w-80 max-h-80 overflow-y-auto rounded-xl border border-app-border bg-app-bg-primary/80 shadow-2xl outline-none transition-all duration-150 ease-out motion-reduce:transition-none ${
             historyVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-1'
           }`}
-          style={{ top: historyPos.top, right: historyPos.right }}
+          style={{
+            top: historyPos.top,
+            right: historyPos.right,
+            WebkitBackdropFilter: 'blur(20px)',
+            backdropFilter: 'blur(20px)',
+          }}
         >
           {historyLoading ? (
             <div className="p-3 space-y-2">
@@ -1091,7 +1096,7 @@ export function ChatView() {
               暂无过往会话
             </div>
           ) : (
-            <ul className="py-1">
+            <ul className="p-1.5">
               {sessions.map((s, i) => (
                 <li key={s.id}>
                   <div
@@ -1105,8 +1110,8 @@ export function ChatView() {
                       }
                     }}
                     onMouseEnter={() => setHistoryIdx(i)}
-                    className={`group relative flex items-center gap-2 px-3 py-2 cursor-pointer ${
-                      i === historyIdx ? 'bg-white/5' : ''
+                    className={`group relative flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-colors duration-150 ease-out ${
+                      i === historyIdx ? 'bg-app-bg-hover' : ''
                     }`}
                   >
                     {s.id === sessionId && (

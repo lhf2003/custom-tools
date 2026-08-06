@@ -141,7 +141,7 @@ export function GeneratePluginModal({
         if (e.target === e.currentTarget && phase !== 'generating') handleClose();
       }}
     >
-      <div className="w-[600px] max-h-[85vh] flex flex-col bg-app-bg-card border border-app-border rounded-xl shadow-2xl animate-in fade-in duration-100">
+      <div className="w-[600px] max-h-[85vh] flex flex-col bg-app-bg-tertiary border border-app-border rounded-xl shadow-2xl animate-in fade-in duration-100">
         {/* 头部 */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
           <div className="flex items-center gap-2">
