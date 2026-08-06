@@ -965,7 +965,8 @@ fn setup_system_tray(app_handle: &tauri::AppHandle) -> Result<(), Box<dyn std::e
 }
 
 /// 运行时日志级别闸门：调试模式开 = Debug（含 prompt 日志），关 = Info。
-/// log crate 的全局 max_level 是唯一闸门；插件初始级别只决定启动早期的输出。
+/// log crate 的全局 max_level 是唯一闸门——插件（build_log_plugin）级别恒为
+/// Debug，不再做第二道过滤，否则 release 构建会把 debug 记录丢弃在插件内部。
 pub fn apply_log_level(debug: bool) {
     log::set_max_level(if debug {
         log::LevelFilter::Debug
@@ -978,12 +979,14 @@ pub fn apply_log_level(debug: bool) {
 /// app_log_dir,Windows 上为 %LOCALAPPDATA%\<identifier>\logs,
 /// 注意是 Local 不是 Roaming %APPDATA%),
 /// 插件注册在 Builder 链前部,保证后续所有初始化阶段的日志都能落盘。
+///
+/// 插件过滤级别恒为 Debug——真正的开关是运行时 apply_log_level(settings.debug_mode)
+/// 的全局闸门。若此处用 cfg!(debug_assertions) 区分，release 构建的 fern dispatch
+/// 会以 Info 丢弃 debug 记录（插件内部有独立于 log crate 的第二道过滤），
+/// 导致安装版设置里开调试模式也无 debug 日志落盘。
+/// debug_mode 默认 false 时全局闸门为 Info，log::debug! 在宏内短路，敏感日志不落盘。
 fn build_log_plugin() -> tauri_plugin_log::Builder {
-    let log_level = if cfg!(debug_assertions) {
-        log::LevelFilter::Debug
-    } else {
-        log::LevelFilter::Info
-    };
+    let log_level = log::LevelFilter::Debug;
 
     tauri_plugin_log::Builder::default()
         .targets([
