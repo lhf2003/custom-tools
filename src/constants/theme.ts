@@ -23,12 +23,10 @@ const PRIMITIVE = {
     900: '#18181b',
     950: '#09090b',
   },
-  // 品牌强调色 (Indigo-Purple 渐变)
+  // 品牌强调色
   BRAND: {
     PRIMARY: '#6366f1', // indigo-500
     SECONDARY: '#a855f7', // purple-500
-    GRADIENT_START: '#6366f1',
-    GRADIENT_END: '#a855f7',
   },
   // 功能色
   FUNCTIONAL: {
@@ -92,10 +90,6 @@ export const THEME = {
   BTN_BG: '#38383e',
   /** 次要按钮悬停（对齐 surface-pressed） */
   BTN_BG_HOVER: '#45454c',
-  /** 主按钮渐变开始 */
-  BTN_PRIMARY_FROM: PRIMITIVE.BRAND.GRADIENT_START,
-  /** 主按钮渐变结束 */
-  BTN_PRIMARY_TO: PRIMITIVE.BRAND.GRADIENT_END,
 
   // -----------------------------------------
   // 强调色 (Accents)
