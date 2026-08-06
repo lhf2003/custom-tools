@@ -220,7 +220,7 @@ function MemoRow({ memo, onToggle, onDismiss }: MemoRowProps) {
             className="ml-2 text-[10px] px-1.5 py-0.5 rounded"
             style={{
               backgroundColor: 'rgba(99, 102, 241, 0.15)',
-              color: '#a5b4fc',
+              color: 'var(--app-brand-primary-light)',
             }}
           >
             {memo.due_date}

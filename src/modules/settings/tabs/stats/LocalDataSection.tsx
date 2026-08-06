@@ -4,15 +4,15 @@ import { useStatsStore, type DataCategory } from '@/stores/statsStore';
 import { useToastStore } from '@/stores/toastStore';
 import { fmtBytes, fmtScannedAt } from './format';
 
-/** 分类色：数据编码用，others 兜底落灰阶，内容类各用区分色 */
+/** 分类色：数据编码用，others 兜底落灰阶，内容类各用区分色（CSS 变量随主题切换，见 index.css --cat-*） */
 const CATEGORY_COLORS: Record<string, string> = {
-  core_db: '#34d399',
-  clipboard: '#38bdf8',
-  notes: '#818cf8',
-  companion: '#a855f7',
-  icon_cache: '#2dd4bf',
-  logs: '#f59e0b',
-  others: '#71717a',
+  core_db: 'var(--cat-emerald)',
+  clipboard: 'var(--cat-sky)',
+  notes: 'var(--cat-indigo)',
+  companion: 'var(--cat-violet)',
+  icon_cache: 'var(--cat-teal)',
+  logs: 'var(--cat-amber)',
+  others: 'var(--cat-zinc)',
 };
 
 function CategoryRow({ category }: { category: DataCategory }) {

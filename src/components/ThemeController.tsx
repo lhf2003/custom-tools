@@ -3,6 +3,9 @@ import { useSettingsStore } from '@/stores/settingsStore';
 
 export type ResolvedTheme = 'dark' | 'light';
 
+/** localStorage 缓存键：与 index.html 的防闪屏内联脚本共享 */
+export const THEME_MODE_CACHE_KEY = 'flowhub-theme-mode';
+
 /** 系统主题媒体查询（WebView2 原生支持 prefers-color-scheme） */
 function systemQuery(): MediaQueryList {
   return window.matchMedia('(prefers-color-scheme: dark)');
@@ -27,6 +30,8 @@ export function ThemeController() {
   useEffect(() => {
     if (isLoading) return; // 等 loadSettings 完成后一次性应用，防止默认值闪烁
     document.documentElement.dataset.theme = resolveTheme(theme);
+    // 缓存模式供 index.html 内联脚本在下次启动的 React 挂载前预读，消除首帧闪屏
+    localStorage.setItem(THEME_MODE_CACHE_KEY, theme);
 
     if (theme !== 'system') return;
     const mq = systemQuery();

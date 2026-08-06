@@ -534,7 +534,7 @@ export function MarkdownView() {
             >
           <div
             className="flex-1 flex items-center gap-1.5 rounded-lg px-2 py-1.5 min-w-0"
-            style={{ backgroundColor: 'rgba(63, 63, 70, 0.4)' }}
+            style={{ backgroundColor: THEME.BG_TERTIARY }}
           >
             <Search size={12} className="shrink-0" style={{ color: THEME.TEXT_DISABLED }} />
             <input
@@ -555,7 +555,7 @@ export function MarkdownView() {
             style={{ color: THEME.TEXT_DISABLED }}
             onMouseEnter={(e) => {
               e.currentTarget.style.color = THEME.TEXT_PRIMARY;
-              e.currentTarget.style.backgroundColor = 'rgba(63, 63, 70, 0.5)';
+              e.currentTarget.style.backgroundColor = THEME.BG_HOVER;
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.color = THEME.TEXT_DISABLED;
@@ -571,7 +571,7 @@ export function MarkdownView() {
             style={{ color: THEME.TEXT_DISABLED }}
             onMouseEnter={(e) => {
               e.currentTarget.style.color = THEME.TEXT_PRIMARY;
-              e.currentTarget.style.backgroundColor = 'rgba(63, 63, 70, 0.5)';
+              e.currentTarget.style.backgroundColor = THEME.BG_HOVER;
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.color = THEME.TEXT_DISABLED;
@@ -616,14 +616,14 @@ export function MarkdownView() {
               onClick={() => setSelectedNote(MEMO_VIEW_PATH)}
               className="w-full flex items-center gap-2 px-2 py-1.5 mb-1 rounded-md text-sm transition-colors cursor-pointer"
               style={{
-                color: selectedNote === MEMO_VIEW_PATH ? '#93c5fd' : THEME.TEXT_TERTIARY,
+                color: selectedNote === MEMO_VIEW_PATH ? THEME.SELECTED : THEME.TEXT_TERTIARY,
                 backgroundColor:
                   selectedNote === MEMO_VIEW_PATH ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
               }}
               onMouseEnter={(e) => {
                 if (selectedNote !== MEMO_VIEW_PATH) {
                   e.currentTarget.style.color = THEME.TEXT_PRIMARY;
-                  e.currentTarget.style.backgroundColor = 'rgba(63, 63, 70, 0.4)';
+                  e.currentTarget.style.backgroundColor = THEME.BG_HOVER;
                 }
               }}
               onMouseLeave={(e) => {
@@ -682,13 +682,13 @@ export function MarkdownView() {
                     }}
                     className="w-full text-left px-2 py-1.5 rounded-md text-sm truncate transition-colors cursor-pointer"
                     style={{
-                      color: selectedNote === item.path ? '#93c5fd' : THEME.TEXT_TERTIARY,
+                      color: selectedNote === item.path ? THEME.SELECTED : THEME.TEXT_TERTIARY,
                       backgroundColor: selectedNote === item.path ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
                     }}
                     onMouseEnter={(e) => {
                       if (selectedNote !== item.path) {
                         e.currentTarget.style.color = THEME.TEXT_PRIMARY;
-                        e.currentTarget.style.backgroundColor = 'rgba(63, 63, 70, 0.4)';
+                        e.currentTarget.style.backgroundColor = THEME.BG_HOVER;
                       }
                     }}
                     onMouseLeave={(e) => {
@@ -707,7 +707,7 @@ export function MarkdownView() {
             <div className="flex flex-col items-center justify-center h-full p-4 text-center" style={{ color: THEME.TEXT_DISABLED }}>
               <div
                 className="w-12 h-12 rounded-xl flex items-center justify-center mb-3"
-                style={{ backgroundColor: 'rgba(63, 63, 70, 0.3)' }}
+                style={{ backgroundColor: THEME.BG_TERTIARY }}
               >
                 <FileText size={24} className="opacity-50" />
               </div>
@@ -868,7 +868,7 @@ export function MarkdownView() {
                       style={{ color: THEME.TEXT_DISABLED }}
                       onMouseEnter={(e) => {
                         e.currentTarget.style.color = THEME.TEXT_PRIMARY;
-                        e.currentTarget.style.backgroundColor = 'rgba(63, 63, 70, 0.5)';
+                        e.currentTarget.style.backgroundColor = THEME.BG_HOVER;
                       }}
                       onMouseLeave={(e) => {
                         e.currentTarget.style.color = THEME.TEXT_DISABLED;
@@ -889,7 +889,7 @@ export function MarkdownView() {
                       style={{ color: THEME.TEXT_DISABLED }}
                       onMouseEnter={(e) => {
                         e.currentTarget.style.color = THEME.TEXT_PRIMARY;
-                        e.currentTarget.style.backgroundColor = 'rgba(63, 63, 70, 0.5)';
+                        e.currentTarget.style.backgroundColor = THEME.BG_HOVER;
                       }}
                       onMouseLeave={(e) => {
                         e.currentTarget.style.color = THEME.TEXT_DISABLED;
@@ -908,7 +908,7 @@ export function MarkdownView() {
                       style={{ color: THEME.TEXT_DISABLED }}
                       onMouseEnter={(e) => {
                         e.currentTarget.style.color = THEME.TEXT_PRIMARY;
-                        e.currentTarget.style.backgroundColor = 'rgba(63, 63, 70, 0.5)';
+                        e.currentTarget.style.backgroundColor = THEME.BG_HOVER;
                       }}
                       onMouseLeave={(e) => {
                         e.currentTarget.style.color = THEME.TEXT_DISABLED;
@@ -929,7 +929,7 @@ export function MarkdownView() {
                 style={{
                   backgroundColor: 'rgba(59, 130, 246, 0.12)',
                   borderBottom: `1px solid ${THEME.BORDER_DEFAULT}`,
-                  color: '#93c5fd',
+                  color: THEME.SELECTED,
                 }}
                 role="status"
               >
@@ -948,7 +948,7 @@ export function MarkdownView() {
                     onClick={() => setShowAiRestore(false)}
                     aria-label="关闭提示"
                     className="p-0.5 rounded transition-colors hover:bg-white/10 cursor-pointer"
-                    style={{ color: '#93c5fd' }}
+                    style={{ color: THEME.SELECTED }}
                   >
                     <X size={12} />
                   </button>
@@ -996,7 +996,7 @@ export function MarkdownView() {
             placeholder={createType === 'file' ? '笔记名称.md' : '文件夹名称'}
             className="w-full rounded-lg px-4 py-2 outline-none transition-colors"
             style={{
-              backgroundColor: 'rgba(63, 63, 70, 0.5)',
+              backgroundColor: THEME.BG_TERTIARY,
               border: `1px solid ${THEME.BORDER_EMPHASIS}`,
               color: THEME.TEXT_PRIMARY,
             }}
@@ -1010,7 +1010,7 @@ export function MarkdownView() {
               style={{ color: THEME.TEXT_TERTIARY }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.color = THEME.TEXT_PRIMARY;
-                e.currentTarget.style.backgroundColor = 'rgba(63, 63, 70, 0.5)';
+                e.currentTarget.style.backgroundColor = THEME.BG_HOVER;
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.color = THEME.TEXT_TERTIARY;
@@ -1025,7 +1025,7 @@ export function MarkdownView() {
               className="px-4 py-2 rounded-lg transition-all duration-200 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
               style={{
                 backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                color: '#60a5fa',
+                color: THEME.SELECTED,
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.backgroundColor = 'rgba(59, 130, 246, 0.3)';
@@ -1050,7 +1050,7 @@ export function MarkdownView() {
             onChange={(e) => setRenameValue(e.target.value)}
             className="w-full rounded-lg px-4 py-2 outline-none transition-colors"
             style={{
-              backgroundColor: 'rgba(63, 63, 70, 0.5)',
+              backgroundColor: THEME.BG_TERTIARY,
               border: `1px solid ${THEME.BORDER_EMPHASIS}`,
               color: THEME.TEXT_PRIMARY,
             }}
@@ -1064,7 +1064,7 @@ export function MarkdownView() {
               style={{ color: THEME.TEXT_TERTIARY }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.color = THEME.TEXT_PRIMARY;
-                e.currentTarget.style.backgroundColor = 'rgba(63, 63, 70, 0.5)';
+                e.currentTarget.style.backgroundColor = THEME.BG_HOVER;
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.color = THEME.TEXT_TERTIARY;
@@ -1079,7 +1079,7 @@ export function MarkdownView() {
               className="px-4 py-2 rounded-lg transition-all duration-200 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
               style={{
                 backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                color: '#60a5fa',
+                color: THEME.SELECTED,
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.backgroundColor = 'rgba(59, 130, 246, 0.3)';

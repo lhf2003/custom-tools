@@ -129,15 +129,15 @@ export interface JsonToken {
   kind: JsonTokenKind;
 }
 
-/** 与 json_formatter 模块 canvas 色板一致，两处 JSON 渲染保持同一副面孔 */
+/** 与 json_formatter 模块 canvas 色板一致，两处 JSON 渲染保持同一副面孔；值走 CSS 变量随主题切换（index.css --json-*） */
 export const JSON_TOKEN_COLORS: Record<JsonTokenKind, string> = {
-  key: '#7dd3fc',
-  string: '#6ee7b7',
-  number: '#fcd34d',
-  boolean: '#c4b5fd',
-  null: '#a1a1aa',
-  punct: '#71717a',
-  plain: '#d4d4d8',
+  key: 'var(--json-key)',
+  string: 'var(--json-string)',
+  number: 'var(--json-number)',
+  boolean: 'var(--json-boolean)',
+  null: 'var(--json-null)',
+  punct: 'var(--json-punct)',
+  plain: 'var(--json-plain)',
 };
 
 /**

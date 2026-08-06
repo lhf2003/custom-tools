@@ -312,22 +312,22 @@ export function EverythingView() {
   const renderFileIcon = (color: string, label: string) => (
     <div
       className="w-10 h-10 rounded flex items-center justify-center"
-      style={{ backgroundColor: `${color}33` }}
+      style={{ backgroundColor: `color-mix(in srgb, ${color} 20%, transparent)` }}
     >
       <span className="text-xs font-bold" style={{ color }}>{label}</span>
     </div>
   );
 
-  // Map category id to icon color
+  // Map category id to icon color（CSS 变量，浅色主题自动换深档，见 index.css --cat-*）
   const CATEGORY_ICON_COLOR: Partial<Record<FileCategory, string>> = {
-    image:   '#c084fc',
-    video:   '#f87171',
-    audio:   '#f472b6',
-    archive: '#facc15',
-    excel:   '#4ade80',
-    word:    '#60a5fa',
-    ppt:     '#fb923c',
-    pdf:     '#f87171',
+    image:   'var(--cat-purple)',
+    video:   'var(--cat-red)',
+    audio:   'var(--cat-pink)',
+    archive: 'var(--cat-yellow)',
+    excel:   'var(--cat-green)',
+    word:    'var(--cat-blue)',
+    ppt:     'var(--cat-orange)',
+    pdf:     'var(--cat-red)',
   };
 
   // Get file icon component
@@ -341,7 +341,7 @@ export function EverythingView() {
     );
 
     if (matchedCategory) {
-      const color = CATEGORY_ICON_COLOR[matchedCategory.id] ?? '#94a3b8';
+      const color = CATEGORY_ICON_COLOR[matchedCategory.id] ?? 'var(--cat-slate)';
       const label = matchedCategory.id === 'pdf' ? 'PDF' : ext.toUpperCase();
       return renderFileIcon(color, label);
     }

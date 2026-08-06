@@ -99,7 +99,7 @@ export function JsonExportPreviewModal({ imageDataUrl, defaultFilename, onClose 
         aria-modal="true"
         aria-label="导出预览"
         className="flex flex-col bg-app-bg-primary border border-app-border rounded-xl
-                   shadow-[0_25px_60px_rgba(0,0,0,0.6)] w-[700px] max-h-[88vh]"
+                   shadow-2xl w-[700px] max-h-[88vh]"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}

@@ -74,6 +74,14 @@ export default {
       backdropBlur: {
         xs: '2px',
       },
+      // 阴影统一映射 DESIGN.md 四档词表（--app-shadow-* 随主题切换：
+      // 深色 0.2/0.2/0.3/0.6，浅色自动降档 0.08/0.10/0.12/0.20）。
+      // 存量 shadow-lg/xl/2xl 全部跟随，无需改组件。
+      boxShadow: {
+        lg: 'var(--app-shadow-lg)',
+        xl: 'var(--app-shadow-lg)',
+        '2xl': 'var(--app-shadow-xl)',
+      },
       animation: {
         'fade-in': 'fadeIn 0.2s ease-out',
         'slide-up': 'slideUp 0.2s ease-out',

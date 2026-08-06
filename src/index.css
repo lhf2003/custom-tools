@@ -10,6 +10,9 @@
    与 tailwind.config.js 和 THEME 常量保持同步
    ============================================ */
 :root {
+  /* 原生控件（日期选择器、滚动条）配色方案随主题切换 */
+  color-scheme: dark;
+
   /* 背景色（2026-08-05 新灰阶：五档明度均匀拉开，相邻档 OKLCH L 差 ≥0.03，见 DESIGN.md The Even Tiers Rule） */
   --app-bg-primary: #1e1e21;
   --app-bg-secondary: #26262a;
@@ -77,6 +80,32 @@
   --window-bg: transparent;
   --panel-bg: rgba(30, 30, 33, 0.7);
   --panel-border: rgba(255, 255, 255, 0.05);
+
+  /* 分类/图形标识色（文件类型图标、数据分类圆点；浅色换深档保对比，见 light 覆盖） */
+  --cat-purple: #c084fc;
+  --cat-red: #f87171;
+  --cat-pink: #f472b6;
+  --cat-yellow: #facc15;
+  --cat-green: #4ade80;
+  --cat-blue: #60a5fa;
+  --cat-orange: #fb923c;
+  --cat-slate: #94a3b8;
+  --cat-emerald: #34d399;
+  --cat-sky: #38bdf8;
+  --cat-indigo: #818cf8;
+  --cat-violet: #a855f7;
+  --cat-teal: #2dd4bf;
+  --cat-amber: #f59e0b;
+  --cat-zinc: #71717a;  /* 两主题同值 */
+
+  /* JSON 语法色（ClipboardDetail 内联渲染经 JSON_TOKEN_COLORS 引用；JsonTreeView 的 Tailwind 类由 light 类级覆盖对齐同值） */
+  --json-key: #7dd3fc;
+  --json-string: #6ee7b7;
+  --json-number: #fcd34d;
+  --json-boolean: #c4b5fd;
+  --json-null: #a1a1aa;
+  --json-punct: #71717a;  /* 两主题同值 */
+  --json-plain: #d4d4d8;
 }
 
 /* ============================================
@@ -86,6 +115,8 @@
    通过 html[data-theme='light'] 切换，Tailwind 类全部走 var() 自动跟随。
    ============================================ */
 [data-theme='light'] {
+  color-scheme: light;
+
   /* 背景色五档（zinc-50/100/200/300/400 反向映射） */
   --app-bg-primary: #fafafa;
   --app-bg-secondary: #f4f4f5;
@@ -95,12 +126,12 @@
   --app-bg-hover: rgba(0, 0, 0, 0.05);
   --app-bg-active: rgba(0, 0, 0, 0.08);
 
-  /* 文字色（zinc-900/700/600/400/500） */
+  /* 文字色（zinc-900/700/600/400） */
   --app-text-primary: #18181b;
   --app-text-secondary: #3f3f46;
   --app-text-tertiary: #52525b;
   --app-text-disabled: #a1a1aa;
-  --app-text-placeholder: #71717a;
+  --app-text-placeholder: #65656e;  /* 实测 5.53:1 on #fafafa / 4.55:1 on #e4e4e7，双达标（原 #71717a 在 Card 上仅 3.81:1） */
 
   /* 边框色（黑色低透明度） */
   --app-border-default: rgba(0, 0, 0, 0.10);
@@ -145,6 +176,30 @@
   --window-bg: transparent;
   --panel-bg: rgba(250, 250, 250, 0.72);
   --panel-border: rgba(0, 0, 0, 0.08);
+
+  /* 分类/图形标识色：浅底换深档（≥3:1 图形对比） */
+  --cat-purple: #9333ea;
+  --cat-red: #dc2626;
+  --cat-pink: #db2777;
+  --cat-yellow: #ca8a04;
+  --cat-green: #16a34a;
+  --cat-blue: #2563eb;
+  --cat-orange: #ea580c;
+  --cat-slate: #64748b;
+  --cat-emerald: #059669;
+  --cat-sky: #0284c7;
+  --cat-indigo: #4f46e5;
+  --cat-violet: #9333ea;
+  --cat-teal: #0d9488;
+  --cat-amber: #d97706;
+
+  /* JSON 语法色：浅底换深档（文字 ≥4.5:1） */
+  --json-key: #0284c7;
+  --json-string: #059669;
+  --json-number: #d97706;
+  --json-boolean: #7c3aed;
+  --json-null: #71717a;
+  --json-plain: #3f3f46;
 }
 
 /* ============================================
@@ -322,6 +377,248 @@
 
 [data-theme='light'] .bg-indigo-500\/20 {
   background-color: rgba(99, 102, 241, 0.15);
+}
+
+/* ============================================
+   Light Theme White-Alpha Text Overrides
+   存量 text-white/N 白纱文字（深色下的层次文字）浅色下不可见
+   → 按档位映射到语义墨阶：80~90=primary、60~70=secondary、
+   40~50=tertiary、25~35=placeholder。
+   品牌/状态色按钮上的纯 text-white 白字由恢复规则保留（见块尾）。
+   ============================================ */
+[data-theme='light'] .text-white {
+  color: var(--app-text-primary);
+}
+
+[data-theme='light'] .text-white\/80,
+[data-theme='light'] .text-white\/85,
+[data-theme='light'] .text-white\/90 {
+  color: var(--app-text-primary);
+}
+
+[data-theme='light'] .text-white\/60,
+[data-theme='light'] .text-white\/70 {
+  color: var(--app-text-secondary);
+}
+
+[data-theme='light'] .text-white\/40,
+[data-theme='light'] .text-white\/45,
+[data-theme='light'] .text-white\/50 {
+  color: var(--app-text-tertiary);
+}
+
+[data-theme='light'] .text-white\/25,
+[data-theme='light'] .text-white\/30,
+[data-theme='light'] .text-white\/35 {
+  color: var(--app-text-placeholder);
+}
+
+/* hover 变体 */
+[data-theme='light'] .hover\:text-white:hover {
+  color: var(--app-text-primary);
+}
+
+[data-theme='light'] .hover\:text-white\/70:hover,
+[data-theme='light'] .hover\:text-white\/80:hover {
+  color: var(--app-text-secondary);
+}
+
+/* placeholder 变体 */
+[data-theme='light'] .placeholder\:text-white\/20::placeholder,
+[data-theme='light'] .placeholder\:text-white\/30::placeholder,
+[data-theme='light'] .placeholder\:text-white\/40::placeholder {
+  color: var(--app-text-placeholder);
+}
+
+/* focus 边框变体（基础 border-white/N 已在上方翻黑） */
+[data-theme='light'] .focus\:border-white\/20:focus {
+  border-color: rgba(0, 0, 0, 0.18);
+}
+
+[data-theme='light'] .focus\:border-white\/25:focus {
+  border-color: rgba(0, 0, 0, 0.22);
+}
+
+/* divide 分隔线翻黑 */
+[data-theme='light'] .divide-white\/5 > :not([hidden]) ~ :not([hidden]) {
+  border-color: rgba(0, 0, 0, 0.06);
+}
+
+/* 品牌/状态色按钮恢复白字：彩色底上白字在浅色下依然正确 */
+[data-theme='light'] .bg-blue-600.text-white,
+[data-theme='light'] .bg-violet-500.text-white,
+[data-theme='light'] .bg-app-status-info.text-white,
+[data-theme='light'] .bg-app-status-error\/90.text-white {
+  color: #ffffff;
+}
+
+/* 暗幕（bg-black/80 图片放大态）后代恢复白字白纱：暗幕不随主题翻转 */
+[data-theme='light'] .bg-black\/80 .text-white {
+  color: #ffffff;
+}
+
+[data-theme='light'] .bg-black\/80 .bg-white\/10 {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* ============================================
+   Light Theme Colored Text Overrides
+   深色下验证过的浅档彩色文字（300/400 档）在浅底对比度不达标
+   → 换深档（对齐 --app-status-* / Deep Brand Rule），深色不动。
+   ============================================ */
+[data-theme='light'] .text-blue-200,
+[data-theme='light'] .text-blue-300,
+[data-theme='light'] .text-blue-400,
+[data-theme='light'] .hover\:text-blue-300:hover,
+[data-theme='light'] .hover\:text-blue-400:hover {
+  color: #2563eb;
+}
+
+[data-theme='light'] .text-green-400,
+[data-theme='light'] .hover\:text-green-400:hover {
+  color: #16a34a;
+}
+
+[data-theme='light'] .text-green-400\/70 {
+  color: rgba(22, 163, 74, 0.7);
+}
+
+[data-theme='light'] .text-red-300,
+[data-theme='light'] .text-red-400,
+[data-theme='light'] .hover\:text-red-400:hover {
+  color: #dc2626;
+}
+
+[data-theme='light'] .text-red-400\/80 {
+  color: rgba(220, 38, 38, 0.8);
+}
+
+[data-theme='light'] .text-red-400\/60 {
+  color: rgba(220, 38, 38, 0.6);
+}
+
+[data-theme='light'] .text-yellow-300,
+[data-theme='light'] .text-yellow-400 {
+  color: #b45309;
+}
+
+[data-theme='light'] .text-amber-300,
+[data-theme='light'] .text-amber-400,
+[data-theme='light'] .hover\:text-amber-300:hover {
+  color: #d97706;
+}
+
+[data-theme='light'] .text-amber-400\/80 {
+  color: rgba(217, 119, 6, 0.8);
+}
+
+[data-theme='light'] .text-emerald-300,
+[data-theme='light'] .text-emerald-400 {
+  color: #059669;
+}
+
+[data-theme='light'] .text-emerald-400\/70 {
+  color: rgba(5, 150, 105, 0.7);
+}
+
+[data-theme='light'] .text-violet-300,
+[data-theme='light'] .text-violet-400 {
+  color: #7c3aed;
+}
+
+[data-theme='light'] .text-purple-400 {
+  color: #9333ea;
+}
+
+[data-theme='light'] .text-rose-400 {
+  color: #e11d48;
+}
+
+[data-theme='light'] .text-cyan-400 {
+  color: #0891b2;
+}
+
+[data-theme='light'] .text-orange-400 {
+  color: #ea580c;
+}
+
+[data-theme='light'] .text-sky-300 {
+  color: #0284c7;
+}
+
+/* 任意值硬编码类（clipboard 类型图标） */
+[data-theme='light'] .text-\[\#60a5fa\] {
+  color: #2563eb;
+}
+
+[data-theme='light'] .text-\[\#fbbf24\] {
+  color: #d97706;
+}
+
+[data-theme='light'] .text-\[\#c084fc\] {
+  color: #9333ea;
+}
+
+/* prose（聊天 Markdown）内的浅档链接/代码色 */
+[data-theme='light'] .prose-a\:text-blue-400 :is(a) {
+  color: #2563eb;
+}
+
+[data-theme='light'] .prose-code\:text-emerald-300 :is(code) {
+  color: #059669;
+}
+
+/* prose-invert（聊天 Markdown 深色变体）浅色回翻：invert 变量换回浅底墨阶，
+   否则浅灰正文在浅底上整段不可读 */
+[data-theme='light'] .prose-invert {
+  --tw-prose-invert-body: var(--app-text-secondary);
+  --tw-prose-invert-headings: var(--app-text-primary);
+  --tw-prose-invert-lead: var(--app-text-secondary);
+  --tw-prose-invert-links: var(--app-text-primary);
+  --tw-prose-invert-bold: var(--app-text-primary);
+  --tw-prose-invert-counters: var(--app-text-placeholder);
+  --tw-prose-invert-bullets: var(--app-text-disabled);
+  --tw-prose-invert-hr: var(--app-border-default);
+  --tw-prose-invert-quotes: var(--app-text-primary);
+  --tw-prose-invert-quote-borders: var(--app-border-emphasis);
+  --tw-prose-invert-captions: var(--app-text-placeholder);
+  --tw-prose-invert-kbd: var(--app-text-primary);
+  --tw-prose-invert-code: var(--app-text-primary);
+  --tw-prose-invert-pre-code: var(--app-text-primary);
+  --tw-prose-invert-pre-bg: var(--app-bg-tertiary);
+  --tw-prose-invert-th-borders: var(--app-border-emphasis);
+  --tw-prose-invert-td-borders: var(--app-border-default);
+}
+
+/* 行内代码底：zinc-800 映射后是浅底实色，语义上应为黑纱（对齐 vditor --vditor-scrim-code） */
+[data-theme='light'] .prose-code\:bg-zinc-800 :is(code) {
+  background-color: rgba(0, 0, 0, 0.07);
+}
+
+/* ============================================
+   Light Theme Dark-Scrim Badge Overrides
+   bg-{color}-900/30 深色纱底 + 浅字组合在浅底对比崩塌
+   → 纱底翻浅（同色相 12% 透明度），文字已由上方覆盖换深档。
+   ============================================ */
+[data-theme='light'] .bg-red-900\/30 {
+  background-color: rgba(220, 38, 38, 0.12);
+}
+
+[data-theme='light'] .border-red-800\/50 {
+  border-color: rgba(220, 38, 38, 0.3);
+}
+
+[data-theme='light'] .bg-emerald-900\/30 {
+  background-color: rgba(5, 150, 105, 0.12);
+}
+
+[data-theme='light'] .border-emerald-800\/50 {
+  border-color: rgba(5, 150, 105, 0.3);
+}
+
+/* text-zinc-500：深色下为最淡辅助档，浅色下 #71717a 偏淡 → 对齐 placeholder */
+[data-theme='light'] .text-zinc-500 {
+  color: var(--app-text-placeholder);
 }
 
 /* ============================================

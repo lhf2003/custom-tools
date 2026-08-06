@@ -23,6 +23,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { GripVertical, ChevronRight, ChevronDown, Folder, FileText } from 'lucide-react';
 import { Tooltip } from '@/components/Tooltip';
+import { THEME } from '@/constants/theme';
 import type { NoteItemData } from '../types';
 import { ContextMenu, type MenuItem } from './ContextMenu';
 import { MenuIcons } from './menuIcons';
@@ -88,20 +89,20 @@ function SortableTreeItem({
         className="group flex items-center gap-1 py-0.5 rounded text-sm transition-all duration-200"
         style={{
           paddingLeft: `${level * 12}px`,
-          backgroundColor: isSelected ? 'rgba(82, 82, 91, 0.5)' : 'transparent',
-          color: isSelected ? '#f4f4f5' : '#a1a1aa',
+          backgroundColor: isSelected ? THEME.BG_HOVER : 'transparent',
+          color: isSelected ? THEME.TEXT_PRIMARY : THEME.TEXT_TERTIARY,
         }}
         onContextMenu={(e) => onContextMenu(e, item)}
         onMouseEnter={(e) => {
           if (!isSelected) {
-            e.currentTarget.style.backgroundColor = 'rgba(63, 63, 70, 0.3)';
-            e.currentTarget.style.color = '#e4e4e7';
+            e.currentTarget.style.backgroundColor = THEME.BG_HOVER;
+            e.currentTarget.style.color = THEME.TEXT_SECONDARY;
           }
         }}
         onMouseLeave={(e) => {
           if (!isSelected) {
             e.currentTarget.style.backgroundColor = 'transparent';
-            e.currentTarget.style.color = '#a1a1aa';
+            e.currentTarget.style.color = THEME.TEXT_TERTIARY;
           }
         }}
       >
@@ -111,10 +112,10 @@ function SortableTreeItem({
             {...attributes}
             {...listeners}
             className="cursor-grab active:cursor-grabbing py-0.5 px-0.5 rounded inline-flex items-center touch-none"
-            style={{ color: '#45454c' }}
+            style={{ color: THEME.TEXT_DISABLED }}
             aria-label={`拖拽移动 ${item.name.replace(/\.md$/, '')}`}
             onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = 'rgba(82, 82, 91, 0.3)';
+              e.currentTarget.style.backgroundColor = THEME.BG_HOVER;
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.backgroundColor = 'transparent';
@@ -135,7 +136,7 @@ function SortableTreeItem({
           className="flex items-center gap-0.5 flex-1 min-w-0 cursor-pointer rounded text-left focus-visible:bg-white/5"
         >
           {item.is_folder ? (
-            <span className="w-4 shrink-0" style={{ color: '#71717a' }}>
+            <span className="w-4 shrink-0" style={{ color: THEME.TEXT_PLACEHOLDER }}>
               {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
             </span>
           ) : (
@@ -565,12 +566,12 @@ export function SortableNoteTree({
         {activeItem ? (
           <div
             className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-sm shadow-lg"
-            style={{ backgroundColor: 'rgba(82, 82, 91, 0.8)', color: '#f4f4f5' }}
+            style={{ backgroundColor: THEME.BG_PRESSED, color: THEME.TEXT_PRIMARY }}
           >
-            <span style={{ color: '#a1a1aa' }}>
+            <span style={{ color: THEME.TEXT_TERTIARY }}>
               <GripVertical size={14} />
             </span>
-            <span style={{ color: '#a1a1aa' }}>
+            <span style={{ color: THEME.TEXT_TERTIARY }}>
               {activeItem.is_folder ? <Folder size={16} /> : <FileText size={16} />}
             </span>
             <span>{activeItem.name}</span>

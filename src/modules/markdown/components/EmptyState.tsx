@@ -7,7 +7,7 @@ export function EmptyState() {
       <div className="text-center">
         <div
           className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4 mx-auto"
-          style={{ backgroundColor: 'rgba(63, 63, 70, 0.3)' }}
+          style={{ backgroundColor: THEME.BG_TERTIARY }}
         >
           <FileText size={32} className="opacity-50" />
         </div>

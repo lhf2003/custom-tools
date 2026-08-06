@@ -260,7 +260,7 @@ function DateTimeInput({ def }: { def: A2uiComponentDef }) {
           min={typeof def.min === 'string' ? def.min : undefined}
           max={typeof def.max === 'string' ? def.max : undefined}
           onChange={(e) => path && setBoundValue(path, e.target.value)}
-          className={`${INPUT_CLS} [color-scheme:dark]`}
+          className={INPUT_CLS}
         />
       </Label>
     </div>

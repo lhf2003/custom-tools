@@ -20,6 +20,12 @@
   --vditor-border-default: var(--app-border-default);
   --vditor-border-emphasis: var(--app-border-emphasis);
 
+  /* 灰纱层（行内代码底、语言标签、复制按钮、表格隔行；浅色翻黑纱见 light 覆盖） */
+  --vditor-scrim-code: rgba(63, 63, 70, 0.6);
+  --vditor-scrim-chip: rgba(63, 63, 70, 0.4);
+  --vditor-scrim-button: rgba(63, 63, 70, 0.85);
+  --vditor-scrim-row: rgba(63, 63, 70, 0.25);
+
   /* 深色主题高亮色（浅色主题深档覆盖见文件尾部） */
   --vditor-accent-blue: #3b82f6;
   --vditor-accent-blue-light: #93c5fd;
@@ -60,6 +66,12 @@
   --vditor-accent-orange: #ea580c;
   --vditor-accent-pink: #db2777;
   --vditor-accent-red: #dc2626;
+
+  /* 灰纱层翻黑纱（Black Scrim Rule） */
+  --vditor-scrim-code: rgba(0, 0, 0, 0.07);
+  --vditor-scrim-chip: rgba(0, 0, 0, 0.06);
+  --vditor-scrim-button: rgba(0, 0, 0, 0.08);
+  --vditor-scrim-row: rgba(0, 0, 0, 0.04);
 }
 
 /* ============================================
@@ -271,7 +283,7 @@
    行内代码
    ============================================ */
 .vditor-container .vditor-reset code:not(pre code) {
-  background: rgba(63, 63, 70, 0.6);
+  background: var(--vditor-scrim-code);
   color: var(--vditor-accent-pink);
   padding: 2px 6px;
   border-radius: 5px;
@@ -333,7 +345,7 @@
   font-size: 12px;
   font-weight: 500;
   padding: 1px 6px;
-  background: rgba(63, 63, 70, 0.4);
+  background: var(--vditor-scrim-chip);
   border-radius: 4px;
   margin-left: 6px;
   vertical-align: middle;
@@ -389,7 +401,7 @@
   right: 8px;
   width: 36px;
   height: 36px;
-  background: rgba(63, 63, 70, 0.85);
+  background: var(--vditor-scrim-button);
   color: var(--vditor-text-secondary);
   border: 1px solid var(--vditor-border-default);
   border-radius: 8px;
@@ -461,11 +473,11 @@
 }
 
 .vditor-container .vditor-reset table tbody tr:nth-child(2n) {
-  background: rgba(63, 63, 70, 0.25);
+  background: var(--vditor-scrim-row);
 }
 
 .vditor-container .vditor-reset table tbody tr:hover {
-  background: rgba(63, 63, 70, 0.4);
+  background: var(--vditor-scrim-chip);
 }
 
 /* ============================================
@@ -523,12 +535,12 @@
 }
 
 .vditor-container .vditor-content::-webkit-scrollbar-thumb {
-  background: rgba(82, 82, 91, 0.5);
+  background: var(--scrollbar-thumb);
   border-radius: 4px;
 }
 
 .vditor-container .vditor-content::-webkit-scrollbar-thumb:hover {
-  background: rgba(82, 82, 91, 0.8);
+  background: var(--scrollbar-thumb-hover);
 }
 
 /* 代码块内部滚动条 */
@@ -537,7 +549,7 @@
 }
 
 .vditor-container .vditor-reset pre::-webkit-scrollbar-thumb {
-  background: rgba(82, 82, 91, 0.5);
+  background: var(--scrollbar-thumb);
   border-radius: 3px;
 }
 
