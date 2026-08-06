@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Search, Plus, Copy, Check, Eye, EyeOff, Lock, Trash2, X, Globe, Shield, LayoutGrid, Pencil, ExternalLink, Star, Loader2, User } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { Tooltip } from '@/components/Tooltip';
+import { MenuPanel } from '@/components/ActionMenu';
 import { WINDOW_SIZE } from '../../constants/window';
 import { THEME } from '../../constants/theme';
 import { immediateResize } from '@/utils/tauri';
@@ -62,6 +63,9 @@ export function PasswordView() {
   const [editInitialForm, setEditInitialForm] = useState<EntryFormData>(EMPTY_FORM);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [deletingEntry, setDeletingEntry] = useState<PasswordEntry | null>(null);
+  const [deletingCategory, setDeletingCategory] = useState<PasswordCategory | null>(null);
+  // 分类 chip 右键菜单：null 即关闭
+  const [categoryMenu, setCategoryMenu] = useState<{ cat: PasswordCategory; x: number; y: number } | null>(null);
   const [modalError, setModalError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -315,6 +319,33 @@ export function PasswordView() {
     }
   };
 
+  // 删除分类：条目不丢——后端 FK ON DELETE SET NULL 把它们移回未分类
+  const handleConfirmDeleteCategory = async () => {
+    if (!deletingCategory || isDeleting) return;
+
+    setIsDeleting(true);
+    try {
+      setModalError(null);
+      await invoke('delete_password_category', { id: deletingCategory.id });
+      const removedId = deletingCategory.id;
+      setDeletingCategory(null);
+      // 正在看被删分类 → 回到「全部」（loadEntries 由 selectedCategory 依赖触发）
+      if (selectedCategory === removedId) {
+        setSelectedCategory('all');
+      } else {
+        // 「全部」等视图里被移出的条目要出现，手动刷新
+        loadEntries();
+      }
+      await loadCategories();
+    } catch (err: unknown) {
+      console.error('Failed to delete category:', err);
+      const message = err instanceof Error ? err.message : String(err);
+      setModalError(`删除分类失败: ${message}`);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const handleToggleFavorite = useCallback(async (entry: PasswordEntry) => {
     try {
       await invoke('toggle_password_favorite', { id: entry.id, favorite: !entry.favorite });
@@ -415,7 +446,7 @@ export function PasswordView() {
     if (!isUnlocked) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (showEntryModal || showCategoryModal || deletingEntry) return;
+      if (showEntryModal || showCategoryModal || deletingEntry || deletingCategory || categoryMenu) return;
       if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && isTypingTarget() && e.key !== 'Enter') return;
       if (entries.length === 0) return;
 
@@ -452,11 +483,11 @@ export function PasswordView() {
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isUnlocked, entries, selectedEntryId, showEntryModal, showCategoryModal, deletingEntry, copyPassword, handleToggleFavorite]);
+  }, [isUnlocked, entries, selectedEntryId, showEntryModal, showCategoryModal, deletingEntry, deletingCategory, categoryMenu, copyPassword, handleToggleFavorite]);
 
   if (isLoading) {
     return (
-      <div className="w-full h-full flex items-center justify-center text-app-text-tertiary" style={{ backgroundColor: THEME.BG_PRIMARY }}>
+      <div className="w-full h-full flex items-center justify-center text-sm text-app-text-tertiary" style={{ backgroundColor: THEME.BG_PRIMARY }}>
         <Loader2 size={18} className="animate-spin mr-2" />
         <span>加载中...</span>
       </div>
@@ -475,13 +506,13 @@ export function PasswordView() {
           </div>
 
           {/* Title */}
-          <h2 className="text-lg font-semibold text-app-text-primary mb-2">密码保险库</h2>
-          <p className="text-app-text-tertiary text-sm mb-6">请输入主密码解锁</p>
+          <h2 className="text-sm font-semibold text-app-text-primary mb-2">密码保险库</h2>
+          <p className="text-app-text-tertiary text-xs mb-6">请输入主密码解锁</p>
 
           {/* Error Message */}
           {unlockError && (
             <div className="mb-4 p-3 rounded-lg bg-app-status-error/10 border border-app-status-error/20">
-              <p className="text-sm text-app-status-error-text">{unlockError}</p>
+              <p className="text-xs text-app-status-error-text">{unlockError}</p>
             </div>
           )}
 
@@ -495,7 +526,7 @@ export function PasswordView() {
               value={masterPassword}
               onChange={(e) => setMasterPassword(e.target.value)}
               placeholder="主密码"
-              className="w-full bg-app-bg-tertiary border border-app-border rounded-lg px-4 py-3 text-app-text-primary placeholder:text-app-text-placeholder outline-none transition-colors duration-200 focus:border-app-border-emphasis"
+              className="w-full bg-app-bg-tertiary border border-app-border rounded-lg px-4 py-3 text-sm text-app-text-primary placeholder:text-app-text-placeholder outline-none transition-colors duration-200 focus:border-app-border-emphasis"
               onKeyDown={(e) => e.key === 'Enter' && handleUnlock()}
               autoFocus
             />
@@ -505,7 +536,7 @@ export function PasswordView() {
           <button
             onClick={handleUnlock}
             disabled={!masterPassword || isUnlocking}
-            className="w-full py-3 rounded-lg bg-app-status-info text-white font-medium cursor-pointer transition-colors duration-200 hover:bg-app-status-info-deep disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            className="w-full py-3 rounded-lg bg-app-status-info text-white text-sm font-medium cursor-pointer transition-colors duration-200 hover:bg-app-status-info-deep disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {isUnlocking && <Loader2 size={16} className="animate-spin" />}
             {isUnlocking ? '解锁中...' : '解锁'}
@@ -525,10 +556,10 @@ export function PasswordView() {
       {/* 主视图错误条：load/delete/decrypt 失败在这里可见，可重试可关闭 */}
       {listError && (
         <div className="flex items-center gap-3 px-4 py-2 bg-app-status-error/10 border-b border-app-status-error/20 flex-shrink-0">
-          <span className="flex-1 text-sm text-app-status-error-text">{listError}</span>
+          <span className="flex-1 text-xs text-app-status-error-text">{listError}</span>
           <button
             onClick={() => { setListError(null); loadCategories(); loadEntries(); }}
-            className="px-3 py-1 rounded-md text-sm text-app-text-secondary hover:bg-white/10 transition-colors cursor-pointer"
+            className="px-3 py-1 rounded-md text-xs text-app-text-secondary hover:bg-white/10 transition-colors cursor-pointer"
           >
             重试
           </button>
@@ -559,7 +590,7 @@ export function PasswordView() {
                 value={searchInput}
                 onChange={(e) => setSearchInput(e.target.value)}
                 placeholder="搜索密码..."
-                className="flex-1 bg-transparent text-sm text-app-text-primary placeholder:text-app-text-placeholder outline-none"
+                className="flex-1 bg-transparent text-xs text-app-text-primary placeholder:text-app-text-placeholder outline-none"
               />
               {searchInput && (
                 <button
@@ -599,6 +630,10 @@ export function PasswordView() {
                 <button
                   key={cat.id}
                   onClick={() => setSelectedCategory(cat.id)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setCategoryMenu({ cat, x: e.clientX, y: e.clientY });
+                  }}
                   className={`px-2 py-1 rounded-md text-xs whitespace-nowrap transition-colors cursor-pointer ${
                     selectedCategory === cat.id
                       ? 'bg-white/10 text-app-text-primary'
@@ -616,7 +651,7 @@ export function PasswordView() {
             {entries.length === 0 ? (
               searchQuery ? (
                 <div className="flex flex-col items-center justify-center h-full text-app-text-tertiary p-6 text-center">
-                  <p className="text-sm text-app-text-secondary">没有找到匹配的密码</p>
+                  <p className="text-xs text-app-text-secondary">没有找到匹配的密码</p>
                   <button
                     onClick={() => setSearchInput('')}
                     className="text-xs mt-2 text-app-text-tertiary hover:text-app-text-secondary underline underline-offset-2 transition-colors cursor-pointer"
@@ -629,7 +664,7 @@ export function PasswordView() {
                   <div className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center mb-3">
                     <Shield size={24} className="opacity-50" />
                   </div>
-                  <p className="text-sm text-app-text-secondary">暂无密码</p>
+                  <p className="text-xs text-app-text-secondary">暂无密码</p>
                   <p className="text-xs mt-1 text-app-text-tertiary">点击 + 添加新密码</p>
                 </div>
               )
@@ -655,7 +690,7 @@ export function PasswordView() {
           <div className="p-3 border-t border-app-border">
             <button
               onClick={handleLock}
-              className="w-full py-2 rounded-lg bg-white/5 text-app-text-tertiary hover:bg-white/10 hover:text-app-text-primary transition-colors flex items-center justify-center gap-2 text-sm cursor-pointer"
+              className="w-full py-2 rounded-lg bg-white/5 text-app-text-tertiary hover:bg-white/10 hover:text-app-text-primary transition-colors flex items-center justify-center gap-2 text-xs cursor-pointer"
             >
               <Lock size={14} />
               锁定保险库
@@ -684,15 +719,45 @@ export function PasswordView() {
             <div className="w-24 h-24 rounded-2xl bg-white/5 flex items-center justify-center mb-6 border border-app-border-subtle">
               <LayoutGrid size={48} className="text-app-text-tertiary" />
             </div>
-            <p className="text-lg font-medium text-app-text-tertiary">选择一个密码条目</p>
-            <p className="text-sm mt-2 text-app-text-tertiary">从左侧列表选择一个条目查看详情</p>
+            <p className="text-sm font-medium text-app-text-tertiary">选择一个密码条目</p>
+            <p className="text-xs mt-2 text-app-text-tertiary">从左侧列表选择一个条目查看详情</p>
           </div>
         )}
         </div>
       </div>
 
-      {/* Entry Create/Edit Modal（key 保证切换条目时表单状态重置） */}
-      {showEntryModal && (
+      {/* 分类 chip 右键菜单：透明遮罩点击即关，菜单体复用导航栏 MenuPanel 样式 */}
+      {categoryMenu && (
+        <div
+          className="fixed inset-0 z-50"
+          onClick={() => setCategoryMenu(null)}
+          onContextMenu={(e) => { e.preventDefault(); setCategoryMenu(null); }}
+        >
+          <div
+            className="absolute min-w-[160px] bg-app-bg-primary/80 border border-app-border rounded-xl shadow-2xl animate-in fade-in duration-150"
+            style={{
+              left: Math.min(categoryMenu.x, window.innerWidth - 176),
+              top: Math.min(categoryMenu.y, window.innerHeight - 64),
+              WebkitBackdropFilter: 'blur(20px)',
+              backdropFilter: 'blur(20px)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <MenuPanel
+              items={[{
+                id: 'delete-category',
+                label: '删除分类',
+                icon: Trash2,
+                danger: true,
+                onClick: () => { setModalError(null); setDeletingCategory(categoryMenu.cat); },
+              }]}
+              onItemClick={() => setCategoryMenu(null)}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Entry Create/Edit Modal（key 保证切换条目时表单状态重置） */}{showEntryModal && (
         <EntryFormModal
           key={editingEntry ? `edit-${editingEntry.id}` : 'create'}
           mode={editingEntry ? 'edit' : 'create'}
@@ -718,11 +783,28 @@ export function PasswordView() {
       {/* Delete Confirm Modal */}
       {deletingEntry && (
         <ConfirmDeleteModal
-          entryTitle={deletingEntry.title}
+          heading="删除密码"
+          message={<>确定要删除「{deletingEntry.title}」吗？</>}
           deleting={isDeleting}
           error={modalError}
           onConfirm={handleConfirmDelete}
           onClose={() => { setDeletingEntry(null); setModalError(null); }}
+        />
+      )}
+
+      {/* Delete Category Confirm Modal */}
+      {deletingCategory && (
+        <ConfirmDeleteModal
+          heading="删除分类"
+          message={
+            deletingCategory.entry_count > 0
+              ? <>确定要删除分类「{deletingCategory.name}」吗？其中的 {deletingCategory.entry_count} 条密码将移至未分类。</>
+              : <>确定要删除分类「{deletingCategory.name}」吗？</>
+          }
+          deleting={isDeleting}
+          error={modalError}
+          onConfirm={handleConfirmDeleteCategory}
+          onClose={() => { setDeletingCategory(null); setModalError(null); }}
         />
       )}
     </div>
@@ -757,7 +839,7 @@ function PasswordListItem({ item, isSelected, onClick, itemRef }: PasswordListIt
           {item.favorite && (
             <Star size={12} className="text-app-status-warning flex-shrink-0" fill="currentColor" />
           )}
-          <span className={`font-medium truncate ${isSelected ? 'text-app-text-primary' : 'text-app-text-secondary'}`}>{item.title}</span>
+          <span className={`text-sm font-medium truncate ${isSelected ? 'text-app-text-primary' : 'text-app-text-secondary'}`}>{item.title}</span>
         </div>
         <span className="text-app-text-tertiary text-xs truncate block">
           {item.username || '无用户名'}
@@ -801,14 +883,14 @@ function PasswordDetail({
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-4 min-w-0">
             {/* Large Icon */}
-            <div className="w-12 h-12 rounded-xl flex items-center justify-center text-app-text-secondary font-semibold text-lg flex-shrink-0"
+            <div className="w-12 h-12 rounded-xl flex items-center justify-center text-app-text-secondary font-semibold text-sm flex-shrink-0"
                  style={{ backgroundColor: THEME.BG_ELEVATED }}>
               {firstChar(entry.title)}
             </div>
 
             <div className="min-w-0">
               <div className="flex items-center gap-3">
-                <h2 className="text-lg font-semibold text-app-text-primary truncate">{entry.title}</h2>
+                <h2 className="text-sm font-semibold text-app-text-primary truncate">{entry.title}</h2>
               </div>
               {entry.url && (
                 <button
@@ -820,7 +902,7 @@ function PasswordDetail({
                       console.error('Failed to open external URL:', err);
                     }
                   }}
-                  className="text-app-text-tertiary hover:text-blue-400 text-sm flex items-center gap-1 mt-1 transition-colors cursor-pointer truncate"
+                  className="text-app-text-tertiary hover:text-blue-400 text-xs flex items-center gap-1 mt-1 transition-colors cursor-pointer truncate"
                 >
                   {entry.url}
                   <ExternalLink size={12} />
@@ -873,7 +955,7 @@ function PasswordDetail({
               <div className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0">
                 <User size={18} className="text-app-text-tertiary" />
               </div>
-              <code className="flex-1 text-app-text-primary text-sm truncate">{entry.username || '-'}</code>
+              <code className="flex-1 text-app-text-primary text-xs truncate">{entry.username || '-'}</code>
               {entry.username && (
                 <Tooltip content={copiedField === 'username' ? '已复制' : '复制用户名'} placement="top">
                   <button
@@ -897,7 +979,7 @@ function PasswordDetail({
               <div className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0">
                 <Lock size={18} className="text-app-text-tertiary" />
               </div>
-              <code className={`flex-1 text-app-text-primary text-sm font-mono ${showPassword ? 'break-all' : 'truncate'}`} aria-live="polite">
+              <code className={`flex-1 text-app-text-primary text-xs font-mono ${showPassword ? 'break-all' : 'truncate'}`} aria-live="polite">
                 {showPassword ? decryptedPassword || '••••••••' : '••••••••••••••••'}
               </code>
               <Tooltip content={showPassword ? '隐藏密码' : '显示密码'} placement="top">
@@ -933,7 +1015,7 @@ function PasswordDetail({
                 <div className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0">
                   <Globe size={18} className="text-app-text-tertiary" />
                 </div>
-                <code className="flex-1 text-app-text-primary text-sm truncate">{entry.url}</code>
+                <code className="flex-1 text-app-text-primary text-xs truncate">{entry.url}</code>
                 <Tooltip content={copiedField === 'url' ? '已复制' : '复制网址'} placement="top">
                   <button
                     onClick={onCopyUrl}
@@ -954,7 +1036,7 @@ function PasswordDetail({
             <div className="space-y-2">
               <label className="text-xs text-app-text-tertiary">备注</label>
               <div className="rounded-xl p-4 border border-app-border bg-white/5">
-                <p className="text-app-text-secondary text-sm whitespace-pre-wrap break-words">{entry.notes}</p>
+                <p className="text-app-text-secondary text-xs whitespace-pre-wrap break-words">{entry.notes}</p>
               </div>
             </div>
           )}

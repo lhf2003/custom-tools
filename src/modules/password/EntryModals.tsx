@@ -86,7 +86,7 @@ function Modal({ children, onClose, ariaLabel }: ModalProps) {
 }
 
 const inputClass =
-  'w-full bg-app-bg-tertiary border border-app-border rounded-lg px-4 py-2 text-app-text-primary placeholder:text-app-text-placeholder outline-none transition-colors duration-200 focus:border-app-border-emphasis';
+  'w-full bg-app-bg-tertiary border border-app-border rounded-lg px-4 py-2 text-sm text-app-text-primary placeholder:text-app-text-placeholder outline-none transition-colors duration-200 focus:border-app-border-emphasis';
 
 interface EntryFormModalProps {
   mode: 'create' | 'edit';
@@ -128,7 +128,7 @@ export function EntryFormModal({
 
   return (
     <Modal onClose={requestClose} ariaLabel={mode === 'edit' ? '编辑密码' : '新增密码'}>
-      <h2 className="text-app-text-primary font-medium mb-4">
+      <h2 className="text-sm text-app-text-primary font-medium mb-4">
         {mode === 'edit' ? '编辑密码' : '新增密码'}
       </h2>
       <button
@@ -140,7 +140,7 @@ export function EntryFormModal({
       </button>
 
       {error && (
-        <div className="mb-4 p-3 rounded-lg bg-app-status-error/10 border border-app-status-error/20 text-sm text-app-status-error-text">
+        <div className="mb-4 p-3 rounded-lg bg-app-status-error/10 border border-app-status-error/20 text-xs text-app-status-error-text">
           {error}
         </div>
       )}
@@ -208,17 +208,17 @@ export function EntryFormModal({
 
       {confirmDiscard && (
         <div className="mt-4 p-3 rounded-lg bg-app-status-warning/10 border border-app-status-warning/20 flex items-center justify-between gap-2">
-          <span className="text-sm text-app-status-warning-text">放弃未保存的修改？</span>
+          <span className="text-xs text-app-status-warning-text">放弃未保存的修改？</span>
           <div className="flex gap-2">
             <button
               onClick={() => setConfirmDiscard(false)}
-              className="px-3 py-1 rounded-md text-sm text-app-text-tertiary hover:text-app-text-primary transition-colors cursor-pointer"
+              className="px-3 py-1 rounded-md text-xs text-app-text-tertiary hover:text-app-text-primary transition-colors cursor-pointer"
             >
               继续编辑
             </button>
             <button
               onClick={onClose}
-              className="px-3 py-1 rounded-md text-sm text-app-status-warning-text hover:bg-app-status-warning/20 transition-colors cursor-pointer"
+              className="px-3 py-1 rounded-md text-xs text-app-status-warning-text hover:bg-app-status-warning/20 transition-colors cursor-pointer"
             >
               放弃
             </button>
@@ -229,14 +229,14 @@ export function EntryFormModal({
       <div className="flex justify-end gap-2 mt-4">
         <button
           onClick={requestClose}
-          className="px-4 py-2 rounded-lg text-app-text-tertiary hover:text-app-text-primary hover:bg-white/10 transition-colors duration-200 cursor-pointer"
+          className="px-4 py-2 rounded-lg text-sm text-app-text-tertiary hover:text-app-text-primary hover:bg-white/10 transition-colors duration-200 cursor-pointer"
         >
           取消
         </button>
         <button
           onClick={() => onSubmit(form)}
           disabled={!canSubmit}
-          className="px-4 py-2 rounded-lg bg-app-status-info text-white transition-colors duration-200 hover:bg-app-status-info-deep disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center gap-2"
+          className="px-4 py-2 rounded-lg text-sm bg-app-status-info text-white transition-colors duration-200 hover:bg-app-status-info-deep disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center gap-2"
         >
           {saving && <Loader2 size={14} className="animate-spin" />}
           保存
@@ -258,7 +258,7 @@ export function CategoryModal({ saving, error, onSubmit, onClose }: CategoryModa
 
   return (
     <Modal onClose={onClose} ariaLabel="新建分类">
-      <h2 className="text-app-text-primary font-medium mb-4">新建分类</h2>
+      <h2 className="text-sm text-app-text-primary font-medium mb-4">新建分类</h2>
       <button
         onClick={onClose}
         aria-label="关闭"
@@ -268,7 +268,7 @@ export function CategoryModal({ saving, error, onSubmit, onClose }: CategoryModa
       </button>
 
       {error && (
-        <div className="mb-4 p-3 rounded-lg bg-app-status-error/10 border border-app-status-error/20 text-sm text-app-status-error-text">
+        <div className="mb-4 p-3 rounded-lg bg-app-status-error/10 border border-app-status-error/20 text-xs text-app-status-error-text">
           {error}
         </div>
       )}
@@ -289,14 +289,14 @@ export function CategoryModal({ saving, error, onSubmit, onClose }: CategoryModa
       <div className="flex justify-end gap-2 mt-4">
         <button
           onClick={onClose}
-          className="px-4 py-2 rounded-lg text-app-text-tertiary hover:text-app-text-primary hover:bg-white/10 transition-colors duration-200 cursor-pointer"
+          className="px-4 py-2 rounded-lg text-sm text-app-text-tertiary hover:text-app-text-primary hover:bg-white/10 transition-colors duration-200 cursor-pointer"
         >
           取消
         </button>
         <button
           onClick={() => onSubmit(name.trim())}
           disabled={!name.trim() || saving}
-          className="px-4 py-2 rounded-lg bg-app-status-info text-white transition-colors duration-200 hover:bg-app-status-info-deep disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center gap-2"
+          className="px-4 py-2 rounded-lg text-sm bg-app-status-info text-white transition-colors duration-200 hover:bg-app-status-info-deep disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center gap-2"
         >
           {saving && <Loader2 size={14} className="animate-spin" />}
           创建
@@ -307,7 +307,10 @@ export function CategoryModal({ saving, error, onSubmit, onClose }: CategoryModa
 }
 
 interface ConfirmDeleteModalProps {
-  entryTitle: string;
+  /** 弹窗标题（删除密码 / 删除分类） */
+  heading: string;
+  /** 点名确认文案（含条目数等上下文） */
+  message: React.ReactNode;
   deleting: boolean;
   error: string | null;
   onConfirm: () => void;
@@ -315,7 +318,8 @@ interface ConfirmDeleteModalProps {
 }
 
 export function ConfirmDeleteModal({
-  entryTitle,
+  heading,
+  message,
   deleting,
   error,
   onConfirm,
@@ -323,14 +327,12 @@ export function ConfirmDeleteModal({
 }: ConfirmDeleteModalProps) {
   return (
     <Modal onClose={onClose} ariaLabel="删除确认">
-      <h2 className="text-app-text-primary font-medium mb-2">删除密码</h2>
-      <p className="text-sm text-app-text-tertiary mb-1">
-        确定要删除「{entryTitle}」吗？
-      </p>
+      <h2 className="text-sm text-app-text-primary font-medium mb-2">{heading}</h2>
+      <p className="text-xs text-app-text-tertiary mb-1">{message}</p>
       <p className="text-xs text-app-text-tertiary mb-4">此操作无法撤销。</p>
 
       {error && (
-        <div className="mb-4 p-3 rounded-lg bg-app-status-error/10 border border-app-status-error/20 text-sm text-app-status-error-text">
+        <div className="mb-4 p-3 rounded-lg bg-app-status-error/10 border border-app-status-error/20 text-xs text-app-status-error-text">
           {error}
         </div>
       )}
@@ -339,14 +341,14 @@ export function ConfirmDeleteModal({
         <button
           onClick={onClose}
           autoFocus
-          className="px-4 py-2 rounded-lg text-app-text-tertiary hover:text-app-text-primary hover:bg-white/10 transition-colors duration-200 cursor-pointer"
+          className="px-4 py-2 rounded-lg text-sm text-app-text-tertiary hover:text-app-text-primary hover:bg-white/10 transition-colors duration-200 cursor-pointer"
         >
           取消
         </button>
         <button
           onClick={onConfirm}
           disabled={deleting}
-          className="px-4 py-2 rounded-lg bg-app-status-error/90 text-white hover:bg-app-status-error transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center gap-2"
+          className="px-4 py-2 rounded-lg text-sm bg-app-status-error/90 text-white hover:bg-app-status-error transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center gap-2"
         >
           {deleting && <Loader2 size={14} className="animate-spin" />}
           删除

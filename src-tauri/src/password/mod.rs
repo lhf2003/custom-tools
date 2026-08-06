@@ -26,6 +26,8 @@ pub struct PasswordCategory {
     pub name: String,
     pub icon: String,
     pub color: String,
+    /// 分类下的条目数（删除确认弹窗要用，避免前端为计数再发一次查询）
+    pub entry_count: i64,
 }
 
 /// Password manager state

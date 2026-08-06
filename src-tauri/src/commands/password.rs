@@ -56,7 +56,11 @@ pub fn get_password_categories(
     let conn = Connection::open(&db_state.0).map_err(|e| e.to_string())?;
 
     let mut stmt = conn
-        .prepare("SELECT id, name, icon, color FROM password_categories ORDER BY sort_order, name")
+        .prepare(
+            "SELECT c.id, c.name, c.icon, c.color,
+                    (SELECT COUNT(*) FROM password_entries e WHERE e.category_id = c.id)
+             FROM password_categories c ORDER BY c.sort_order, c.name",
+        )
         .map_err(|e| e.to_string())?;
 
     let categories = stmt
@@ -66,6 +70,7 @@ pub fn get_password_categories(
                 name: row.get(1)?,
                 icon: row.get(2)?,
                 color: row.get(3)?,
+                entry_count: row.get(4)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -326,6 +331,25 @@ pub fn create_password_category(
     .map_err(|e| e.to_string())?;
 
     Ok(conn.last_insert_rowid())
+}
+
+/// Delete a password category. Entries in it are NOT deleted — the FK's
+/// `ON DELETE SET NULL` moves them back to uncategorized. Must go through
+/// `open_connection`: SQLite keeps foreign keys off per connection by
+/// default, and a plain `Connection::open` would silently skip the SET NULL.
+#[tauri::command]
+pub fn delete_password_category(db_state: State<DatabaseState>, id: i64) -> Result<(), String> {
+    let conn = crate::db::open_connection(&db_state.0).map_err(|e| e.to_string())?;
+
+    let affected = conn
+        .execute("DELETE FROM password_categories WHERE id = ?1", params![id])
+        .map_err(|e| e.to_string())?;
+
+    if affected == 0 {
+        return Err(format!("分类 {} 不存在", id));
+    }
+
+    Ok(())
 }
 
 /// Toggle favorite flag on a password entry

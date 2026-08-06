@@ -3,6 +3,8 @@ export interface PasswordCategory {
   name: string;
   icon: string;
   color: string;
+  /** 分类下的条目数（删除确认弹窗展示用） */
+  entry_count: number;
 }
 
 export interface PasswordEntry {
