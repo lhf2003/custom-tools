@@ -9,7 +9,7 @@ import type { ViewMode } from '@/types';
 import { safeInvoke, debouncedResize } from '../../utils/tauri';
 import { WINDOW_SIZE } from '../../constants/window';
 import { listLauncherEntries, isLauncherEntryId, entryIdToViewMode } from '@/plugins/launcherEntries';
-import { matchTrigger } from '@/plugins/registry';
+import { matchTrigger, suggestTriggers, type TriggerSuggestion } from '@/plugins/registry';
 import { getCachedIcon, setCachedIcon } from './iconCache';
 
 
@@ -108,6 +108,16 @@ export function LauncherView() {
   const triggerMatch = !isNoteMode && searchQuery ? matchTrigger(searchQuery.trim()) : null;
   const isTriggerMode = triggerMatch !== null;
 
+  // @ 前缀联想：未完整命中时模糊匹配 trigger 关键词（@ti → @time），
+  // 记不起完整名称也能进入插件；优先级低于独占态、高于普通搜索
+  const triggerSuggestions = useMemo(
+    () => !isNoteMode && !isTriggerMode && searchQuery.trim().startsWith('@')
+      ? suggestTriggers(searchQuery.trim())
+      : [],
+    [isNoteMode, isTriggerMode, searchQuery]
+  );
+  const isSuggestMode = triggerSuggestions.length > 0;
+
   // trigger 独占结果：单行 AppItemData（path = builtin://<id>，toolId 复用打开逻辑）
   const triggerResult: AppItemData | null = useMemo(
     () => triggerMatch
@@ -116,16 +126,29 @@ export function LauncherView() {
     [triggerMatch]
   );
 
+  // 联想候选转 AppItemData（键盘导航集合与渲染集合共用，选中与建议一一对应）
+  const suggestResults: AppItemData[] = useMemo(
+    () => triggerSuggestions.map((s) => ({
+      name: s.plugin.name,
+      path: `builtin://${s.plugin.id}`,
+      isBuiltIn: true,
+      toolId: s.plugin.id,
+    })),
+    [triggerSuggestions]
+  );
+
   // 键盘导航集合与渲染集合必须一致：折叠态只渲染前 N 条，选中不可越界（防盲启动）
   // 备忘模式无结果网格，导航集合为空；trigger 独占态导航集合只有独占结果
   const navItems = useMemo(() => isNoteMode
     ? []
     : isTriggerMode
       ? (triggerResult ? [triggerResult] : [])
-      : searchQuery && !isExpanded
-        ? allResults.slice(0, SEARCH_COLLAPSED_COUNT)
-        : allResults,
-  [isNoteMode, isTriggerMode, triggerResult, searchQuery, isExpanded, allResults]);
+      : isSuggestMode
+        ? suggestResults
+        : searchQuery && !isExpanded
+          ? allResults.slice(0, SEARCH_COLLAPSED_COUNT)
+          : allResults,
+  [isNoteMode, isTriggerMode, triggerResult, isSuggestMode, suggestResults, searchQuery, isExpanded, allResults]);
 
   // Reset selection when items change
   useEffect(() => {
@@ -506,6 +529,12 @@ export function LauncherView() {
               freshItems[Math.min(selectedIndex, freshItems.length - 1)];
             if (target) handleItemClick(target);
           })();
+        } else if (isSuggestMode && triggerSuggestions[selectedIndex]) {
+          // @ 联想：以选中候选的剩余参数为载荷打开（@ti 123 → @time + arg "123"）
+          const suggestion = triggerSuggestions[selectedIndex];
+          setSearchQuery('');
+          useAppStore.getState().openPluginView(suggestion.plugin.id, suggestion.arg || undefined);
+          handleItemClick(suggestResults[selectedIndex]);
         } else if (isTriggerMode && triggerMatch && triggerResult) {
           // trigger 独占：以剩余文本为载荷打开插件（裸 @json 载荷 undefined = 空开）
           setSearchQuery('');
@@ -516,7 +545,7 @@ export function LauncherView() {
         }
         break;
     }
-  }, [searchQuery, navItems, selectedIndex, setActiveView, addToast, setSearchQuery, searchApps, buildResults, handleItemClick, isNoteMode, noteContent, isTriggerMode, triggerMatch, triggerResult, focusSettingsButton, focusExpandButton, focusGridItem]);
+  }, [searchQuery, navItems, selectedIndex, setActiveView, addToast, setSearchQuery, searchApps, buildResults, handleItemClick, isNoteMode, noteContent, isTriggerMode, triggerMatch, triggerResult, isSuggestMode, triggerSuggestions, suggestResults, focusSettingsButton, focusExpandButton, focusGridItem]);
 
   return (
     <div
@@ -558,6 +587,17 @@ export function LauncherView() {
       <div className="w-full flex-1 px-4 pb-4 overflow-hidden">
         {isNoteMode ? (
           <NoteActionPreview content={noteContent} />
+        ) : isSuggestMode ? (
+          <TriggerSuggestList
+            suggestions={triggerSuggestions}
+            selectedIndex={selectedIndex}
+            onSelect={handleHoverSelect}
+            onOpen={(suggestion, index) => {
+              setSearchQuery('');
+              useAppStore.getState().openPluginView(suggestion.plugin.id, suggestion.arg || undefined);
+              handleItemClick(suggestResults[index]);
+            }}
+          />
         ) : isTriggerMode && triggerResult ? (
           <TriggerResultCard
             result={triggerResult}
@@ -861,6 +901,57 @@ function SearchResults({
           />
         ))}
       </div>
+    </section>
+  );
+}
+
+// @ 前缀联想列表：未完整命中 trigger 时的模糊候选（@ti → @time），
+// 每行展示插件名 + 关键词 + 说明；回车/点击以剩余参数打开
+function TriggerSuggestList({
+  suggestions,
+  selectedIndex,
+  onSelect,
+  onOpen,
+}: {
+  suggestions: TriggerSuggestion[];
+  selectedIndex: number;
+  onSelect: (index: number) => void;
+  onOpen: (suggestion: TriggerSuggestion, index: number) => void;
+}) {
+  return (
+    <section className="h-full flex flex-col">
+      {suggestions.map((s, index) => {
+        const Icon = s.plugin.icon;
+        return (
+          <div
+            key={`${s.plugin.id}:${s.keyword}`}
+            id={`launcher-option-${index}`}
+            role="option"
+            aria-selected={index === selectedIndex}
+            onClick={() => onOpen(s, index)}
+            onMouseMove={() => onSelect(index)}
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors cursor-pointer ${
+              index === selectedIndex ? 'bg-white/10' : 'hover:bg-white/5'
+            }`}
+          >
+            {Icon && (
+              <div className="w-8 h-8 rounded-lg bg-app-bg-elevated flex items-center justify-center flex-shrink-0">
+                <Icon className="w-4 h-4 text-app-text-secondary" />
+              </div>
+            )}
+            <div className="flex-1 min-w-0">
+              <p className="text-sm text-app-text-primary truncate">
+                {s.plugin.name}
+                <span className="text-app-text-tertiary ml-1.5 font-mono text-xs">{s.keyword}</span>
+              </p>
+              <p className="text-xs text-app-text-tertiary mt-0.5 truncate">
+                {s.plugin.description ?? s.trigger.argHint ?? '回车打开插件'}
+              </p>
+            </div>
+            {s.arg && <span className="text-xs text-app-text-tertiary flex-shrink-0">{s.arg}</span>}
+          </div>
+        );
+      })}
     </section>
   );
 }

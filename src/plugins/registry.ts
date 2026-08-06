@@ -115,6 +115,53 @@ export function matchTrigger(query: string): { plugin: ViewPlugin; trigger: Plug
   return null;
 }
 
+/** @ 前缀模糊联想的单个候选（未完整命中时供启动器联想列表展示/选择） */
+export interface TriggerSuggestion {
+  plugin: ViewPlugin;
+  trigger: PluginTrigger;
+  /** 匹配的完整关键词（@time） */
+  keyword: string;
+  /** 匹配类型：prefix 前缀匹配 > substring 子串包含 */
+  matchType: 'prefix' | 'substring';
+  /** 剩余参数（query 中「@ 关键词之后」的部分，选中后投递给插件） */
+  arg: string;
+}
+
+/**
+ * @ 前缀联想：query 以 @ 开头且未完整命中 trigger 时，用「@ 后第一段 token」
+ * 模糊匹配全部 trigger 关键词（前缀优先、子串兜底）——记不起完整名称（@ti → @time）
+ * 也能进入插件。排序：前缀 > 子串；同级按插件 order、关键词长度升序。
+ */
+export function suggestTriggers(query: string): TriggerSuggestion[] {
+  if (!query.startsWith('@')) return [];
+  // @ 后第一段 token 作为匹配目标（@time 123 → time）；参数 = @ 后第一个空格起
+  const afterAt = query.slice(1);
+  const tokenEnd = afterAt.search(/\s/);
+  const token = (tokenEnd === -1 ? afterAt : afterAt.slice(0, tokenEnd)).toLowerCase();
+  if (!token) return [];
+  const argStart = query.indexOf(' ', 1);
+  const arg = argStart === -1 ? '' : query.slice(argStart).trim();
+
+  const out: TriggerSuggestion[] = [];
+  for (const plugin of byId.values()) {
+    for (const trigger of plugin.triggers ?? []) {
+      const kw = trigger.keyword;
+      if (!kw.startsWith('@')) continue;
+      const kwBody = kw.slice(1).toLowerCase();
+      const matchType = kwBody.startsWith(token) ? 'prefix' : kwBody.includes(token) ? 'substring' : null;
+      if (!matchType) continue;
+      out.push({ plugin, trigger, keyword: kw, matchType, arg });
+    }
+  }
+  out.sort((a, b) => {
+    if (a.matchType !== b.matchType) return a.matchType === 'prefix' ? -1 : 1;
+    const orderDiff = (a.plugin.order ?? 100) - (b.plugin.order ?? 100);
+    if (orderDiff !== 0) return orderDiff;
+    return a.keyword.length - b.keyword.length;
+  });
+  return out;
+}
+
 /** 壳入口：封闭集合（壳自己是自己唯一的登记处，不构成同步点），与注册表插件合并进启动器结果 */
 export interface ShellEntry {
   id: ShellView;
