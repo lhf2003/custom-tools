@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useToastStore } from '@/stores/toastStore';
-import { PageHeader, SettingGroup, SettingRow, Toggle } from '../components/SettingsPrimitives';
+import { SettingGroup, SettingRow, Toggle } from '../components/SettingsPrimitives';
 import { CustomSelect } from '../components/CustomSelect';
 import { MemoryCenter } from './MemoryCenter';
 import { SuggestionCenter } from './SuggestionCenter';
@@ -189,11 +189,6 @@ export function CompanionSettings() {
 
   return (
     <>
-      <PageHeader
-        title="陪伴界面"
-        description="学习你的工作习惯，适时给出建议（数据仅存本机）"
-      />
-
       <SettingGroup title="基础">
         <SettingRow title="启用陪伴" description="后台采集窗口活动并生成主动建议">
           <Toggle enabled={companion_enabled} onToggle={setCompanionEnabled} />
@@ -302,7 +297,7 @@ export function CompanionSettings() {
 
       {/* 学习概览：未启用陪伴时隐藏（没有数据可学） */}
       {companion_enabled && (
-        <div className="mb-6">
+        <div className="mb-8">
           <h3 className="text-xs font-semibold text-app-text-tertiary px-3 mb-1.5">学习概览</h3>
           <div className="px-3 space-y-5">
             {/* 今日使用 */}

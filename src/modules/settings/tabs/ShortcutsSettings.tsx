@@ -3,7 +3,7 @@ import { RotateCcw, AlertCircle } from 'lucide-react';
 import { Tooltip } from '@/components/Tooltip';
 import { useSettingsStore, type ShortcutConfig } from '@/stores/settingsStore';
 import { KeyRecorder } from '../components/KeyRecorder';
-import { PageHeader } from '../components/SettingsPrimitives';
+import { SettingGroup } from '../components/SettingsPrimitives';
 
 export function ShortcutsSettings() {
   const { shortcuts, shortcutsLoading, loadShortcuts, resetAllShortcuts } = useSettingsStore();
@@ -30,30 +30,27 @@ export function ShortcutsSettings() {
 
   return (
     <>
-      <PageHeader
-        title="快捷键"
-        description="自定义全局快捷操作"
+      <SettingGroup
+        title="全局快捷键"
         actions={
           <Tooltip content="恢复默认" placement="bottom">
             <button
               onClick={handleResetAll}
-              className="px-3 py-1.5 rounded-lg text-app-text-tertiary text-xs hover:bg-white/10 hover:text-app-text-primary transition-colors cursor-pointer flex items-center gap-1.5"
+              className="px-2 py-1 rounded-md text-app-text-tertiary text-xs hover:bg-white/10 hover:text-app-text-primary transition-colors cursor-pointer flex items-center gap-1.5"
             >
               <RotateCcw size={13} />
               恢复默认
             </button>
           </Tooltip>
         }
-      />
-
-      {shortcutsLoading ? (
-        <div className="text-app-text-disabled text-center py-12">
-          <div className="inline-block w-6 h-6 border-2 border-white/20 border-t-app-brand-primary-light rounded-full animate-spin mb-3" />
-          <p className="text-sm">加载中...</p>
-        </div>
-      ) : (
-        <div>
-          {shortcuts.map((shortcut) => (
+      >
+        {shortcutsLoading ? (
+          <div className="text-app-text-disabled text-center py-12">
+            <div className="inline-block w-6 h-6 border-2 border-white/20 border-t-app-brand-primary-light rounded-full animate-spin mb-3" />
+            <p className="text-sm">加载中...</p>
+          </div>
+        ) : (
+          shortcuts.map((shortcut) => (
             <ShortcutItem
               key={shortcut.id}
               config={shortcut}
@@ -69,9 +66,9 @@ export function ShortcutsSettings() {
               onConflict={(name) => setConflictInfo({ id: shortcut.id, name })}
               onClearConflict={() => setConflictInfo(null)}
             />
-          ))}
-        </div>
-      )}
+          ))
+        )}
+      </SettingGroup>
 
       <p className="mt-5 px-3 text-app-text-tertiary text-xs leading-relaxed">
         点击快捷键区域即可编辑，支持 Ctrl、Shift、Alt、Meta 组合键，修改后立即生效。
@@ -131,7 +128,7 @@ function ShortcutItem({
 
   if (isEditing) {
     return (
-      <div className="rounded-lg px-3 py-2.5 bg-white/5">
+      <div className="px-3 py-3 bg-white/5">
         <div className="flex items-center gap-4">
           <div className="flex-1 min-w-0">
             <p className="text-app-text-primary text-sm font-medium">{config.name}</p>
@@ -154,7 +151,7 @@ function ShortcutItem({
 
   return (
     <div
-      className="group rounded-lg px-3 py-2.5 flex items-center gap-4 hover:bg-white/5 transition-colors cursor-pointer"
+      className="group px-3 py-3 flex items-center gap-4 hover:bg-white/5 transition-colors cursor-pointer"
       onClick={onEdit}
     >
       <div className="flex-1 min-w-0">

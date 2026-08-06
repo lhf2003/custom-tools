@@ -1,5 +1,3 @@
-import { PageHeader } from '../components/SettingsPrimitives';
-
 interface ChangelogEntry {
   version: string;
   date: string;
@@ -202,8 +200,6 @@ const TAG_LABEL: Record<ChangelogEntry['tag'], string> = {
 export function ChangelogSettings() {
   return (
     <>
-      <PageHeader title="更新日志" description="版本迭代记录" />
-
       <div>
         {CHANGELOG.map((entry, index) => (
           <div key={entry.version} className="mb-6">

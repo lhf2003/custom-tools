@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
-import { PageHeader, SettingGroup } from '../components/SettingsPrimitives';
+import { SettingGroup } from '../components/SettingsPrimitives';
 
 const TECH_STACK = ['Tauri 2.0', 'Rust', 'React 18', 'TypeScript', 'Vite', 'Tailwind CSS', 'SQLite', 'nucleo'];
 
@@ -15,8 +15,6 @@ export function AboutSettings() {
 
   return (
     <>
-      <PageHeader title="关于我们" description="应用信息与致谢" />
-
       {/* 应用信息 */}
       <div className="flex items-center gap-4 px-3 mb-6">
         <div className="w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 overflow-hidden">
@@ -32,14 +30,14 @@ export function AboutSettings() {
       </div>
 
       <SettingGroup title="关于本应用">
-        <p className="px-3 text-app-text-tertiary text-xs leading-relaxed">
+        <p className="px-3 py-3 text-app-text-tertiary text-xs leading-relaxed">
           FlowHub 是一款面向 Windows 的效率工具启动器，提供应用模糊搜索、剪贴板历史、
           密码管理、Markdown 笔记、文件搜索、JSON 格式化和 AI 对话等功能，旨在让日常操作更快捷流畅。
         </p>
       </SettingGroup>
 
       <SettingGroup title="技术栈">
-        <div className="px-3 flex flex-wrap gap-2">
+        <div className="px-3 py-3 flex flex-wrap gap-2">
           {TECH_STACK.map((tech) => (
             <span
               key={tech}
@@ -52,7 +50,7 @@ export function AboutSettings() {
       </SettingGroup>
 
       <SettingGroup title="隐私声明">
-        <p className="px-3 text-app-text-tertiary text-xs leading-relaxed">
+        <p className="px-3 py-3 text-app-text-tertiary text-xs leading-relaxed">
           本应用所有数据（剪贴板历史、密码、笔记、AI 配置）均仅存储在本地，不会上传至任何服务器。
           AI 功能需要用户自行配置第三方大模型接口密钥。
         </p>

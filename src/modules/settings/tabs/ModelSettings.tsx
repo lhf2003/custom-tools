@@ -24,7 +24,7 @@ import {
 import { Tooltip } from '@/components/Tooltip';
 import { useLlmProviderStore, type Provider, type ProviderType, type Model, type Scene, type SceneConfig } from '@/stores/llmProviderStore';
 import { useSettingsStore } from '@/stores/settingsStore';
-import { PageHeader, Toggle } from '../components/SettingsPrimitives';
+import { Toggle } from '../components/SettingsPrimitives';
 import { CustomSelect, type SelectGroup } from '../components/CustomSelect';
 
 // Provider type options
@@ -296,8 +296,6 @@ export function ModelSettings() {
 
   return (
     <>
-      <PageHeader title="模型配置" description="配置多提供商 LLM 服务" />
-
       <div className="space-y-4">
         {/* Claude Code 全局配置 */}
         <div className="rounded-xl border border-white/10 bg-white/[0.02] overflow-hidden">

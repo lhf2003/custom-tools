@@ -1,38 +1,29 @@
 /**
- * 设置页布局原语：PageHeader / SettingGroup / SettingRow / Toggle
- * 行式布局——层级靠排版与灰阶建立，不用卡片边框（对齐 DESIGN.md）。
+ * 设置页布局原语：SettingGroup / SettingRow / Toggle
+ * Win11/Raycast 式分组卡片——SettingGroup 用 Sidebar 色圆角容器包裹行列表
+ * （窗口左右统一 Base 基座，容器是页面唯一浮起层），行间 hairline 分隔；
+ * 设置行无 hover 铺底（整行不可点，交互在右侧控件）。
+ * 页面无顶部大标题：组标题承担说明职责。
  */
-
-interface PageHeaderProps {
-  title: string;
-  description?: string;
-  actions?: React.ReactNode;
-}
-
-/** 设置页统一页头：16px 600 标题 + 12px 三级文字副标题，右侧可选操作区 */
-export function PageHeader({ title, description, actions }: PageHeaderProps) {
-  return (
-    <div className="flex items-start justify-between gap-4 mb-5">
-      <div className="min-w-0">
-        <h2 className="text-base font-semibold text-app-text-primary">{title}</h2>
-        {description && <p className="text-app-text-tertiary text-xs mt-1">{description}</p>}
-      </div>
-      {actions && <div className="flex-shrink-0">{actions}</div>}
-    </div>
-  );
-}
 
 interface SettingGroupProps {
   title: string;
+  /** 组标题行右侧操作区（ghost 小按钮，如「恢复默认」「AI 生成」） */
+  actions?: React.ReactNode;
   children: React.ReactNode;
 }
 
-/** 设置分组：小字组标题 + 行容器，组间靠间距分隔 */
-export function SettingGroup({ title, children }: SettingGroupProps) {
+/** 设置分组：组标题（可带右侧操作）+ Sidebar 色圆角容器，行间 hairline 分隔，组间靠大间距分隔 */
+export function SettingGroup({ title, actions, children }: SettingGroupProps) {
   return (
-    <section className="mb-6">
-      <h3 className="text-xs font-semibold text-app-text-tertiary px-3 mb-1.5">{title}</h3>
-      <div>{children}</div>
+    <section className="mb-8">
+      <div className="flex items-center justify-between gap-2 px-3 mb-1.5">
+        <h3 className="text-xs font-semibold text-app-text-tertiary">{title}</h3>
+        {actions}
+      </div>
+      <div className="rounded-xl bg-app-bg-secondary overflow-hidden divide-y divide-app-border-subtle">
+        {children}
+      </div>
     </section>
   );
 }
@@ -43,10 +34,10 @@ interface SettingRowProps {
   children?: React.ReactNode;
 }
 
-/** 行式设置项：hover 铺纱层底色，无卡片无边框 */
+/** 行式设置项：行间由 SettingGroup 的 hairline 分隔，行本身无 hover 底色 */
 export function SettingRow({ title, description, children }: SettingRowProps) {
   return (
-    <div className="flex items-center gap-4 px-3 py-2.5 rounded-lg hover:bg-white/5 transition-colors">
+    <div className="flex items-center gap-4 px-3 py-3">
       <div className="min-w-0 flex-1">
         <p className="text-app-text-primary text-sm font-medium">{title}</p>
         {description && (

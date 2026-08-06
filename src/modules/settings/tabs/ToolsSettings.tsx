@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { Search, ChevronRight, Lock, Terminal, Globe } from 'lucide-react';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useToastStore } from '@/stores/toastStore';
-import { PageHeader, Toggle } from '../components/SettingsPrimitives';
+import { Toggle } from '../components/SettingsPrimitives';
 import { CustomSelect } from '../components/CustomSelect';
 
 interface CompanionToolInfo {
@@ -102,10 +102,6 @@ export function ToolsSettings() {
 
   return (
     <>
-      <PageHeader
-        title="工具界面"
-        description="管理贾维斯可使用的工具。锁定工具为核心能力，不允许关闭。"
-      />
 
       {/* 搜索过滤 */}
       <div className="relative mb-4">

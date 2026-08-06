@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import {
   Command,
   Settings,
-  Search,
   Bot,
   BookOpen,
   History,
@@ -17,7 +16,6 @@ import { THEME } from '@/constants/theme';
 import { WINDOW_SIZE } from '@/constants/window';
 import { GeneralSettings } from './tabs/GeneralSettings';
 import { ShortcutsSettings } from './tabs/ShortcutsSettings';
-import { SearchSettings } from './tabs/SearchSettings';
 import { ModelSettings } from './tabs/ModelSettings';
 import { CompanionSettings } from './tabs/CompanionSettings';
 import { ToolsSettings } from './tabs/ToolsSettings';
@@ -33,17 +31,15 @@ const NAV_GROUPS = [
     items: [
       { id: 'general', name: '通用', icon: Settings },
       { id: 'shortcuts', name: '快捷键', icon: Command },
-      { id: 'search', name: '搜索', icon: Search },
     ],
   },
   {
     label: 'AI 配置',
     items: [
-      { id: 'model', name: '模型配置', icon: Bot },
-      { id: 'tools', name: '工具界面', icon: Wrench },
-      { id: 'companion', name: '陪伴界面', icon: Sparkles },
-      { id: 'observe', name: '观测界面', icon: BarChart3 },
-      { id: 'manual', name: '操作手册', icon: BookOpen },
+      { id: 'model', name: '模型', icon: Bot },
+      { id: 'tools', name: '工具', icon: Wrench },
+      { id: 'companion', name: '陪伴', icon: Sparkles },
+      { id: 'observe', name: '观测', icon: BarChart3 }
     ],
   },
   {
@@ -53,6 +49,7 @@ const NAV_GROUPS = [
   {
     label: '其他',
     items: [
+      { id: 'manual', name: '操作手册', icon: BookOpen },
       { id: 'about', name: '关于我们', icon: Info },
       { id: 'changelog', name: '更新日志', icon: History },
     ],
@@ -64,7 +61,6 @@ type TabId = (typeof NAV_GROUPS)[number]['items'][number]['id'];
 const TAB_CONTENT: Record<TabId, React.ReactNode> = {
   general: <GeneralSettings />,
   shortcuts: <ShortcutsSettings />,
-  search: <SearchSettings />,
   model: <ModelSettings />,
   tools: <ToolsSettings />,
   companion: <CompanionSettings />,
@@ -84,8 +80,8 @@ export function SettingsView() {
 
   return (
     <div className="w-full h-full flex" style={{ backgroundColor: THEME.BG_PRIMARY }}>
-      {/* 分组侧边栏：与内容区靠一档明度差分区，不加边框 */}
-      <aside className="w-52 bg-app-bg-secondary flex flex-col flex-shrink-0">
+      {/* 分组侧边栏：与内容区同一基座色（#1e1e21），分区靠选中态纱层暗示 */}
+      <aside className="w-52 flex flex-col flex-shrink-0">
         <h3 className="text-base font-semibold text-app-text-primary px-3.5 pt-4 pb-2">设置</h3>
         <nav className="flex-1 overflow-y-auto px-2 pb-4">
           {NAV_GROUPS.map((group) => (

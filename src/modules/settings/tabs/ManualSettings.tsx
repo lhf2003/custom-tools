@@ -1,14 +1,12 @@
 import { Search, Command as CommandIcon } from 'lucide-react';
 import { listLauncherEntriesWithDescription } from '@/plugins/launcherEntries';
-import { PageHeader, SettingGroup } from '../components/SettingsPrimitives';
+import { SettingGroup } from '../components/SettingsPrimitives';
 
 export function ManualSettings() {
   const toolsWithDescription = listLauncherEntriesWithDescription();
 
   return (
     <>
-      <PageHeader title="操作手册" description="快速上手本系统的使用方法" />
-
       {/* 内置工具介绍 */}
       <SettingGroup title="内置工具">
         {toolsWithDescription.map((tool) => {
@@ -16,7 +14,7 @@ export function ManualSettings() {
           return (
             <div
               key={tool.id}
-              className="flex items-start gap-3 px-3 py-2.5 rounded-lg hover:bg-white/5 transition-colors"
+              className="flex items-start gap-3 px-3 py-3"
             >
               <div className="w-9 h-9 rounded-lg bg-app-bg-elevated flex items-center justify-center flex-shrink-0">
                 <Icon className="text-app-text-secondary" size={18} />
@@ -54,7 +52,7 @@ export function ManualSettings() {
             desc: '在搜索框聚焦时按 Shift+Tab，快速跳转到 AI 聊天页面。若搜索框已有输入内容，将作为首条消息自动发送。',
           },
         ].map(({ icon, title, desc }) => (
-          <div key={title} className="flex items-start gap-3 px-3 py-2.5 rounded-lg hover:bg-white/5 transition-colors">
+          <div key={title} className="flex items-start gap-3 px-3 py-3">
             <div className="w-8 h-8 rounded-lg bg-app-bg-elevated flex items-center justify-center flex-shrink-0">
               {icon}
             </div>
@@ -85,7 +83,7 @@ export function ManualSettings() {
             desc: '在搜索结果或列表中使用方向键快速切换选中项，按 Enter 确认。',
           },
         ].map(({ key, title, desc }) => (
-          <div key={key} className="flex items-start gap-3 px-3 py-2.5 rounded-lg hover:bg-white/5 transition-colors">
+          <div key={key} className="flex items-start gap-3 px-3 py-3">
             <kbd className="px-2 py-1 rounded-md bg-app-bg-elevated border border-white/10 text-app-text-secondary text-xs font-mono flex-shrink-0">
               {key}
             </kbd>
