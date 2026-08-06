@@ -24,6 +24,23 @@ colors:
   status-info: "#2563eb"
   scrim-white-5: "#ffffff0d"
   scrim-white-10: "#ffffff1a"
+  light-surface-base: "#fafafa"
+  light-surface-sidebar: "#f4f4f5"
+  light-surface-card: "#e4e4e7"
+  light-surface-elevated: "#d4d4d8"
+  light-surface-pressed: "#a1a1aa"
+  light-ink-primary: "#18181b"
+  light-ink-secondary: "#3f3f46"
+  light-ink-tertiary: "#52525b"
+  light-ink-disabled: "#a1a1aa"
+  light-ink-placeholder: "#71717a"
+  light-signal-indigo: "#6366f1"
+  light-signal-indigo-light: "#4f46e5"
+  light-status-success: "#16a34a"
+  light-status-warning: "#d97706"
+  light-status-error: "#dc2626"
+  light-scrim-black-5: "#0000000d"
+  light-scrim-black-10: "#0000001a"
 typography:
   display:
     fontFamily: "'HarmonyOS Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif"
@@ -89,6 +106,9 @@ components:
   panel-glass:
     backgroundColor: "#1e1e21b3"
     rounded: "{rounded.lg}"
+  panel-glass-light:
+    backgroundColor: "#fafafab8"
+    rounded: "{rounded.lg}"
 ---
 
 # Design System: FlowHub
@@ -101,8 +121,11 @@ components:
 
 这套系统是深色单色的：zinc 灰阶构成连续的表面，品牌色只做点睛。灰阶保持中性无色相，层次完全靠明度差建立——五档表面的明度均匀拉开，面板从背景中"浮出"而非"贴上"。它明确拒绝 SaaS 营销风的大标题大圆角、AI 花哨感的渐变与霓虹、企业后台感的控件堆叠、卡片套卡片的层级滥用，以及游戏外设软件式的灯效堆砌。层级靠字重、字号、间距与灰阶建立；边框和阴影是最后手段。
 
+2026-08-06 起支持浅色主题（设置 → 通用 → 外观，跟随系统/深色/浅色三档）。浅色不是独立设计，而是深色系统的**明度镜像**：同一 zinc 色系、同一 Even Tiers 档差、同一层级哲学，方向相反。切换由 CSS 变量驱动（`[data-theme='light']` 覆盖 `--app-*`，Tailwind 类与 THEME 常量全部走 var() 自动跟随），token 命名保持语义一致（surface/ink/scrim 同义，值反向）。
+
 **Key Characteristics:**
 - 深色一体表面（#1e1e21 基座），五档表面明度均匀拉开（相邻档差 ≥0.03 OKLCH L）
+- 浅色主题为同系镜像（#fafafa 基座，五档反向拉开），禁止引入新色相
 - OS 窗口材质（Mica/Acrylic/Blur）即分层的第一手段
 - Signal Indigo 点睛，面积 ≤10%
 - 无营销级大字号；最大字级是 18px 搜索框
@@ -138,12 +161,29 @@ components:
 - Success (#22c55e) / Warning (#f59e0b) / Error (#ef4444) / Info (#2563eb)：仅用于语义状态，不做装饰。
 - **Error Text** (#f87171): 深色表面上需要错误「文字」时（内联错误条、加载失败说明）使用的提亮变体（实测 ≥5.9:1 on Surface Base）；Error 原色直接作文字对比度不达标，仅用于图标/底色语义，不作正文。
 
+### 浅色主题（[data-theme='light'] 镜像 token）
+浅色是深色系统的明度镜像：zinc 浅档（50→400）反向映射表面五档，文字换深档（900/700/600），品牌与状态色换深档保对比。同一语义、同一步骤、同一色相，只有方向相反。
+
+- **Light Surface Base** (#fafafa, zinc-50): 浅色主背景基座。与深色基座 (#1e1e21, zinc 深档) 同系同差。
+- **Light Surface Sidebar / Card / Elevated / Pressed** (#f4f4f5 / #e4e4e7 / #d4d4d8 / #a1a1aa): 五档表面反向映射，档差与深色对称（相邻差 ≥0.03 OKLCH L，镜像 Even Tiers）。
+- **Light Ink Primary / Secondary / Tertiary** (#18181b / #3f3f46 / #52525b): 浅底上的文字档，Tertiary 在 Card 上实测 ≥5.4:1。
+- **Light Signal Indigo** (#6366f1): 品牌色在浅色下保持原值（白底 4.8:1 达标）。
+- **Light Signal Indigo Light** (#4f46e5, indigo-600): **浅色下品牌文字必须用深档**——原 #818cf8 在浅底对比不足，禁止跨主题复用。
+- **Light Scrim Black 5/10** (#0000000d / #0000001a): 浅色纱层镜像——"提亮"在浅底不可用，翻转为黑色透明度系。存量 `bg-white/N`、`border-white/N` 类在浅色下经类级覆盖自动翻黑（见 Do's）。
+- **Light 状态色**: Success (#16a34a) / Warning (#d97706) / Error (#dc2626)：功能色换深档保证浅底 ≥4.5:1；Error Text 在浅色下直接用深档 (#dc2626)。
+
 ### Named Rules
 **The One Voice Rule.** Signal Indigo 在任何单屏面积 ≤10%。它的稀缺性就是它的意义——满屏靛蓝等于没有品牌。
 
 **The Zinc Monolith Rule.** 背景分层只允许在 zinc 灰阶内上下浮动一档（base → sidebar → card → elevated）。禁止引入灰阶以外的表面色；需要"更亮"时用白色纱层（Scrim White 5/10），不是新颜色。
 
 **The Even Tiers Rule.** 相邻表面档的明度差必须可感知（OKLCH L 差 ≥0.03）。档位挤在一起的灰阶等于没有分层——如果要眯眼才能分清 sidebar 和 base，该做的是拉开档差，不是加边框。
+
+**The Mirror Rule.** 浅色主题是深色系统的明度镜像：同 zinc 色系、同档差、同语义，方向相反。禁止为浅色引入深色系统没有的新色相或新表面色；浅色无法表达时，回到深色找对应物，而不是发明。
+
+**The Black Scrim Rule.** 浅色表面上的纱层一律用黑色透明度系（Scrim Black 5/10 镜像 Scrim White 5/10）。白色纱层在浅底上不可见，等于没有反馈。
+
+**The Deep Brand Rule.** 浅色下品牌与状态文字的对比度必须重新验证：Signal Indigo Light 换深档 (#4f46e5)、Error Text 换深档 (#dc2626)、Warning 换深档 (#d97706)。深色下成立的对比度在浅色下不成立，跨主题复用色值即违规。
 
 ## 3. Typography
 
@@ -178,6 +218,8 @@ components:
 **The Flat-At-Rest Rule.** 表面静止时平坦。阴影是对状态（hover、浮起、模态）的响应，不是装饰。如果你给一个静止元素加阴影"让它更立体"，方向就错了——用灰阶抬升表面色。
 
 **The Material-First Rule.** 分层的第一手段是窗口材质与灰阶差，不是 box-shadow。阴影词表只有四档，超出即违规。
+
+浅色主题阴影：浅底阴影可见度更高，四档 alpha 各降一档（SM 0.2→0.08、MD 0.2→0.10、LG 0.3→0.12、XL 0.6→0.20），值由 `--app-shadow-*` 变量承载，随主题自动切换。
 
 ## 5. Components
 
@@ -227,6 +269,8 @@ components:
 - **Do** 动画控制在 150–300ms、ease-out 或 cubic-bezier(0.4,0,0.2,1)；`prefers-reduced-motion` 下降级为交叉淡入或即时切换。
 - **Do** 保持 placeholder 与次要文字对比度 ≥4.5:1；深色玻璃背景上先验证再提交。
 - **Do** 优先使用 Tailwind 语义 token（app-bg / app-text / app-border / app-brand），与 index.css 的 CSS 变量保持一致。
+- **Do** 写浅色主题时把存量 white-alpha 类翻转为黑纱：类级覆盖（`[data-theme='light'] .bg-white\/10` 等）已在 index.css，新代码直接引用语义变量（app-bg-hover / app-alpha-*），不要再用裸 `bg-white/N`。
+- **Do** 在浅色下重新验证对比度：品牌文字用 Light Signal Indigo Light (#4f46e5)、状态文字用浅色深档，正文保持 ≥4.5:1。
 
 ### Don't:
 - **Don't** 引入 SaaS 营销风：大标题、大圆角（>16px）、大面积留白构图、hero 区。这是工具，不是落地页。
@@ -238,3 +282,6 @@ components:
 - **Don't** 给静止元素加常驻阴影；违反 Flat-At-Rest Rule。
 - **Don't** 超过 18px 字级；违反 18px Ceiling Rule。
 - **Don't** 引入 Web 字体；违反 System Stack Rule。
+- **Don't** 为浅色主题发明新色相或新表面色；违反 Mirror Rule——浅色是镜像，不是新设计。
+- **Don't** 在浅色下沿用深色系纱层（bg-white/N 不翻黑 = 无反馈）；违反 Black Scrim Rule。
+- **Don't** 跨主题复用深色下验证过的品牌/状态色值（#818cf8 浅底、#f87171 浅底均不达标）；违反 Deep Brand Rule。
