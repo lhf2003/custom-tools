@@ -13,6 +13,13 @@ pub fn get_settings(state: State<'_, SettingsState>) -> Result<AppSettings, Stri
     Ok(manager.get_settings())
 }
 
+/// Get a single KV setting by key（插件启用状态等通用键）
+#[tauri::command]
+pub fn get_setting(state: State<'_, SettingsState>, key: String) -> Result<Option<String>, String> {
+    let manager = state.0.lock().map_err(|e| e.to_string())?;
+    manager.get_setting(&key).map_err(|e| e.to_string())
+}
+
 /// Update a setting
 #[tauri::command]
 pub fn set_setting(

@@ -45,6 +45,46 @@ export function isPluginView(id: string): boolean {
   return byId.has(id);
 }
 
+/** 已注册的外部插件 id（内置插件不在其中），用于禁用/卸载时的注销 */
+const externalIds = new Set<string>();
+
+/**
+ * 合流外部插件（仅启用的传入；全部扫描结果供管理器展示，不注册）。
+ * 与已注册插件（内置或已注册外部）id 冲突时忽略新注册并 warn。
+ */
+export function registerExternalPlugins(plugins: ViewPlugin[]): void {
+  for (const plugin of plugins) {
+    if (byId.has(plugin.id)) {
+      console.warn(`[plugins] 插件「${plugin.id}」与已注册插件冲突，忽略外部版本`);
+      continue;
+    }
+    byId.set(plugin.id, plugin);
+    externalIds.add(plugin.id);
+    if (plugin.shortcutModuleId) {
+      byShortcutModuleId.set(plugin.shortcutModuleId, plugin);
+    }
+  }
+}
+
+/** 注销外部插件（禁用/卸载后调用），只作用于外部插件 id */
+export function unregisterExternalPlugins(ids: string[]): void {
+  for (const id of ids) {
+    if (!externalIds.has(id)) continue;
+    byId.delete(id);
+    externalIds.delete(id);
+    for (const [k, v] of byShortcutModuleId) {
+      if (v.id === id) {
+        byShortcutModuleId.delete(k);
+      }
+    }
+  }
+}
+
+/** 当前已注册的外部插件 id（供完整刷新时先注销再合流） */
+export function listExternalPluginIds(): string[] {
+  return [...externalIds];
+}
+
 /** 后端 shortcut:open_module 的 moduleId → 插件（吸收 notes/passwords 旧 id） */
 export function getPluginByShortcutModule(moduleId: string): ViewPlugin | undefined {
   return byShortcutModuleId.get(moduleId);

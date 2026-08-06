@@ -8,6 +8,7 @@ import { useToastStore } from '@/stores/toastStore';
 import { LauncherView } from '@/modules/launcher/LauncherView';
 import { SettingsView } from '@/modules/settings/SettingsView';
 import { ChatView } from '@/modules/chat/ChatView';
+import { ThemeController } from '@/components/ThemeController';
 import { TopNavigationBar } from '@/components/TopNavigationBar';
 import { UpdateNotification } from '@/components/UpdateNotification';
 import { ChangelogDialog } from '@/components/ChangelogDialog';
@@ -16,6 +17,8 @@ import { ToastContainer } from '@/components/Toast';
 import type { VersionCheckResult } from '@/components/ChangelogDialog';
 import type { MenuItem, OpenViewDetail, ShellView } from '@/types';
 import { getPlugin, getPluginByShortcutModule, isPluginView, preloadPlugins } from '@/plugins/registry';
+import { refreshExternalPlugins } from '@/plugins/external';
+import { getPluginShortcutConflicts } from '@/plugins/pluginShortcuts';
 import { PluginHost } from '@/plugins/PluginHost';
 
 const SHELL_VIEWS: readonly ShellView[] = ['launcher', 'chat', 'settings'];
@@ -135,6 +138,13 @@ function App() {
     return () => clearTimeout(timer);
   }, []);
 
+  // 扫描外部插件并合流注册表（仅启用的注册；全部结果供管理器展示）
+  useEffect(() => {
+    refreshExternalPlugins().catch((err: unknown) => {
+      console.error('[plugins] 外部插件扫描失败:', err);
+    });
+  }, []);
+
   // Handle keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -151,7 +161,8 @@ function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [toggleWindow, activeView, setActiveView]);
 
-  // Listen for global shortcut events from backend（shortcutModuleId → 插件映射由注册表吸收）
+  // Listen for global shortcut events from backend（shortcutModuleId → 插件映射由注册表吸收；
+  // 外部插件快捷键直接以插件 id 作 moduleId，fallback getPlugin 兜底）
   useEffect(() => {
     const unlisten = listen('shortcut:open_module', (event) => {
       const moduleId = event.payload as string;
@@ -159,7 +170,7 @@ function App() {
         setActiveView('settings');
         return;
       }
-      const plugin = getPluginByShortcutModule(moduleId);
+      const plugin = getPluginByShortcutModule(moduleId) ?? getPlugin(moduleId);
       if (plugin) {
         setActiveView(plugin.id);
       } else {
@@ -231,6 +242,19 @@ function App() {
   const activePlugin = isPluginView(activeView) ? getPlugin(activeView) : undefined;
   const isHome = activeView === 'launcher' || activeView === 'chat';
 
+  // 打开插件时提示快捷键冲突（裁决：冲突标记不阻塞，toast 提示；每次进入提示一次）
+  useEffect(() => {
+    if (!activePlugin) return;
+    const conflicts = getPluginShortcutConflicts(activePlugin.id);
+    if (conflicts.length > 0) {
+      addToast({
+        type: 'warning',
+        title: `「${activePlugin.name}」快捷键注册失败`,
+        message: `全局快捷键 ${conflicts.map((c) => c.key).join('、')} 已被占用，请在「设置 → 快捷键」中调整。`,
+      });
+    }
+  }, [activeView, activePlugin, addToast]);
+
   // Render current view
   const renderView = () => {
     if (activePlugin) {
@@ -279,6 +303,9 @@ function App() {
     <div
       className="w-full h-full flex flex-col relative select-none selection:bg-blue-500/30 rounded-lg overflow-hidden bg-transparent"
     >
+      {/* 主题与窗口不透明度应用（无渲染） */}
+      <ThemeController />
+
       {renderView()}
 
       {/* Update Notification */}

@@ -9,7 +9,7 @@ import type { ViewMode } from '@/types';
 import { safeInvoke, debouncedResize } from '../../utils/tauri';
 import { WINDOW_SIZE } from '../../constants/window';
 import { listLauncherEntries, isLauncherEntryId, entryIdToViewMode } from '@/plugins/launcherEntries';
-import { matchTrigger, listPlugins } from '@/plugins/registry';
+import { matchTrigger } from '@/plugins/registry';
 import { getCachedIcon, setCachedIcon } from './iconCache';
 
 
@@ -20,9 +20,14 @@ interface AppItemData {
   toolId?: string;
 }
 
-// 启动器内置入口枚举（插件注册表 + 壳入口，一次取用）
-const LAUNCHER_ENTRIES = listLauncherEntries();
-const PLUGIN_IDS = new Set(listPlugins().map((p) => p.id));
+/**
+ * 启动器内置入口枚举（插件注册表 + 壳入口）。
+ * 注意：必须是动态获取（每次调用重算）——外部插件在运行时合流注册表，
+ * 模块级常量会冻结在应用启动时刻，搜不到新装插件。
+ */
+function getLauncherEntries() {
+  return listLauncherEntries();
+}
 
 /** 判断 id 是否为内置入口（插件或壳视图），用于 builtin:// 路径打开 */
 function isBuiltInEntryId(id: string | undefined): id is string {
@@ -46,6 +51,7 @@ const PLACEHOLDER_HINTS = [
 export function LauncherView() {
   const { searchQuery, setSearchQuery, setActiveView } = useAppStore();
   const { addToast } = useToastStore();
+  const launcherEntries = getLauncherEntries();
   const { apps, searchApps, launchApp, getRecentApps, recordAppUsage, searchError } = useSearch();
   const [recentItems, setRecentItems] = useState<AppItemData[]>([]);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -69,7 +75,7 @@ export function LauncherView() {
     if (!searchQuery) return displayedItems;
     const q = searchQuery.toLowerCase();
     // 单字符查询只做名称匹配：别名在此长度下噪音过大（'a' 会命中 'ai'/'format'/'paste'）
-    const filteredTools = LAUNCHER_ENTRIES.filter(tool =>
+    const filteredTools = launcherEntries.filter(tool =>
       tool.name.toLowerCase().includes(q) || (q.length >= 2 && tool.aliases?.some(alias => alias.includes(q)))
     );
     const toolItems: AppItemData[] = filteredTools.map(tool => ({
@@ -84,7 +90,7 @@ export function LauncherView() {
       .sort((a, b) => (usageRank.get(a.path) ?? 0) - (usageRank.get(b.path) ?? 0));
     const otherApps = appItems.filter(a => !usageRank.has(a.path));
     return [...usedApps, ...toolItems, ...otherApps];
-  }, [searchQuery, displayedItems, recentItems]);
+  }, [searchQuery, displayedItems, recentItems, launcherEntries]);
 
   const allResults = useMemo(() => buildResults(apps), [buildResults, apps]);
 
@@ -230,7 +236,7 @@ export function LauncherView() {
 
       // Fallback: if still empty, show built-in tools
       if (items.length === 0) {
-        items = LAUNCHER_ENTRIES.map(tool => ({
+        items = launcherEntries.map(tool => ({
           name: tool.name,
           path: `builtin://${tool.id}`,
           isBuiltIn: true,
@@ -242,14 +248,14 @@ export function LauncherView() {
     } catch (err) {
       console.error('Failed to load recent items:', err);
       // On error, fallback to built-in tools
-      setRecentItems(LAUNCHER_ENTRIES.map(tool => ({
+      setRecentItems(launcherEntries.map(tool => ({
         name: tool.name,
         path: `builtin://${tool.id}`,
         isBuiltIn: true,
         toolId: tool.id,
       })));
     }
-  }, [getRecentApps]);
+  }, [getRecentApps, launcherEntries]);
 
   // Load recent items (only actually used apps)
   useEffect(() => {
@@ -669,7 +675,7 @@ function ItemCard({
   // hover 变色只作用于未选中项，避免与选中态颜色分叉（鼠标/键盘选中必须同色）
   // For built-in tools, use Lucide icon
   if (item.isBuiltIn) {
-    const tool = LAUNCHER_ENTRIES.find(t => t.id === item.toolId);
+    const tool = getLauncherEntries().find(t => t.id === item.toolId);
     if (tool) {
       const Icon = tool.icon;
       return (
@@ -873,7 +879,7 @@ function TriggerResultCard({
   isSelected: boolean;
   onClick: () => void;
 }) {
-  const entry = LAUNCHER_ENTRIES.find((t) => t.id === result.toolId);
+  const entry = getLauncherEntries().find((t) => t.id === result.toolId);
   const Icon = entry?.icon;
   return (
     <section className="h-full flex flex-col">

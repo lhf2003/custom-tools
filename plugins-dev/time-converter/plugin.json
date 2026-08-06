@@ -1,0 +1,33 @@
+{
+  "id": "time-converter",
+  "name": "日期转换",
+  "version": "0.1.0",
+  "author": "LHF",
+  "description": "时间戳与日期互转，支持秒/毫秒精度",
+  "aliases": ["time", "date", "timestamp", "时间", "日期"],
+  "main": "plugin.js",
+  "runtime": "frontend",
+  "permissions": [],
+  "triggers": [
+    { "keyword": "@time", "argHint": "时间戳或日期" }
+  ],
+  "shortcuts": [
+    { "id": "open", "key": "Ctrl+Shift+T", "label": "打开日期转换" }
+  ],
+  "settings": [
+    {
+      "key": "format",
+      "label": "日期格式",
+      "type": "select",
+      "options": ["YYYY-MM-DD HH:mm:ss", "YYYY/MM/DD HH:mm", "MM-DD HH:mm"],
+      "default": "YYYY-MM-DD HH:mm:ss"
+    },
+    {
+      "key": "ms",
+      "label": "时间戳精度",
+      "type": "select",
+      "options": ["秒 (10位)", "毫秒 (13位)"],
+      "default": "秒 (10位)"
+    }
+  ]
+}

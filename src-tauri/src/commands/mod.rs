@@ -4,6 +4,8 @@ pub mod clipboard;
 pub mod companion;
 pub mod llm;
 pub mod notes;
+pub mod plugin_gen;
+pub mod plugins;
 pub mod password;
 pub mod search;
 pub mod settings;

@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
 
 pub mod shortcuts;
-pub use shortcuts::{get_default_shortcuts, ShortcutConfig, ShortcutManager};
+pub use shortcuts::{
+    get_default_shortcuts, PluginShortcutConfig, ShortcutConfig, ShortcutConflict, ShortcutManager,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
@@ -267,6 +269,18 @@ impl SettingsManager {
         }
 
         Ok(())
+    }
+
+    /// 读取任意 key 的 KV 设置（插件启用状态等非 AppSettings 固定字段的通用键）
+    pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
+        let conn = Connection::open(&self.db_path)?;
+        let mut stmt = conn.prepare("SELECT value FROM settings WHERE key = ?1")?;
+        let mut rows = stmt.query([key])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(row.get(0)?))
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn set_setting(&self, key: &str, value: &str) -> Result<()> {

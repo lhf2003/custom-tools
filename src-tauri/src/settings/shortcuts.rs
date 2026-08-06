@@ -120,10 +120,30 @@ pub fn get_default_shortcuts() -> Vec<ShortcutConfig> {
     ]
 }
 
+/// 外部插件快捷键声明（从 manifest.shortcuts 展开，携带插件 id）
+#[derive(Debug, Clone)]
+pub struct PluginShortcutConfig {
+    pub plugin_id: String,
+    pub id: String,
+    pub key: String,
+    pub label: String,
+}
+
+/// 快捷键冲突（OS 注册失败或格式非法；失败不阻塞插件使用，仅标记 + toast）
+#[derive(Debug, Clone, Serialize)]
+pub struct ShortcutConflict {
+    pub plugin_id: String,
+    pub shortcut_id: String,
+    pub key: String,
+    pub reason: String,
+}
+
 /// 快捷键管理器
 pub struct ShortcutManager {
     db_path: String,
     configs: HashMap<String, ShortcutConfig>,
+    /// 已注册的外部插件快捷键（注销时按 Shortcut 逐个 unregister）
+    plugin_shortcuts: HashMap<String, Shortcut>,
 }
 
 impl ShortcutManager {
@@ -131,6 +151,7 @@ impl ShortcutManager {
         let mut manager = Self {
             db_path,
             configs: HashMap::new(),
+            plugin_shortcuts: HashMap::new(),
         };
 
         if let Err(e) = manager.init() {
@@ -316,6 +337,64 @@ impl ShortcutManager {
         self.register_all(app_handle)?;
         Ok(())
     }
+
+    /// 全量同步外部插件快捷键：注销旧的 → 注册新的（启用插件的 manifest.shortcuts）。
+    /// 返回冲突列表（OS 注册失败 / 格式非法），失败不阻塞插件使用，仅标记 + toast。
+    pub fn sync_plugin_shortcuts(
+        &mut self,
+        app_handle: &AppHandle,
+        shortcuts: &[PluginShortcutConfig],
+    ) -> Vec<ShortcutConflict> {
+        let shortcut_manager = app_handle.global_shortcut();
+
+        // 1. 注销全部旧插件快捷键（plugin_shortcuts 只跟踪插件部分，不碰内置）
+        for shortcut in self.plugin_shortcuts.drain().map(|(_, s)| s) {
+            if let Err(e) = shortcut_manager.unregister(shortcut) {
+                log::warn!("Failed to unregister plugin shortcut: {}", e);
+            }
+        }
+
+        // 2. 注册新的；回调统一 action_id = plugin.<pluginId>（同插件多快捷键共用）
+        let mut conflicts = Vec::new();
+        for sc in shortcuts {
+            let action_id = format!("plugin.{}", sc.plugin_id);
+            match parse_shortcut(&sc.key) {
+                Ok(shortcut) => {
+                    let action_id_clone = action_id.clone();
+                    match shortcut_manager.on_shortcut(shortcut.clone(), move |app, _s, event| {
+                        if event.state() == ShortcutState::Pressed {
+                            handle_shortcut_action(app, &action_id_clone);
+                        }
+                    }) {
+                        Ok(_) => {
+                            self.plugin_shortcuts.insert(
+                                format!("{}:{}", sc.plugin_id, sc.id),
+                                shortcut,
+                            );
+                            log::info!(
+                                "Registered plugin shortcut {} for {}",
+                                sc.key,
+                                sc.plugin_id
+                            );
+                        }
+                        Err(e) => conflicts.push(ShortcutConflict {
+                            plugin_id: sc.plugin_id.clone(),
+                            shortcut_id: sc.id.clone(),
+                            key: sc.key.clone(),
+                            reason: format!("注册失败（组合键可能被占用）: {e}"),
+                        }),
+                    }
+                }
+                Err(e) => conflicts.push(ShortcutConflict {
+                    plugin_id: sc.plugin_id.clone(),
+                    shortcut_id: sc.id.clone(),
+                    key: sc.key.clone(),
+                    reason: format!("快捷键格式非法: {e}"),
+                }),
+            }
+        }
+        conflicts
+    }
 }
 
 /// 解析快捷键字符串为 Tauri Shortcut
@@ -494,6 +573,21 @@ fn handle_shortcut_action(app_handle: &AppHandle, action_id: &str) {
         "toggle_window" => {
             // 复用 lib.rs 的 toggle_main_window（含 HWND 捕获、防闪烁、窗口定位）
             crate::toggle_main_window(app_handle);
+        }
+        // 外部插件快捷键：action_id = plugin.<pluginId>，显示窗口 + 打开插件视图
+        action if action.starts_with("plugin.") => {
+            let plugin_id = action.trim_start_matches("plugin.").to_string();
+
+            // 捕获前台窗口以支持自动粘贴
+            #[cfg(windows)]
+            crate::capture_prev_window_hwnd(app_handle);
+
+            if let Some(window) = app_handle.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+            crate::emit_window_shown(app_handle);
+            let _ = app_handle.emit("shortcut:open_module", plugin_id);
         }
         "open_clipboard" | "open_notes" | "open_passwords" | "open_settings"
         | "open_everything" => {
