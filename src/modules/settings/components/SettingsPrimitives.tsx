@@ -1,8 +1,10 @@
 /**
  * 设置页布局原语：SettingGroup / SettingRow / Toggle
- * Win11/Raycast 式分组卡片——SettingGroup 用 Sidebar 色圆角容器包裹行列表
- * （窗口左右统一 Base 基座，容器是页面唯一浮起层），行间 hairline 分隔；
+ * Win11/Raycast 式分组卡片——SettingGroup 用 5% 白纱圆角容器包裹行列表
+ * （浅色主题经 index.css 类级覆盖自动翻 5% 黑纱），行间 hairline 分隔；
  * 设置行无 hover 铺底（整行不可点，交互在右侧控件）。
+ * 容器用相对纱层而非不透明 tier 色：卡片与玻璃面板的明度差恒定，
+ * 背景透明度滑杆任意档位、任意主题（含未来新主题）下层次都不会倒挂。
  * 页面无顶部大标题：组标题承担说明职责。
  */
 
@@ -13,7 +15,7 @@ interface SettingGroupProps {
   children: React.ReactNode;
 }
 
-/** 设置分组：组标题（可带右侧操作）+ Sidebar 色圆角容器，行间 hairline 分隔，组间靠大间距分隔 */
+/** 设置分组：组标题（可带右侧操作）+ 5% 纱层圆角容器（浅色翻黑纱），行间 hairline 分隔，组间靠大间距分隔 */
 export function SettingGroup({ title, actions, children }: SettingGroupProps) {
   return (
     <section className="mb-8">
@@ -21,7 +23,7 @@ export function SettingGroup({ title, actions, children }: SettingGroupProps) {
         <h3 className="text-xs font-semibold text-app-text-tertiary">{title}</h3>
         {actions}
       </div>
-      <div className="rounded-xl bg-app-bg-secondary overflow-hidden divide-y divide-app-border-subtle">
+      <div className="rounded-xl bg-white/5 overflow-hidden divide-y divide-app-border-subtle">
         {children}
       </div>
     </section>

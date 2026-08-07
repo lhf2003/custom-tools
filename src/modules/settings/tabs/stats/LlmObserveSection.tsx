@@ -184,7 +184,7 @@ export function LlmObserveSection() {
         <h3 className="text-xs font-semibold text-app-text-tertiary">模型调用观测</h3>
       </div>
 
-      <div className="rounded-xl border border-app-border-subtle bg-app-bg-secondary overflow-hidden">
+      <div className="rounded-xl border border-app-border-subtle bg-white/5 overflow-hidden">
         {/* 过滤栏 */}
         <div className="px-4 py-3 border-b border-app-border-subtle flex flex-wrap items-center gap-2">
           <CustomSelect
@@ -300,7 +300,7 @@ export function LlmObserveSection() {
                     </button>
 
                     {state && (
-                      <div className="mt-1 mb-2 rounded-lg border border-app-border-subtle bg-app-bg-secondary px-3 py-2">
+                      <div className="mt-1 mb-2 rounded-lg border border-app-border-subtle bg-white/5 px-3 py-2">
                         {state.loading ? (
                           <p className="text-app-text-disabled text-xs py-1.5">正在加载调用日志…</p>
                         ) : state.error ? (
