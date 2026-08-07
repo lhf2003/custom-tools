@@ -12,13 +12,13 @@ import { SHELL_ENTRIES, listPlugins, type ShellEntry } from './registry';
 export interface LauncherEntry {
   id: string;
   name: string;
-  icon: LucideIcon | ComponentType<{ className?: string; size?: number }>;
+  icon: LucideIcon | ComponentType<{ className?: string; size?: number | string }>;
   aliases: string[];
   description?: string;
   order?: number;
 }
 
-function entryOf(plugin: { id: string; name: string; icon: LucideIcon | ComponentType<{ className?: string; size?: number }>; aliases: string[]; description?: string; order?: number }): LauncherEntry {
+function entryOf(plugin: { id: string; name: string; icon: LucideIcon | ComponentType<{ className?: string; size?: number | string }>; aliases: string[]; description?: string; order?: number }): LauncherEntry {
   return {
     id: plugin.id,
     name: plugin.name,

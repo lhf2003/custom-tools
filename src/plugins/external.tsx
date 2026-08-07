@@ -167,10 +167,10 @@ function createExternalViewComponent(pluginId: string): ComponentType {
   };
 }
 
-/** 外部插件 icon：图片（asset URL）包装为组件，兼容 LucideIcon 的 className/size */
-function createExternalIconComponent(dirPath: string, iconFile: string): ComponentType<{ className?: string; size?: number }> {
+/** 外部插件 icon：图片（asset URL）包装为组件，兼容 LucideIcon 的 className/size（插件视图与设置导航共用） */
+export function createExternalIconComponent(dirPath: string, iconFile: string): ComponentType<{ className?: string; size?: number | string }> {
   const src = convertFileSrc(`${dirPath}\\${iconFile}`);
-  return function ExternalPluginIcon(props: { className?: string; size?: number }) {
+  return function ExternalPluginIcon(props: { className?: string; size?: number | string }) {
     return (
       <img
         src={src}

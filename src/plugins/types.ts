@@ -29,7 +29,7 @@ export interface ViewPlugin {
    * 图标组件：内置为 Lucide 组件，外部为图片包装组件（兼容 className/size）。
    * 联合类型：LucideIcon 与 ComponentType 在 TS 严格模式不直接兼容。
    */
-  icon: LucideIcon | ComponentType<{ className?: string; size?: number }>;
+  icon: LucideIcon | ComponentType<{ className?: string; size?: number | string }>;
   /** 启动器搜索别名（小写） */
   aliases: string[];
   /** 操作手册文案；缺省的条目不进手册 */

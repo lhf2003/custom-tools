@@ -1,24 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { FolderOpen, MoreHorizontal, Package, Settings2, Sparkles, Trash2 } from 'lucide-react';
 import { SettingGroup, SettingRow, Toggle } from '../components/SettingsPrimitives';
 import { MenuPanel } from '@/components/ActionMenu';
 import { useToastStore } from '@/stores/toastStore';
-import { listPlugins, listExternalPluginIds } from '@/plugins/registry';
-import { refreshExternalPlugins, setPluginEnabled, isPluginTrusted, markPluginTrusted } from '@/plugins/external';
-import { PluginSettingsForm } from '@/plugins/pluginSettings';
+import { useExternalPluginsStore, type ExternalPluginItem } from '@/stores/externalPluginsStore';
+import { listPlugins } from '@/plugins/registry';
+import { setPluginEnabled, isPluginTrusted, markPluginTrusted } from '@/plugins/external';
 import { getPluginShortcutConflicts } from '@/plugins/pluginShortcuts';
 import { GeneratePluginModal } from './GeneratePluginModal';
-import type { PluginScanItem } from '@/plugins/external';
-
-/** 合并启用状态的外部插件展示条目 */
-interface ExternalItem {
-  manifest: NonNullable<PluginScanItem['manifest']>;
-  dirPath: string;
-  error: string | null;
-  enabled: boolean;
-}
 
 /** 信任确认弹窗 */
 function TrustConfirmModal({
@@ -77,124 +69,166 @@ function MoreMenu({
   hasSettings: boolean;
 }) {
   const [isOpen, setIsOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  // 菜单 portal 到 body + fixed 定位：SettingGroup 容器 overflow-hidden 会裁剪 absolute 菜单
+  const [menuBox, setMenuBox] = useState<{ top?: number; bottom?: number; right: number }>({ right: 0 });
+  const [dropUp, setDropUp] = useState(false);
+
+  // fixed 几何：右缘对齐触发器；下方空间不足且上方够时向上翻（与 CustomSelect 同一策略）
+  const updateMenuPosition = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const itemCount = hasSettings ? 3 : 2;
+    const estimatedHeight = itemCount * 36 + 12 + 13; // 项高 + 面板 padding + 分隔线
+    const gap = 8;
+    const up = window.innerHeight - rect.bottom < estimatedHeight && rect.top > estimatedHeight;
+    setDropUp(up);
+    setMenuBox({
+      right: window.innerWidth - rect.right,
+      ...(up
+        ? { bottom: window.innerHeight - rect.top + gap }
+        : { top: rect.bottom + gap }),
+    });
+  }, [hasSettings]);
+
+  useEffect(() => {
+    if (isOpen) updateMenuPosition();
+  }, [isOpen, updateMenuPosition]);
+
+  // 滚动/缩放时跟随触发器重新定位（设置页在内部容器滚动，需 capture 阶段捕获）
+  useEffect(() => {
+    if (!isOpen) return;
+    let raf = 0;
+    const handler = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(updateMenuPosition);
+    };
+    window.addEventListener('scroll', handler, true);
+    window.addEventListener('resize', handler);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('scroll', handler, true);
+      window.removeEventListener('resize', handler);
+    };
+  }, [isOpen, updateMenuPosition]);
 
   useEffect(() => {
     if (!isOpen) return;
     const handleClickOutside = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setIsOpen(false);
-      }
+      const target = e.target as Node;
+      if (containerRef.current?.contains(target)) return;
+      // 菜单 portal 在 body 下、不在 containerRef 内，需单独判定
+      if (menuRef.current?.contains(target)) return;
+      setIsOpen(false);
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isOpen]);
 
   return (
-    <div ref={menuRef} className="relative flex-shrink-0">
+    <div ref={containerRef} className="relative flex-shrink-0">
       <button
+        ref={triggerRef}
         onClick={() => setIsOpen((v) => !v)}
         aria-label="更多操作"
         className="w-7 h-7 rounded-lg flex items-center justify-center text-app-text-tertiary hover:text-app-text-primary hover:bg-app-bg-elevated/50 transition-colors cursor-pointer"
       >
         <MoreHorizontal size={16} />
       </button>
-      {isOpen && (
-        <div
-          className="absolute right-0 top-full mt-2 min-w-[180px] bg-app-bg-primary/80 border border-app-border rounded-xl shadow-2xl z-50 animate-in fade-in slide-in-from-top-1 duration-150"
-          style={{ WebkitBackdropFilter: 'blur(20px)', backdropFilter: 'blur(20px)' }}
-        >
-          <MenuPanel
-            items={[
-              ...(hasSettings
-                ? [
-                    {
-                      id: 'settings',
-                      label: '设置',
-                      icon: Settings2,
-                      onClick: () => {
-                        onSettings();
-                        setIsOpen(false);
+      {isOpen &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className={`fixed min-w-[180px] bg-app-bg-primary/80 border border-app-border rounded-xl shadow-2xl z-50 animate-in fade-in duration-150 ${
+              dropUp ? 'slide-in-from-bottom-1' : 'slide-in-from-top-1'
+            }`}
+            style={{ ...menuBox, WebkitBackdropFilter: 'blur(20px)', backdropFilter: 'blur(20px)' }}
+          >
+            <MenuPanel
+              items={[
+                ...(hasSettings
+                  ? [
+                      {
+                        id: 'settings',
+                        label: '设置',
+                        icon: Settings2,
+                        onClick: () => {
+                          onSettings();
+                          setIsOpen(false);
+                        },
                       },
-                    },
-                  ]
-                : []),
-              {
-                id: 'reveal',
-                label: '打开插件目录',
-                icon: FolderOpen,
-                onClick: () => {
-                  onReveal();
-                  setIsOpen(false);
+                    ]
+                  : []),
+                {
+                  id: 'reveal',
+                  label: '打开插件目录',
+                  icon: FolderOpen,
+                  onClick: () => {
+                    onReveal();
+                    setIsOpen(false);
+                  },
                 },
-              },
-              {
-                id: 'uninstall',
-                label: '卸载插件',
-                icon: Trash2,
-                danger: true,
-                separator: true,
-                onClick: () => {
-                  onUninstall();
-                  setIsOpen(false);
+                {
+                  id: 'uninstall',
+                  label: '卸载插件',
+                  icon: Trash2,
+                  danger: true,
+                  separator: true,
+                  onClick: () => {
+                    onUninstall();
+                    setIsOpen(false);
+                  },
                 },
-              },
-            ]}
-            onItemClick={(item) => item.onClick()}
-          />
-        </div>
-      )}
+              ]}
+              onItemClick={(item) => item.onClick()}
+            />
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
 
-export function PluginMarketSettings() {
+interface PluginMarketSettingsProps {
+  /** 跳转到某插件的独立设置 tab（设置页「插件」分组下） */
+  onOpenPluginSettings: (pluginId: string) => void;
+}
+
+export function PluginMarketSettings({ onOpenPluginSettings }: PluginMarketSettingsProps) {
   const { addToast } = useToastStore();
-  const [items, setItems] = useState<ExternalItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  // 列表数据走共享 store：本页操作刷新后，设置导航的插件设置 tab 同步增减
+  const items = useExternalPluginsStore((s) => s.items);
+  const loading = useExternalPluginsStore((s) => s.loading);
+  const refresh = useExternalPluginsStore((s) => s.refresh);
   // 待确认启用的插件（信任流程）
-  const [pendingEnable, setPendingEnable] = useState<ExternalItem | null>(null);
-  // 行下展开设置表单的插件 id（schema 渲染，见 pluginSettings.tsx）
-  const [expandedSettingsId, setExpandedSettingsId] = useState<string | null>(null);
+  const [pendingEnable, setPendingEnable] = useState<ExternalPluginItem | null>(null);
   // AI 生成弹窗（任务 12：流式步骤 + 校验 + 预览 + 试运行 + 安装）
   const [showGenerate, setShowGenerate] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const scanItems = await refreshExternalPlugins();
-      const items: ExternalItem[] = [];
-      for (const item of scanItems) {
-        if (!item.manifest) continue;
-        const enabled = await invoke<string | null>('get_setting', {
-          key: `plugins.${item.manifest.id}.enabled`,
-        });
-        items.push({
-          manifest: item.manifest,
-          dirPath: item.dir_path,
-          error: item.error,
-          enabled: enabled === '1',
-        });
-      }
-      setItems(items);
+      await refresh();
     } catch (err) {
       console.error('[plugins] 插件列表加载失败:', err);
       addToast({ type: 'error', title: '插件列表加载失败', message: String(err) });
-    } finally {
-      setLoading(false);
     }
-  }, [addToast]);
+  }, [refresh, addToast]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  // 内置插件：注册表中非外部的部分
-  const builtInPlugins = useMemo(
-    () => listPlugins().filter((p) => !listExternalPluginIds().includes(p.id)),
-    [items]
-  );
+  // 内置插件：注册表中不在扫描结果里的部分（注册表只含启用的外部插件，
+  // 扫描结果含全部外部插件，差集恰好是内置；依赖 items 让刷新后重算）
+  const builtInPlugins = useMemo(() => {
+    const externalIds = new Set(items.map((it) => it.manifest.id));
+    return listPlugins().filter((p) => !externalIds.has(p.id));
+  }, [items]);
 
-  const handleToggle = useCallback(async (item: ExternalItem, enabled: boolean) => {
+  const handleToggle = useCallback(async (item: ExternalPluginItem, enabled: boolean) => {
     if (enabled) {
       // 启用：未信任则先弹确认
       const trusted = await isPluginTrusted(item.manifest.id).catch(() => false);
@@ -222,7 +256,7 @@ export function PluginMarketSettings() {
     }
   }, [pendingEnable, load, addToast]);
 
-  const handleUninstall = useCallback(async (item: ExternalItem) => {
+  const handleUninstall = useCallback(async (item: ExternalPluginItem) => {
     if (!confirm(`确定要卸载插件「${item.manifest.name}」吗？将删除其插件目录。`)) return;
     try {
       await invoke('uninstall_plugin', { pluginId: item.manifest.id });
@@ -233,18 +267,13 @@ export function PluginMarketSettings() {
     }
   }, [load, addToast]);
 
-  const handleReveal = useCallback(async (item: ExternalItem) => {
+  const handleReveal = useCallback(async (item: ExternalPluginItem) => {
     try {
       await revealItemInDir(item.dirPath);
     } catch (err) {
       addToast({ type: 'error', title: '打开目录失败', message: String(err) });
     }
   }, [addToast]);
-
-  // 设置展开/收起（同一时刻只展开一行）
-  const handleSettings = useCallback((id: string) => {
-    setExpandedSettingsId((prev) => (prev === id ? null : id));
-  }, []);
 
   const handleAiGenerate = useCallback(() => {
     setShowGenerate(true);
@@ -260,7 +289,6 @@ export function PluginMarketSettings() {
       {/* 内置插件：系统能力，锁定展示 */}
       <SettingGroup title="内置插件">
         {builtInPlugins.map((plugin) => {
-          const Icon = plugin.icon;
           return (
             <SettingRow key={plugin.id} title={plugin.name} description={plugin.description}>
               <span className="text-xs text-app-text-disabled">系统内置</span>
@@ -301,52 +329,39 @@ export function PluginMarketSettings() {
           </div>
         ) : (
           items.map((item) => {
-            const Icon = item.manifest.icon ? null : Package;
             const hasSettings = item.manifest.settings.length > 0;
             const shortcutConflicts = getPluginShortcutConflicts(item.manifest.id);
             return (
-              <div key={item.manifest.id}>
-                <SettingRow
-                  title={item.manifest.name}
-                  description={item.manifest.description ?? item.dirPath}
-                >
-                  <div className="flex items-center gap-2">
-                    {item.error ? (
-                      <span className="text-xs text-app-status-error">加载失败</span>
-                    ) : shortcutConflicts.length > 0 ? (
-                      <span
-                        className="text-xs text-app-status-error cursor-help"
-                        title={`${shortcutConflicts.map((c) => c.key).join('、')} 注册失败：${shortcutConflicts[0].reason}`}
-                      >
-                        快捷键冲突
-                      </span>
-                    ) : !item.enabled ? (
-                      <span className="text-xs text-app-text-disabled">已禁用</span>
-                    ) : null}
-                    <Toggle
-                      enabled={item.enabled}
-                      onToggle={(v) => handleToggle(item, v)}
-                    />
-                    <MoreMenu
-                      hasSettings={hasSettings}
-                      onSettings={() => handleSettings(item.manifest.id)}
-                      onReveal={() => handleReveal(item)}
-                      onUninstall={() => handleUninstall(item)}
-                    />
-                  </div>
-                </SettingRow>
-                {/* 设置展开区：纱层底 + 缩进，层级靠排版建立（不卡片化） */}
-                {expandedSettingsId === item.manifest.id && hasSettings && (
-                  <div className="mx-1 mb-1.5 rounded-lg bg-white/[0.03]">
-                    <div className="px-5 py-1.5">
-                      <PluginSettingsForm
-                        pluginId={item.manifest.id}
-                        schema={item.manifest.settings}
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
+              <SettingRow
+                key={item.manifest.id}
+                title={item.manifest.name}
+                description={item.manifest.description ?? item.dirPath}
+              >
+                <div className="flex items-center gap-2">
+                  {item.error ? (
+                    <span className="text-xs text-app-status-error">加载失败</span>
+                  ) : shortcutConflicts.length > 0 ? (
+                    <span
+                      className="text-xs text-app-status-error cursor-help"
+                      title={`${shortcutConflicts.map((c) => c.key).join('、')} 注册失败：${shortcutConflicts[0].reason}`}
+                    >
+                      快捷键冲突
+                    </span>
+                  ) : !item.enabled ? (
+                    <span className="text-xs text-app-text-disabled">已禁用</span>
+                  ) : null}
+                  <Toggle
+                    enabled={item.enabled}
+                    onToggle={(v) => handleToggle(item, v)}
+                  />
+                  <MoreMenu
+                    hasSettings={hasSettings}
+                    onSettings={() => onOpenPluginSettings(item.manifest.id)}
+                    onReveal={() => handleReveal(item)}
+                    onUninstall={() => handleUninstall(item)}
+                  />
+                </div>
+              </SettingRow>
             );
           })
         )}
