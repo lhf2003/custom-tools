@@ -36,7 +36,7 @@ function isBuiltInEntryId(id: string | undefined): id is string {
 
 const ITEMS_PER_ROW = 9;
 // 折叠态条数随视图切换（grid=ITEMS_PER_ROW / list=LIST_COLLAPSED_COUNT），见组件内 collapsedCount
-// 列表视图折叠态条数：行高 40px × 7 ≈ 网格两行高度，窗口无需增高
+// 列表视图折叠态条数：行高 40px × 7；列表模式窗口默认高 575（listCollapsed），未填满部分留白
 const LIST_COLLAPSED_COUNT = 7;
 // 冷启动填充上限（无任何使用记录时展示索引应用）：取 9 列 × 2 行，
 // 避免一次渲染全部索引应用、触发大量图标提取
@@ -199,11 +199,15 @@ export function LauncherView() {
     return () => clearTimeout(timer);
   }, [searchQuery, searchApps]);
 
-  // Set window height based on expanded state
+  // Set window height based on expanded state and view mode
   useEffect(() => {
-    const height = isExpanded ? WINDOW_SIZE.LAUNCHER.expanded : WINDOW_SIZE.LAUNCHER.collapsed;
+    const height = isExpanded
+      ? WINDOW_SIZE.LAUNCHER.expanded
+      : isListView
+        ? WINDOW_SIZE.LAUNCHER.listCollapsed
+        : WINDOW_SIZE.LAUNCHER.collapsed;
     debouncedResize(height, WINDOW_SIZE.LAUNCHER.width);
-  }, [isExpanded]);
+  }, [isExpanded, isListView]);
 
   // 唤起即折叠：与 query 重置一致的"每次唤起全新状态"语义
   useEffect(() => {
