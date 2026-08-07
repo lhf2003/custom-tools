@@ -317,10 +317,10 @@ export function GeneralSettings() {
       </SettingGroup>
 
       <SettingGroup title="外观">
-        <ThemeSelector />
         <SettingRow title="启动器视图" description="搜索结果的排列方式：横向网格或纵向列表">
           <LauncherViewSwitch />
         </SettingRow>
+        <ThemeSelector />
       </SettingGroup>
 
       <SearchSection />
