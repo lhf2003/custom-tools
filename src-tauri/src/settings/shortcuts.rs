@@ -388,7 +388,7 @@ impl ShortcutManager {
                             plugin_id: sc.plugin_id.clone(),
                             shortcut_id: sc.id.clone(),
                             key: sc.key.clone(),
-                            reason: format!("注册失败（组合键可能被占用）: {e}"),
+                            reason: format!("注册失败，快捷键被占用"),
                         }),
                     }
                 }
