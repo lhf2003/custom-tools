@@ -315,8 +315,8 @@ export function LlmObserveSection() {
                               className={`grid ${DETAIL_GRID} gap-2 text-app-text-disabled text-xs py-0.5`}
                             >
                               <span>模型名称</span>
-                              <span className="text-right">输入(未命中)</span>
-                              <span className="text-right">输入(命中)</span>
+                              <span className="text-right">输入</span>
+                              <span className="text-right">输入(缓存)</span>
                               <span className="text-right">输出</span>
                               <span className="text-right">耗时</span>
                               <span className="text-right">成本</span>

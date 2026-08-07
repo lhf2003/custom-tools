@@ -39,9 +39,9 @@ const SCENE_LABELS: Record<Scene, { label: string; icon: typeof MessageSquare; d
   chat: { label: '闲聊', icon: MessageSquare, description: '日常对话场景' },
   qa: { label: '问答', icon: HelpCircle, description: '知识问答场景' },
   translate: { label: '翻译', icon: Languages, description: '翻译场景' },
-  companion: { label: '陪伴', icon: Bot, description: '陪伴功能（模式挖掘、意图解析）' },
-  memory_extraction: { label: '记忆提取', icon: Brain, description: '聊天记忆提炼（缺省跟随陪伴场景）' },
-  diary: { label: '情感日记', icon: BookHeart, description: '贾维斯的私有日记（缺省跟随陪伴场景）' },
+  companion: { label: '陪伴', icon: Bot, description: '模式挖掘、意图解析' },
+  memory_extraction: { label: '记忆提取', icon: Brain, description: '聊天记忆提炼' },
+  diary: { label: '情感日记', icon: BookHeart, description: '贾维斯的私有日记' },
 };
 
 // 连接状态徽章：圆点 + 文字范式（与设置页其它状态徽章一致）
