@@ -794,7 +794,6 @@ export function ModelSettings() {
                         disabled={totalModelOptions === 0}
                         placeholder="选择模型"
                         className="w-44"
-                        menuClassName="w-80 right-0"
                       />
                     );
                   })()}

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useId, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, ChevronDown, Search, X } from 'lucide-react';
+import { ChevronDown, Search, X } from 'lucide-react';
 
 export interface SelectOption {
   value: string;
@@ -87,45 +87,6 @@ export function CustomSelect({
 
   const selectedOption = allOptions.find((opt) => opt.value === value);
 
-  // 打开时初始化：清空搜索、高亮当前选中项。放在打开动作里而不是 effect 里——
-  // options 每次渲染都是新数组引用，依赖它的 effect 会反复把高亮重置回选中项
-  const openSelect = () => {
-    setSearchQuery('');
-    const selectedIndex = filteredOptions.findIndex((opt) => opt.value === value);
-    setHighlightedIndex(selectedIndex >= 0 ? selectedIndex : 0);
-    setIsOpen(true);
-  };
-
-  // 打开后聚焦搜索框（键盘优先：展开即可输入）
-  useEffect(() => {
-    if (isOpen && isSearchable) searchInputRef.current?.focus();
-  }, [isOpen, isSearchable]);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      const target = event.target as Node;
-      if (containerRef.current?.contains(target)) return;
-      // 菜单 portal 在 body 下、不在 containerRef 内，需单独判定
-      if (menuRef.current?.contains(target)) return;
-      setIsOpen(false);
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  // 输入搜索词后，高亮回到第一个匹配项
-  useEffect(() => {
-    if (query) setHighlightedIndex(0);
-  }, [query]);
-
-  // 键盘导航时保证高亮项滚入可视区
-  useEffect(() => {
-    if (!isOpen || highlightedIndex < 0) return;
-    listRef.current
-      ?.querySelector(`[data-option-index="${highlightedIndex}"]`)
-      ?.scrollIntoView({ block: 'nearest' });
-  }, [highlightedIndex, isOpen]);
-
   // fixed 定位的几何计算：上翻/下翻、水平对齐、可用高度收缩。
   // menuClassName 的两类宽度意图：默认 w-full = 与触发器同宽（fixed 下换算成内联像素）；
   // right-0 = 菜单右缘对齐触发器右缘（fixed 下换算成视口 right 偏移）
@@ -166,6 +127,51 @@ export function CustomSelect({
     }
   }, [totalCount, menuClassName]);
 
+  // 打开时初始化：清空搜索、高亮当前选中项。放在打开动作里而不是 effect 里——
+  // options 每次渲染都是新数组引用，依赖它的 effect 会反复把高亮重置回选中项
+  const openSelect = () => {
+    setSearchQuery('');
+    const selectedIndex = filteredOptions.findIndex((opt) => opt.value === value);
+    setHighlightedIndex(selectedIndex >= 0 ? selectedIndex : 0);
+    // 同步定位：展开首帧若沿用陈旧 menuBox（初始无坐标），菜单会闪到视口左上角再跳回
+    updateMenuPosition();
+    setIsOpen(true);
+  };
+
+  // 打开后聚焦搜索框（键盘优先：展开即可输入）
+  useEffect(() => {
+    if (isOpen && isSearchable) searchInputRef.current?.focus();
+  }, [isOpen, isSearchable]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (containerRef.current?.contains(target)) return;
+      // 菜单 portal 在 body 下、不在 containerRef 内，需单独判定
+      if (menuRef.current?.contains(target)) return;
+      setIsOpen(false);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // 输入搜索词后，高亮回到第一个匹配项
+  useEffect(() => {
+    if (query) setHighlightedIndex(0);
+  }, [query]);
+
+  // 高亮来源标记：仅键盘导航允许 scrollIntoView。鼠标 hover 不滚动——否则展开后
+  // 入场动画（translateY 4px）期间 hover、或 hover 到边缘半遮选项时，列表会被顶动几 px
+  const keyboardNavRef = useRef(false);
+
+  // 键盘导航时保证高亮项滚入可视区
+  useEffect(() => {
+    if (!isOpen || highlightedIndex < 0 || !keyboardNavRef.current) return;
+    listRef.current
+      ?.querySelector(`[data-option-index="${highlightedIndex}"]`)
+      ?.scrollIntoView({ block: 'nearest' });
+  }, [highlightedIndex, isOpen]);
+
   // Calculate dropdown position based on available space
   useEffect(() => {
     if (isOpen) updateMenuPosition();
@@ -202,7 +208,10 @@ export function CustomSelect({
           triggerRef.current?.focus();
         } else if (!typingInSearch) {
           if (isOpen) setIsOpen(false);
-          else openSelect();
+          else {
+            keyboardNavRef.current = true;
+            openSelect();
+          }
         }
         break;
       case ' ':
@@ -214,7 +223,10 @@ export function CustomSelect({
           triggerRef.current?.focus();
         } else {
           if (isOpen) setIsOpen(false);
-          else openSelect();
+          else {
+            keyboardNavRef.current = true;
+            openSelect();
+          }
         }
         break;
       case 'Escape':
@@ -223,6 +235,7 @@ export function CustomSelect({
         break;
       case 'ArrowDown':
         e.preventDefault();
+        keyboardNavRef.current = true;
         if (!isOpen) {
           openSelect();
         } else {
@@ -233,6 +246,7 @@ export function CustomSelect({
         break;
       case 'ArrowUp':
         e.preventDefault();
+        keyboardNavRef.current = true;
         if (!isOpen) {
           openSelect();
         } else {
@@ -262,7 +276,11 @@ export function CustomSelect({
           setIsOpen(false);
         }}
         disabled={option.disabled}
-        onMouseEnter={() => setHighlightedIndex(index)}
+        onMouseEnter={() => {
+          // 鼠标接管高亮：清除键盘标记（含方向键到底/顶后残留的 stale 标记），本次不滚动
+          keyboardNavRef.current = false;
+          setHighlightedIndex(index);
+        }}
         // 入场 stagger：前 7 项依次延迟 18ms，总时长控制在设计词表 300ms 内；
         // 仅打开时挂载动画类——关闭走菜单整体的淡出，选项不各自重播
         style={{ animationDelay: `${Math.min(index, 6) * 18}ms` }}
@@ -279,12 +297,7 @@ export function CustomSelect({
           ${isHighlighted ? 'bg-app-bg-hover' : ''}
         `}
       >
-        <span className="flex items-center gap-2">
-          <span className="w-4 flex-shrink-0 flex items-center justify-center">
-            {isSelected && <Check size={14} className="text-app-brand-primary-light" />}
-          </span>
-          <span className="truncate">{option.label}</span>
-        </span>
+        <span className="truncate">{option.label}</span>
       </button>
     );
   };
@@ -335,9 +348,14 @@ export function CustomSelect({
       {createPortal(
         <div
           ref={menuRef}
-          // --option-enter-offset 传给选项入场动画：菜单向上翻时选项从下方浮入，保持物理方向感
+          // --option-enter-offset 传给选项入场动画：菜单向上翻时选项从下方浮入，保持物理方向感。
+          // 注意 maxHeight 只给内层列表（含搜索框时外层若也限高会被 overflow-hidden 连搜索框一起裁掉）
           style={{
-            ...menuBox,
+            left: menuBox.left,
+            right: menuBox.right,
+            top: menuBox.top,
+            bottom: menuBox.bottom,
+            width: menuBox.width,
             '--option-enter-offset': dropdownPosition === 'top' ? '-4px' : '4px',
             WebkitBackdropFilter: 'blur(20px)',
             backdropFilter: 'blur(20px)',
@@ -383,7 +401,9 @@ export function CustomSelect({
             id={listboxId}
             role="listbox"
             style={{ maxHeight: menuBox.maxHeight }}
-            className="overflow-y-auto overscroll-contain px-1.5 scrollbar-thin scrollbar-thumb-zinc-600 scrollbar-track-transparent"
+            // pb-1 吸收选项入场动画的 4px 下沉位移（transform 计入可滚动溢出）——
+            // 短菜单没有这 4px 余量时，动画期间会瞬时撑出滚动条、结束后又消失（滚轮闪现）
+            className="overflow-y-auto overscroll-contain px-1.5 pb-1 scrollbar-thin scrollbar-thumb-zinc-600 scrollbar-track-transparent"
           >
             {filteredOptions.length === 0 ? (
               <div className={`px-3 py-2 text-app-text-placeholder text-sm text-center ${isOpen ? 'animate-option-in motion-reduce:animate-none' : ''}`}>
