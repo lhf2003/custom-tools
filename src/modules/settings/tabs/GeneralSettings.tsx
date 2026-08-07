@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { safeInvoke } from '@/utils/tauri';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { SettingGroup, SettingRow, Toggle } from '../components/SettingsPrimitives';
@@ -106,6 +106,8 @@ function ThemeMiniPreview({ variant }: { variant: ThemeMode }) {
 function PanelAlphaSlider() {
   const panelAlpha = useSettingsStore((s) => s.panel_alpha);
   const setPanelAlpha = useSettingsStore((s) => s.setPanelAlpha);
+  // 轨道填充百分比：值域 0.4~1.0 映射 0~100%，经 --range-fill 驱动（见 index.css 滑杆块）
+  const fillPct = ((panelAlpha - 0.4) / 0.6) * 100;
 
   return (
     <div className="flex items-center gap-2">
@@ -117,9 +119,11 @@ function PanelAlphaSlider() {
         value={panelAlpha}
         onChange={(e) => setPanelAlpha(Number(e.target.value))}
         className="w-32"
+        style={{ '--range-fill': `${fillPct}%` } as CSSProperties}
         aria-label="面板背景不透明度"
+        aria-valuetext={`${Math.round(panelAlpha * 100)}%`}
       />
-      <span className="w-10 text-xs text-app-text-secondary tabular-nums text-right">
+      <span className="range-readout w-10 text-xs text-app-text-secondary tabular-nums text-right transition-colors duration-150">
         {Math.round(panelAlpha * 100)}%
       </span>
     </div>
@@ -338,7 +342,7 @@ export function GeneralSettings() {
         <SettingRow title="失去焦点时隐藏" description="点击窗口外部自动隐藏，保持桌面整洁">
           <Toggle enabled={hide_on_blur} onToggle={toggleHideOnBlur} />
         </SettingRow>
-        <SettingRow title="背景透明度" description="启动器、聊天与各插件页的面板底色，数值越低越透出桌面与主题渐变">
+        <SettingRow title="背景透明度" description="数值越低越透出桌面与主题渐变">
           <PanelAlphaSlider />
         </SettingRow>
       </SettingGroup>
