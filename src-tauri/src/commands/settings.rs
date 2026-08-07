@@ -250,17 +250,46 @@ pub fn reset_all_shortcuts(
     Ok(())
 }
 
+/// 冲突检测结果：只需冲突项名称供前端提示（内置与插件快捷键统一为此轻量结构）
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ShortcutConflictInfo {
+    pub name: String,
+}
+
 /// Check if a shortcut conflicts with existing ones
 #[tauri::command]
 pub fn check_shortcut_conflict(
+    app_handle: tauri::AppHandle,
     state: State<'_, ShortcutManagerState>,
+    settings_state: State<'_, SettingsState>,
     keys: String,
     exclude_id: Option<String>,
-) -> Result<Option<ShortcutConfig>, String> {
+) -> Result<Option<ShortcutConflictInfo>, String> {
     let manager = state.0.lock().map_err(|e| e.to_string())?;
-    Ok(manager
-        .check_conflict(&keys, exclude_id.as_deref())
-        .cloned())
+    // 内置快捷键：exclude_id 命中内置 id 时排除自身
+    if let Some(config) = manager.check_conflict(&keys, exclude_id.as_deref()) {
+        return Ok(Some(ShortcutConflictInfo {
+            name: config.name.clone(),
+        }));
+    }
+    drop(manager);
+
+    // 外部插件快捷键：exclude_id 形如 plugin.<pluginId>.<shortcutId> 时排除自身
+    let exclude_plugin = exclude_id
+        .as_deref()
+        .and_then(|id| id.strip_prefix("plugin."));
+    let shortcuts = crate::commands::plugins::collect_plugin_shortcuts(&app_handle, &settings_state)?;
+    for sc in shortcuts {
+        if sc.key != keys {
+            continue;
+        }
+        let self_id = format!("{}.{}", sc.plugin_id, sc.id);
+        if exclude_plugin == Some(self_id.as_str()) {
+            continue;
+        }
+        return Ok(Some(ShortcutConflictInfo { name: sc.label }));
+    }
+    Ok(None)
 }
 
 /// Toggle auto update setting

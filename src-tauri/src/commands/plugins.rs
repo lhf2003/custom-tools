@@ -186,15 +186,15 @@ pub fn uninstall_plugin(app_handle: AppHandle, plugin_id: String) -> Result<(), 
     std::fs::remove_dir_all(&plugin_dir).map_err(|e| format!("卸载失败: {e}"))
 }
 
-/// 同步外部插件快捷键贡献点：扫描启用插件的 manifest.shortcuts → 注销旧的 → 注册新的。
-/// 返回冲突列表（OS 注册失败 / 格式非法）；冲突不阻塞插件使用，前端标记 + toast。
-#[tauri::command]
-pub fn sync_plugin_shortcuts(
-    app_handle: AppHandle,
-    settings_state: State<'_, SettingsState>,
-    shortcut_state: State<'_, ShortcutManagerState>,
-) -> Result<Vec<ShortcutConflict>, String> {
+/// 收集启用插件的快捷键声明（应用用户自定义键位覆盖：
+/// settings 表 plugins.<id>.shortcut.<shortcut_id> 存在时替代 manifest 默认键）。
+/// sync 注册与冲突检测共用，保证两处看到的「生效键位」一致。
+pub(crate) fn collect_plugin_shortcuts(
+    app_handle: &AppHandle,
+    settings_state: &SettingsState,
+) -> Result<Vec<PluginShortcutConfig>, String> {
     let items = scan_plugins(app_handle.clone())?;
+    let settings = settings_state.0.lock().map_err(|e| e.to_string())?;
 
     let mut shortcuts = Vec::new();
     for item in items {
@@ -202,10 +202,7 @@ pub fn sync_plugin_shortcuts(
             continue;
         };
         // 仅启用插件注册（enabled 状态与市场 tab 同源：settings 表 KV）
-        let enabled = settings_state
-            .0
-            .lock()
-            .map_err(|e| e.to_string())?
+        let enabled = settings
             .get_setting(&format!("plugins.{}.enabled", manifest.id))
             .map_err(|e| e.to_string())?
             .as_deref()
@@ -214,15 +211,54 @@ pub fn sync_plugin_shortcuts(
             continue;
         }
         for sc in manifest.shortcuts {
+            let custom = settings
+                .get_setting(&format!("plugins.{}.shortcut.{}", manifest.id, sc.id))
+                .map_err(|e| e.to_string())?
+                .filter(|k| !k.is_empty());
             shortcuts.push(PluginShortcutConfig {
                 plugin_id: manifest.id.clone(),
                 id: sc.id,
-                key: sc.key,
+                key: custom.unwrap_or(sc.key),
                 label: sc.label,
             });
         }
     }
+    Ok(shortcuts)
+}
 
+/// 同步外部插件快捷键贡献点：扫描启用插件的 manifest.shortcuts → 注销旧的 → 注册新的。
+/// 返回冲突列表（OS 注册失败 / 格式非法）；冲突不阻塞插件使用，前端标记 + toast。
+#[tauri::command]
+pub fn sync_plugin_shortcuts(
+    app_handle: AppHandle,
+    settings_state: State<'_, SettingsState>,
+    shortcut_state: State<'_, ShortcutManagerState>,
+) -> Result<Vec<ShortcutConflict>, String> {
+    let shortcuts = collect_plugin_shortcuts(&app_handle, &settings_state)?;
+    let mut manager = shortcut_state.0.lock().map_err(|e| e.to_string())?;
+    Ok(manager.sync_plugin_shortcuts(&app_handle, &shortcuts))
+}
+
+/// 更新插件快捷键的自定义键位（None / 空串 = 恢复 manifest 默认），随后全量重同步。
+/// 返回重同步后的冲突列表，前端据此刷新行内标记。
+#[tauri::command]
+pub fn update_plugin_shortcut(
+    app_handle: AppHandle,
+    settings_state: State<'_, SettingsState>,
+    shortcut_state: State<'_, ShortcutManagerState>,
+    plugin_id: String,
+    shortcut_id: String,
+    custom_keys: Option<String>,
+) -> Result<Vec<ShortcutConflict>, String> {
+    {
+        let settings = settings_state.0.lock().map_err(|e| e.to_string())?;
+        let key = format!("plugins.{plugin_id}.shortcut.{shortcut_id}");
+        match custom_keys.as_deref().filter(|k| !k.is_empty()) {
+            Some(k) => settings.set_setting(&key, k).map_err(|e| e.to_string())?,
+            None => settings.delete_setting(&key).map_err(|e| e.to_string())?,
+        }
+    }
+    let shortcuts = collect_plugin_shortcuts(&app_handle, &settings_state)?;
     let mut manager = shortcut_state.0.lock().map_err(|e| e.to_string())?;
     Ok(manager.sync_plugin_shortcuts(&app_handle, &shortcuts))
 }

@@ -8,7 +8,7 @@ export interface AppSettings {
   theme: string;
   /** 启动器结果排列：grid（横向网格）| list（列表） */
   launcher_view: string;
-  /** 面板背景不透明度（启动器/聊天玻璃面板，0.4~1.0，写入 --app-panel-alpha） */
+  /** 面板背景不透明度（各页面玻璃面板，0.4~1.0，写入 --app-panel-alpha） */
   panel_alpha: number;
   clipboard_keep_days: number;
   auto_update: boolean;
@@ -62,7 +62,8 @@ interface SettingsState extends AppSettings {
   /** 设置主题模式（system/dark/light）：落库；即时生效由 ThemeController 负责 */
   setTheme: (theme: string) => Promise<void>;
   setLauncherView: (view: string) => Promise<void>;
-  setPanelAlpha: (alpha: number) => Promise<void>;
+  /** 面板背景不透明度：本地即时生效（滑杆跟手），落库 300ms 防抖 */
+  setPanelAlpha: (alpha: number) => void;
   setAutoUpdate: (enabled: boolean) => Promise<void>;
   toggleAutoUpdate: () => Promise<boolean>;
   toggleDebugMode: () => Promise<boolean>;
@@ -94,7 +95,7 @@ interface SettingsState extends AppSettings {
   updateShortcut: (id: string, customKeys: string | null, enabled: boolean) => Promise<void>;
   resetShortcut: (id: string) => Promise<void>;
   resetAllShortcuts: () => Promise<void>;
-  checkShortcutConflict: (keys: string, excludeId?: string) => Promise<ShortcutConfig | null>;
+  checkShortcutConflict: (keys: string, excludeId?: string) => Promise<{ name: string } | null>;
 }
 
 const defaultSettings: AppSettings = {
@@ -125,6 +126,9 @@ const defaultSettings: AppSettings = {
   disabled_companion_tools: '[]',
   shell_permission_mode: 'confirm_all',
 };
+
+/** panel_alpha 落库防抖计时器（模块级单例，组件卸载不丢待写值） */
+let panelAlphaPersistTimer: ReturnType<typeof setTimeout> | null = null;
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   ...defaultSettings,
@@ -241,13 +245,17 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }
   },
 
-  setPanelAlpha: async (alpha: number) => {
-    try {
-      await invoke('set_setting', { key: 'panel_alpha', value: alpha.toFixed(2) });
-      set({ panel_alpha: alpha });
-    } catch (err) {
-      console.error('Failed to set panel_alpha:', err);
-    }
+  // 滑杆 onChange 高频触发：本地即时生效（CSS 变量经 ThemeController 跟随），
+  // 落库 300ms 防抖——一次拖动只写一次 SQLite，UI 不受 IPC 往返门控
+  setPanelAlpha: (alpha: number) => {
+    set({ panel_alpha: alpha });
+    if (panelAlphaPersistTimer !== null) clearTimeout(panelAlphaPersistTimer);
+    panelAlphaPersistTimer = setTimeout(() => {
+      panelAlphaPersistTimer = null;
+      invoke('set_setting', { key: 'panel_alpha', value: alpha.toFixed(2) }).catch((err) =>
+        console.error('Failed to set panel_alpha:', err),
+      );
+    }, 300);
   },
 
   setAutoUpdate: async (enabled: boolean) => {
@@ -520,7 +528,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   checkShortcutConflict: async (keys: string, excludeId?: string) => {
     try {
-      const conflict = await invoke<ShortcutConfig | null>('check_shortcut_conflict', {
+      const conflict = await invoke<{ name: string } | null>('check_shortcut_conflict', {
         keys,
         excludeId,
       });

@@ -15,7 +15,7 @@ pub struct AppSettings {
     pub theme: String,
     /// 启动器结果排列：grid（横向网格）| list（列表）
     pub launcher_view: String,
-    /// 面板背景不透明度（启动器/聊天玻璃面板，0.4~1.0，前端写入 --app-panel-alpha）
+    /// 面板背景不透明度（各页面玻璃面板，0.4~1.0，前端写入 --app-panel-alpha）
     pub panel_alpha: f32,
     pub clipboard_keep_days: i32,
     pub auto_update: bool,
@@ -415,6 +415,13 @@ impl SettingsManager {
             }
         }
 
+        Ok(())
+    }
+
+    /// 删除任意 key 的 KV 设置（插件快捷键自定义键位等「缺省即默认」场景的复位）
+    pub fn delete_setting(&self, key: &str) -> Result<()> {
+        let conn = Connection::open(&self.db_path)?;
+        conn.execute("DELETE FROM settings WHERE key = ?1", [key])?;
         Ok(())
     }
 

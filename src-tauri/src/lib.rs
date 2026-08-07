@@ -491,6 +491,7 @@ pub fn run() {
             commands::plugins::read_plugin_bundle,
             commands::plugins::uninstall_plugin,
             commands::plugins::sync_plugin_shortcuts,
+            commands::plugins::update_plugin_shortcut,
             commands::plugin_gen::generate_plugin,
             commands::plugin_gen::write_plugin_preview,
             commands::plugin_gen::install_preview_plugin,
