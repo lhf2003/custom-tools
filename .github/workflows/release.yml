@@ -72,8 +72,8 @@ jobs:
           [System.IO.File]::WriteAllText($aboutPath, $aboutContent, [System.Text.Encoding]::UTF8)
           Write-Host "Updated AboutSettings.tsx: 版本 $version"
 
-          # 2. 在 ChangelogSettings.tsx CHANGELOG 数组开头插入新条目
-          $changelogPath = "src/modules/settings/tabs/ChangelogSettings.tsx"
+          # 2. 在 ChangelogModal.tsx CHANGELOG 数组开头插入新条目
+          $changelogPath = "src/modules/settings/components/ChangelogModal.tsx"
           $changelogContent = [System.IO.File]::ReadAllText($changelogPath, [System.Text.Encoding]::UTF8)
 
           $itemLines = ($items | ForEach-Object { "      '$_'," }) -join "`n"
@@ -81,7 +81,7 @@ jobs:
 
           $changelogContent = $changelogContent -replace '(const CHANGELOG: ChangelogEntry\[\] = \[)', "`$1`n$newEntry"
           [System.IO.File]::WriteAllText($changelogPath, $changelogContent, [System.Text.Encoding]::UTF8)
-          Write-Host "Updated ChangelogSettings.tsx: added v$version entry"
+          Write-Host "Updated ChangelogModal.tsx: added v$version entry"
 
       - name: Get tag message
         id: tag_message
