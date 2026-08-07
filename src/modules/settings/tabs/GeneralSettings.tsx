@@ -1,15 +1,7 @@
 import { type CSSProperties } from 'react';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { SettingGroup, SettingRow, Toggle } from '../components/SettingsPrimitives';
-import { CustomSelect } from '../components/CustomSelect';
 import { Check, LayoutGrid, List } from 'lucide-react';
-
-const clipboardKeepDaysOptions = [
-  { value: '7', label: '7天' },
-  { value: '30', label: '30天' },
-  { value: '90', label: '90天' },
-  { value: '0', label: '永久' },
-];
 
 /* ==================== 主题卡片 ==================== */
 
@@ -212,16 +204,12 @@ export function GeneralSettings() {
     always_on_top,
     hide_on_blur,
     startup_launch,
-    clipboard_keep_days,
     auto_update,
-    clipboard_auto_paste,
     debug_mode,
     toggleAlwaysOnTop,
     toggleHideOnBlur,
     setStartupLaunch,
-    setClipboardKeepDays,
     setAutoUpdate,
-    toggleClipboardAutoPaste,
     toggleDebugMode,
   } = useSettingsStore();
 
@@ -253,23 +241,6 @@ export function GeneralSettings() {
           <LauncherViewSwitch />
         </SettingRow>
         <ThemeSelector />
-      </SettingGroup>
-
-      <SettingGroup title="剪贴板">
-        <SettingRow
-          title="双击自动粘贴"
-          description="双击剪贴板历史项后自动粘贴到光标所在位置"
-        >
-          <Toggle enabled={clipboard_auto_paste} onToggle={toggleClipboardAutoPaste} />
-        </SettingRow>
-        <SettingRow title="历史保存天数" description="超过此天数的历史将被自动清理（0=永久保存）">
-          <CustomSelect
-            value={String(clipboard_keep_days)}
-            onChange={(v) => setClipboardKeepDays(Number(v))}
-            options={clipboardKeepDaysOptions}
-            className="min-w-[100px]"
-          />
-        </SettingRow>
       </SettingGroup>
 
       <SettingGroup title="系统">

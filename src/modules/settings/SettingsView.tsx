@@ -12,6 +12,7 @@ import {
   Package,
   SlidersHorizontal,
   AppWindow,
+  Clipboard,
 } from 'lucide-react';
 import { immediateResize } from '@/utils/tauri';
 import { WINDOW_SIZE } from '@/constants/window';
@@ -19,6 +20,7 @@ import { useExternalPluginsStore } from '@/stores/externalPluginsStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { createExternalIconComponent } from '@/plugins/external';
 import { GeneralSettings } from './tabs/GeneralSettings';
+import { BuiltinSettings } from './tabs/BuiltinSettings';
 import { AppsSettings } from './tabs/AppsSettings';
 import { ShortcutsSettings } from './tabs/ShortcutsSettings';
 import { ModelSettings } from './tabs/ModelSettings';
@@ -52,6 +54,7 @@ const SYSTEM_NAV_GROUP: NavGroup = {
   label: '系统',
   items: [
     { id: 'general', name: '通用', icon: Settings },
+    { id: 'builtin', name: '内置功能', icon: Clipboard },
     { id: 'apps', name: '应用', icon: AppWindow },
     { id: 'shortcuts', name: '快捷键', icon: Command },
     { id: 'stats', name: '统计', icon: BarChart3 },
@@ -79,6 +82,7 @@ const MISC_NAV_GROUP: NavGroup = {
 /** 固定 tab 内容（插件市场与插件设置 tab 走动态渲染，不在此表） */
 const STATIC_TAB_CONTENT: Record<string, React.ReactNode> = {
   general: <GeneralSettings />,
+  builtin: <BuiltinSettings />,
   apps: <AppsSettings />,
   shortcuts: <ShortcutsSettings />,
   model: <ModelSettings />,
