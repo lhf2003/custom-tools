@@ -592,6 +592,8 @@ pub fn run() {
             commands::companion::get_companion_suggestions,
             commands::companion::act_on_companion_suggestion,
             commands::companion::dismiss_companion_suggestion,
+            commands::companion::get_app_cache_entries,
+            commands::companion::update_app_cache_description,
             commands::companion::list_manuals,
             commands::companion::get_manual,
             commands::companion::save_manual,

@@ -30,6 +30,16 @@ enabled: true
 
 每条一句话，最多 3 条，不确定的不要写；一律用「他」，禁用「用户」。
 
+## 任务三：给不认识的应用补描述
+
+摘要里进程名旁边带「（描述）」的已认识；**没带的就是不认识**。对这些应用，
+如果从窗口标题、出现时段、使用频率能推断出它的用途，就输出一条描述；
+**推断不出就不要填**——宁可让用户自己标注，不可瞎猜写错（猜错会长期污染数据）。
+描述要求：
+- 10-20 字中文短语，说明这是做什么的（如「代码编辑器」「微信桌面客户端」），不要带"这是一个"之类废话
+- 进程名必须用摘要中的原文，不能改大小写或加后缀
+- 每次最多 5 条，只填你有把握的
+
 ## 不该存（一律不写）
 
 - 可从数据直接查到的（重复且会过期）
@@ -49,6 +59,10 @@ enabled: true
   "facts": [
     {"action": "add", "fact": "他下午工作时习惯开音乐", "category": "workflow"},
     {"action": "update", "target_id": 12, "fact": "他的主项目是 FlowHub（Tauri 桌面端）", "category": "project"}
+  ],
+  "app_descriptions": [
+    {"app": "Code.exe", "description": "代码编辑器"},
+    {"app": "Weixin.exe", "description": "微信桌面客户端"}
   ]
 }
 ```
@@ -59,3 +73,4 @@ enabled: true
 2. 只保留置信度 >= 0.5 的；每种 type 最多 2 个；没有可靠模式就返回空数组
 3. facts 的 category 从 person/project/workflow/voice/expectation 中选；三维映射：identity→person 或 project、workflow→workflow、voice→voice
 4. update 的 target_id 必须来自「已有记忆」清单里的 id；对不上 id 就用 add
+5. app_descriptions 只填摘要中没带「（描述）」的进程；不确定的坚决不填

@@ -200,6 +200,19 @@ function App() {
     };
   }, [setActiveView]);
 
+  // 未知应用提醒深链：预填「应用」tab 搜索（view 可能尚未切到 settings，
+  // 存 store 由 SettingsView 挂载时消费，保证事件先到不丢）
+  useEffect(() => {
+    const unlisten = listen<string>('settings:open-apps-tab', (event) => {
+      useSettingsStore.getState().setAppsTabQuery(event.payload);
+    });
+    return () => {
+      unlisten.then((fn) => fn()).catch((err: unknown) => {
+        console.error('Failed to cleanup apps tab listener:', err);
+      });
+    };
+  }, []);
+
   // Listen for companion "AI 分析" requests: prefill chat and switch to chat view
   useEffect(() => {
     const unlisten = listen<string>('companion:analyze', (event) => {

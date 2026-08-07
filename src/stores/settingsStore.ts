@@ -48,6 +48,9 @@ interface SettingsState extends AppSettings {
   isLoading: boolean;
   shortcuts: ShortcutConfig[];
   shortcutsLoading: boolean;
+  /** 未知应用提醒深链：待处理的「应用」tab 搜索预填（消费即清空）。
+   *  事件可能在 SettingsView 挂载前到达（主窗口内 view 切换），store 兜底缓存 */
+  appsTabQuery: string | null;
 
   // Actions
   loadSettings: () => Promise<void>;
@@ -96,6 +99,8 @@ interface SettingsState extends AppSettings {
   resetShortcut: (id: string) => Promise<void>;
   resetAllShortcuts: () => Promise<void>;
   checkShortcutConflict: (keys: string, excludeId?: string) => Promise<{ name: string } | null>;
+  /** 应用 tab 深链预填（设置页挂载时消费） */
+  setAppsTabQuery: (query: string | null) => void;
 }
 
 const defaultSettings: AppSettings = {
@@ -133,6 +138,7 @@ let panelAlphaPersistTimer: ReturnType<typeof setTimeout> | null = null;
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   ...defaultSettings,
   isLoading: true,
+  appsTabQuery: null,
   shortcuts: [],
   shortcutsLoading: false,
 
@@ -538,4 +544,6 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       return null;
     }
   },
+
+  setAppsTabQuery: (query: string | null) => set({ appsTabQuery: query }),
 }));

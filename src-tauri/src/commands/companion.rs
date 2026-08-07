@@ -69,6 +69,20 @@ pub async fn act_on_companion_suggestion(
                     &edit.new_content,
                 )?;
             }
+        } else if let Ok(value) = serde_json::from_str::<serde_json::Value>(payload_str) {
+            if value["action"].as_str() == Some("open_apps_tab") {
+                // 未知应用提醒：打开主窗口 → 切设置页 → 应用 tab 预填搜索
+                // （设置是主窗口内 view，先 show 再发两个事件；前端 store 缓存兜底事件先到）
+                crate::commands::window::show_window(app_handle.clone()).await?;
+                if let Err(e) = app_handle.emit("shortcut:open_module", "settings") {
+                    log::warn!("emit shortcut:open_module 失败: {}", e);
+                }
+                if let Some(process_name) = value["process_name"].as_str() {
+                    if let Err(e) = app_handle.emit("settings:open-apps-tab", process_name) {
+                        log::warn!("emit settings:open-apps-tab 失败: {}", e);
+                    }
+                }
+            }
         }
     }
 
@@ -94,6 +108,50 @@ pub fn dismiss_companion_suggestion(
     crate::companion::emotion::on_suggestion_dismissed(&conn, now);
     suggester::hide_toast_window(&app_handle);
     Ok(())
+}
+
+// ── 应用描述（设置页「应用」tab） ─────────────────────────────
+
+/// 分页查询应用列表（JOIN app_usage 取启动次数）
+#[tauri::command]
+pub fn get_app_cache_entries(
+    db_state: State<DatabaseState>,
+    query: Option<String>,
+    sort: Option<String>,
+    direction: Option<String>,
+    only_unlabeled: Option<bool>,
+    offset: Option<i64>,
+    limit: Option<i64>,
+) -> Result<Vec<crate::db::app_cache::AppCacheRow>, String> {
+    let conn = open_conn(&db_state)?;
+    let sort = sort.unwrap_or_else(|| "launch".to_string());
+    let direction =
+        direction.unwrap_or_else(|| if sort == "name" { "asc" } else { "desc" }.to_string());
+    crate::db::app_cache::query_app_entries(
+        &conn,
+        query.as_deref(),
+        &sort,
+        &direction,
+        only_unlabeled.unwrap_or(false),
+        offset.unwrap_or(0),
+        limit.unwrap_or(50).clamp(1, 200),
+    )
+    .map_err(|e| format!("查询应用列表失败: {}", e))
+}
+
+/// 更新单行应用描述（空字符串 = 清空）
+#[tauri::command]
+pub fn update_app_cache_description(
+    db_state: State<DatabaseState>,
+    path: String,
+    description: String,
+) -> Result<(), String> {
+    if description.chars().count() > 50 {
+        return Err("描述过长（最多 50 字）".to_string());
+    }
+    let conn = open_conn(&db_state)?;
+    crate::db::app_cache::update_description(&conn, &path, description.trim())
+        .map_err(|e| format!("更新描述失败: {}", e))
 }
 
 // ── 习惯模式 ─────────────────────────────────────────────────

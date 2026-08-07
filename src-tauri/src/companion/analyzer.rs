@@ -764,8 +764,10 @@ pub async fn run_daily_analysis(
     // 跨天窗口按天分节（只有 HH:MM 时分不清是哪天），文本上限随天数放大
     let multi_day = fmt_local(start, "%Y-%m-%d") != fmt_local(now_ts - 1, "%Y-%m-%d");
     let day_count = ((now_ts - start + 86399) / 86400).clamp(1, 7) as usize;
+    // 应用标注映射（exe 文件名 → (显示名, 描述)），命中则随进程名拼给 LLM
+    let app_labels = crate::db::app_cache::app_label_map(&conn).unwrap_or_default();
     let aggregate_text =
-        aggregate_activities(&activities, multi_day, AGGREGATE_TEXT_CAP * day_count);
+        aggregate_activities(&activities, multi_day, AGGREGATE_TEXT_CAP * day_count, &app_labels);
     let window_label = format!(
         "{} ~ {}",
         fmt_local(start, "%Y-%m-%d %H:%M"),
@@ -887,18 +889,131 @@ pub async fn run_daily_analysis(
         }
     }
 
+    // 应用描述回填：模型对摘要中出现、拼接时描述为空的进程给出描述。
+    // 只填 description = '' 的行（fill_empty_descriptions 条件约束），
+    // 期间用户手动标过的不会被覆盖。
+    let mut desc_saved = 0;
+    for d in &parsed.app_descriptions {
+        match crate::db::app_cache::fill_empty_descriptions(
+            &conn,
+            d.app.trim(),
+            d.description.trim(),
+        ) {
+            Ok(n) => desc_saved += n,
+            Err(e) => log::warn!("应用描述回填失败 {}: {}", d.app, e),
+        }
+    }
+
     // 成功落库后推进水位（失败/数据不足都不推进，下次窗口自动顺延合并）
     save_setting(db_path, "companion_last_analysis_ts", &now_ts.to_string());
 
+    // 未知应用提醒：模型回填后仍不认识 → 引导用户去设置页标注
+    let reminded = remind_unknown_apps(&conn, app_handle, &activities, &now);
+
     Ok(format!(
-        "窗口 {}：{} 条活动 → 聚合 {} 字符 → {} 个模式 + 事实新增 {} / 更新 {}",
+        "窗口 {}：{} 条活动 → 聚合 {} 字符 → {} 个模式 + 事实新增 {} / 更新 {} + 描述回填 {} + 未知应用提醒 {}",
         window_label,
         activities.len(),
         aggregate_text.len(),
         saved,
         facts_saved,
-        facts_updated
+        facts_updated,
+        desc_saved,
+        reminded
     ))
+}
+
+/// 进程名带标注（exe 文件名小写 → (显示名, 描述) 映射，来自 app_cache）。
+/// 拼接规则：有 name 有描述 → `proc（name / 描述）`；只有 name → `proc（name）`；
+/// name 与进程名雷同（如 name 就是 "Code.exe"）跳过；都没有 → 原样进程名。
+fn proc_label(proc: &str, labels: &std::collections::HashMap<String, (String, String)>) -> String {
+    let Some((name, desc)) = labels.get(&proc.to_lowercase()) else {
+        return proc.to_string();
+    };
+    let name = name.trim();
+    let desc = desc.trim();
+    let name_part = if !name.is_empty() && !proc.eq_ignore_ascii_case(name) {
+        Some(name)
+    } else {
+        None
+    };
+    match (name_part, desc) {
+        (Some(n), d) if !d.is_empty() => format!("{}（{} / {}）", proc, n, d),
+        (Some(n), _) => format!("{}（{}）", proc, n),
+        (None, d) if !d.is_empty() => format!("{}（{}）", proc, d),
+        (None, _) => proc.to_string(),
+    }
+}
+
+/// 未知应用提醒：本次窗口出现过 + 模型回填后描述仍为空 + 未提醒过 →
+/// 动作型建议「去标注」；单轮最多 REMIND_LIMIT 个，先打标防重复。
+/// 深夜轮（凌晨 3 点前，含 0 点 slot 及其补跑）只落建议中心不弹窗。
+fn remind_unknown_apps(
+    conn: &Connection,
+    app_handle: &AppHandle,
+    activities: &[ActivityLog],
+    now: &chrono::DateTime<chrono::Local>,
+) -> usize {
+    const REMIND_LIMIT: usize = 2;
+
+    // 摘要中出现过的进程（进程时长 Top 区覆盖全部出现进程，去重即可）
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for a in activities {
+        seen.insert(a.process_name.clone());
+    }
+
+    let silent = now.hour() < CLEANUP_HOUR;
+    let mut reminded = 0;
+    for proc in seen {
+        if reminded >= REMIND_LIMIT {
+            break;
+        }
+        if proc.is_empty() || proc.eq_ignore_ascii_case("unknown") {
+            continue;
+        }
+        let all_empty = crate::db::app_cache::process_all_descriptions_empty(conn, &proc)
+            .unwrap_or(false);
+        let all_reminded =
+            crate::db::app_cache::process_all_reminded(conn, &proc).unwrap_or(true); // 查询失败视为已提醒，别打扰
+        if !all_empty || all_reminded {
+            continue;
+        }
+        // 先打标再推送（防并发/重试重复弹）
+        if let Err(e) = crate::db::app_cache::mark_process_reminded(conn, &proc) {
+            log::warn!("标记应用提醒失败 {}: {}", proc, e);
+            continue;
+        }
+        let payload = serde_json::json!({
+            "action": "open_apps_tab",
+            "process_name": proc,
+        })
+        .to_string();
+        let body =
+            "我不认识这个应用。去设置页「应用」给它填一句描述，我就能更懂你的使用习惯了。";
+        let result = if silent {
+            suggester::push_suggestion_silent(
+                conn,
+                suggester::TYPE_APP_UNKNOWN,
+                &format!("「{}」是做什么的？", proc),
+                Some(body),
+                Some(&payload),
+            )
+        } else {
+            suggester::push_suggestion(
+                conn,
+                app_handle,
+                suggester::TYPE_APP_UNKNOWN,
+                &format!("「{}」是做什么的？", proc),
+                Some(body),
+                Some(&payload),
+            )
+        };
+        match result {
+            Ok(_) => reminded += 1,
+            Err(e) => log::warn!("未知应用建议创建失败 {}: {}", proc, e),
+        }
+    }
+    reminded
 }
 
 /// 把原始活动流水压缩成会话级摘要文本
@@ -906,6 +1021,7 @@ pub(crate) fn aggregate_activities(
     activities: &[ActivityLog],
     multi_day: bool,
     text_cap: usize,
+    labels: &std::collections::HashMap<String, (String, String)>,
 ) -> String {
     struct Session {
         process: String,
@@ -947,7 +1063,7 @@ pub(crate) fn aggregate_activities(
 
     let mut text = String::from("【进程时长 Top】\n");
     for (proc, secs) in totals.iter().take(10) {
-        text.push_str(&format!("- {} {:.1}h\n", proc, *secs as f64 / 3600.0));
+        text.push_str(&format!("- {} {:.1}h\n", proc_label(proc, labels), *secs as f64 / 3600.0));
     }
 
     text.push_str("\n【时间线】\n");
@@ -970,7 +1086,7 @@ pub(crate) fn aggregate_activities(
             "{}-{} {}「{}」\n",
             fmt_hm(s.start),
             fmt_hm(s.end),
-            s.process,
+            proc_label(&s.process, labels),
             title
         ));
         if text.len() > text_cap {
@@ -1011,11 +1127,12 @@ pub(crate) fn aggregate_day(conn: &Connection, day_label: &str) -> Result<String
         return Ok(format!("{} 没有采集到活动记录", day_label));
     }
 
+    let app_labels = crate::db::app_cache::app_label_map(conn).unwrap_or_default();
     Ok(format!(
         "【{} 活动聚合，共 {} 段】\n{}",
         day_label,
         activities.len(),
-        aggregate_activities(&activities, false, AGGREGATE_TEXT_CAP)
+        aggregate_activities(&activities, false, AGGREGATE_TEXT_CAP, &app_labels)
     ))
 }
 
@@ -1071,11 +1188,12 @@ pub(crate) fn aggregate_range(conn: &Connection, start: i64, end: i64) -> Result
     let multi_day = fmt_local(start, "%Y-%m-%d") != fmt_local(end - 1, "%Y-%m-%d");
     let day_count = ((end - start + 86399) / 86400).clamp(1, 7) as usize;
 
+    let app_labels = crate::db::app_cache::app_label_map(conn).unwrap_or_default();
     Ok(format!(
         "【{} 活动聚合，共 {} 段】\n{}",
         label,
         activities.len(),
-        aggregate_activities(&activities, multi_day, AGGREGATE_TEXT_CAP * day_count)
+        aggregate_activities(&activities, multi_day, AGGREGATE_TEXT_CAP * day_count, &app_labels)
     ))
 }
 
@@ -1124,6 +1242,17 @@ struct LlmPatternsResponse {
     patterns: Vec<LlmPattern>,
     #[serde(default)]
     facts: Vec<LlmFact>,
+    #[serde(default)]
+    app_descriptions: Vec<LlmAppDescription>,
+}
+
+/// 模型回填的应用描述（app 必须用摘要中的进程名原文）
+#[derive(Debug, Deserialize)]
+struct LlmAppDescription {
+    #[serde(default)]
+    app: String,
+    #[serde(default)]
+    description: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1182,6 +1311,18 @@ fn parse_llm_patterns(reply: &str) -> Result<LlmPatternsResponse, String> {
     });
     parsed.facts.retain(|f| f.fact.trim().len() >= 4);
     parsed.facts.truncate(3);
+
+    // 应用描述回填：app 非空、描述非空且 <= 50 字、不与进程名雷同（防垃圾输出）
+    // 「不能瞎猜」由提示词约束，这里只做格式兜底，不评判内容对错
+    parsed.app_descriptions.retain(|d| {
+        let app = d.app.trim();
+        let desc = d.description.trim();
+        !app.is_empty()
+            && !desc.is_empty()
+            && desc.chars().count() <= 50
+            && !app.eq_ignore_ascii_case(desc)
+    });
+    parsed.app_descriptions.truncate(10);
 
     Ok(parsed)
 }
@@ -1816,7 +1957,7 @@ mod tests {
         let d1 = parse_flexible_datetime("2026-07-28 23:00", false).unwrap();
         let d2 = parse_flexible_datetime("2026-07-29 09:00", false).unwrap();
         let acts = vec![log(1, "code.exe", d1, 1800), log(2, "chrome.exe", d2, 1800)];
-        let text = aggregate_activities(&acts, true, AGGREGATE_TEXT_CAP);
+        let text = aggregate_activities(&acts, true, AGGREGATE_TEXT_CAP, &Default::default());
         assert!(text.contains("【07-28】"), "缺第一天分节: {}", text);
         assert!(text.contains("【07-29】"), "缺第二天分节: {}", text);
     }
@@ -1825,7 +1966,49 @@ mod tests {
     fn timeline_has_no_day_headers_when_single_day() {
         let d = parse_flexible_datetime("2026-07-29 09:00", false).unwrap();
         let acts = vec![log(1, "code.exe", d, 1800)];
-        let text = aggregate_activities(&acts, false, AGGREGATE_TEXT_CAP);
+        let text = aggregate_activities(&acts, false, AGGREGATE_TEXT_CAP, &Default::default());
         assert!(!text.contains("【07-29】"), "单天不应有日期分节: {}", text);
+    }
+
+    #[test]
+    fn known_apps_append_name_and_description_in_summary() {
+        let d = parse_flexible_datetime("2026-07-29 09:00", false).unwrap();
+        let acts = vec![log(1, "code.exe", d, 3600)];
+        let mut labels = std::collections::HashMap::new();
+        labels.insert(
+            "code.exe".to_string(),
+            ("Visual Studio Code".to_string(), "代码编辑器".to_string()),
+        );
+        let text = aggregate_activities(&acts, false, AGGREGATE_TEXT_CAP, &labels);
+        assert!(
+            text.contains("code.exe（Visual Studio Code / 代码编辑器）"),
+            "缺显示名与描述拼接: {}",
+            text
+        );
+    }
+
+    #[test]
+    fn name_identical_to_process_skips_name_part() {
+        let d = parse_flexible_datetime("2026-07-29 09:00", false).unwrap();
+        let acts = vec![log(1, "code.exe", d, 3600)];
+        let mut labels = std::collections::HashMap::new();
+        labels.insert(
+            "code.exe".to_string(),
+            ("Code.exe".to_string(), "代码编辑器".to_string()),
+        );
+        let text = aggregate_activities(&acts, false, AGGREGATE_TEXT_CAP, &labels);
+        assert!(
+            text.contains("code.exe（代码编辑器）") && !text.contains("（Code.exe /"),
+            "name 与进程名雷同时应跳过 name: {}",
+            text
+        );
+    }
+
+    #[test]
+    fn unknown_apps_keep_bare_process_name() {
+        let d = parse_flexible_datetime("2026-07-29 09:00", false).unwrap();
+        let acts = vec![log(1, "mystery.exe", d, 3600)];
+        let text = aggregate_activities(&acts, false, AGGREGATE_TEXT_CAP, &Default::default());
+        assert!(text.contains("- mystery.exe"), "未知进程不应带标注: {}", text);
     }
 }

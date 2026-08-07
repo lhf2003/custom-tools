@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { AlertTriangle, Coffee, Rocket, X, Sparkles, Pin, Sunrise, Music, Zap, FileText } from 'lucide-react';
+import { AlertTriangle, Coffee, Rocket, X, Sparkles, Pin, Sunrise, Music, Zap, FileText, HelpCircle } from 'lucide-react';
 
 interface Suggestion {
   id: number;
@@ -87,6 +87,11 @@ const TYPE_META: Record<string, TypeMeta> = {
     iconColor: 'text-emerald-400',
     iconBg: 'bg-emerald-500/15',
   },
+  app_unknown: {
+    icon: HelpCircle,
+    ...REGULAR_META,
+    acceptLabel: '去标注',
+  },
 };
 
 const DEFAULT_META: TypeMeta = {
@@ -97,7 +102,7 @@ const DEFAULT_META: TypeMeta = {
 
 /** 动作型建议（启动应用/AI 分析）：Enter 不直达，防打字中误触——
  *  误接受会启动应用并污染毕业制投票数据，必须鼠标点击确认 */
-const ACTION_TYPES = new Set(['work_suite', 'context_routine', 'error_analysis']);
+const ACTION_TYPES = new Set(['work_suite', 'context_routine', 'error_analysis', 'app_unknown']);
 
 export default function CompanionToast() {
   const [suggestion, setSuggestion] = useState<Suggestion | null>(null);

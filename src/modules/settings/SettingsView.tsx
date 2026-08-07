@@ -11,12 +11,15 @@ import {
   Store,
   Package,
   SlidersHorizontal,
+  AppWindow,
 } from 'lucide-react';
 import { immediateResize } from '@/utils/tauri';
 import { WINDOW_SIZE } from '@/constants/window';
 import { useExternalPluginsStore } from '@/stores/externalPluginsStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import { createExternalIconComponent } from '@/plugins/external';
 import { GeneralSettings } from './tabs/GeneralSettings';
+import { AppsSettings } from './tabs/AppsSettings';
 import { ShortcutsSettings } from './tabs/ShortcutsSettings';
 import { ModelSettings } from './tabs/ModelSettings';
 import { CompanionSettings } from './tabs/CompanionSettings';
@@ -49,6 +52,7 @@ const SYSTEM_NAV_GROUP: NavGroup = {
   label: '系统',
   items: [
     { id: 'general', name: '通用', icon: Settings },
+    { id: 'apps', name: '应用', icon: AppWindow },
     { id: 'shortcuts', name: '快捷键', icon: Command },
     { id: 'stats', name: '统计', icon: BarChart3 },
     { id: 'advanced', name: '高级', icon: SlidersHorizontal }
@@ -75,6 +79,7 @@ const MISC_NAV_GROUP: NavGroup = {
 /** 固定 tab 内容（插件市场与插件设置 tab 走动态渲染，不在此表） */
 const STATIC_TAB_CONTENT: Record<string, React.ReactNode> = {
   general: <GeneralSettings />,
+  apps: <AppsSettings />,
   shortcuts: <ShortcutsSettings />,
   model: <ModelSettings />,
   tools: <ToolsSettings />,
@@ -89,10 +94,18 @@ export function SettingsView() {
   const [activeTab, setActiveTab] = useState('general');
   const externalPlugins = useExternalPluginsStore((s) => s.items);
   const refreshExternal = useExternalPluginsStore((s) => s.refresh);
+  // 未知应用提醒深链：store 里有待处理的搜索预填 → 切到「应用」tab（AppsSettings 挂载时消费）
+  const appsTabQuery = useSettingsStore((s) => s.appsTabQuery);
 
   useEffect(() => {
     immediateResize(WINDOW_SIZE.SETTINGS.height, WINDOW_SIZE.SETTINGS.width);
   }, []);
+
+  useEffect(() => {
+    if (appsTabQuery) {
+      setActiveTab('apps');
+    }
+  }, [appsTabQuery]);
 
   // 打开设置即扫描外部插件（侧边导航的数据源；市场页的启用/安装/卸载经同一 store 回流）
   useEffect(() => {

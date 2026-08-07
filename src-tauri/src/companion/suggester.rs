@@ -17,6 +17,8 @@ pub const TYPE_DAILY_REPORT: &str = "daily_report";
 pub const TYPE_AUTO_EXECUTED: &str = "auto_executed";
 /// 建议类型：备忘情境触发提醒（忽略弹窗 ≠ 处置备忘）
 pub const TYPE_INTENT_REMINDER: &str = "intent_reminder";
+/// 建议类型：未知应用提醒（模型回填后仍不认识 → 引导用户去「应用」设置页标注）
+pub const TYPE_APP_UNKNOWN: &str = "app_unknown";
 
 /// 纯提示型：accept 无后续动作，看过即终结——
 /// 卡片不渲染按钮，推送即落 seen（不依赖前端回调，应用被杀也不留 pending 残渣）。
@@ -62,6 +64,23 @@ pub fn push_suggestion(
 
     show_existing_suggestion(app_handle, &suggestion);
 
+    Ok(suggestion.id)
+}
+
+/// 创建建议但不弹窗（凌晨分析轮：人不在电脑前，只落建议中心待处理）。
+/// 与 push_suggestion 同款落库语义，只是跳过 show_toast_window。
+pub fn push_suggestion_silent(
+    conn: &Connection,
+    suggestion_type: &str,
+    title: &str,
+    body: Option<&str>,
+    action_payload: Option<&str>,
+) -> Result<i64, String> {
+    let now = chrono::Local::now().timestamp();
+    let suggestion =
+        db::create_suggestion(conn, suggestion_type, title, body, action_payload, now)
+            .map_err(|e| format!("创建建议失败: {}", e))?;
+    log::info!("Companion 新建议 [{}]: {}（静默）", suggestion_type, title);
     Ok(suggestion.id)
 }
 
