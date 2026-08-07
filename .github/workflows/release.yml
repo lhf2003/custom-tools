@@ -1,9 +1,9 @@
 name: Release
 
+# 发布入口：GitHub Releases UI 建草稿（写 markdown 更新日志）→ Publish 触发构建
 on:
-  push:
-    tags:
-      - 'v*'
+  release:
+    types: [published]
 
 jobs:
   release:
@@ -24,81 +24,29 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Update version from tag
+      - name: Update version from release tag
         shell: pwsh
         run: |
-          $tag = "${{ github.ref_name }}"
+          $tag = "${{ github.event.release.tag_name }}"
           $version = $tag -replace '^v', ''
-          Write-Host "Updating version to: $version"
+          Write-Host "Building version: $version"
 
-          # Update tauri.conf.json (replace version field in-place)
+          # tauri.conf.json（唯一权威，产物版本）
           $tauriConf = Get-Content "src-tauri/tauri.conf.json" -Raw
           $tauriConf = $tauriConf -replace '"version":\s*"[^"]*"', "`"version`": `"$version`""
           Set-Content "src-tauri/tauri.conf.json" $tauriConf -Encoding UTF8 -NoNewline
 
-          # Update Cargo.toml (only the first version line in [package])
+          # Cargo.toml（crate 元数据）
           $cargoToml = Get-Content "src-tauri/Cargo.toml" -Raw
           $cargoToml = $cargoToml -replace '(?m)^version = "[^"]+"', "version = `"$version`""
           Set-Content "src-tauri/Cargo.toml" $cargoToml -Encoding UTF8 -NoNewline
 
-          Write-Host "Version updated successfully to $version"
+          # package.json（保持一致）
+          $pkg = Get-Content "package.json" -Raw
+          $pkg = $pkg -replace '"version":\s*"[^"]*"', "`"version`": `"$version`""
+          Set-Content "package.json" $pkg -Encoding UTF8 -NoNewline
 
-      - name: Sync version and changelog to UI
-        shell: pwsh
-        run: |
-          $tag = "${{ github.ref_name }}"
-          $version = $tag -replace '^v', ''
-          $today = Get-Date -Format 'yyyy-MM-dd'
-
-          # 读取完整 tag message（保留原始格式，只去掉签名部分）
-          $fullMsg = git tag -l --format='%(contents)' $tag
-          # 去掉可能的 GPG 签名部分
-          $fullMsg = $fullMsg -replace '(?s)\n-----BEGIN PGP SIGNATURE-----.*', ''
-          # 按行分割，过滤空行
-          $lines = $fullMsg -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
-
-          # 所有非空行都作为 changelog 条目
-          $tagType = 'feat'
-          $items = [System.Collections.Generic.List[string]]::new()
-
-          foreach ($line in $lines) {
-            $items.Add($line)
-          }
-
-          # 1. 更新 AboutSettings.tsx 版本号
-          $aboutPath = "src/modules/settings/tabs/AboutSettings.tsx"
-          $aboutContent = [System.IO.File]::ReadAllText($aboutPath, [System.Text.Encoding]::UTF8)
-          $aboutContent = $aboutContent -replace '版本 \d+\.\d+\.\d+', "版本 $version"
-          [System.IO.File]::WriteAllText($aboutPath, $aboutContent, [System.Text.Encoding]::UTF8)
-          Write-Host "Updated AboutSettings.tsx: 版本 $version"
-
-          # 2. 在 ChangelogModal.tsx CHANGELOG 数组开头插入新条目
-          $changelogPath = "src/modules/settings/components/ChangelogModal.tsx"
-          $changelogContent = [System.IO.File]::ReadAllText($changelogPath, [System.Text.Encoding]::UTF8)
-
-          $itemLines = ($items | ForEach-Object { "      '$_'," }) -join "`n"
-          $newEntry = "  {`n    version: '$version',`n    date: '$today',`n    tag: '$tagType',`n    items: [`n$itemLines`n    ],`n  },"
-
-          $changelogContent = $changelogContent -replace '(const CHANGELOG: ChangelogEntry\[\] = \[)', "`$1`n$newEntry"
-          [System.IO.File]::WriteAllText($changelogPath, $changelogContent, [System.Text.Encoding]::UTF8)
-          Write-Host "Updated ChangelogModal.tsx: added v$version entry"
-
-      - name: Get tag message
-        id: tag_message
-        shell: pwsh
-        run: |
-          # 直接获取完整 tag message，保留原始格式
-          $msg = git tag -l --format='%(contents)' "${{ github.ref_name }}"
-          # 去掉可能的 GPG 签名部分
-          $msg = $msg -replace '(?s)\n-----BEGIN PGP SIGNATURE-----.*', ''
-          if (-not $msg.Trim()) {
-            $msg = "## 更新内容`n- 版本 ${{ github.ref_name }}"
-          }
-          # GitHub Actions multiline output
-          $delimiter = "EOF_$(Get-Random)"
-          "body<<$delimiter" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          $msg | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          $delimiter | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "Version files updated to $version"
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
@@ -107,9 +55,52 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: ${{ github.ref_name }}
-          releaseBody: ${{ steps.tag_message.outputs.body }}
-          releaseDraft: false
-          prerelease: false
-          includeUpdaterJson: true
+          tagName: ${{ github.event.release.tag_name }}
+          releaseName: ${{ github.event.release.tag_name }}
+
+      - name: Generate and upload latest.json
+        shell: pwsh
+        run: |
+          $tag = "${{ github.event.release.tag_name }}"
+          $version = $tag -replace '^v', ''
+
+          # release body 经 gh CLI 读取，避免把多行内容直接插进脚本
+          $body = gh release view $tag --json body -q .body
+          if ([string]::IsNullOrWhiteSpace($body)) {
+            $body = "## 更新内容`n- 版本 $tag"
+          }
+          $pubDate = gh release view $tag --json publishedAt -q .publishedAt
+
+          # 安装包与签名文件（.sig 与安装包同目录）
+          $nsisPkg = Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe" | Select-Object -First 1
+          $msiPkg = Get-ChildItem "src-tauri/target/release/bundle/msi/*.msi" | Select-Object -First 1
+          if (-not $nsisPkg -or -not $msiPkg) {
+            Write-Error "Installer artifacts not found"
+            exit 1
+          }
+          $nsisSig = (Get-Content "$($nsisPkg.FullName).sig" -Raw).Trim()
+          $msiSig = (Get-Content "$($msiPkg.FullName).sig" -Raw).Trim()
+
+          $nsisUrl = "https://github.com/lhf2003/custom-tools/releases/download/$tag/$($nsisPkg.Name)"
+          $msiUrl = "https://github.com/lhf2003/custom-tools/releases/download/$tag/$($msiPkg.Name)"
+
+          $json = [ordered]@{
+            version   = $version
+            notes     = $body
+            pub_date  = $pubDate
+            platforms = @{
+              "windows-x86_64" = @{
+                signature = $nsisSig
+                url       = $nsisUrl
+              }
+              "windows-x86_64-msi" = @{
+                signature = $msiSig
+                url       = $msiUrl
+              }
+            }
+          }
+          $json | ConvertTo-Json -Depth 5 | Set-Content "latest.json" -Encoding UTF8
+          Write-Host "latest.json generated with notes for $tag"
+
+          # --clobber 覆盖 tauri-action 可能上传的同名 asset，保证 notes 生效
+          gh release upload $tag "latest.json" --clobber

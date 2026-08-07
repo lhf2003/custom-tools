@@ -128,6 +128,11 @@ pub fn run() {
             db::init(app.handle())?;
             log::info!("Database initialized");
 
+            // 内置历史更新日志（幂等，仅补缺失版本）
+            if let Err(e) = commands::changelog::seed_history(app.handle()) {
+                log::warn!("Failed to seed changelog history: {e}");
+            }
+
             // Initialize pending update cache (populated by check_for_update)
             app.manage(commands::updater::PendingUpdate(Mutex::new(None)));
 
@@ -551,6 +556,8 @@ pub fn run() {
             commands::changelog::mark_all_changelogs_read,
             commands::changelog::check_version_changelog,
             commands::changelog::cleanup_old_changelogs,
+            commands::changelog::sync_releases_changelog,
+            commands::changelog::list_changelogs,
             commands::llm::test_llm_connection,
             commands::llm::call_llm_stream_by_scene,
             commands::llm::get_llm_call_stats,
