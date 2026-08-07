@@ -24,7 +24,7 @@ interface SortState {
 }
 
 const MAIN_GRID = 'grid-cols-[20px_1fr_64px_110px_80px_90px]';
-const DETAIL_GRID = 'grid-cols-[1fr_76px_64px_44px_52px_68px_88px]';
+const DETAIL_GRID = 'grid-cols-[1fr_64px_64px_44px_52px_68px_88px]';
 
 function startOfToday(): number {
   const d = new Date();
