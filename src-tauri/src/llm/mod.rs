@@ -4,12 +4,10 @@ use tauri::Emitter;
 pub mod observe;
 
 /// LLM HTTP 客户端：必须显式带超时——reqwest 默认无超时，
-/// 一次挂起的请求会把场景聊天 FIFO 的 in_flight 永久卡住（后续消息全部滞留队列）
+/// 一次挂起的请求会把场景聊天 FIFO 的 in_flight 永久卡住（后续消息全部滞留队列）。
+/// 统一走 http::build_client：系统代理开关开启时经系统代理（loopback 自动绕过）
 fn http_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(10))
-        .timeout(std::time::Duration::from_secs(120))
-        .build()
+    crate::http::build_client(std::time::Duration::from_secs(120))
         .unwrap_or_else(|_| reqwest::Client::new())
 }
 
@@ -650,10 +648,7 @@ pub async fn call_llm_stream_collect(
     };
 
     // 独立 client：超时按调用方需求（排版长生成需要 >120s，不动全局 http_client）
-    let client = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(10))
-        .timeout(timeout)
-        .build()
+    let client = crate::http::build_client(timeout)
         .map_err(|e| format!("构建 HTTP 客户端失败: {}", e))?;
 
     let mut body = serde_json::json!({

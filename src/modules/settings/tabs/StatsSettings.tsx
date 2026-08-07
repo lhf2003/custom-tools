@@ -1,7 +1,6 @@
 import { useEffect } from 'react';
 import { useStatsStore } from '@/stores/statsStore';
 import { LocalDataSection } from './stats/LocalDataSection';
-import { LlmObserveSection } from './stats/LlmObserveSection';
 
 export function StatsSettings() {
   const loadLocalDataStats = useStatsStore((s) => s.loadLocalDataStats);
@@ -16,7 +15,6 @@ export function StatsSettings() {
     <>
       <div className="space-y-8">
         <LocalDataSection />
-        <LlmObserveSection />
       </div>
     </>
   );

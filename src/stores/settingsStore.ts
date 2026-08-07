@@ -13,6 +13,8 @@ export interface AppSettings {
   auto_update: boolean;
   clipboard_auto_paste: boolean;
   debug_mode: boolean;
+  /** 应用内网络请求（LLM 调用、模型列表等）使用 Windows 系统代理 */
+  system_proxy_enabled: boolean;
   llm_base_url: string;
   llm_api_key: string;
   llm_model: string;
@@ -64,6 +66,7 @@ interface SettingsState extends AppSettings {
   toggleDebugMode: () => Promise<boolean>;
   setClipboardAutoPaste: (enabled: boolean) => Promise<void>;
   toggleClipboardAutoPaste: () => Promise<boolean>;
+  setSystemProxyEnabled: (enabled: boolean) => Promise<void>;
   setLlmBaseUrl: (url: string) => Promise<void>;
   setLlmApiKey: (key: string) => Promise<void>;
   setLlmModel: (model: string) => Promise<void>;
@@ -103,6 +106,7 @@ const defaultSettings: AppSettings = {
   auto_update: true,
   clipboard_auto_paste: true,
   debug_mode: false,
+  system_proxy_enabled: false,
   llm_base_url: 'https://api.openai.com/v1',
   llm_api_key: '',
   llm_model: 'gpt-4o-mini',
@@ -285,6 +289,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     } catch (err) {
       console.error('Failed to toggle clipboard_auto_paste:', err);
       return get().clipboard_auto_paste;
+    }
+  },
+
+  setSystemProxyEnabled: async (enabled: boolean) => {
+    try {
+      await invoke('set_setting', { key: 'system_proxy_enabled', value: enabled.toString() });
+      set({ system_proxy_enabled: enabled });
+    } catch (err) {
+      console.error('Failed to set system_proxy_enabled:', err);
     }
   },
 

@@ -41,7 +41,9 @@ async fn fetch_ollama_models(
 ) -> Result<Vec<ModelInfo>, String> {
     let url = format!("{}/api/tags", provider.base_url.trim_end_matches('/'));
 
-    let client = reqwest::Client::new();
+    // 统一工厂：Ollama 在 loopback，系统代理开启时也会被 no_proxy 绕过直连
+    let client = crate::http::build_client(std::time::Duration::from_secs(30))
+        .map_err(|e| e.to_string())?;
     let mut request = client.get(&url);
 
     // Ollama 通常不需要 API Key，但如果提供了则解密并添加
@@ -113,7 +115,9 @@ async fn fetch_openai_compatible_models(
 ) -> Result<Vec<ModelInfo>, String> {
     let url = format!("{}/models", provider.base_url.trim_end_matches('/'));
 
-    let client = reqwest::Client::new();
+    // 统一工厂：远端端点走系统代理（开关开启时），顺带补上原 Client::new() 无超时的问题
+    let client = crate::http::build_client(std::time::Duration::from_secs(30))
+        .map_err(|e| e.to_string())?;
     let mut request = client.get(&url);
 
     // OpenAI 兼容 API 通常需要 API Key，需要解密后使用

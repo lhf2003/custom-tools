@@ -162,7 +162,7 @@ export function LlmObserveSection() {
     <button
       onClick={() => toggleSort(key)}
       className={`flex items-center justify-end gap-0.5 w-full transition-colors cursor-pointer ${
-        sort.key === key ? 'text-white/70' : 'text-white/30 hover:text-white/50'
+        sort.key === key ? 'text-app-text-secondary' : 'text-app-text-disabled hover:text-app-text-tertiary'
       }`}
     >
       {label}
@@ -180,16 +180,13 @@ export function LlmObserveSection() {
 
   return (
     <section>
-      <div className="mb-3">
-        <h3 className="text-sm font-medium text-white/90">模型调用观测</h3>
-        <p className="text-xs text-white/40 mt-0.5">
-          各功能的 LLM 调用次数、token、耗时与成本
-        </p>
+      <div className="px-3 mb-1.5">
+        <h3 className="text-xs font-semibold text-app-text-tertiary">模型调用观测</h3>
       </div>
 
-      <div className="rounded-xl border border-white/10 bg-white/[0.02] overflow-hidden">
+      <div className="rounded-xl border border-app-border-subtle bg-app-bg-secondary overflow-hidden">
         {/* 过滤栏 */}
-        <div className="px-4 py-3 border-b border-white/10 flex flex-wrap items-center gap-2">
+        <div className="px-4 py-3 border-b border-app-border-subtle flex flex-wrap items-center gap-2">
           <CustomSelect
             value={source}
             options={sourceOptions}
@@ -217,30 +214,30 @@ export function LlmObserveSection() {
         </div>
 
         {/* 数据看板 */}
-        <div className="flex divide-x divide-white/5 border-b border-white/10">
+        <div className="flex divide-x divide-app-border-subtle border-b border-app-border-subtle">
           <div className="flex-1 px-4 py-3">
-            <div className="text-xs text-white/40">token 总计</div>
-            <div className="text-base font-semibold text-white/90 tabular-nums mt-0.5">
+            <div className="text-xs text-app-text-tertiary">token 总计</div>
+            <div className="text-base font-semibold text-app-text-primary tabular-nums mt-0.5">
               {summary ? fmtTokens(summary.total_tokens) : '—'}
             </div>
           </div>
           <div className="flex-1 px-4 py-3">
-            <div className="text-xs text-white/40">模型调用</div>
-            <div className="text-base font-semibold text-white/90 tabular-nums mt-0.5">
+            <div className="text-xs text-app-text-tertiary">模型调用</div>
+            <div className="text-base font-semibold text-app-text-primary tabular-nums mt-0.5">
               {summary ? summary.model_calls : '—'}
             </div>
           </div>
           <div className="flex-1 px-4 py-3">
-            <div className="text-xs text-white/40">工具调用</div>
-            <div className="text-base font-semibold text-white/90 tabular-nums mt-0.5">
+            <div className="text-xs text-app-text-tertiary">工具调用</div>
+            <div className="text-base font-semibold text-app-text-primary tabular-nums mt-0.5">
               {summary ? summary.tool_calls : '—'}
             </div>
           </div>
           <div className="flex-1 px-4 py-3">
-            <div className="text-xs text-white/40">调用错误</div>
+            <div className="text-xs text-app-text-tertiary">调用错误</div>
             <div
               className={`text-base font-semibold tabular-nums mt-0.5 ${
-                summary && summary.errors > 0 ? 'text-red-400' : 'text-white/90'
+                summary && summary.errors > 0 ? 'text-app-status-error-text' : 'text-app-text-primary'
               }`}
             >
               {summary ? summary.errors : '—'}
@@ -255,12 +252,12 @@ export function LlmObserveSection() {
           }`}
         >
           {sortedRows.length === 0 ? (
-            <p className="text-white/30 text-xs py-2">
+            <p className="text-app-text-disabled text-xs py-2">
               该筛选条件下还没有调用记录
             </p>
           ) : (
             <div className="space-y-1">
-              <div className={`grid ${MAIN_GRID} gap-2 px-2 text-white/30 text-xs items-center`}>
+              <div className={`grid ${MAIN_GRID} gap-2 px-2 text-app-text-disabled text-xs items-center`}>
                 <span />
                 <span>来源</span>
                 {sortHeader('次数', 'calls')}
@@ -275,47 +272,47 @@ export function LlmObserveSection() {
                     <button
                       onClick={() => toggleExpand(row.source)}
                       className={`w-full grid ${MAIN_GRID} gap-2 items-center px-2 py-1.5 rounded-lg text-xs text-left transition-colors cursor-pointer ${
-                        state ? 'bg-white/[0.06]' : 'bg-white/[0.03] hover:bg-white/[0.06]'
+                        state ? 'bg-app-alpha-white-10' : 'bg-app-alpha-white-5 hover:bg-app-alpha-white-10'
                       }`}
                     >
                       <ChevronRight
                         size={12}
-                        className={`text-white/40 transition-transform duration-150 ${
+                        className={`text-app-text-tertiary transition-transform duration-150 ${
                           state ? 'rotate-90' : ''
                         }`}
                       />
-                      <span className="text-white/70">{sourceLabel(row.source)}</span>
-                      <span className="text-right text-white/60 tabular-nums">
+                      <span className="text-app-text-secondary">{sourceLabel(row.source)}</span>
+                      <span className="text-right text-app-text-secondary tabular-nums">
                         {row.calls}
                         {row.errors > 0 && (
-                          <span className="text-red-400 ml-1">({row.errors}错)</span>
+                          <span className="text-app-status-error-text ml-1">({row.errors}错)</span>
                         )}
                       </span>
-                      <span className="text-right text-white/50 tabular-nums">
+                      <span className="text-right text-app-text-tertiary tabular-nums">
                         {fmtTokens(row.input_tokens)}/{fmtTokens(row.output_tokens)}
                       </span>
-                      <span className="text-right text-white/50 tabular-nums">
+                      <span className="text-right text-app-text-tertiary tabular-nums">
                         {fmtDuration(row.total_duration_ms)}
                       </span>
-                      <span className="text-right text-white/60 tabular-nums">
+                      <span className="text-right text-app-text-secondary tabular-nums">
                         {fmtCost(row.cost_cny)}
                       </span>
                     </button>
 
                     {state && (
-                      <div className="mt-1 mb-2 rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2">
+                      <div className="mt-1 mb-2 rounded-lg border border-app-border-subtle bg-app-bg-secondary px-3 py-2">
                         {state.loading ? (
-                          <p className="text-white/30 text-xs py-1.5">正在加载调用日志…</p>
+                          <p className="text-app-text-disabled text-xs py-1.5">正在加载调用日志…</p>
                         ) : state.error ? (
-                          <p className="text-red-400/80 text-xs py-1.5">
+                          <p className="text-app-status-error-text text-xs py-1.5">
                             加载失败：{state.error}
                           </p>
                         ) : state.logs.length === 0 ? (
-                          <p className="text-white/30 text-xs py-1.5">没有调用日志</p>
+                          <p className="text-app-text-disabled text-xs py-1.5">没有调用日志</p>
                         ) : (
                           <div className="space-y-0.5">
                             <div
-                              className={`grid ${DETAIL_GRID} gap-2 text-white/25 text-xs py-0.5`}
+                              className={`grid ${DETAIL_GRID} gap-2 text-app-text-disabled text-xs py-0.5`}
                             >
                               <span>模型名称</span>
                               <span className="text-right">输入(未命中)</span>
@@ -328,17 +325,17 @@ export function LlmObserveSection() {
                             {state.logs.map((logRow) => (
                               <div key={logRow.id}>
                                 <div
-                                  className={`grid ${DETAIL_GRID} gap-2 items-center text-xs py-1 border-t border-white/5 ${
-                                    logRow.status === 'error' ? 'text-red-400/80' : ''
+                                  className={`grid ${DETAIL_GRID} gap-2 items-center text-xs py-1 border-t border-app-border-subtle ${
+                                    logRow.status === 'error' ? 'text-app-status-error-text' : ''
                                   }`}
                                 >
-                                  <span className="text-white/60 truncate">
+                                  <span className="text-app-text-secondary truncate">
                                     {logRow.model ??
                                       (logRow.channel === 'claude_code'
                                         ? 'Claude Code CLI'
                                         : '—')}
                                   </span>
-                                  <span className="text-right text-white/50 tabular-nums">
+                                  <span className="text-right text-app-text-tertiary tabular-nums">
                                     {fmtTokens(
                                       Math.max(
                                         logRow.input_tokens - logRow.cached_input_tokens,
@@ -346,24 +343,24 @@ export function LlmObserveSection() {
                                       ),
                                     )}
                                   </span>
-                                  <span className="text-right text-white/50 tabular-nums">
+                                  <span className="text-right text-app-text-tertiary tabular-nums">
                                     {fmtTokens(logRow.cached_input_tokens)}
                                   </span>
-                                  <span className="text-right text-white/50 tabular-nums">
+                                  <span className="text-right text-app-text-tertiary tabular-nums">
                                     {fmtTokens(logRow.output_tokens)}
                                   </span>
-                                  <span className="text-right text-white/50 tabular-nums">
+                                  <span className="text-right text-app-text-tertiary tabular-nums">
                                     {fmtDuration(logRow.duration_ms)}
                                   </span>
-                                  <span className="text-right text-white/60 tabular-nums">
+                                  <span className="text-right text-app-text-secondary tabular-nums">
                                     {fmtCost(logRow.cost_cny)}
                                   </span>
-                                  <span className="text-right text-white/40 tabular-nums">
+                                  <span className="text-right text-app-text-tertiary tabular-nums">
                                     {fmtTime(logRow.created_at)}
                                   </span>
                                 </div>
                                 {logRow.status === 'error' && logRow.error && (
-                                  <p className="text-red-400/60 text-xs pb-1 truncate">
+                                  <p className="text-app-status-error-text text-xs pb-1 truncate">
                                     {logRow.error}
                                   </p>
                                 )}
@@ -378,9 +375,9 @@ export function LlmObserveSection() {
               })}
             </div>
           )}
-          <p className="text-white/25 text-xs mt-2.5">
-            成本 = token × 模型单价（人民币，在「AI 模型」页配置）；Claude Code 通道为订阅制，不
-            计成本；流式调用（翻译/问答）暂不计 token；Claude Code 通道的工具调用数不可观测，记 0。
+          <p className="text-app-text-disabled text-xs mt-2.5">
+            成本 = token × 模型单价（人民币，在本页模型单价中配置）；Claude Code 通道为订阅制，
+            不计成本；流式调用（翻译/问答）暂不计 token；Claude Code 通道的工具调用数不可观测，记 0。
           </p>
         </div>
       </div>

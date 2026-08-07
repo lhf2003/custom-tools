@@ -30,7 +30,8 @@ export function SettingGroup({ title, actions, children }: SettingGroupProps) {
 
 interface SettingRowProps {
   title: string;
-  description?: string;
+  /** 支持富文本（如状态色警告文案） */
+  description?: React.ReactNode;
   children?: React.ReactNode;
 }
 
@@ -54,20 +55,25 @@ interface ToggleProps {
   onToggle?: (enabled: boolean) => void;
   /** 点击事件拦截，常用于阻止外层可折叠区域误触发 */
   onClick?: (e: React.MouseEvent<HTMLButtonElement>) => void;
+  /** 禁用态：不响应点击，视觉降低存在感（如未选模型时的思考开关） */
+  disabled?: boolean;
 }
 
-export function Toggle({ enabled = false, onToggle, onClick }: ToggleProps) {
+export function Toggle({ enabled = false, onToggle, onClick, disabled = false }: ToggleProps) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={enabled}
       aria-label={enabled ? '关闭' : '开启'}
+      disabled={disabled}
       onClick={(e) => {
         onClick?.(e);
         onToggle?.(!enabled);
       }}
-      className={`relative w-12 h-7 rounded-full overflow-hidden transition-colors duration-200 cursor-pointer ${
+      className={`relative w-12 h-7 rounded-full overflow-hidden transition-colors duration-200 ${
+        disabled ? 'cursor-not-allowed opacity-30' : 'cursor-pointer'
+      } ${
         enabled ? 'bg-app-status-info hover:bg-blue-700' : 'bg-app-bg-pressed hover:bg-[#4e4e56]'
       }`}
     >

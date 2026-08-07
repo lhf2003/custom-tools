@@ -220,10 +220,8 @@ async fn stream_generate_plugin(
         format!("{}/chat/completions", trimmed)
     };
 
-    let client = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(300))
-        .build()
+    // 统一工厂：系统代理开关开启时经系统代理
+    let client = crate::http::build_client(Duration::from_secs(300))
         .map_err(|e| format!("构建 HTTP 客户端失败: {e}"))?;
 
     let body = {

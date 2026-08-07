@@ -43,7 +43,7 @@ notify = { version = "6.1", default-features = false, features = ["macos_kqueue"
 chrono = "0.4"
 open = "5.0"
 window-vibrancy = "0.7.1"
-reqwest = { version = "0.12", features = ["json", "stream"] }
+reqwest = { version = "0.13", features = ["json", "stream", "socks"] }
 futures-util = "0.3"
 tauri-plugin-process = "2.3.1"
 tauri-plugin-dialog = "2"
@@ -56,4 +56,6 @@ windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsA
 windows-core = { version = "0.61" }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
-tauri-plugin-updater = "2.10.0"
+# default-features=false：TLS 后端与项目 reqwest 统一为 native-tls（Windows 上 schannel，
+# 企业 MITM 代理证书开箱即用），避免插件默认的 rustls 与项目 default-tls 在 feature 合并时互斥
+tauri-plugin-updater = { version = "2.10.0", default-features = false, features = ["native-tls", "zip"] }

@@ -33,6 +33,8 @@ pub struct AppSettings {
     pub companion_daily_report: bool,
     pub companion_monologue: bool,
     pub debug_mode: bool,
+    /// 应用内网络请求（LLM 调用、模型列表等）使用 Windows 系统代理
+    pub system_proxy_enabled: bool,
     /// 被手动关闭的陪伴工具名列表（JSON 数组字符串，只含可开关的非核心工具）
     pub disabled_companion_tools: String,
     /// Shell 工具权限模式：confirm_all（每次确认）| accept_edits（预留，同 confirm_all）| unattended（安全命令自动放行）
@@ -65,6 +67,7 @@ impl Default for AppSettings {
             companion_daily_report: true,
             companion_monologue: true,
             debug_mode: false,
+            system_proxy_enabled: false,
             disabled_companion_tools: "[]".to_string(),
             shell_permission_mode: "confirm_all".to_string(),
         }
@@ -74,7 +77,7 @@ impl Default for AppSettings {
 /// SettingsManager 管辖的全部键。settings 表与陪伴模块状态、
 /// custom_scan_dirs / notes_directory 共享，reset 只能按此白名单删键——
 /// 全表 DELETE 会误删陪伴调度水位和扫描目录配置
-const KNOWN_KEYS: [&str; 25] = [
+const KNOWN_KEYS: [&str; 26] = [
     "always_on_top",
     "hide_on_blur",
     "startup_launch",
@@ -98,6 +101,7 @@ const KNOWN_KEYS: [&str; 25] = [
     "companion_daily_report",
     "companion_monologue",
     "debug_mode",
+    "system_proxy_enabled",
     "disabled_companion_tools",
     "shell_permission_mode",
 ];
@@ -227,6 +231,11 @@ impl SettingsManager {
                 "debug_mode" => {
                     if let Ok(v) = value.parse::<bool>() {
                         settings.debug_mode = v;
+                    }
+                }
+                "system_proxy_enabled" => {
+                    if let Ok(v) = value.parse::<bool>() {
+                        settings.system_proxy_enabled = v;
                     }
                 }
                 "disabled_companion_tools" => {
@@ -384,6 +393,11 @@ impl SettingsManager {
                 "debug_mode" => {
                     if let Ok(v) = value.parse::<bool>() {
                         cache.debug_mode = v;
+                    }
+                }
+                "system_proxy_enabled" => {
+                    if let Ok(v) = value.parse::<bool>() {
+                        cache.system_proxy_enabled = v;
                     }
                 }
                 "disabled_companion_tools" => {

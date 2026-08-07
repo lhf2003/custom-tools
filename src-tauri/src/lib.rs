@@ -70,6 +70,7 @@ pub mod clipboard;
 pub mod commands;
 pub mod companion;
 pub mod db;
+pub mod http;
 pub mod llm;
 pub mod llm_provider;
 pub mod notes;
@@ -100,6 +101,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            // 统一 HTTP 客户端工厂：系统代理开关在 build_client 中读取（MCP 模式无 setup，句柄缺失时退化直连）
+            http::init(app.handle().clone());
+
             // Setup system tray
             setup_system_tray(app.handle())?;
 

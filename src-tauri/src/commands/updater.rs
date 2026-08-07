@@ -12,8 +12,12 @@ pub async fn check_for_update(app: AppHandle) -> Result<Option<UpdateInfo>, Stri
     let app_version = app.package_info().version.clone();
     log::info!("Current app version: {}", app_version);
 
+    // 每次检查都重新构建 updater：configure_client 读取「系统代理」开关并附加代理，
+    // 开关变更即时生效（updater_builder() 每次新建，插件注册时的 client 不参与运行时检查）
     let updater = app
-        .updater()
+        .updater_builder()
+        .configure_client(crate::http::apply_system_proxy)
+        .build()
         .map_err(|e| format!("Failed to get updater: {}", e))?;
 
     log::info!("Checking for updates...");

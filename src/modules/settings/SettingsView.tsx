@@ -10,6 +10,7 @@ import {
   Wrench,
   Store,
   Package,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { immediateResize } from '@/utils/tauri';
 import { THEME } from '@/constants/theme';
@@ -22,6 +23,7 @@ import { ModelSettings } from './tabs/ModelSettings';
 import { CompanionSettings } from './tabs/CompanionSettings';
 import { ToolsSettings } from './tabs/ToolsSettings';
 import { StatsSettings } from './tabs/StatsSettings';
+import { AdvancedSettings } from './tabs/AdvancedSettings';
 import { ManualSettings } from './tabs/ManualSettings';
 import { PluginMarketSettings } from './tabs/PluginMarketSettings';
 import { PluginSettingsTab } from './tabs/PluginSettingsTab';
@@ -45,20 +47,21 @@ interface NavGroup {
 }
 
 const SYSTEM_NAV_GROUP: NavGroup = {
-  label: '系统配置',
+  label: '系统',
   items: [
     { id: 'general', name: '通用', icon: Settings },
     { id: 'shortcuts', name: '快捷键', icon: Command },
+    { id: 'stats', name: '统计', icon: BarChart3 },
+    { id: 'advanced', name: '高级', icon: SlidersHorizontal }
   ],
 };
 
 const AI_NAV_GROUP: NavGroup = {
-  label: 'AI 配置',
+  label: 'AI',
   items: [
     { id: 'model', name: '模型', icon: Bot },
     { id: 'tools', name: '工具', icon: Wrench },
     { id: 'companion', name: '陪伴', icon: Sparkles },
-    { id: 'observe', name: '观测', icon: BarChart3 },
   ],
 };
 
@@ -77,7 +80,8 @@ const STATIC_TAB_CONTENT: Record<string, React.ReactNode> = {
   model: <ModelSettings />,
   tools: <ToolsSettings />,
   companion: <CompanionSettings />,
-  observe: <StatsSettings />,
+  stats: <StatsSettings />,
+  advanced: <AdvancedSettings />,
   manual: <ManualSettings />,
   about: <AboutSettings />,
 };
@@ -148,7 +152,7 @@ export function SettingsView() {
   return (
     <div className="w-full h-full flex" style={{ backgroundColor: THEME.BG_PRIMARY }}>
       {/* 分组侧边栏：与内容区同一基座色（#1e1e21），分区靠选中态纱层暗示 */}
-      <aside className="w-52 flex flex-col flex-shrink-0">
+      <aside className="w-44 flex flex-col flex-shrink-0">
         <h3 className="text-base font-semibold text-app-text-primary px-3.5 pt-4 pb-2">设置</h3>
         <nav className="flex-1 overflow-y-auto px-2 pb-4">
           {navGroups.map((group, groupIndex) => (
