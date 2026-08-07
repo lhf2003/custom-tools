@@ -37,8 +37,8 @@
   --vditor-accent-pink: #f472b6;
   --vditor-accent-red: #f87171;
 
-  /* 代码高亮专属色 */
-  --hljs-bg: var(--vditor-bg-tertiary);
+  /* 代码高亮专属色（块底走灰纱：半透不透死，玻璃面板上透得出主题渐变） */
+  --hljs-bg: var(--vditor-scrim-chip);
   --hljs-comment: var(--vditor-text-disabled);
   --hljs-keyword: var(--vditor-accent-purple);
   --hljs-string: var(--vditor-accent-green);
@@ -88,7 +88,8 @@
    工具栏
    ============================================ */
 .vditor-container .vditor-toolbar {
-  background: var(--vditor-bg-secondary);
+  /* 透明：透出玻璃面板（与设置页侧栏同范式），靠 border-b 分层 */
+  background: transparent;
   border-bottom: 1px solid var(--vditor-border-default);
   padding: 4px 8px;
   display: flex;
@@ -184,7 +185,8 @@
 }
 
 .vditor-container .vditor-ir pre.vditor-reset {
-  background-color: var(--vditor-bg-primary) !important;
+  /* 整块编辑画布透明（!important 压 Vditor 官方底色）：透出页面玻璃面板 */
+  background-color: transparent !important;
   padding: 16px 24px;
   box-sizing: border-box;
   min-height: 100%;
@@ -295,7 +297,7 @@
    代码块（编辑态）
    ============================================ */
 .vditor-container .vditor-ir__node[data-type="code-block"] {
-  background: var(--vditor-bg-primary);
+  background: var(--hljs-bg);
   border-radius: 10px;
   padding: 14px 16px;
   margin: 14px 0;
@@ -457,13 +459,13 @@
 }
 
 .vditor-container .vditor-reset table thead {
-  background: var(--vditor-bg-secondary);
+  background: var(--vditor-scrim-row);
   color: var(--vditor-text-primary);
   font-weight: 500;
 }
 
 .vditor-container .vditor-reset table thead th {
-  background: var(--vditor-bg-secondary);
+  background: var(--vditor-scrim-row);
   color: var(--vditor-text-primary);
   border-bottom: 1px solid var(--vditor-border-emphasis);
 }
@@ -665,5 +667,6 @@
    全屏模式适配
    ============================================ */
 .vditor-container .vditor-fullscreen {
-  background: var(--vditor-bg-primary);
+  /* 全屏同样透玻璃面板（全屏容器覆盖视口，不透会盖住 body 渐变） */
+  background: transparent;
 }

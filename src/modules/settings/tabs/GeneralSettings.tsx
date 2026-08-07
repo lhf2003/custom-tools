@@ -338,7 +338,7 @@ export function GeneralSettings() {
         <SettingRow title="失去焦点时隐藏" description="点击窗口外部自动隐藏，保持桌面整洁">
           <Toggle enabled={hide_on_blur} onToggle={toggleHideOnBlur} />
         </SettingRow>
-        <SettingRow title="背景透明度" description="启动器与聊天窗口的面板底色，数值越低越透出桌面与主题渐变">
+        <SettingRow title="背景透明度" description="启动器、聊天与各插件页的面板底色，数值越低越透出桌面与主题渐变">
           <PanelAlphaSlider />
         </SettingRow>
       </SettingGroup>

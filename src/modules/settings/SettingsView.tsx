@@ -13,7 +13,6 @@ import {
   SlidersHorizontal,
 } from 'lucide-react';
 import { immediateResize } from '@/utils/tauri';
-import { THEME } from '@/constants/theme';
 import { WINDOW_SIZE } from '@/constants/window';
 import { useExternalPluginsStore } from '@/stores/externalPluginsStore';
 import { createExternalIconComponent } from '@/plugins/external';
@@ -150,10 +149,9 @@ export function SettingsView() {
   }
 
   return (
-    <div className="w-full h-full flex" style={{ backgroundColor: THEME.BG_PRIMARY }}>
+    <div className="w-full h-full flex panel-glass">
       {/* 分组侧边栏：与内容区同一基座色（#1e1e21），分区靠选中态纱层暗示 */}
       <aside className="w-44 flex flex-col flex-shrink-0">
-        <h3 className="text-base font-semibold text-app-text-primary px-3.5 pt-4 pb-2">设置</h3>
         <nav className="flex-1 overflow-y-auto px-2 pb-4">
           {navGroups.map((group, groupIndex) => (
             <div key={group.label} className={groupIndex === 0 ? 'mt-1' : 'mt-4'}>

@@ -13,7 +13,6 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { Tooltip } from '@/components/Tooltip';
-import { THEME } from '../../constants/theme';
 import { WINDOW_SIZE } from '../../constants/window';
 import { immediateResize } from '../../utils/tauri';
 import { imageCache } from './imageCache';
@@ -385,7 +384,7 @@ export function ClipboardView() {
   // 整窗状态：加载中 / 错误 /（非搜索态的）空列表
   if (isLoading) {
     return (
-      <div className="w-full h-full flex flex-col items-center justify-center text-app-text-disabled" style={{ backgroundColor: THEME.BG_PRIMARY }}>
+      <div className="w-full h-full flex flex-col items-center justify-center text-app-text-disabled panel-glass">
         <Loader2 size={32} className="animate-spin mb-3" />
         <span className="text-sm">加载中...</span>
       </div>
@@ -394,7 +393,7 @@ export function ClipboardView() {
 
   if (error) {
     return (
-      <div className="w-full h-full flex flex-col items-center justify-center text-app-text-disabled" style={{ backgroundColor: THEME.BG_PRIMARY }}>
+      <div className="w-full h-full flex flex-col items-center justify-center text-app-text-disabled panel-glass">
         <p className="text-app-status-error mb-2">{error}</p>
         <button
           onClick={() => fetchClipboardHistory(false)}
@@ -408,18 +407,17 @@ export function ClipboardView() {
 
   if (items.length === 0 && !searchQuery.trim()) {
     return (
-      <div className="w-full h-full flex" style={{ backgroundColor: THEME.BG_PRIMARY }}>
+      <div className="w-full h-full flex panel-glass">
         <EmptyState activeTab={activeTab} />
       </div>
     );
   }
 
   return (
-    <div className="w-full h-full flex" style={{ backgroundColor: THEME.BG_PRIMARY }}>
+    <div className="w-full h-full flex panel-glass">
       {/* 左栏：搜索 + 过滤 + 紧凑列表 */}
       <aside
         className="w-[300px] flex-shrink-0 flex flex-col border-r border-app-border-subtle"
-        style={{ backgroundColor: THEME.BG_SECONDARY }}
       >
         {/* Search（与右栏详情头同高 h-11） */}
         <div className="flex items-center px-3 h-11 border-b border-app-border-subtle">
@@ -519,7 +517,7 @@ export function ClipboardView() {
           {currentGroup && (
             <div
               className="absolute top-0 inset-x-0 px-4 pt-2.5 pb-1.5 text-xs font-medium text-app-text-tertiary pointer-events-none"
-              style={{ backgroundColor: THEME.BG_SECONDARY }}
+              style={{ background: 'var(--app-panel-bg)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}
             >
               {currentGroup}
             </div>

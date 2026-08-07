@@ -487,7 +487,7 @@ export function PasswordView() {
 
   if (isLoading) {
     return (
-      <div className="w-full h-full flex items-center justify-center text-sm text-app-text-tertiary" style={{ backgroundColor: THEME.BG_PRIMARY }}>
+      <div className="w-full h-full flex items-center justify-center text-sm text-app-text-tertiary panel-glass">
         <Loader2 size={18} className="animate-spin mr-2" />
         <span>加载中...</span>
       </div>
@@ -496,7 +496,7 @@ export function PasswordView() {
 
   if (!isUnlocked) {
     return (
-      <div className="w-full h-full flex items-center justify-center" style={{ backgroundColor: THEME.BG_PRIMARY }}>
+      <div className="w-full h-full flex items-center justify-center panel-glass">
         <div className="rounded-2xl p-8 w-80 text-center border border-app-border"
              style={{ backgroundColor: THEME.BG_SECONDARY }}>
           {/* Icon */}
@@ -552,7 +552,7 @@ export function PasswordView() {
   const selectedEntry = entries.find(e => e.id === selectedEntryId);
 
   return (
-    <div className="w-full h-full flex flex-col" style={{ backgroundColor: THEME.BG_PRIMARY }}>
+    <div className="w-full h-full flex flex-col panel-glass">
       {/* 主视图错误条：load/delete/decrypt 失败在这里可见，可重试可关闭 */}
       {listError && (
         <div className="flex items-center gap-3 px-4 py-2 bg-app-status-error/10 border-b border-app-status-error/20 flex-shrink-0">
@@ -575,7 +575,7 @@ export function PasswordView() {
 
       <div className="flex-1 flex min-h-0">
         {/* Left Sidebar - Password List Only */}
-        <aside className="w-64 border-r border-app-border flex flex-col flex-shrink-0" style={{ backgroundColor: THEME.BG_SECONDARY }}>
+        <aside className="w-64 border-r border-app-border flex flex-col flex-shrink-0">
           {/* Search Bar（侧栏不再重复标题——TopNavigationBar 已有「密码保险库」） */}
           <div className="p-3 flex items-center gap-2">
             <div className="flex-1 flex items-center gap-2 bg-app-bg-tertiary rounded-lg px-3 py-2 border border-app-border">
@@ -699,7 +699,7 @@ export function PasswordView() {
         </aside>
 
         {/* Right - Detail View */}
-        <div className="flex-1 flex flex-col min-w-0" style={{ backgroundColor: THEME.BG_PRIMARY }}>
+        <div className="flex-1 flex flex-col min-w-0">
         {selectedEntry ? (
           <PasswordDetail
             entry={selectedEntry}

@@ -30,7 +30,7 @@ export function TopNavigationBar({
                                  }: TopNavigationBarProps) {
   return (
       <header
-          className="h-12 bg-app-bg-primary/50 border-b border-app-border flex items-center pl-0 pr-4 shrink-0 relative select-none"
+          className="h-12 panel-glass border-b border-app-border flex items-center pl-0 pr-4 shrink-0 relative select-none"
           data-tauri-drag-region
       >
         {/* Left: Back button - no-drag 确保按钮可点击 */}

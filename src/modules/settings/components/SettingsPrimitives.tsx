@@ -71,10 +71,12 @@ export function Toggle({ enabled = false, onToggle, onClick, disabled = false }:
         onClick?.(e);
         onToggle?.(!enabled);
       }}
-      className={`relative w-12 h-7 rounded-full overflow-hidden transition-colors duration-200 ${
+      className={`relative w-12 h-7 rounded-full overflow-hidden transition-all duration-200 ${
         disabled ? 'cursor-not-allowed opacity-30' : 'cursor-pointer'
       } ${
-        enabled ? 'bg-app-status-info hover:bg-blue-700' : 'bg-app-bg-pressed hover:bg-[#4e4e56]'
+        enabled
+          ? 'bg-app-status-info hover:bg-app-status-info-deep'
+          : 'bg-app-bg-pressed hover:brightness-110'
       }`}
     >
       <span

@@ -7,9 +7,14 @@ export type ThemeFamily = 'dark' | 'light';
 /** localStorage 缓存键：与 index.html / companion-toast.html 的防闪屏内联脚本共享 */
 export const THEME_MODE_CACHE_KEY = 'flowhub-theme-mode';
 
+/** 面板不透明度缓存键：与 theme-bootstrap.js 共享（预读消除首帧透明度闪变） */
+export const PANEL_ALPHA_CACHE_KEY = 'flowhub-panel-alpha';
+
 /**
  * 主题注册表：具体主题 → 明暗族。新增主题在此登记一行，
- * 并把对应 token 块写进 index.css（[data-theme='<id>']）。
+ * 并把对应 token 块写进 index.css（[data-theme='<id>']）——纯色主题必须声明
+ * --app-panel-rgb（漏声明会静默继承 :root 深色值，浅色族主题面板变深色）；
+ * 渐变类主题（如橘子海）则直接覆盖 --app-panel-bg 并把 --app-panel-alpha 乘进色标。
  * 浅色族的类级覆盖全部挂 [data-theme-family='light']，深色族主题零改动继承。
  * 注意：public/theme-bootstrap.js 的 FAMILY 映射（防闪屏预读）必须同步登记。
  */
@@ -53,10 +58,18 @@ export function ThemeController() {
   const panelAlpha = useSettingsStore((s) => s.panel_alpha);
   const isLoading = useSettingsStore((s) => s.isLoading);
 
-  // 面板背景不透明度：与主题同管道（loadSettings 完成后应用）
+  // 面板背景不透明度：与主题同管道（loadSettings 完成后应用 + 缓存供下次启动预读）
   useEffect(() => {
     if (isLoading) return;
-    document.documentElement.style.setProperty('--app-panel-alpha', panelAlpha.toFixed(2));
+    const value = panelAlpha.toFixed(2);
+    document.documentElement.style.setProperty('--app-panel-alpha', value);
+    // 缓存供 theme-bootstrap.js 在下次启动的 React 挂载前预读，消除首帧透明度闪变。
+    // localStorage 不可用时静默跳过（不透明度已生效，仅下次首帧无法预读）。
+    try {
+      localStorage.setItem(PANEL_ALPHA_CACHE_KEY, value);
+    } catch {
+      /* 隐私模式等场景忽略 */
+    }
   }, [panelAlpha, isLoading]);
 
   useEffect(() => {
@@ -66,7 +79,7 @@ export function ThemeController() {
     // localStorage 不可用时静默跳过（主题已生效，仅下次首帧无法预读）。
     try {
       localStorage.setItem(THEME_MODE_CACHE_KEY, theme);
-    } catch (e) {
+    } catch {
       /* 隐私模式等场景忽略 */
     }
 

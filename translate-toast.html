@@ -4,9 +4,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>划词翻译</title>
-  <!-- 防主题闪屏：与主窗口同 origin 共享 localStorage（public/theme-bootstrap.js） -->
-  <script src="/theme-bootstrap.js"></script>
-</head>
+  <!-- 跟随主题：与主窗口同 origin 共享 localStorage（public/theme-bootstrap.js），
+       预读 data-theme + --app-panel-alpha；浮窗面板走 panel-glass 契约，同启动器 -->
+  <script src="/theme-bootstrap.js"></script></head>
 <body class="overflow-hidden">
   <div id="root"></div>
   <script type="module" src="/src/modules/translate/toast/index.tsx"></script>

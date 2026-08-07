@@ -517,7 +517,7 @@ export function MarkdownView() {
   );
 
   return (
-    <div className="w-full h-full flex" style={{ backgroundColor: THEME.BG_PRIMARY }}>
+    <div className="w-full h-full flex panel-glass">
       {/* File Tree Sidebar */}
       {!isEditorFullscreen && (
         <aside
@@ -534,7 +534,7 @@ export function MarkdownView() {
             >
           <div
             className="flex-1 flex items-center gap-1.5 rounded-lg px-2 py-1.5 min-w-0"
-            style={{ backgroundColor: THEME.BG_TERTIARY }}
+            style={{ border: `1px solid ${THEME.BORDER_DEFAULT}` }}
           >
             <Search size={12} className="shrink-0" style={{ color: THEME.TEXT_DISABLED }} />
             <input

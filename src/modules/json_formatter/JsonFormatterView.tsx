@@ -10,7 +10,6 @@ import {
 import { Tooltip } from '@/components/Tooltip';
 import { usePluginPayload } from '@/plugins/usePluginPayload';
 import { useToastStore } from '@/stores/toastStore';
-import { THEME } from '../../constants/theme';
 import { WINDOW_SIZE } from '../../constants/window';
 import { immediateResize } from '../../utils/tauri';
 import { JsonTreeView } from './JsonTreeView';
@@ -310,8 +309,7 @@ export function JsonFormatterView() {
 
   return (
     <div
-      className="flex flex-col h-full text-app-text-secondary"
-      style={{ backgroundColor: THEME.BG_PRIMARY }}
+      className="flex flex-col h-full text-app-text-secondary panel-glass"
     >
       {/* ── Toolbar ───────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-2 px-3 py-2 border-b border-app-border flex-shrink-0">

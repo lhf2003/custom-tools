@@ -16,6 +16,7 @@ export default {
           tertiary: 'var(--app-bg-tertiary)',   // 卡片、输入框
           elevated: 'var(--app-bg-elevated)',   // 悬浮、下拉
           pressed: 'var(--app-bg-pressed)',    // 按压、选中
+          hover: 'var(--app-bg-hover)',        // 悬停（菜单/下拉/列表项底色块）
         },
         // 语义化文字色
         'app-text': {

@@ -82,9 +82,11 @@
   --panel-border: rgba(255, 255, 255, 0.05);
 
   /* App Panel Glass Variables（玻璃面板三变量契约）
-     启动器/聊天等玻璃窗口的面板底色：主题声明 --app-panel-rgb（RGB 三通道，
+     启动器/聊天等玻璃窗口的面板底色：纯色主题声明 --app-panel-rgb（RGB 三通道，
      与各自 --app-bg-primary 同值），透明度由 --app-panel-alpha 统一控制
      （后续设置页滑杆写入，默认 0.72）。组件只消费 --app-panel-bg。
+     渐变类主题（如橘子海）不走 rgb 公式：直接覆盖 --app-panel-bg，
+     并把 --app-panel-alpha 乘进每个色标（100% = 完整主题，拉低 = 整幅淡出透桌面）。
      与 --panel-bg 的分工：--panel-bg 是 OS 效果专用（被 mica/acrylic/blur 类重写），
      --app-panel-* 是应用层玻璃底色，两套并存互不覆盖。 */
   --app-panel-rgb: 30 30 33;
@@ -262,20 +264,22 @@
   --panel-bg: rgba(26, 32, 36, 0.72);
   --panel-border: rgba(255, 255, 255, 0.08);
 
-  /* 玻璃面板基底：青相深色（同 --app-bg-primary）；alpha 拉低时海面渐变透出 */
+  /* 玻璃面板：海面渐变即主题本体，不走纯色 rgb 公式——直接覆盖 --app-panel-bg，
+     全部色标乘以 --app-panel-alpha：100% = 完整不透明海面，拉低 = 整幅淡出透桌面
+     （与深浅主题同一滑杆语义）。逐层 fixed：导航栏/内容区等多面板共享同一视口渐变，
+     接缝处连续。--app-panel-rgb 仅作文档保留（覆盖后不再参与计算） */
   --app-panel-rgb: 26 32 36;
+  --app-panel-bg:
+    radial-gradient(140% 120% at 50% 45%, transparent 56%, rgb(10 13 15 / calc(0.30 * var(--app-panel-alpha))) 100%) fixed,
+    radial-gradient(120% 90% at 50% -12%, rgb(232 130 64 / calc(0.32 * var(--app-panel-alpha))), transparent 55%) fixed,
+    radial-gradient(130% 100% at 50% 118%, rgb(38 110 128 / calc(0.34 * var(--app-panel-alpha))), transparent 62%) fixed,
+    linear-gradient(180deg, rgb(77 56 40 / var(--app-panel-alpha)) 0%, rgb(51 64 60 / var(--app-panel-alpha)) 46%, rgb(27 58 69 / var(--app-panel-alpha)) 100%) fixed;
 }
 
 /* 海面渐变：烟熏棕橙（天）→ 深海青绿（海），雾状光晕 + 轻暗角。
-   橘子海主题放弃 OS 材质透明穿透，由 body 自绘暮色海面。 */
-[data-theme='orange-sea'] body {
-  background:
-    radial-gradient(140% 120% at 50% 45%, transparent 56%, rgba(10, 13, 15, 0.30) 100%),
-    radial-gradient(120% 90% at 50% -12%, rgba(232, 130, 64, 0.32), transparent 55%),
-    radial-gradient(130% 100% at 50% 118%, rgba(38, 110, 128, 0.34), transparent 62%),
-    linear-gradient(180deg, #4d3828 0%, #33403c 46%, #1b3a45 100%) !important;
-  background-attachment: fixed !important;
-}
+   橘子海主题放弃 OS 材质透明穿透，暮色海面由 --app-panel-bg 承担（见上方主题块），
+   不再画在 body——画在 body 会被 100% 不透明度的面板盖死（主题"消失"），
+   且滑杆语义颠倒（拉低反而显主题）。勿在 body 重挂渐变。 */
 
 /* ============================================
    Window Effect Fallback Styles
@@ -341,10 +345,19 @@
 }
 
 /* 玻璃面板（启动器/聊天等窗口根容器）：
-   底色 = 主题基底（--app-panel-rgb）× 全局透明度（--app-panel-alpha），
-   透明度滑杆只写 alpha 一个变量，主题新增只需声明 rgb。 */
+   底色 = 主题基底 × 全局透明度（--app-panel-alpha）；纯色主题声明 --app-panel-rgb，
+   渐变主题（橘子海）直接覆盖 --app-panel-bg 并把 alpha 乘进色标。 */
 .panel-glass {
   background: var(--app-panel-bg, rgba(30, 30, 33, 0.72));
+}
+
+/* 浮窗面板（划词翻译 toast 等小窗根容器）：与 panel-glass 同底色，但剥掉
+   fixed 定位——WebView2 透明窗口下 fixed 背景走独立合成路径，会绕过
+   border-radius 裁切，四角露出矩形角块。小窗只有单面板，无跨面板接缝
+   需求，scroll（元素盒定位）即可。 */
+.panel-glass-toast {
+  background: var(--app-panel-bg, rgba(30, 30, 33, 0.72));
+  background-attachment: scroll;
 }
 
 /* ============================================

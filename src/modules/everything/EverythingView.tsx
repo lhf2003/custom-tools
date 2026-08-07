@@ -91,7 +91,7 @@ function EverythingInstallPage({ onInstalled }: { onInstalled: () => void }) {
   const noneSelected = !selected.client && !selected.es;
 
   return (
-    <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center" style={{ backgroundColor: THEME.BG_PRIMARY }}>
+    <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center panel-glass">
       <HardDrive className="w-14 h-14 text-zinc-600 mb-4" />
       <h2 className="text-lg font-semibold text-zinc-300 mb-1">Everything 未安装</h2>
       <p className="text-sm text-zinc-500 max-w-sm mb-6">
@@ -351,7 +351,7 @@ export function EverythingView() {
 
   if (everythingStatus === null) {
     return (
-      <div className="w-full h-full flex items-center justify-center text-zinc-500" style={{ backgroundColor: THEME.BG_PRIMARY }}>
+      <div className="w-full h-full flex items-center justify-center text-zinc-500 panel-glass">
         <div className="animate-pulse">正在检查 Everything...</div>
       </div>
     );
@@ -363,7 +363,7 @@ export function EverythingView() {
 
   if (everythingStatus === 'service_not_running') {
     return (
-      <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center" style={{ backgroundColor: THEME.BG_PRIMARY }}>
+      <div className="w-full h-full flex flex-col items-center justify-center p-8 text-center panel-glass">
         <Power className="w-16 h-16 text-yellow-600 mb-4" />
         <h2 className="text-lg font-semibold text-zinc-300 mb-2">Everything 服务未运行</h2>
         <p className="text-sm text-zinc-500 max-w-md mb-6">
@@ -381,9 +381,9 @@ export function EverythingView() {
   }
 
   return (
-    <div className="w-full h-full flex flex-col" style={{ backgroundColor: THEME.BG_TERTIARY }}>
+    <div className="w-full h-full flex flex-col panel-glass">
       {/* Search Bar */}
-      <div className="flex items-center px-4 py-3 border-b border-white/5" style={{ backgroundColor: THEME.BG_PRIMARY }}>
+      <div className="flex items-center px-4 py-3 border-b border-white/5">
         <Search className="w-4 h-4 text-zinc-500 mr-3" />
         <input
           ref={inputRef}
@@ -398,7 +398,7 @@ export function EverythingView() {
       {/* Main Content - Three Column Layout */}
       <div className="flex-1 flex overflow-hidden min-h-0">
         {/* Left Sidebar - Categories */}
-        <div className="w-24 border-r border-white/5 h-full overflow-y-auto" style={{ backgroundColor: THEME.BG_TERTIARY }}>
+        <div className="w-24 border-r border-white/5 h-full overflow-y-auto">
           {categories.map((cat) => (
             <button
               key={cat.id}
@@ -415,7 +415,7 @@ export function EverythingView() {
         </div>
 
         {/* Middle - File List */}
-        <div className="flex-1 flex flex-col min-w-0 min-h-0" style={{ backgroundColor: THEME.BG_PRIMARY }}>
+        <div className="flex-1 flex flex-col min-w-0 min-h-0">
           {/* File List Header */}
           <div className="flex items-center justify-between px-4 py-2 border-b border-white/5 text-xs text-zinc-500">
             <span>共 {files.length} 条结果</span>
@@ -472,7 +472,7 @@ export function EverythingView() {
         </div>
 
         {/* Right - File Details */}
-        <div className="w-72 border-l border-white/5 p-4 overflow-y-auto" style={{ backgroundColor: THEME.BG_TERTIARY }}>
+        <div className="w-72 border-l border-white/5 p-4 overflow-y-auto">
           {selectedFile ? (
             <div className="flex flex-col items-center">
               {/* File Icon */}
