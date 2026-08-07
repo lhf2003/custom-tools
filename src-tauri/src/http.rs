@@ -25,9 +25,12 @@ use crate::commands::settings::SettingsState;
 /// 句柄保持未设置 → build_client 退化直连（绝不 unwrap）。
 static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
 
-/// 进程级 client 缓存：key = (代理开关, 代理地址, 超时秒数)，配置/超时变化才重建——
-/// LLM 高频调用不丢连接池。约束：锁内不得跨 .await（本文件所有锁均在表达式结束处释放）。
-static CLIENT_CACHE: Mutex<Option<((bool, String, u64), reqwest::Client)>> = Mutex::new(None);
+/// client 缓存 key：(代理开关, 代理地址, 超时秒数)
+type ClientCacheKey = (bool, String, u64);
+
+/// 进程级 client 缓存：配置/超时变化才重建——LLM 高频调用不丢连接池。
+/// 约束：锁内不得跨 .await（本文件所有锁均在表达式结束处释放）。
+static CLIENT_CACHE: Mutex<Option<(ClientCacheKey, reqwest::Client)>> = Mutex::new(None);
 
 /// 由 lib.rs setup 调用，供 build_client 读取设置与代理配置
 pub fn init(app: AppHandle) {
@@ -72,12 +75,10 @@ pub fn parse_proxy_server(value: &str) -> Vec<ProxySpec> {
             log::warn!("[http] 系统代理段格式非法，跳过: {host_port}");
             continue;
         };
-        let port = port.unwrap_or_else(|| {
-            if matches!(scheme.as_str(), "socks" | "socks4" | "socks5") {
-                1080
-            } else {
-                80
-            }
+        let port = port.unwrap_or(if matches!(scheme.as_str(), "socks" | "socks4" | "socks5") {
+            1080
+        } else {
+            80
         });
         let scheme = match scheme.as_str() {
             "socks" => "socks5".to_string(),
