@@ -60,7 +60,11 @@ jobs:
 
       - name: Generate and upload latest.json
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          # 原生命令（gh）非零退出时立即失败，避免静默生成错误的 latest.json
+          $PSNativeCommandUseErrorActionPreference = $true
           $tag = "${{ github.event.release.tag_name }}"
           $version = $tag -replace '^v', ''
 
