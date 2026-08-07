@@ -8,7 +8,8 @@ export interface AppSettings {
   theme: string;
   /** 启动器结果排列：grid（横向网格）| list（列表） */
   launcher_view: string;
-  window_opacity: number;
+  /** 面板背景不透明度（启动器/聊天玻璃面板，0.4~1.0，写入 --app-panel-alpha） */
+  panel_alpha: number;
   clipboard_keep_days: number;
   auto_update: boolean;
   clipboard_auto_paste: boolean;
@@ -61,6 +62,7 @@ interface SettingsState extends AppSettings {
   /** 设置主题模式（system/dark/light）：落库；即时生效由 ThemeController 负责 */
   setTheme: (theme: string) => Promise<void>;
   setLauncherView: (view: string) => Promise<void>;
+  setPanelAlpha: (alpha: number) => Promise<void>;
   setAutoUpdate: (enabled: boolean) => Promise<void>;
   toggleAutoUpdate: () => Promise<boolean>;
   toggleDebugMode: () => Promise<boolean>;
@@ -101,7 +103,7 @@ const defaultSettings: AppSettings = {
   startup_launch: false,
   theme: 'system',
   launcher_view: 'grid',
-  window_opacity: 0.95,
+  panel_alpha: 0.72,
   clipboard_keep_days: 30,
   auto_update: true,
   clipboard_auto_paste: true,
@@ -236,6 +238,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       set({ launcher_view: view });
     } catch (err) {
       console.error('Failed to set launcher_view:', err);
+    }
+  },
+
+  setPanelAlpha: async (alpha: number) => {
+    try {
+      await invoke('set_setting', { key: 'panel_alpha', value: alpha.toFixed(2) });
+      set({ panel_alpha: alpha });
+    } catch (err) {
+      console.error('Failed to set panel_alpha:', err);
     }
   },
 

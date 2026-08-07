@@ -15,7 +15,8 @@ pub struct AppSettings {
     pub theme: String,
     /// 启动器结果排列：grid（横向网格）| list（列表）
     pub launcher_view: String,
-    pub window_opacity: f32,
+    /// 面板背景不透明度（启动器/聊天玻璃面板，0.4~1.0，前端写入 --app-panel-alpha）
+    pub panel_alpha: f32,
     pub clipboard_keep_days: i32,
     pub auto_update: bool,
     pub clipboard_auto_paste: bool,
@@ -49,7 +50,7 @@ impl Default for AppSettings {
             startup_launch: false,
             theme: "system".to_string(),
             launcher_view: "grid".to_string(),
-            window_opacity: 0.95,
+            panel_alpha: 0.72,
             clipboard_keep_days: 30,
             auto_update: true,
             clipboard_auto_paste: true,
@@ -83,7 +84,7 @@ const KNOWN_KEYS: [&str; 26] = [
     "startup_launch",
     "theme",
     "launcher_view",
-    "window_opacity",
+    "panel_alpha",
     "clipboard_keep_days",
     "auto_update",
     "clipboard_auto_paste",
@@ -163,9 +164,9 @@ impl SettingsManager {
                 }
                 "theme" => settings.theme = value,
                 "launcher_view" => settings.launcher_view = value,
-                "window_opacity" => {
+                "panel_alpha" => {
                     if let Ok(v) = value.parse::<f32>() {
-                        settings.window_opacity = v.clamp(0.5, 1.0);
+                        settings.panel_alpha = v.clamp(0.4, 1.0);
                     }
                 }
                 "clipboard_keep_days" => {
@@ -325,9 +326,9 @@ impl SettingsManager {
                 }
                 "theme" => cache.theme = value.to_string(),
                 "launcher_view" => cache.launcher_view = value.to_string(),
-                "window_opacity" => {
+                "panel_alpha" => {
                     if let Ok(v) = value.parse::<f32>() {
-                        cache.window_opacity = v.clamp(0.5, 1.0);
+                        cache.panel_alpha = v.clamp(0.4, 1.0);
                     }
                 }
                 "clipboard_keep_days" => {

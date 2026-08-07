@@ -544,7 +544,7 @@ export function LauncherView() {
 
   return (
     <div
-      className="w-full h-full flex flex-col rounded-lg overflow-hidden outline-none bg-zinc-800/50"
+      className="w-full h-full flex flex-col rounded-lg overflow-hidden outline-none panel-glass"
       onKeyDown={handleKeyDown}
     >
       {/* Search Bar（兼窗口拖拽区；输入框与按钮显式摘除，否则会被拖拽拦截） */}

@@ -81,6 +81,16 @@
   --panel-bg: rgba(30, 30, 33, 0.7);
   --panel-border: rgba(255, 255, 255, 0.05);
 
+  /* App Panel Glass Variables（玻璃面板三变量契约）
+     启动器/聊天等玻璃窗口的面板底色：主题声明 --app-panel-rgb（RGB 三通道，
+     与各自 --app-bg-primary 同值），透明度由 --app-panel-alpha 统一控制
+     （后续设置页滑杆写入，默认 0.72）。组件只消费 --app-panel-bg。
+     与 --panel-bg 的分工：--panel-bg 是 OS 效果专用（被 mica/acrylic/blur 类重写），
+     --app-panel-* 是应用层玻璃底色，两套并存互不覆盖。 */
+  --app-panel-rgb: 30 30 33;
+  --app-panel-alpha: 0.72;
+  --app-panel-bg: rgb(var(--app-panel-rgb) / var(--app-panel-alpha));
+
   /* 分类/图形标识色（文件类型图标、数据分类圆点；浅色换深档保对比，见 light 覆盖） */
   --cat-purple: #c084fc;
   --cat-red: #f87171;
@@ -177,6 +187,9 @@
   --panel-bg: rgba(255, 255, 255, 0.72);
   --panel-border: rgba(0, 0, 0, 0.08);
 
+  /* 玻璃面板基底：纯白（同 --app-bg-primary），alpha 走全局 --app-panel-alpha */
+  --app-panel-rgb: 255 255 255;
+
   /* 分类/图形标识色：浅底换深档（≥3:1 图形对比） */
   --cat-purple: #9333ea;
   --cat-red: #dc2626;
@@ -248,6 +261,9 @@
   /* Window：自绘海面渐变（body 承担），面板为青相深色玻璃 */
   --panel-bg: rgba(26, 32, 36, 0.72);
   --panel-border: rgba(255, 255, 255, 0.08);
+
+  /* 玻璃面板基底：青相深色（同 --app-bg-primary）；alpha 拉低时海面渐变透出 */
+  --app-panel-rgb: 26 32 36;
 }
 
 /* 海面渐变：烟熏棕橙（天）→ 深海青绿（海），雾状光晕 + 轻暗角。
@@ -322,6 +338,13 @@
   background: var(--panel-bg, rgba(30, 30, 33, 0.7));
   border: 1px solid var(--panel-border, rgba(255, 255, 255, 0.05));
   border-radius: 12px;
+}
+
+/* 玻璃面板（启动器/聊天等窗口根容器）：
+   底色 = 主题基底（--app-panel-rgb）× 全局透明度（--app-panel-alpha），
+   透明度滑杆只写 alpha 一个变量，主题新增只需声明 rgb。 */
+.panel-glass {
+  background: var(--app-panel-bg, rgba(30, 30, 33, 0.72));
 }
 
 /* ============================================
@@ -790,6 +813,45 @@ body {
   -moz-osx-font-smoothing: grayscale;
   background: transparent !important;
   color: var(--app-text-primary);
+}
+
+/* ============================================
+   Range Slider Styles（通用滑杆：设置页透明度等）
+   原生 input[type=range]：track 走按压档、thumb 品牌色+面板描边，
+   全部走 token 浅深色自动跟随；WebView2 为 Chromium 内核，仅需 -webkit- 前缀
+   ============================================ */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 20px; /* 点击热区 */
+  background: transparent;
+  cursor: pointer;
+}
+
+input[type='range']::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 9999px;
+  background: var(--app-bg-pressed);
+}
+
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px; /* (thumb 14px - track 4px) / 2，垂直居中 */
+  border-radius: 9999px;
+  background: var(--app-brand-primary);
+  border: 2px solid var(--app-bg-primary);
+  box-shadow: var(--app-shadow-sm);
+}
+
+input[type='range']:hover::-webkit-slider-thumb {
+  background: var(--app-brand-primary-light);
+}
+
+input[type='range']:focus-visible::-webkit-slider-thumb {
+  outline: 2px solid var(--app-brand-selected);
+  outline-offset: 2px;
 }
 
 /* Scrollbar Styles - Zinc Theme */

@@ -46,10 +46,18 @@ function applyTheme(mode: string): void {
  * - 应用的同时把模式写入 localStorage，供 index.html 内联脚本在下一次启动的
  *   React 挂载前预读，消除首帧闪屏
  * - theme=system 时监听系统主题变化实时跟随；固定模式移除监听
+ * - 面板背景不透明度（panel_alpha）写入 --app-panel-alpha，玻璃面板即时跟随
  */
 export function ThemeController() {
   const theme = useSettingsStore((s) => s.theme);
+  const panelAlpha = useSettingsStore((s) => s.panel_alpha);
   const isLoading = useSettingsStore((s) => s.isLoading);
+
+  // 面板背景不透明度：与主题同管道（loadSettings 完成后应用）
+  useEffect(() => {
+    if (isLoading) return;
+    document.documentElement.style.setProperty('--app-panel-alpha', panelAlpha.toFixed(2));
+  }, [panelAlpha, isLoading]);
 
   useEffect(() => {
     if (isLoading) return; // 等 loadSettings 完成后一次性应用，防止默认值闪烁

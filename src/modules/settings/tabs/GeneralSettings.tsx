@@ -102,6 +102,30 @@ function ThemeMiniPreview({ variant }: { variant: ThemeMode }) {
   return <MiniSide colors={PREVIEW_COLORS[variant]} />;
 }
 
+/** 面板背景透明度滑杆：写 --app-panel-alpha（ThemeController 应用），0.4~1.0 */
+function PanelAlphaSlider() {
+  const panelAlpha = useSettingsStore((s) => s.panel_alpha);
+  const setPanelAlpha = useSettingsStore((s) => s.setPanelAlpha);
+
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        type="range"
+        min={0.4}
+        max={1}
+        step={0.01}
+        value={panelAlpha}
+        onChange={(e) => setPanelAlpha(Number(e.target.value))}
+        className="w-32"
+        aria-label="面板背景不透明度"
+      />
+      <span className="w-10 text-xs text-app-text-secondary tabular-nums text-right">
+        {Math.round(panelAlpha * 100)}%
+      </span>
+    </div>
+  );
+}
+
 /** 启动器视图两段切换：横向网格 / 列表 */
 function LauncherViewSwitch() {
   const launcherView = useSettingsStore((s) => s.launcher_view);
@@ -313,6 +337,9 @@ export function GeneralSettings() {
         </SettingRow>
         <SettingRow title="失去焦点时隐藏" description="点击窗口外部自动隐藏，保持桌面整洁">
           <Toggle enabled={hide_on_blur} onToggle={toggleHideOnBlur} />
+        </SettingRow>
+        <SettingRow title="背景透明度" description="启动器与聊天窗口的面板底色，数值越低越透出桌面与主题渐变">
+          <PanelAlphaSlider />
         </SettingRow>
       </SettingGroup>
 

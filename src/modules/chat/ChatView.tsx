@@ -852,7 +852,7 @@ export function ChatView() {
     !hasResponse && !isLoading && !error && streamText.length === 0;
 
   return (
-    <div className="w-full h-full flex flex-col select-none bg-zinc-800/50">
+    <div className="w-full h-full flex flex-col select-none panel-glass">
       {/* ── Header：返回 + 会话标题 + 操作组（兼窗口拖拽区） ── */}
       <div className="px-3 py-2 shrink-0 flex items-center gap-2" data-tauri-drag-region>
         <button
