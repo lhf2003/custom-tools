@@ -498,8 +498,10 @@ pub fn run() {
             commands::plugins::sync_plugin_shortcuts,
             commands::plugins::update_plugin_shortcut,
             commands::plugin_gen::generate_plugin,
+            commands::plugin_gen::read_plugin_files,
             commands::plugin_gen::write_plugin_preview,
             commands::plugin_gen::install_preview_plugin,
+            commands::plugin_gen::update_plugin_from_preview,
             commands::plugin_gen::clear_plugin_preview,
             // 划词翻译
             translate::translate_text,

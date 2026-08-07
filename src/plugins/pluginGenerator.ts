@@ -26,20 +26,28 @@ export interface GeneratedPluginFiles {
   steps: Partial<Record<GenStepName, string>>;
 }
 
+/** AI 更新模式上下文：现有插件 plugin.json 原文 + main bundle（Rust 读原始文件，保留 snake_case） */
+export interface PluginUpdateContext {
+  manifest: string;
+  bundle: string;
+}
+
 /**
  * 流式生成插件。onStep 每检测到步骤标记回调一次；invoke resolve 时返回完整产物。
  * 校验失败自动带错误重试 1 次（Rust 侧无法感知校验结果，重试由本函数发起）。
+ * existing 存在时为「AI 更新」模式：Rust 侧基于现有代码生成新版本（id 不变、version 递增）。
  */
 export async function generatePlugin(
   description: string,
   onStep: (step: GenStepName) => void,
-  onRetry: (reason: string) => void
+  onRetry: (reason: string) => void,
+  existing?: PluginUpdateContext
 ): Promise<GeneratedPluginFiles> {
   let attempt = 0;
   for (;;) {
     attempt += 1;
     try {
-      const text = await streamGenerate(description, onStep);
+      const text = await streamGenerate(description, onStep, existing);
       return parseGeneratedFiles(text);
     } catch (err) {
       // 只有校验类错误重试（生成/网络错误直接抛）
@@ -52,7 +60,8 @@ export async function generatePlugin(
 /** 流式收集全文：invoke generate_plugin + 监听 plugin_gen:chunk 拼装 */
 async function streamGenerate(
   description: string,
-  onStep: (step: GenStepName) => void
+  onStep: (step: GenStepName) => void,
+  existing?: PluginUpdateContext
 ): Promise<string> {
   let text = '';
   const unlisten = await listen<string>('plugin_gen:chunk', (event) => {
@@ -63,7 +72,10 @@ async function streamGenerate(
     }
   });
   try {
-    return await invoke<string>('generate_plugin', { description });
+    return await invoke<string>('generate_plugin', {
+      description,
+      ...(existing ? { existingFiles: existing } : {}),
+    });
   } finally {
     unlisten();
   }

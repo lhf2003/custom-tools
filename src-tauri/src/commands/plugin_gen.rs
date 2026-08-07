@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::db::DatabaseState;
@@ -98,6 +98,19 @@ const PLUGIN_GEN_SYSTEM_PROMPT: &str = r#"你是 FlowHub（Windows 桌面效率�
 - plugin.js 内 manifest 必须与 plugin.json 逐字段一致
 "#;
 
+/// AI 更新模式追加段（仅在 existing_files 存在时拼进 system prompt）。
+/// 核心约束：id 不变（否则安装链路拒绝覆盖）、version 递增、基于现有代码增量修改。
+const PLUGIN_UPDATE_SYSTEM_PROMPT: &str = r#"
+
+# 更新任务（本次为 AI 更新模式）
+
+用户提供了现有插件的 plugin.json 与 plugin.js，以及一段更新需求。你必须：
+- 保持 id 完全不变；version 递增（如 0.1.0 → 0.2.0）
+- 基于现有代码增量修改，不要无关重写；沿用既有 settings 键与 shortcuts id（保持用户配置兼容）
+- 除需求涉及的改动外，其余 manifest 字段与视图行为保持原样
+- 输出格式与上述完全一致（4 个 step 标记 + 2 个文件块），plugin.js 内 manifest 必须与 plugin.json 逐字段一致
+"#;
+
 /// 流式响应解析结构（OpenAI SSE / Ollama NDJSON，与 llm/mod.rs 私有结构同形）
 #[derive(Deserialize)]
 struct GenStreamChunk {
@@ -121,14 +134,46 @@ struct GenOllamaMessage {
     content: String,
 }
 
+/// AI 更新时的现有插件文件（plugin.json 原文 + main bundle），作为上下文传给 LLM
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PluginExistingFiles {
+    pub manifest: String,
+    pub bundle: String,
+}
+
+/// 读取正式插件目录的 plugin.json 原文 + main bundle（AI 更新时作为现有代码上下文传给 LLM）。
+/// 读原文而非解析后序列化：保留 snake_case 字段名，避免 LLM 模仿 camelCase 输出导致字段丢失。
+#[tauri::command]
+pub fn read_plugin_files(
+    app_handle: AppHandle,
+    plugin_id: String,
+) -> Result<PluginExistingFiles, String> {
+    let base = crate::commands::plugins::plugins_dir(&app_handle)?;
+    let plugin_dir = base.join(&plugin_id);
+    // 路径穿越防护：确认目标在 plugins 目录内
+    if !plugin_dir.starts_with(&base) {
+        return Err("非法插件路径".to_string());
+    }
+    let manifest = std::fs::read_to_string(plugin_dir.join("plugin.json"))
+        .map_err(|e| format!("读取 plugin.json 失败: {e}"))?;
+    // 解析 main 字段：bundle 文件名可能不是默认 plugin.js
+    let parsed: crate::commands::plugins::ExternalPluginManifest =
+        serde_json::from_str(&manifest).map_err(|e| format!("plugin.json 解析失败: {e}"))?;
+    let bundle = std::fs::read_to_string(plugin_dir.join(&parsed.main))
+        .map_err(|e| format!("读取 {} 失败: {e}", parsed.main))?;
+    Ok(PluginExistingFiles { manifest, bundle })
+}
+
 /// AI 生成插件：复用陪伴场景模型配置（不引入第二套 LLM 配置）。
 /// 流式输出——逐段 emit `plugin_gen:chunk`（前端解析步骤标记实时回显），
 /// 结束 emit `plugin_gen:done`；command 返回完整生成文本。
+/// existing_files 存在时为「AI 更新」模式：基于现有代码生成新版本（id 不变、version 递增）。
 #[tauri::command]
 pub async fn generate_plugin(
     app_handle: AppHandle,
     db_state: State<'_, DatabaseState>,
     description: String,
+    existing_files: Option<PluginExistingFiles>,
 ) -> Result<String, String> {
     let (base_url, api_key, model, provider_type, thinking_mode, reasoning_effort) = {
         let conn = rusqlite::Connection::open(&db_state.0)
@@ -174,15 +219,28 @@ pub async fn generate_plugin(
         return Err("模型名称未配置".to_string());
     }
 
+    // 更新模式：system prompt 追加更新任务段，user message 携带现有代码 + 更新需求
+    let system_prompt = match &existing_files {
+        Some(_) => format!("{PLUGIN_GEN_SYSTEM_PROMPT}\n{PLUGIN_UPDATE_SYSTEM_PROMPT}"),
+        None => PLUGIN_GEN_SYSTEM_PROMPT.to_string(),
+    };
+    let user_content = match &existing_files {
+        Some(files) => format!(
+            "现有插件 plugin.json:\n{}\n\n现有插件 plugin.js:\n{}\n\n更新需求：{}",
+            files.manifest, files.bundle, description
+        ),
+        None => description,
+    };
+
     let messages = vec![
         ChatMessage {
             role: "system".to_string(),
-            content: PLUGIN_GEN_SYSTEM_PROMPT.to_string(),
+            content: system_prompt,
             images: None,
         },
         ChatMessage {
             role: "user".to_string(),
-            content: description,
+            content: user_content,
             images: None,
         },
     ];
@@ -400,6 +458,34 @@ pub fn install_preview_plugin(app_handle: AppHandle, plugin_id: String) -> Resul
         return Err("同名插件已存在，请先在插件市场卸载旧版本".to_string());
     }
     copy_dir(&preview, &dest).map_err(|e| format!("安装失败: {e}"))?;
+    let _ = std::fs::remove_dir_all(&preview);
+    Ok(())
+}
+
+/// 从预览更新到正式目录（覆盖同名插件，AI 更新模式用）。与 install_preview_plugin 对称：
+/// 校验预览存在、正式目录已存在、预览 manifest 的 id 与目标目录一致（防覆盖错插件）；
+/// 先清空旧目录再复制（避免新版本删除的文件残留），最后清理预览。
+#[tauri::command]
+pub fn update_plugin_from_preview(app_handle: AppHandle, plugin_id: String) -> Result<(), String> {
+    let preview = preview_dir(&app_handle)?.join(&plugin_id);
+    if !preview.exists() {
+        return Err("预览插件不存在".to_string());
+    }
+    // 预览 manifest 的 id 必须与目标插件一致（LLM 可能改 id，前端也校验，Rust 侧兜底）
+    let preview_manifest: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(preview.join("plugin.json")).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| format!("预览 plugin.json 解析失败: {e}"))?;
+    if preview_manifest.get("id").and_then(|v| v.as_str()) != Some(&plugin_id) {
+        return Err("预览插件的 id 与目标插件不一致，拒绝更新".to_string());
+    }
+    let dest = crate::commands::plugins::plugins_dir(&app_handle)?.join(&plugin_id);
+    if !dest.exists() {
+        return Err("插件目录不存在，无法更新".to_string());
+    }
+    // 清空旧目录再复制（copy_dir 的 fs::copy 对已存在文件虽会覆盖，但目录内残留文件不会删）
+    std::fs::remove_dir_all(&dest).map_err(|e| format!("清理旧插件失败: {e}"))?;
+    copy_dir(&preview, &dest).map_err(|e| format!("更新失败: {e}"))?;
     let _ = std::fs::remove_dir_all(&preview);
     Ok(())
 }

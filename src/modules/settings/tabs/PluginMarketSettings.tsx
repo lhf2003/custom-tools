@@ -71,13 +71,15 @@ function TrustConfirmModal({
   );
 }
 
-/** 行内更多菜单（设置 / 打开目录 / 卸载）；设置项仅在插件声明了 settings schema 时出现 */
+/** 行内更多菜单（AI 更新 / 设置 / 打开目录 / 卸载）；设置项仅在插件声明了 settings schema 时出现 */
 function MoreMenu({
+  onAiUpdate,
   onReveal,
   onUninstall,
   onSettings,
   hasSettings,
 }: {
+  onAiUpdate: () => void;
   onReveal: () => void;
   onUninstall: () => void;
   onSettings: () => void;
@@ -96,7 +98,7 @@ function MoreMenu({
     const trigger = triggerRef.current;
     if (!trigger) return;
     const rect = trigger.getBoundingClientRect();
-    const itemCount = hasSettings ? 3 : 2;
+    const itemCount = hasSettings ? 4 : 3;
     const estimatedHeight = itemCount * 36 + 12 + 13; // 项高 + 面板 padding + 分隔线
     const gap = 8;
     const up = window.innerHeight - rect.bottom < estimatedHeight && rect.top > estimatedHeight;
@@ -178,6 +180,15 @@ function MoreMenu({
                     ]
                   : []),
                 {
+                  id: 'ai-update',
+                  label: 'AI 更新',
+                  icon: Sparkles,
+                  onClick: () => {
+                    onAiUpdate();
+                    setIsOpen(false);
+                  },
+                },
+                {
                   id: 'reveal',
                   label: '打开插件目录',
                   icon: FolderOpen,
@@ -222,6 +233,8 @@ export function PluginMarketSettings({ onOpenPluginSettings }: PluginMarketSetti
   const [pendingEnable, setPendingEnable] = useState<ExternalPluginItem | null>(null);
   // AI 生成弹窗（任务 12：流式步骤 + 校验 + 预览 + 试运行 + 安装）
   const [showGenerate, setShowGenerate] = useState(false);
+  // AI 更新弹窗：待更新的已安装插件（复用生成管线，update 模式）
+  const [updatingPlugin, setUpdatingPlugin] = useState<ExternalPluginItem | null>(null);
   // 内置插件开关的本地镜像（初始化/加载后刷新；切换时同步）
   const [builtInEnabled, setBuiltInEnabled] = useState<Record<string, boolean>>({});
 
@@ -337,6 +350,10 @@ export function PluginMarketSettings({ onOpenPluginSettings }: PluginMarketSetti
     setShowGenerate(true);
   }, []);
 
+  const handleAiUpdate = useCallback((item: ExternalPluginItem) => {
+    setUpdatingPlugin(item);
+  }, []);
+
   // 生成安装成功后的刷新（新插件出现在列表；启用走现有信任确认流程）
   const handleGeneratedInstalled = useCallback(() => {
     load();
@@ -418,6 +435,7 @@ export function PluginMarketSettings({ onOpenPluginSettings }: PluginMarketSetti
                   />
                   <MoreMenu
                     hasSettings={hasSettings}
+                    onAiUpdate={() => handleAiUpdate(item)}
                     onSettings={() => onOpenPluginSettings(item.manifest.id)}
                     onReveal={() => handleReveal(item)}
                     onUninstall={() => handleUninstall(item)}
@@ -442,6 +460,16 @@ export function PluginMarketSettings({ onOpenPluginSettings }: PluginMarketSetti
       {/* AI 生成弹窗 */}
       {showGenerate && (
         <GeneratePluginModal onClose={() => setShowGenerate(false)} onInstalled={handleGeneratedInstalled} />
+      )}
+
+      {/* AI 更新弹窗：复用生成管线，基于现有插件代码增量更新 */}
+      {updatingPlugin && (
+        <GeneratePluginModal
+          mode="update"
+          existingPlugin={updatingPlugin}
+          onClose={() => setUpdatingPlugin(null)}
+          onInstalled={handleGeneratedInstalled}
+        />
       )}
     </>
   );

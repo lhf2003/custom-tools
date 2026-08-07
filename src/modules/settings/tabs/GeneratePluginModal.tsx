@@ -7,13 +7,16 @@ import {
   GEN_STEP_LABELS,
   type GenStepName,
   type GeneratedPluginFiles,
+  type PluginUpdateContext,
 } from '@/plugins/pluginGenerator';
+import type { ExternalPluginItem } from '@/stores/externalPluginsStore';
 import type { FlowhubPluginModule } from '@/plugins/external';
 
 /**
- * AI 生成插件弹窗（二期设计第 8 节落地）：
+ * AI 生成/更新插件弹窗（二期设计第 8 节落地 + AI 更新扩展）：
  * 描述 → 流式生成（4 步回显，避免长等待焦虑）→ 校验（失败自动重试 1 次）
- * → 预览（文件清单 + 代码）→ 试运行（.preview/ 落盘走真实加载链路）→ 安装（触发扫描）。
+ * → 预览（文件清单 + 代码）→ 试运行（.preview/ 落盘走真实加载链路）→ 安装/更新（触发扫描）。
+ * mode='update' 时复用同一管线：先读现有插件文件作上下文，安装改为覆盖更新。
  */
 
 const STEP_ORDER: GenStepName[] = ['manifest', 'view', 'style', 'verify'];
@@ -54,13 +57,19 @@ function PreviewRunner({ pluginId, manifest, bundle }: { pluginId: string; manif
 }
 
 export function GeneratePluginModal({
+  mode = 'create',
+  existingPlugin,
   onClose,
   onInstalled,
 }: {
+  /** create：从零生成；update：基于现有插件代码更新（需传 existingPlugin） */
+  mode?: 'create' | 'update';
+  existingPlugin?: ExternalPluginItem;
   onClose: () => void;
   onInstalled: () => void;
 }) {
   const { addToast } = useToastStore();
+  const isUpdate = mode === 'update';
   const [phase, setPhase] = useState<'input' | 'generating' | 'result' | 'error'>('input');
   const [description, setDescription] = useState('');
   const [currentStep, setCurrentStep] = useState<GenStepName | null>(null);
@@ -95,6 +104,14 @@ export function GeneratePluginModal({
     setRetryMsg(null);
     setError(null);
     try {
+      // 更新模式：先读现有插件文件（plugin.json 原文 + bundle）作为 LLM 上下文
+      let existing: PluginUpdateContext | undefined;
+      if (isUpdate && existingPlugin) {
+        const files = await invoke<PluginUpdateContext>('read_plugin_files', {
+          pluginId: existingPlugin.manifest.id,
+        });
+        existing = files;
+      }
       const files = await generatePlugin(
         description.trim(),
         (step) => {
@@ -105,8 +122,14 @@ export function GeneratePluginModal({
           setRetryMsg(reason);
           setStepsDone([]);
           setCurrentStep(null);
-        }
+        },
+        existing
       );
+      // 更新模式硬约束：id 必须与现有插件一致（Rust 侧覆盖安装也兜底校验）
+      const newManifest = JSON.parse(files.manifestJson) as Record<string, unknown>;
+      if (isUpdate && String(newManifest.id ?? '') !== existingPlugin?.manifest.id) {
+        throw new Error(`AI 生成的插件 id「${String(newManifest.id)}」与「${existingPlugin?.manifest.name}」不一致，请重新生成`);
+      }
       setResult(files);
       setPhase('result');
       setPreviewFile('plugin.json');
@@ -114,20 +137,29 @@ export function GeneratePluginModal({
       setError(err instanceof Error ? err.message : String(err));
       setPhase('error');
     }
-  }, [description]);
+  }, [description, isUpdate, existingPlugin]);
 
   const handleInstall = useCallback(async () => {
     if (!result || !manifestId) return;
     try {
-      await invoke('install_preview_plugin', { pluginId: manifestId });
-      cleanupPreview();
-      addToast({ type: 'success', title: `已安装「${String(manifest?.name ?? manifestId)}」，请在插件市场启用` });
+      if (isUpdate) {
+        await invoke('update_plugin_from_preview', { pluginId: manifestId });
+        cleanupPreview();
+        addToast({
+          type: 'success',
+          title: `已更新「${String(manifest?.name ?? manifestId)}」v${String(manifest?.version ?? '')}`,
+        });
+      } else {
+        await invoke('install_preview_plugin', { pluginId: manifestId });
+        cleanupPreview();
+        addToast({ type: 'success', title: `已安装「${String(manifest?.name ?? manifestId)}」，请在插件市场启用` });
+      }
       onInstalled();
       onClose();
     } catch (err) {
-      addToast({ type: 'error', title: '安装失败', message: String(err) });
+      addToast({ type: 'error', title: isUpdate ? '更新失败' : '安装失败', message: String(err) });
     }
-  }, [result, manifestId, manifest, cleanupPreview, onInstalled, onClose, addToast]);
+  }, [result, manifestId, manifest, isUpdate, cleanupPreview, onInstalled, onClose, addToast]);
 
   const summaryLine =
     manifest && Array.isArray(manifest.triggers)
@@ -146,7 +178,9 @@ export function GeneratePluginModal({
         <div className="flex items-center justify-between px-5 py-4 border-b border-white/5">
           <div className="flex items-center gap-2">
             <Sparkles size={15} className="text-app-status-info" />
-            <h3 className="text-sm font-semibold text-app-text-primary">AI 生成插件</h3>
+            <h3 className="text-sm font-semibold text-app-text-primary">
+              {isUpdate ? 'AI 更新插件' : 'AI 生成插件'}
+            </h3>
           </div>
           {phase !== 'generating' && (
             <button
@@ -162,16 +196,27 @@ export function GeneratePluginModal({
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
           {phase === 'input' && (
             <>
-              <p className="text-xs text-app-text-tertiary leading-relaxed">
-                用一句话描述你想要的插件，AI 会按插件协议生成框架、视图与设置项，并遵循本系统设计规范。
-              </p>
+              {isUpdate && existingPlugin ? (
+                <p className="text-xs text-app-text-tertiary leading-relaxed">
+                  将更新「{existingPlugin.manifest.name}{existingPlugin.manifest.version ? ` v${existingPlugin.manifest.version}` : ''}」
+                  ——AI 会基于现有插件代码增量修改，保持 id 不变、版本自动递增。描述你想改什么：
+                </p>
+              ) : (
+                <p className="text-xs text-app-text-tertiary leading-relaxed">
+                  用一句话描述你想要的插件，AI 会按插件协议生成框架、视图与设置项，并遵循本系统设计规范。
+                </p>
+              )}
               <textarea
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                placeholder="例如：一个 base64 编码/解码工具，支持编码与解码切换、复制结果"
+                placeholder={
+                  isUpdate
+                    ? '例如：把输出格式改成 markdown，增加一个复制全部按钮'
+                    : '例如：一个 base64 编码/解码工具，支持编码与解码切换、复制结果'
+                }
                 rows={4}
                 autoFocus
-                className="w-full px-3 py-2.5 rounded-lg text-sm bg-app-bg-tertiary border border-app-border text-app-text-primary placeholder:text-app-text-placeholder outline-none focus:border-app-status-info focus:ring-2 focus:ring-app-status-info/20 transition-all duration-200 resize-none"
+                className="w-full px-3 py-2.5 rounded-lg text-sm bg-app-bg-tertiary border border-app-border text-app-text-primary placeholder:text-app-text-placeholder outline-none focus:border-app-status-info transition-all duration-200 resize-none"
               />
             </>
           )}
@@ -310,7 +355,7 @@ export function GeneratePluginModal({
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-white bg-app-status-info hover:bg-blue-700 transition-colors cursor-pointer"
               >
                 <Rocket size={14} />
-                安装插件
+                {isUpdate ? '更新插件' : '安装插件'}
               </button>
             </>
           )}
