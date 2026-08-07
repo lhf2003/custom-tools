@@ -6,7 +6,6 @@ import { useAppStore } from '@/stores/appStore';
 import { useToastStore } from '@/stores/toastStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useSearch } from '@/hooks/useSearch';
-import type { ViewMode } from '@/types';
 import { safeInvoke, debouncedResize } from '../../utils/tauri';
 import { WINDOW_SIZE } from '../../constants/window';
 import { listLauncherEntries, isLauncherEntryId, entryIdToViewMode } from '@/plugins/launcherEntries';

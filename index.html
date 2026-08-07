@@ -5,27 +5,8 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>custom-tools</title>
-    <script>
-      // 防主题闪屏：React 挂载前预读缓存的主题模式并解析。
-      // 与 ThemeController.tsx 的 THEME_MODE_CACHE_KEY / THEME_FAMILY 保持一致；
-      // 无缓存（首次启动）按默认 system 行为跟随 prefers-color-scheme。
-      (function () {
-        try {
-          var FAMILY = { dark: 'dark', light: 'light', 'orange-sea': 'dark' };
-          var mode = localStorage.getItem('flowhub-theme-mode') || 'system';
-          var family = FAMILY[mode];
-          var theme = mode;
-          if (!family) {
-            family = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-            theme = family;
-          }
-          document.documentElement.dataset.theme = theme;
-          document.documentElement.dataset.themeFamily = family;
-        } catch (e) {
-          /* localStorage 不可用时由 ThemeController 兜底 */
-        }
-      })();
-    </script>
+    <!-- 防主题闪屏：React 挂载前预读主题（与陪伴窗口共享 public/theme-bootstrap.js） -->
+    <script src="/theme-bootstrap.js"></script>
   </head>
   <body>
     <div id="root"></div>
