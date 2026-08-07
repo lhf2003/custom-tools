@@ -12,6 +12,7 @@ import {
   ChevronRight,
   Brain,
 } from 'lucide-react';
+import { Tooltip } from '@/components/Tooltip';
 import { useToastStore } from '@/stores/toastStore';
 import { CustomSelect } from '../components/CustomSelect';
 
@@ -210,30 +211,35 @@ export function MemoryCenter({ onBack }: MemoryCenterProps) {
         ) : (
           <div className="flex items-center gap-2 text-xs">
             <span className="text-white/80 flex-1 min-w-0 break-words">{fact.fact}</span>
-            <span className="text-white/30 shrink-0" title={`来源：${SOURCE_LABEL[fact.source] ?? fact.source}`}>
-              {SOURCE_LABEL[fact.source] ?? fact.source} · ×{fact.confirmations}
-            </span>
-            <button
-              onClick={() => handleToggleHistory(fact.id)}
-              className="text-white/30 hover:text-white/70 transition-colors cursor-pointer shrink-0"
-              title="变更历史"
-            >
-              {historyFor === fact.id ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-            </button>
-            <button
-              onClick={() => handleStartEdit(fact)}
-              className="text-white/30 hover:text-white/70 transition-colors cursor-pointer shrink-0"
-              title="编辑"
-            >
-              <Pencil size={12} />
-            </button>
-            <button
-              onClick={() => handleDelete(fact.id)}
-              className="text-white/30 hover:text-red-400 transition-colors cursor-pointer shrink-0"
-              title="删除"
-            >
-              <Trash2 size={12} />
-            </button>
+            <Tooltip content={`来源：${SOURCE_LABEL[fact.source] ?? fact.source}`} wrapperClassName="shrink-0">
+              <span className="text-white/30 shrink-0">
+                {SOURCE_LABEL[fact.source] ?? fact.source} · ×{fact.confirmations}
+              </span>
+            </Tooltip>
+            <Tooltip content="变更历史" wrapperClassName="shrink-0">
+              <button
+                onClick={() => handleToggleHistory(fact.id)}
+                className="text-white/30 hover:text-white/70 transition-colors cursor-pointer shrink-0"
+              >
+                {historyFor === fact.id ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+              </button>
+            </Tooltip>
+            <Tooltip content="编辑" wrapperClassName="shrink-0">
+              <button
+                onClick={() => handleStartEdit(fact)}
+                className="text-white/30 hover:text-white/70 transition-colors cursor-pointer shrink-0"
+              >
+                <Pencil size={12} />
+              </button>
+            </Tooltip>
+            <Tooltip content="删除" wrapperClassName="shrink-0">
+              <button
+                onClick={() => handleDelete(fact.id)}
+                className="text-white/30 hover:text-red-400 transition-colors cursor-pointer shrink-0"
+              >
+                <Trash2 size={12} />
+              </button>
+            </Tooltip>
           </div>
         )}
         {historyFor === fact.id && (
@@ -265,13 +271,14 @@ export function MemoryCenter({ onBack }: MemoryCenterProps) {
   return (
     <>
       <div className="flex items-center gap-3 mb-6">
-        <button
-          onClick={onBack}
-          className="w-8 h-8 rounded-lg hover:bg-white/10 flex items-center justify-center text-white/50 hover:text-white transition-colors cursor-pointer"
-          title="返回陪伴设置"
-        >
-          <ArrowLeft size={16} />
-        </button>
+        <Tooltip content="返回陪伴设置">
+          <button
+            onClick={onBack}
+            className="w-8 h-8 rounded-lg hover:bg-white/10 flex items-center justify-center text-white/50 hover:text-white transition-colors cursor-pointer"
+          >
+            <ArrowLeft size={16} />
+          </button>
+        </Tooltip>
         <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-app-brand-primary/30 to-app-brand-primary/20 flex items-center justify-center">
           <Brain size={20} className="text-app-brand-primary-light" />
         </div>

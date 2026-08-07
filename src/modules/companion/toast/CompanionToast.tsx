@@ -3,6 +3,7 @@ import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { AlertTriangle, Coffee, Rocket, X, Sparkles, Pin, Sunrise, Music, Zap, FileText, HelpCircle } from 'lucide-react';
+import { Tooltip } from '@/components/Tooltip';
 
 interface Suggestion {
   id: number;
@@ -239,13 +240,14 @@ export default function CompanionToast() {
           <div data-tauri-drag-region className="flex-1 text-white text-sm font-medium truncate">
             {suggestion.title}
           </div>
-          <button
-            onClick={isInfoType ? hideWindow : () => void handleDismiss()}
-            className="text-white/40 hover:text-white/80 transition-colors cursor-pointer shrink-0"
-            title={isInfoType ? '关闭（Esc）' : '忽略（Esc）'}
-          >
-            <X size={14} />
-          </button>
+          <Tooltip content={isInfoType ? '关闭（Esc）' : '忽略（Esc）'} wrapperClassName="shrink-0">
+            <button
+              onClick={isInfoType ? hideWindow : () => void handleDismiss()}
+              className="text-white/40 hover:text-white/80 transition-colors cursor-pointer shrink-0"
+            >
+              <X size={14} />
+            </button>
+          </Tooltip>
         </div>
 
         {/* 正文（提示型去掉了操作区，空间还给正文） */}
@@ -274,14 +276,15 @@ export default function CompanionToast() {
             >
               忽略
             </button>
-            <button
-              onClick={handleAccept}
-              disabled={acting}
-              title={isActionType ? '动作型建议需点击确认（防误触）' : '点击或按 Enter'}
-              className="px-3 py-1.5 rounded-lg text-xs bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors cursor-pointer disabled:opacity-50"
-            >
-              {acting ? '执行中…' : (meta.acceptLabel ?? '知道了')}
-            </button>
+            <Tooltip content={isActionType ? '动作型建议需点击确认（防误触）' : '点击或按 Enter'}>
+              <button
+                onClick={handleAccept}
+                disabled={acting}
+                className="px-3 py-1.5 rounded-lg text-xs bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {acting ? '执行中…' : (meta.acceptLabel ?? '知道了')}
+              </button>
+            </Tooltip>
           </div>
         )}
 

@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { Copy, Check, Eraser, Languages, Loader2 } from 'lucide-react';
 import { useToastStore } from '@/stores/toastStore';
+import { Tooltip } from '@/components/Tooltip';
 import { CustomSelect } from '@/modules/settings/components/CustomSelect';
 import { TARGET_LANG_OPTIONS, TARGET_LANG_KEY, DEFAULT_TARGET_LANG } from './constants';
 
@@ -125,15 +126,16 @@ export function TranslateView() {
               className="w-24"
               menuClassName="w-28"
             />
-            <button
-              onClick={handleClear}
-              disabled={status === 'translating'}
-              title="清空"
-              className="flex items-center gap-1 px-2 h-7 rounded-md text-xs text-app-text-tertiary hover:text-app-text-primary hover:bg-white/10 transition-colors cursor-pointer disabled:opacity-40"
-            >
-              <Eraser size={13} />
-              清空
-            </button>
+            <Tooltip content="清空">
+              <button
+                onClick={handleClear}
+                disabled={status === 'translating'}
+                className="flex items-center gap-1 px-2 h-7 rounded-md text-xs text-app-text-tertiary hover:text-app-text-primary hover:bg-white/10 transition-colors cursor-pointer disabled:opacity-40"
+              >
+                <Eraser size={13} />
+                清空
+              </button>
+            </Tooltip>
           </div>
         </div>
         <textarea

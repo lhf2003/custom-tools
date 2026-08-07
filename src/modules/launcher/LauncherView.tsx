@@ -11,6 +11,7 @@ import { WINDOW_SIZE } from '../../constants/window';
 import { listLauncherEntries, isLauncherEntryId, entryIdToViewMode } from '@/plugins/launcherEntries';
 import { matchTrigger, suggestTriggers, type TriggerSuggestion } from '@/plugins/registry';
 import { getCachedIcon, setCachedIcon } from './iconCache';
+import { Tooltip } from '@/components/Tooltip';
 
 
 interface AppItemData {
@@ -792,12 +793,13 @@ function ItemCard({
       className={`flex flex-col items-center group py-2 rounded-lg transition-colors ${isSelected ? 'bg-white/10' : ''}`}
     >
       <ItemIcon item={item} className="mb-1.5" />
-      <span
-        title={item.name}
-        className={`line-clamp-2 text-xs w-full text-center transition-colors leading-tight ${isSelected ? 'text-app-text-primary font-medium' : 'text-app-text-tertiary group-hover:text-app-text-primary'}`}
-      >
-        {item.name}
-      </span>
+      <Tooltip content={item.name} wrapperClassName="w-full">
+        <span
+          className={`line-clamp-2 text-xs w-full text-center transition-colors leading-tight ${isSelected ? 'text-app-text-primary font-medium' : 'text-app-text-tertiary group-hover:text-app-text-primary'}`}
+        >
+          {item.name}
+        </span>
+      </Tooltip>
     </button>
   );
 }
@@ -837,12 +839,13 @@ function ItemRow({
       className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors group text-left ${isSelected ? 'bg-white/10' : ''}`}
     >
       <ItemIcon item={item} />
-      <span
-        title={item.name}
-        className={`flex-1 min-w-0 truncate text-sm transition-colors ${isSelected ? 'text-app-text-primary font-medium' : 'text-app-text-tertiary group-hover:text-app-text-primary'}`}
-      >
-        {item.name}
-      </span>
+      <Tooltip content={item.name} wrapperClassName="flex-1 min-w-0">
+        <span
+          className={`flex-1 min-w-0 truncate text-sm transition-colors ${isSelected ? 'text-app-text-primary font-medium' : 'text-app-text-tertiary group-hover:text-app-text-primary'}`}
+        >
+          {item.name}
+        </span>
+      </Tooltip>
       {isSelected && (
         <span className="text-xs text-app-text-tertiary flex-shrink-0">↵ 打开</span>
       )}

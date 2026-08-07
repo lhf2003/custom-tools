@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { safeInvoke } from '@/utils/tauri';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { Tooltip } from '@/components/Tooltip';
 import { getCachedIcon, setCachedIcon } from '@/modules/launcher/iconCache';
 import { SettingGroup, SettingRow } from '../components/SettingsPrimitives';
 
@@ -147,12 +148,11 @@ function IndexSection() {
           <div className="max-h-40 overflow-y-auto">
             {dirs.map((dir) => (
               <div key={dir} className="group flex items-center gap-3 px-3 py-2.5">
-                <span
-                  className="text-app-text-secondary text-xs truncate flex-1 font-mono"
-                  title={dir}
-                >
-                  {dir}
-                </span>
+                <Tooltip content={dir} wrapperClassName="flex-1 min-w-0 truncate">
+                  <span className="text-app-text-secondary text-xs font-mono">
+                    {dir}
+                  </span>
+                </Tooltip>
                 <button
                   onClick={() => removeDir(dir)}
                   className="text-app-text-disabled hover:text-app-status-error-text transition-colors text-xs cursor-pointer flex-shrink-0 opacity-0 group-hover:opacity-100"
@@ -309,13 +309,14 @@ export function AppsSettings() {
             className="w-full pl-8 pr-2.5 py-1.5 rounded-lg bg-white/5 border border-white/10 text-app-text-primary text-xs placeholder:text-app-text-disabled focus:outline-none focus:border-app-brand-primary/40 transition-colors"
           />
           {query && (
-            <button
-              onClick={() => setQuery('')}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-app-text-tertiary hover:text-app-text-primary transition-colors cursor-pointer"
-              title="清空搜索"
-            >
-              <RotateCcw size={12} />
-            </button>
+            <Tooltip content="清空搜索" wrapperClassName="absolute right-2 top-1/2 -translate-y-1/2">
+              <button
+                onClick={() => setQuery('')}
+                className="text-app-text-tertiary hover:text-app-text-primary transition-colors cursor-pointer"
+              >
+                <RotateCcw size={12} />
+              </button>
+            </Tooltip>
           )}
         </div>
         <div className="flex items-center rounded-lg bg-white/5 border border-white/10 overflow-hidden">
@@ -340,53 +341,62 @@ export function AppsSettings() {
             仅未标注
           </button>
         </div>
-        <button
-          onClick={handleRescan}
-          disabled={rescanning}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-app-text-tertiary text-xs hover:bg-white/10 hover:text-app-text-primary transition-colors cursor-pointer disabled:opacity-50 disabled:hover:bg-transparent"
-          title="重新扫描已安装应用（注册表 / UWP / 快捷方式）"
-        >
-          <RefreshCw size={12} className={rescanning ? 'animate-spin' : ''} />
-          {rescanning ? '扫描中…' : '重新扫描'}
-        </button>
+        <Tooltip content="重新扫描已安装应用（注册表 / UWP / 快捷方式）">
+          <button
+            onClick={handleRescan}
+            disabled={rescanning}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-app-text-tertiary text-xs hover:bg-white/10 hover:text-app-text-primary transition-colors cursor-pointer disabled:opacity-50 disabled:hover:bg-transparent"
+          >
+            <RefreshCw size={12} className={rescanning ? 'animate-spin' : ''} />
+            {rescanning ? '扫描中…' : '重新扫描'}
+          </button>
+        </Tooltip>
       </div>
 
       {/* 表头（名称 / 启动次数列可点击排序） */}
       <div className="flex items-center gap-3 px-2 text-app-text-disabled text-xs select-none">
         <span className="w-6 flex-shrink-0" />
-        <button
-          onClick={() => handleSort('name')}
-          className="w-44 flex items-center gap-1 text-left truncate transition-colors cursor-pointer hover:text-app-text-primary"
-          title={sortKey === 'name' ? `按名称${sortDir === 'asc' ? '升序' : '降序'}（点击切换）` : '按名称排序'}
+        <Tooltip
+          content={sortKey === 'name' ? `按名称${sortDir === 'asc' ? '升序' : '降序'}（点击切换）` : '按名称排序'}
+          wrapperClassName="w-44"
         >
-          名称
-          {sortKey === 'name' ? (
-            sortDir === 'asc' ? (
-              <ChevronUp size={12} className="text-app-brand-primary-light" />
+          <button
+            onClick={() => handleSort('name')}
+            className="w-full flex items-center gap-1 text-left truncate transition-colors cursor-pointer hover:text-app-text-primary"
+          >
+            名称
+            {sortKey === 'name' ? (
+              sortDir === 'asc' ? (
+                <ChevronUp size={12} className="text-app-brand-primary-light" />
+              ) : (
+                <ChevronDown size={12} className="text-app-brand-primary-light" />
+              )
             ) : (
-              <ChevronDown size={12} className="text-app-brand-primary-light" />
-            )
-          ) : (
-            <ArrowUpDown size={12} className="opacity-50" />
-          )}
-        </button>
+              <ArrowUpDown size={12} className="opacity-50" />
+            )}
+          </button>
+        </Tooltip>
         <span className="flex-1">描述</span>
-        <button
-          onClick={() => handleSort('launch')}
-          className="w-16 flex items-center gap-1 text-left truncate transition-colors cursor-pointer hover:text-app-text-primary"
-          title={sortKey === 'launch' ? `按启动次数${sortDir === 'desc' ? '降序' : '升序'}（点击切换）` : '按启动次数排序'}
+        <Tooltip
+          content={sortKey === 'launch' ? `按启动次数${sortDir === 'desc' ? '降序' : '升序'}（点击切换）` : '按启动次数排序'}
+          wrapperClassName="w-16"
         >
-          {sortKey === 'launch' ? (
-            sortDir === 'desc' ? (
-              <ChevronDown size={12} className="text-app-brand-primary-light" />
+          <button
+            onClick={() => handleSort('launch')}
+            className="w-full flex items-center gap-1 text-left truncate transition-colors cursor-pointer hover:text-app-text-primary"
+          >
+            {sortKey === 'launch' ? (
+              sortDir === 'desc' ? (
+                <ChevronDown size={12} className="text-app-brand-primary-light" />
+              ) : (
+                <ChevronUp size={12} className="text-app-brand-primary-light" />
+              )
             ) : (
-              <ChevronUp size={12} className="text-app-brand-primary-light" />
-            )
-          ) : (
-            <ArrowUpDown size={12} className="opacity-50" />
-          )}
-          启动次数
-        </button>
+              <ArrowUpDown size={12} className="opacity-50" />
+            )}
+            启动次数
+          </button>
+        </Tooltip>
       </div>
 
       {/* 列表 */}
@@ -405,12 +415,11 @@ export function AppsSettings() {
                   className="flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-white/5 transition-colors"
                 >
                   <AppIcon entry={entry} />
-                  <span
-                    className="w-44 truncate text-app-text-secondary text-xs"
-                    title={entry.path}
-                  >
-                    {entry.name}
-                  </span>
+                  <Tooltip content={entry.path} wrapperClassName="w-44">
+                    <span className="w-full truncate text-app-text-secondary text-xs">
+                      {entry.name}
+                    </span>
+                  </Tooltip>
                   <div className="flex-1 min-w-0">
                     {isEditing ? (
                       <input
@@ -427,15 +436,16 @@ export function AppsSettings() {
                         className="w-full px-2 py-0.5 rounded-md bg-white/10 border border-app-brand-primary/40 text-app-text-primary text-xs placeholder:text-app-text-disabled focus:outline-none"
                       />
                     ) : (
-                      <button
-                        onClick={() => startEdit(entry)}
-                        className="w-full text-left px-2 py-0.5 rounded-md text-xs truncate text-app-text-secondary hover:bg-white/5 transition-colors cursor-pointer"
-                        title="点击编辑描述（模型分析时也会尝试回填）"
-                      >
-                        {entry.description || (
-                          <span className="text-app-text-disabled">点击填写描述</span>
-                        )}
-                      </button>
+                      <Tooltip content="点击编辑描述（模型分析时也会尝试回填）" wrapperClassName="w-full">
+                        <button
+                          onClick={() => startEdit(entry)}
+                          className="w-full text-left px-2 py-0.5 rounded-md text-xs truncate text-app-text-secondary hover:bg-white/5 transition-colors cursor-pointer"
+                        >
+                          {entry.description || (
+                            <span className="text-app-text-disabled">点击填写描述</span>
+                          )}
+                        </button>
+                      </Tooltip>
                     )}
                   </div>
                   <span className="w-16 text-left text-app-text-tertiary text-xs tabular-nums">

@@ -292,9 +292,11 @@ function PluginShortcutItem({
       </div>
       <div className="flex items-center gap-2">
         {registerError && (
-          <span className="text-xs text-app-status-error cursor-help" title={registerError}>
-            注册失败
-          </span>
+          <Tooltip content={registerError}>
+            <span className="text-xs text-app-status-error cursor-help">
+              注册失败
+            </span>
+          </Tooltip>
         )}
         <kbd className="px-3 py-1 rounded-md bg-app-bg-elevated border border-white/10 text-app-text-secondary text-xs font-mono min-w-[96px] text-center group-hover:text-app-text-primary transition-colors">
           {effectiveKeys}

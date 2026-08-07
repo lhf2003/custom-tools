@@ -6,6 +6,7 @@ import { FolderOpen, MoreHorizontal, Package, Settings2, Sparkles, Trash2 } from
 import { SettingGroup, SettingRow, Toggle } from '../components/SettingsPrimitives';
 import { MenuPanel } from '@/components/ActionMenu';
 import { useToastStore } from '@/stores/toastStore';
+import { Tooltip } from '@/components/Tooltip';
 import { useExternalPluginsStore, type ExternalPluginItem } from '@/stores/externalPluginsStore';
 import {
   isBuiltInPluginEnabled,
@@ -401,12 +402,13 @@ export function PluginMarketSettings({ onOpenPluginSettings }: PluginMarketSetti
                   {item.error ? (
                     <span className="text-xs text-app-status-error">加载失败</span>
                   ) : shortcutConflicts.length > 0 ? (
-                    <span
-                      className="text-xs text-app-status-error cursor-help"
-                      title={`${shortcutConflicts.map((c) => c.key).join('、')} 注册失败：${shortcutConflicts[0].reason}`}
+                    <Tooltip
+                      content={`${shortcutConflicts.map((c) => c.key).join('、')} 注册失败：${shortcutConflicts[0].reason}`}
                     >
-                      快捷键冲突
-                    </span>
+                      <span className="text-xs text-app-status-error cursor-help">
+                        快捷键冲突
+                      </span>
+                    </Tooltip>
                   ) : !item.enabled ? (
                     <span className="text-xs text-app-text-disabled">已禁用</span>
                   ) : null}

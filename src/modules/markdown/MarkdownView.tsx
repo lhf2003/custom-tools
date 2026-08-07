@@ -549,38 +549,40 @@ export function MarkdownView() {
               style={{ color: THEME.TEXT_SECONDARY }}
             />
           </div>
-          <button
-            onClick={() => openCreateModal('file')}
-            className="p-1.5 rounded-lg transition-all duration-200 cursor-pointer shrink-0"
-            style={{ color: THEME.TEXT_DISABLED }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.color = THEME.TEXT_PRIMARY;
-              e.currentTarget.style.backgroundColor = THEME.BG_HOVER;
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.color = THEME.TEXT_DISABLED;
-              e.currentTarget.style.backgroundColor = 'transparent';
-            }}
-            title="新建笔记"
-          >
-            <Plus size={14} />
-          </button>
-          <button
-            onClick={() => openCreateModal('folder')}
-            className="p-1.5 rounded-lg transition-all duration-200 cursor-pointer shrink-0"
-            style={{ color: THEME.TEXT_DISABLED }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.color = THEME.TEXT_PRIMARY;
-              e.currentTarget.style.backgroundColor = THEME.BG_HOVER;
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.color = THEME.TEXT_DISABLED;
-              e.currentTarget.style.backgroundColor = 'transparent';
-            }}
-            title="新建文件夹"
-          >
-            <Folder size={14} />
-          </button>
+          <Tooltip content="新建笔记" wrapperClassName="shrink-0">
+            <button
+              onClick={() => openCreateModal('file')}
+              className="p-1.5 rounded-lg transition-all duration-200 cursor-pointer shrink-0"
+              style={{ color: THEME.TEXT_DISABLED }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = THEME.TEXT_PRIMARY;
+                e.currentTarget.style.backgroundColor = THEME.BG_HOVER;
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = THEME.TEXT_DISABLED;
+                e.currentTarget.style.backgroundColor = 'transparent';
+              }}
+            >
+              <Plus size={14} />
+            </button>
+          </Tooltip>
+          <Tooltip content="新建文件夹" wrapperClassName="shrink-0">
+            <button
+              onClick={() => openCreateModal('folder')}
+              className="p-1.5 rounded-lg transition-all duration-200 cursor-pointer shrink-0"
+              style={{ color: THEME.TEXT_DISABLED }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = THEME.TEXT_PRIMARY;
+                e.currentTarget.style.backgroundColor = THEME.BG_HOVER;
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = THEME.TEXT_DISABLED;
+                e.currentTarget.style.backgroundColor = 'transparent';
+              }}
+            >
+              <Folder size={14} />
+            </button>
+          </Tooltip>
         </div>
 
         {/* Operation error bar — inline, never replaces the tree */}
@@ -776,20 +778,24 @@ export function MarkdownView() {
                   />
                 ) : (
                   <>
-                    <button
-                      onClick={startTitleEdit}
-                      onKeyDown={(e) => {
-                        if (e.key === 'F2') {
-                          e.preventDefault();
-                          startTitleEdit();
-                        }
-                      }}
-                      className="text-sm font-semibold text-left truncate cursor-text rounded-md px-1.5 py-0.5 -mx-1.5 transition-colors hover:bg-white/5 min-w-0"
-                      style={{ color: THEME.TEXT_PRIMARY }}
-                      title="点击重命名（F2）"
+                    <Tooltip
+                      content="点击重命名（F2）"
+                      wrapperClassName="min-w-0 truncate cursor-text rounded-md px-1.5 py-0.5 -mx-1.5 transition-colors hover:bg-white/5"
                     >
-                      {noteContent.name.replace(/\.md$/, '')}
-                    </button>
+                      <button
+                        onClick={startTitleEdit}
+                        onKeyDown={(e) => {
+                          if (e.key === 'F2') {
+                            e.preventDefault();
+                            startTitleEdit();
+                          }
+                        }}
+                        className="text-sm font-semibold text-left"
+                        style={{ color: THEME.TEXT_PRIMARY }}
+                      >
+                        {noteContent.name.replace(/\.md$/, '')}
+                      </button>
+                    </Tooltip>
                     <button
                       onClick={startTitleEdit}
                       aria-label="重命名笔记"
@@ -810,16 +816,18 @@ export function MarkdownView() {
                       保存中...
                     </span>
                   ) : saveError ? (
-                    <span className="text-xs flex items-center gap-1" title={saveError}>
-                      <span style={{ color: THEME.ERROR_TEXT }}>保存失败</span>
-                      <button
-                        onClick={retrySave}
-                        className="underline cursor-pointer"
-                        style={{ color: THEME.INFO }}
-                      >
-                        重试
-                      </button>
-                    </span>
+                    <Tooltip content={saveError}>
+                      <span className="text-xs flex items-center gap-1">
+                        <span style={{ color: THEME.ERROR_TEXT }}>保存失败</span>
+                        <button
+                          onClick={retrySave}
+                          className="underline cursor-pointer"
+                          style={{ color: THEME.INFO }}
+                        >
+                          重试
+                        </button>
+                      </span>
+                    </Tooltip>
                   ) : editorContent !== noteContent.content ? (
                     <span className="text-xs" style={{ color: THEME.TEXT_TERTIARY }}>待保存</span>
                   ) : (

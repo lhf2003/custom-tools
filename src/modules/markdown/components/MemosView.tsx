@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { Check, Loader2, ListTodo, X } from 'lucide-react';
 import { THEME } from '@/constants/theme';
+import { Tooltip } from '@/components/Tooltip';
 
 /** MarkdownView 里选中备忘视图的哨兵路径（不可能与真实笔记路径冲突） */
 export const MEMO_VIEW_PATH = '__memos_view__';
@@ -209,12 +210,15 @@ function MemoRow({ memo, onToggle, onDismiss }: MemoRowProps) {
       >
         {done && <Check size={11} style={{ color: THEME.SUCCESS }} />}
       </button>
-      <span
-        className={`flex-1 text-sm leading-5 ${done ? 'line-through' : ''}`}
-        style={{ color: done ? THEME.TEXT_DISABLED : THEME.TEXT_SECONDARY }}
-        title={memo.content_raw !== memo.content ? `原文：${memo.content_raw}` : undefined}
+      <Tooltip
+        content={memo.content_raw !== memo.content ? `原文：${memo.content_raw}` : undefined}
+        wrapperClassName="flex-1 min-w-0"
       >
-        {memo.content}
+        <span
+          className={`flex-1 text-sm leading-5 ${done ? 'line-through' : ''}`}
+          style={{ color: done ? THEME.TEXT_DISABLED : THEME.TEXT_SECONDARY }}
+        >
+          {memo.content}
         {memo.due_date && (
           <span
             className="ml-2 text-[10px] px-1.5 py-0.5 rounded"
@@ -226,7 +230,8 @@ function MemoRow({ memo, onToggle, onDismiss }: MemoRowProps) {
             {memo.due_date}
           </span>
         )}
-      </span>
+        </span>
+      </Tooltip>
       <button
         onClick={onDismiss}
         aria-label="忽略这条备忘"

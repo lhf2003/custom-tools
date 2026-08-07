@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Copy, Check, Languages, X, ChevronDown, ChevronUp } from 'lucide-react';
+import { Tooltip } from '@/components/Tooltip';
 
 /** translate:chunk / done / error 事件的统一壳（与 Rust 端 TranslateEventPayload 对应） */
 interface TranslateEventPayload {
@@ -172,13 +173,14 @@ export default function TranslateToast() {
             译成{targetLang}
           </span>
         )}
-        <button
-          onClick={hideWindow}
-          className="text-app-text-tertiary hover:text-app-text-primary transition-colors cursor-pointer shrink-0"
-          title="关闭（Esc）"
-        >
-          <X size={14} />
-        </button>
+        <Tooltip content="关闭（Esc）" wrapperClassName="shrink-0">
+          <button
+            onClick={hideWindow}
+            className="text-app-text-tertiary hover:text-app-text-primary transition-colors cursor-pointer shrink-0"
+          >
+            <X size={14} />
+          </button>
+        </Tooltip>
       </div>
 
       {isIdle ? (

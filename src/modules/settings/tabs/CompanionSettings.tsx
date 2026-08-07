@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useToastStore } from '@/stores/toastStore';
+import { Tooltip } from '@/components/Tooltip';
 import { SettingGroup, SettingRow, Toggle } from '../components/SettingsPrimitives';
 import { CustomSelect } from '../components/CustomSelect';
 import { MemoryCenter } from './MemoryCenter';
@@ -358,22 +359,25 @@ export function CompanionSettings() {
                         className="flex items-center gap-2 rounded-lg px-2 py-1.5 -mx-2 hover:bg-white/5 transition-colors"
                       >
                         <div className="flex-1 min-w-0">
-                          <div className="text-app-text-secondary text-xs truncate" title={p.description}>
-                            {p.description}
-                          </div>
+                          <Tooltip content={p.description} wrapperClassName="w-full truncate">
+                            <div className="text-app-text-secondary text-xs">
+                              {p.description}
+                            </div>
+                          </Tooltip>
                           <div className="text-app-text-disabled text-xs mt-0.5">
                             置信度 {Math.round(p.confidence * 100)}% · 观察到 {p.occurrences} 次 ·{' '}
                             <span className={status.color}>{status.text}</span>
                           </div>
                         </div>
                         {p.status !== 'dismissed' && (
-                          <button
-                            onClick={() => handleDismissPattern(p.id)}
-                            className="text-app-text-disabled hover:text-app-status-error-text transition-colors cursor-pointer shrink-0"
-                            title="不再使用此模式"
-                          >
-                            <Trash2 size={13} />
-                          </button>
+                          <Tooltip content="不再使用此模式" wrapperClassName="shrink-0">
+                            <button
+                              onClick={() => handleDismissPattern(p.id)}
+                              className="text-app-text-disabled hover:text-app-status-error-text transition-colors cursor-pointer shrink-0"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </Tooltip>
                         )}
                       </div>
                     );

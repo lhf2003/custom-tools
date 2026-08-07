@@ -3,6 +3,7 @@
 
 import { useId, type ReactNode } from 'react';
 import { evalChecks, toDisplayString } from '../functions';
+import { Tooltip } from '@/components/Tooltip';
 import { RenderComponent, useA2ui } from '../render';
 import type { A2uiAction, A2uiComponentDef } from '../types';
 
@@ -79,18 +80,19 @@ function Button({ def }: { def: A2uiComponentDef }) {
         : 'border border-white/15 bg-white/5 hover:bg-white/10 rounded-lg px-3 py-1.5';
 
   return (
-    <button
-      disabled={!checkResult.ok}
-      title={checkResult.ok ? undefined : checkResult.message}
-      onClick={() => {
-        if (action?.event?.name) {
-          dispatchAction(action.event.name, action.event.context, label);
-        }
-      }}
-      className={`inline-flex items-center gap-1.5 text-sm transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${cls}`}
-    >
-      {child ? <RenderComponent id={child} /> : label}
-    </button>
+    <Tooltip content={checkResult.ok ? undefined : checkResult.message}>
+      <button
+        disabled={!checkResult.ok}
+        onClick={() => {
+          if (action?.event?.name) {
+            dispatchAction(action.event.name, action.event.context, label);
+          }
+        }}
+        className={`inline-flex items-center gap-1.5 text-sm transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${cls}`}
+      >
+        {child ? <RenderComponent id={child} /> : label}
+      </button>
+    </Tooltip>
   );
 }
 

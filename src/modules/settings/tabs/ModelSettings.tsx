@@ -672,10 +672,11 @@ export function ModelSettings() {
                                   </div>
                                 )}
                               </div>
-                              <div
-                                className="flex items-center gap-1 mr-1 flex-shrink-0"
-                                title="单价（人民币/百万 token），成本面板据此估算金额；缓存命中输入按缓存价计（未填则按输入价）；留空只统计 token"
+                              <Tooltip
+                                content="单价（人民币/百万 token），成本面板据此估算金额；缓存命中输入按缓存价计（未填则按输入价）；留空只统计 token"
+                                wrapperClassName="flex items-center gap-1 mr-1 flex-shrink-0"
                               >
+                                <div className="flex items-center gap-1 mr-1 flex-shrink-0">
                                 <input
                                   key={`in-${model.id}-${model.input_price_per_m ?? ''}`}
                                   type="text"
@@ -703,7 +704,8 @@ export function ModelSettings() {
                                   onBlur={(e) => handlePriceBlur(model, 'output', e.target.value)}
                                   className={`w-14 ${smallInputClass}`}
                                 />
-                              </div>
+                                </div>
+                              </Tooltip>
                               <label className="flex items-center gap-2 cursor-pointer flex-shrink-0">
                                 <input
                                   type="checkbox"
