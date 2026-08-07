@@ -2,8 +2,7 @@
 //! 每手册一个 .md，frontmatter（极简单行 key: value，不引 yaml 依赖）声明元数据：
 //!   name（必填，与文件名一致）/ description / trigger_description（有值才进聊天能力目录）
 //!   / schedule（daily HH:MM[,HH:MM…] | weekly <mon..sun> HH:MM，可选）/ enabled（缺省 true）
-//! 启动时播种；旧 companion/agents/ 目录一次性迁移（内容搬进 skills/ 后整目录删除）。
-//! 聊天与调度循环每次现扫目录——用户改文件当轮生效，无需重启。
+//! 启动时播种；聊天与调度循环每次现扫目录——用户改文件当轮生效，无需重启。
 
 use std::path::{Path, PathBuf};
 
@@ -14,7 +13,7 @@ const DEFAULT_RECALL: &str = include_str!("skills/recall.md");
 const DEFAULT_DIARY: &str = include_str!("skills/diary.md");
 const DEFAULT_ERROR_ANALYSIS: &str = include_str!("skills/error-analysis.md");
 
-/// (手册名, 内嵌默认版)——播种/迁移/回退共用的单一清单
+/// (手册名, 内嵌默认版)——播种/回退共用的单一清单
 const EMBEDDED_SKILLS: &[(&str, &str)] = &[
     ("reporter", DEFAULT_REPORTER),
     ("analyst", DEFAULT_ANALYST),
@@ -127,36 +126,18 @@ pub fn apply_manual_content(app_data_dir: &Path, name: &str, content: &str) -> R
     .map_err(|e| format!("写入手册失败: {}", e))
 }
 
-/// 启动播种：skills/<name>.md 不存在时写入。
-/// 一次性迁移：v0.4 前手册在 companion/agents/——存在则把内容（用户可能有编辑）
-/// 前置 frontmatter 搬进 skills/，随后整目录物理删除，不留兼容路径。
+/// 启动播种：skills/<name>.md 不存在时写入内嵌默认版。
 pub fn seed_skills(app_data_dir: &Path) {
     let dir = skills_dir(app_data_dir);
     let _ = std::fs::create_dir_all(&dir);
-    let legacy = app_data_dir.join("companion").join("agents");
-    let legacy_exists = legacy.is_dir();
     for (name, default) in EMBEDDED_SKILLS {
         let target = dir.join(format!("{}.md", name));
         if target.exists() {
             continue;
         }
-        let content = if legacy_exists {
-            match std::fs::read_to_string(legacy.join(format!("{}.md", name))) {
-                Ok(old) => match split_frontmatter_raw(default) {
-                    Some((header, _)) => format!("{}\n\n{}", header.trim_end(), old.trim()),
-                    None => old,
-                },
-                Err(_) => default.to_string(),
-            }
-        } else {
-            default.to_string()
-        };
-        if let Err(e) = std::fs::write(&target, content) {
+        if let Err(e) = std::fs::write(&target, default) {
             log::warn!("播种手册 {} 失败: {}", name, e);
         }
-    }
-    if legacy_exists {
-        let _ = std::fs::remove_dir_all(&legacy);
     }
 }
 

@@ -35,14 +35,6 @@ impl Database {
             [],
         )?;
 
-        // Migration: 来源应用 exe 路径（显示名 + 图标均由此派生，老库补列）
-        ensure_column(
-            &self.conn,
-            "clipboard_history",
-            "source_exe",
-            "ALTER TABLE clipboard_history ADD COLUMN source_exe TEXT",
-        )?;
-
         // Create indexes
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_clipboard_created ON clipboard_history(created_at DESC)",
@@ -69,14 +61,6 @@ impl Database {
                 FOREIGN KEY (parent_id) REFERENCES notes(id) ON DELETE CASCADE
             )",
             [],
-        )?;
-
-        // Migration: add sort_order column if not exists
-        ensure_column(
-            &self.conn,
-            "notes",
-            "sort_order",
-            "ALTER TABLE notes ADD COLUMN sort_order INTEGER DEFAULT 0",
         )?;
 
         // Create index for sort_order
@@ -202,14 +186,6 @@ impl Database {
             [],
         )?;
 
-        // Migration: A2UI 界面卡片消息（content_type='a2ui' 时 content 为协议 JSON）
-        ensure_column(
-            &self.conn,
-            "chat_messages",
-            "content_type",
-            "ALTER TABLE chat_messages ADD COLUMN content_type TEXT NOT NULL DEFAULT 'markdown'",
-        )?;
-
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_chat_messages_session ON chat_messages(session_id)",
             [],
@@ -261,6 +237,9 @@ impl Database {
                 is_active BOOLEAN DEFAULT 0,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                input_price_per_m REAL,
+                output_price_per_m REAL,
+                cached_input_price_per_m REAL,
                 UNIQUE(provider_id, model_id)
             )",
             [],
@@ -287,58 +266,6 @@ impl Database {
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )",
             [],
-        )?;
-
-        // Migration: add thinking_mode column if not exists (for existing tables)
-        ensure_column(
-            &self.conn,
-            "llm_scene_configs",
-            "thinking_mode",
-            "ALTER TABLE llm_scene_configs ADD COLUMN thinking_mode BOOLEAN DEFAULT 0",
-        )?;
-
-        // Migration: 场景思考强度（reasoning_effort：low/medium/high，DeepSeek/OpenAI 系生效）
-        ensure_column(
-            &self.conn,
-            "llm_scene_configs",
-            "reasoning_effort",
-            "ALTER TABLE llm_scene_configs ADD COLUMN reasoning_effort TEXT DEFAULT 'medium'",
-        )?;
-
-        // Migration: 模型单价（每百万 token 人民币，可选；填了成本面板才算金额）
-        ensure_column(
-            &self.conn,
-            "llm_models",
-            "input_price_per_m",
-            "ALTER TABLE llm_models ADD COLUMN input_price_per_m REAL",
-        )?;
-        ensure_column(
-            &self.conn,
-            "llm_models",
-            "output_price_per_m",
-            "ALTER TABLE llm_models ADD COLUMN output_price_per_m REAL",
-        )?;
-        // Migration: 缓存命中输入单价（人民币/百万 token，可选；填了成本计算按缓存价算命中部分）
-        ensure_column(
-            &self.conn,
-            "llm_models",
-            "cached_input_price_per_m",
-            "ALTER TABLE llm_models ADD COLUMN cached_input_price_per_m REAL",
-        )?;
-
-        // Migration: 聊天历史增量摘要（回退通道上下文组装用）——
-        // summary = 已压缩的历史摘要；summarized_up_to = 摘要覆盖到的消息 id 水位
-        ensure_column(
-            &self.conn,
-            "chat_sessions",
-            "summary",
-            "ALTER TABLE chat_sessions ADD COLUMN summary TEXT NOT NULL DEFAULT ''",
-        )?;
-        ensure_column(
-            &self.conn,
-            "chat_sessions",
-            "summarized_up_to",
-            "ALTER TABLE chat_sessions ADD COLUMN summarized_up_to INTEGER NOT NULL DEFAULT 0",
         )?;
 
         // LLM 调用观测日志：每次调用登记来源/通道/token/耗时/成本（成本面板数据源）
@@ -381,42 +308,6 @@ impl Database {
             [],
         )?;
 
-        // Migration: 统计页观测增强——缓存命中 token 与工具调用次数
-        ensure_column(
-            &self.conn,
-            "llm_call_logs",
-            "cached_input_tokens",
-            "ALTER TABLE llm_call_logs ADD COLUMN cached_input_tokens INTEGER DEFAULT 0",
-        )?;
-        ensure_column(
-            &self.conn,
-            "llm_call_logs",
-            "tool_call_count",
-            "ALTER TABLE llm_call_logs ADD COLUMN tool_call_count INTEGER DEFAULT 0",
-        )?;
-
-        // Migration: 成本单位美元 → 人民币（cost_usd → cost_cny）。
-        // 改名成功即首次迁移（之后启动列已不存在会报错跳过）：历史美元成本清零、
-        // 已填美元单价清空——用户重新按人民币填单价，成本重新累计。
-        let cost_col_renamed = self
-            .conn
-            .execute(
-                "ALTER TABLE llm_call_logs RENAME COLUMN cost_usd TO cost_cny",
-                [],
-            )
-            .is_ok();
-        if cost_col_renamed {
-            self.conn
-                .execute("UPDATE llm_call_logs SET cost_cny = 0", [])?;
-            self.conn.execute(
-                "UPDATE llm_models SET input_price_per_m = NULL, output_price_per_m = NULL",
-                [],
-            )?;
-        }
-
-        // Migration: 老库的 CHECK 约束不含 'companion'，SQLite 无法改 CHECK，需重建表
-        self.migrate_scene_configs_check()?;
-
         // Insert default scene configs if not exists (provider_id and model_id are NULL initially)
         let default_scenes = [
             "chat",
@@ -439,141 +330,6 @@ impl Database {
         Ok(())
     }
 
-    /// 一次性迁移：settings.db / shortcuts.db 两个独立小库并回 flowhub.db。
-    /// 合并成功后旧文件改名 .bak-YYYYMMDD 保留（不删，防迁移有遗漏时无据可查）；
-    /// 失败只记日志不阻断启动——旧文件还在，下次启动自动重试。
-    fn migrate_legacy_db_files(&self, app_dir: &Path) {
-        let stamp = chrono::Local::now().format("%Y%m%d");
-        for file_name in ["settings.db", "shortcuts.db"] {
-            let legacy_path = app_dir.join(file_name);
-            if !legacy_path.exists() {
-                continue;
-            }
-            if let Err(e) = self.merge_legacy_db(&legacy_path, file_name) {
-                log::error!(
-                    "合并 {} 进 flowhub.db 失败（保留原文件，下次启动重试）: {}",
-                    file_name,
-                    e
-                );
-                continue;
-            }
-            let bak_path = app_dir.join(format!("{}.bak-{}", file_name, stamp));
-            match fs::rename(&legacy_path, &bak_path) {
-                Ok(_) => log::info!(
-                    "{} 已并入 flowhub.db，原文件备份为 {}",
-                    file_name,
-                    bak_path.display()
-                ),
-                // 数据已合并，改名失败不致命；旧文件留着下次启动会幂等重合并
-                Err(e) => log::warn!("旧库 {} 改名备份失败: {}", file_name, e),
-            }
-        }
-    }
-
-    /// 把单个旧库文件的数据并入主库（settings.db 是当前用户偏好的真值源，
-    /// 同键覆盖主库化石默认值；shortcuts 全量并入覆盖表）
-    fn merge_legacy_db(&self, legacy_path: &Path, file_name: &str) -> Result<()> {
-        self.conn.execute(
-            "ATTACH DATABASE ?1 AS legacy",
-            [legacy_path.to_string_lossy().as_ref()],
-        )?;
-        let merge_result = match file_name {
-            "settings.db" => self.conn.execute(
-                "INSERT OR REPLACE INTO settings (key, value) SELECT key, value FROM legacy.settings",
-                [],
-            ),
-            "shortcuts.db" => self.conn.execute(
-                "INSERT OR REPLACE INTO shortcuts (id, custom_keys, enabled, created_at, updated_at)
-                 SELECT id, custom_keys, enabled, created_at, updated_at FROM legacy.shortcuts",
-                [],
-            ),
-            _ => unreachable!("migrate_legacy_db_files 只传入两个固定文件名"),
-        };
-        let detach_result = self.conn.execute("DETACH DATABASE legacy", []);
-        merge_result?;
-        detach_result?;
-        Ok(())
-    }
-
-    /// 老库 llm_scene_configs 的 CHECK 场景值列表不全（缺 companion / memory_extraction），
-    /// SQLite 无法修改 CHECK，需 RENAME → 重建 → 显式列名拷贝 → DROP。
-    /// 失败只记日志，不阻断启动（后果仅是新场景行插不进去，不丢老数据）。
-    fn migrate_scene_configs_check(&self) -> Result<()> {
-        let table_sql: Option<String> = self
-            .conn
-            .query_row(
-                "SELECT sql FROM sqlite_master WHERE type='table' AND name='llm_scene_configs'",
-                [],
-                |row| row.get(0),
-            )
-            .ok();
-
-        let needs_migration = table_sql
-            .map(|sql| !sql.contains("'diary'"))
-            .unwrap_or(false);
-        if !needs_migration {
-            return Ok(());
-        }
-
-        let result = (|| -> Result<()> {
-            let tx = self.conn.unchecked_transaction()?;
-            tx.execute_batch(
-                "ALTER TABLE llm_scene_configs RENAME TO llm_scene_configs_old;
-                 CREATE TABLE llm_scene_configs (
-                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                     scene TEXT NOT NULL UNIQUE CHECK (scene IN ('chat', 'qa', 'translate', 'companion', 'memory_extraction', 'diary')),
-                     provider_id INTEGER REFERENCES llm_providers(id),
-                     model_id TEXT,
-                     thinking_mode BOOLEAN DEFAULT 0,
-                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                 );
-                 INSERT INTO llm_scene_configs (id, scene, provider_id, model_id, thinking_mode, updated_at)
-                     SELECT id, scene, provider_id, model_id, thinking_mode, updated_at
-                     FROM llm_scene_configs_old;
-                 DROP TABLE llm_scene_configs_old;",
-            )?;
-            tx.commit()
-        })();
-
-        match result {
-            Ok(_) => log::info!("llm_scene_configs 迁移完成：CHECK 约束已包含 diary"),
-            Err(e) => log::error!("llm_scene_configs 迁移失败（旧约束保留）: {}", e),
-        }
-        Ok(())
-    }
-}
-
-/// 幂等迁移：表已有目标列则跳过，没有才执行 ALTER。
-/// 旧写法 `let _ = ALTER TABLE ADD COLUMN` 每次启动都执行必然失败的语句
-/// （列已存在报 duplicate column name 被吞掉），且吞错会掩盖真实迁移失败——
-/// 一旦因磁盘/锁错误没加上列，日志里毫无痕迹，运行时才报 no such column。
-/// 失败只记日志不阻断启动（列缺失的后果由后续代码显式暴露）。
-pub fn ensure_column(
-    conn: &Connection,
-    table: &str,
-    column: &str,
-    alter_ddl: &str,
-) -> Result<bool> {
-    let exists: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM pragma_table_info(?1) WHERE name = ?2",
-        [table, column],
-        |row| row.get(0),
-    )?;
-
-    if exists > 0 {
-        return Ok(false);
-    }
-
-    match conn.execute(alter_ddl, []) {
-        Ok(_) => {
-            log::info!("Migrated: added column {}.{}", table, column);
-            Ok(true)
-        }
-        Err(e) => {
-            log::error!("Migration failed: add column {}.{}: {}", table, column, e);
-            Ok(false)
-        }
-    }
 }
 
 pub fn init(app_handle: &tauri::AppHandle) -> Result<()> {
@@ -590,7 +346,6 @@ pub fn init(app_handle: &tauri::AppHandle) -> Result<()> {
 
     let db = Database::new(conn);
     db.init_tables()?;
-    db.migrate_legacy_db_files(&app_dir);
 
     // Store database connection in app state
     app_handle.manage(DatabaseState(db_path));
@@ -622,7 +377,6 @@ fn get_app_dir(app_handle: &tauri::AppHandle) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::DB_FILE_NAME;
 
     fn setup_chat_tables(conn: &Connection) {
         conn.execute_batch(
@@ -685,106 +439,4 @@ mod tests {
         assert!(result.is_err(), "向已删除/不存在的会话写消息必须被外键拒绝");
     }
 
-    /// 旧版独立小库（settings.db / shortcuts.db）并入主库：
-    /// 行合并、主库既有键不受损、旧文件改名 .bak 且不再被二次迁移
-    #[test]
-    fn legacy_db_files_merge_into_main_db() {
-        let dir = std::env::temp_dir().join(format!(
-            "flowhub_migrate_test_{}_{}",
-            std::process::id(),
-            chrono::Local::now().timestamp_nanos_opt().unwrap_or(0)
-        ));
-        fs::create_dir_all(&dir).unwrap();
-
-        // 造旧 settings.db：两行用户偏好
-        let legacy_settings = Connection::open(dir.join("settings.db")).unwrap();
-        legacy_settings
-            .execute_batch(
-                "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-                 INSERT INTO settings VALUES ('debug_mode', 'true'), ('startup_launch', 'true');",
-            )
-            .unwrap();
-        drop(legacy_settings);
-
-        // 造旧 shortcuts.db：一行自定义快捷键
-        let legacy_shortcuts = Connection::open(dir.join("shortcuts.db")).unwrap();
-        legacy_shortcuts
-            .execute_batch(
-                "CREATE TABLE shortcuts (
-                    id TEXT PRIMARY KEY, custom_keys TEXT, enabled BOOLEAN DEFAULT 1,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                 );
-                 INSERT INTO shortcuts (id, custom_keys, enabled) VALUES ('toggle_window', 'Ctrl+Alt+Space', 1);",
-            )
-            .unwrap();
-        drop(legacy_shortcuts);
-
-        // 主库：建表 + 预置一个陪伴模块的键（验证合并不误伤）
-        let conn = Connection::open(dir.join(DB_FILE_NAME)).unwrap();
-        let db = Database::new(conn);
-        db.init_tables().unwrap();
-        db.conn
-            .execute(
-                "INSERT OR REPLACE INTO settings (key, value) VALUES ('daily_focus', '专注写代码')",
-                [],
-            )
-            .unwrap();
-
-        db.migrate_legacy_db_files(&dir);
-
-        // 旧库行并入
-        let debug_mode: String = db
-            .conn
-            .query_row(
-                "SELECT value FROM settings WHERE key = 'debug_mode'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(debug_mode, "true");
-        let startup: String = db
-            .conn
-            .query_row(
-                "SELECT value FROM settings WHERE key = 'startup_launch'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(startup, "true");
-        let custom_keys: String = db
-            .conn
-            .query_row(
-                "SELECT custom_keys FROM shortcuts WHERE id = 'toggle_window'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(custom_keys, "Ctrl+Alt+Space");
-
-        // 主库既有键完好
-        let focus: String = db
-            .conn
-            .query_row(
-                "SELECT value FROM settings WHERE key = 'daily_focus'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(focus, "专注写代码");
-
-        // 旧文件已改名 .bak-*，二次迁移幂等（文件不存在直接跳过）
-        assert!(!dir.join("settings.db").exists());
-        assert!(!dir.join("shortcuts.db").exists());
-        let baks: Vec<_> = fs::read_dir(&dir)
-            .unwrap()
-            .flatten()
-            .filter(|e| e.file_name().to_string_lossy().contains(".bak-"))
-            .collect();
-        assert_eq!(baks.len(), 2, "两个旧库都应改名备份");
-        db.migrate_legacy_db_files(&dir);
-
-        drop(db);
-        let _ = fs::remove_dir_all(&dir);
-    }
 }

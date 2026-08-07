@@ -186,12 +186,7 @@ impl ShortcutManager {
         let rows = stmt.query_map([], |row| {
             let id: String = row.get(0)?;
             let custom_keys: Option<String> = row.get(1)?;
-            // 兼容旧数据：enabled 可能是整数 0/1 或文本 "true"/"false"
-            let enabled = match row.get::<_, rusqlite::types::Value>(2)? {
-                rusqlite::types::Value::Integer(i) => i != 0,
-                rusqlite::types::Value::Text(ref s) => s != "false" && s != "0",
-                _ => true,
-            };
+            let enabled: bool = row.get(2)?;
             Ok((id, custom_keys, enabled))
         })?;
 

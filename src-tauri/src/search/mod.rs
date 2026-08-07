@@ -181,10 +181,6 @@ impl SearchIndex {
 
             if app_cache::has_cache(&conn)? {
                 let entries = app_cache::load_all(&conn)?;
-                // 历史脏数据修复：旧版本缓存里跨来源重复条目（同 target /
-                // 同 name 不同 path），按与 collect_all_apps 一致的规则去重，
-                // 否则重启后短时间内仍能看到"两个一模一样的应用"
-                let entries = dedup_cache_entries(entries);
                 self.apps = entries.into_iter().map(AppItem::from).collect();
                 self.indexed = true;
                 self.merge_system_features();
@@ -693,55 +689,6 @@ fn parse_shortcut(path: &Path) -> Option<(AppItem, String)> {
     };
 
     Some((app, target_path))
-}
-
-/// 缓存条目按 collect_all_apps 的双重去重规则去重（target 维度 + name 维度），
-/// 冲突时优先保留 .lnk 条目（启动行为与开始菜单一致）。用于修复历史缓存
-/// 里已存在的跨来源重复记录——全量扫描会在 24h 内用 replace_batch 重建缓存，
-/// 但去重应即时生效，不依赖重建时机。
-fn dedup_cache_entries(entries: Vec<AppCacheEntry>) -> Vec<AppCacheEntry> {
-    fn is_lnk(path: &str) -> bool {
-        path.to_lowercase().ends_with(".lnk")
-    }
-
-    // 第一轮：按 target_path 去重
-    let mut by_target: Vec<AppCacheEntry> = Vec::new();
-    let mut target_idx: HashMap<String, usize> = HashMap::new();
-    for entry in entries {
-        let key = entry.target_path.to_lowercase();
-        match target_idx.get(&key) {
-            None => {
-                target_idx.insert(key, by_target.len());
-                by_target.push(entry);
-            }
-            Some(&i) => {
-                // .lnk 优先：新条目是 .lnk 且已有条目不是 → 替换
-                if !is_lnk(&by_target[i].path) && is_lnk(&entry.path) {
-                    by_target[i] = entry;
-                }
-            }
-        }
-    }
-
-    // 第二轮：按 name 去重
-    let mut by_name: Vec<AppCacheEntry> = Vec::new();
-    let mut name_idx: HashMap<String, usize> = HashMap::new();
-    for entry in by_target {
-        let key = entry.name.to_lowercase();
-        match name_idx.get(&key) {
-            None => {
-                name_idx.insert(key, by_name.len());
-                by_name.push(entry);
-            }
-            Some(&i) => {
-                if !is_lnk(&by_name[i].path) && is_lnk(&entry.path) {
-                    by_name[i] = entry;
-                }
-            }
-        }
-    }
-
-    by_name
 }
 
 /// Read custom scan directories from the database settings table.

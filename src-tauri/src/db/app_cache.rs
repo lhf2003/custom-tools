@@ -22,44 +22,11 @@ pub fn init_table(conn: &Connection) -> Result<()> {
             last_modified INTEGER NOT NULL,
             is_valid BOOLEAN DEFAULT 1,
             pinyin_initials TEXT DEFAULT '',
+            description TEXT DEFAULT '',
+            description_reminded_at INTEGER,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )",
-        [],
-    )?;
-
-    // Migration: add pinyin_initials column if not exists
-    super::ensure_column(
-        conn,
-        "app_cache",
-        "pinyin_initials",
-        "ALTER TABLE app_cache ADD COLUMN pinyin_initials TEXT DEFAULT ''",
-    )?;
-
-    // Migration: 应用描述（模型回填 / 用户标注），拼接分析摘要时随进程名带给 LLM
-    super::ensure_column(
-        conn,
-        "app_cache",
-        "description",
-        "ALTER TABLE app_cache ADD COLUMN description TEXT DEFAULT ''",
-    )?;
-    // Migration: 未知进程提醒标记（弹过即不再提醒，填了描述后自然失效）
-    super::ensure_column(
-        conn,
-        "app_cache",
-        "description_reminded_at",
-        "ALTER TABLE app_cache ADD COLUMN description_reminded_at INTEGER",
-    )?;
-
-    // 修复存量脏数据：旧版本把 is_valid 绑定为 TEXT 'true'/'false'（Rust bool 的
-    // to_string()），查询端全部用整数比较 is_valid = 1/0——TEXT 永不匹配，缓存
-    // 从未命中、每次启动全量扫描。把文本转回整数后新代码才能命中缓存。
-    conn.execute(
-        "UPDATE app_cache SET is_valid = 1 WHERE is_valid = 'true'",
-        [],
-    )?;
-    conn.execute(
-        "UPDATE app_cache SET is_valid = 0 WHERE is_valid = 'false'",
         [],
     )?;
 

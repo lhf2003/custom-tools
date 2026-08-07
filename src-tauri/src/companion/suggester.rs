@@ -22,7 +22,6 @@ pub const TYPE_APP_UNKNOWN: &str = "app_unknown";
 
 /// 纯提示型：accept 无后续动作，看过即终结——
 /// 卡片不渲染按钮，推送即落 seen（不依赖前端回调，应用被杀也不留 pending 残渣）。
-/// 与 db.rs 迁移扫描共用这一处定义，新增提示型只改这里。
 pub const INFO_TYPES: &[&str] = &[
     TYPE_LONG_WORK_BREAK,
     TYPE_DAILY_DIGEST,

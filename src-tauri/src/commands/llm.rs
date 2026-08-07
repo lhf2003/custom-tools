@@ -7,7 +7,7 @@ use crate::llm_provider::db::LlmProviderDb;
 use crate::llm_provider::models::Scene;
 use tauri::{Manager, State};
 
-/// 测试大模型连接（使用旧版设置）
+/// 测试大模型连接（通用 KV 设置通道；新建提供商走 test_llm_provider_connection）
 #[tauri::command]
 pub async fn test_llm_connection(
     state: State<'_, SettingsState>,
@@ -30,7 +30,7 @@ pub async fn test_llm_connection(
         images: None,
     }];
 
-    // 旧版设置：从 base_url 推断 provider_type
+    // 通用 KV 设置无 provider_type 字段：从 base_url 推断
     let provider_type = if base_url.contains("ollama") || base_url.contains("11434") {
         "ollama"
     } else {

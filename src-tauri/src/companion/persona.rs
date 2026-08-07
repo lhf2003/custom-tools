@@ -65,7 +65,7 @@ pub fn save_attitude(app_data_dir: &Path, content: &str) -> Result<(), String> {
 
 /// 启动时一次性播种全部人格文件（缺失才写，不覆盖用户编辑）。
 /// 各 load_* 是懒播种——文件只在对应功能首次运行时出现；
-/// 统一在陪伴模块启动时兜底。手册播种走 skills::seed_skills（含旧 agents/ 迁移）。
+/// 统一在陪伴模块启动时兜底。手册播种走 skills::seed_skills。
 pub fn seed_all(app_data_dir: &Path) {
     let _ = load(app_data_dir);
     let _ = load_tool(app_data_dir);
