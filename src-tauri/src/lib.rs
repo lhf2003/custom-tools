@@ -77,6 +77,7 @@ pub mod notes;
 pub mod password;
 pub mod search;
 pub mod settings;
+pub mod translate;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -412,6 +413,30 @@ pub fn run() {
                 }
             }
 
+            // 预创建划词翻译浮窗（隐藏），降低触发时的弹出延迟。透明置顶无边框小窗，
+            // 展示/定位逻辑在 translate 模块（get_cursor_pos + get_monitor_at_cursor）。
+            {
+                let translate_toast = tauri::WebviewWindowBuilder::new(
+                    app,
+                    "translate-toast",
+                    tauri::WebviewUrl::App("/translate-toast.html".into()),
+                )
+                .title("划词翻译")
+                .decorations(false)
+                .transparent(true)
+                .always_on_top(true)
+                .skip_taskbar(true)
+                .shadow(false)
+                .focused(false)
+                .resizable(false)
+                .visible(false)
+                .build();
+
+                if let Err(e) = translate_toast {
+                    log::warn!("Failed to pre-create translate toast window: {}", e);
+                }
+            }
+
             // 启动陪伴模块（窗口活动采集 + 情境建议 + LLM 习惯分析）
             {
                 let companion_db_path = app.path().app_data_dir().unwrap().join(DB_FILE_NAME);
@@ -470,6 +495,8 @@ pub fn run() {
             commands::plugin_gen::write_plugin_preview,
             commands::plugin_gen::install_preview_plugin,
             commands::plugin_gen::clear_plugin_preview,
+            // 划词翻译
+            translate::translate_text,
             commands::password::is_password_manager_unlocked,
             commands::password::unlock_password_manager,
             commands::password::lock_password_manager,
@@ -650,6 +677,19 @@ fn setup_window_handlers(app_handle: &tauri::AppHandle) {
 
     // Store the ignore_blur flag in app state so toggle_main_window can access it
     app_handle.manage(WindowFocusState { ignore_blur });
+
+    // 划词翻译浮窗：失焦即隐藏（点外部 = 看完译文走人）。窗口无边框透明，
+    // 不做 ignore_blur 处理——浮窗必须即时响应失焦，否则会滞留在屏幕上。
+    if let Some(toast) = app_handle.get_webview_window("translate-toast") {
+        let toast_inner = toast.clone();
+        toast.on_window_event(move |event| {
+            if let tauri::WindowEvent::Focused(focused) = event {
+                if !focused {
+                    let _ = toast_inner.hide();
+                }
+            }
+        });
+    }
 }
 
 // State to track window focus behavior

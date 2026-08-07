@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "translate-toast",
+  "description": "划词翻译浮窗的最小权限集（事件监听 + 窗口隐藏/拖动）",
+  "windows": [
+    "translate-toast"
+  ],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:event:allow-listen",
+    "core:window:default",
+    "core:window:allow-hide",
+    "core:window:allow-start-dragging"
+  ]
+}

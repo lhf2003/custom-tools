@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import {
   Bot,
   Plus,
@@ -24,6 +25,7 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import { SettingGroup, SettingRow, Toggle } from '../components/SettingsPrimitives';
 import { CustomSelect, type SelectGroup } from '../components/CustomSelect';
 import { LlmObserveSection } from './stats/LlmObserveSection';
+import { DEFAULT_TARGET_LANG, TARGET_LANG_KEY, TARGET_LANG_OPTIONS } from '@/modules/translate/constants';
 
 // Provider type options
 const PROVIDER_TYPES: { value: ProviderType; label: string; baseUrl: string; apiKeyRequired: boolean }[] = [
@@ -95,6 +97,16 @@ export function ModelSettings() {
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
   const [testingProvider, setTestingProvider] = useState<number | null>(null);
   const [refreshingProvider, setRefreshingProvider] = useState<number | null>(null);
+
+  // 划词翻译目标语言（默认值；翻译视图下拉与其共用同一 KV）
+  const [targetLang, setTargetLang] = useState(DEFAULT_TARGET_LANG);
+  useEffect(() => {
+    invoke<string | null>('get_setting', { key: TARGET_LANG_KEY })
+      .then((v) => {
+        if (v) setTargetLang(v);
+      })
+      .catch(() => {});
+  }, []);
 
   // Claude Code 全局配置（文本输入本地编辑，onBlur 提交）
   const {
@@ -840,6 +852,23 @@ export function ModelSettings() {
                   className="w-20"
                   menuClassName="w-24"
                 />
+
+                {/* 翻译场景专属：目标语言（划词翻译默认目标语言） */}
+                {scene === 'translate' && (
+                  <CustomSelect
+                    value={targetLang}
+                    options={TARGET_LANG_OPTIONS.map((lang) => ({ value: lang, label: lang }))}
+                    onChange={(value) => {
+                      setTargetLang(value);
+                      invoke('set_setting', { key: TARGET_LANG_KEY, value }).catch((e: unknown) => {
+                        alert(`设置目标语言失败: ${e}`);
+                      });
+                    }}
+                    placeholder="目标语言"
+                    className="w-24"
+                    menuClassName="w-28"
+                  />
+                )}
               </div>
             </div>
           );

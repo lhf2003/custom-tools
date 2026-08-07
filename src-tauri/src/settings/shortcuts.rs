@@ -39,6 +39,7 @@ pub enum ShortcutAction {
     OpenPasswords,
     OpenSettings,
     OpenEverything,
+    TranslateSelection,
 }
 
 impl ShortcutAction {
@@ -50,6 +51,7 @@ impl ShortcutAction {
             ShortcutAction::OpenPasswords => "open_passwords",
             ShortcutAction::OpenSettings => "open_settings",
             ShortcutAction::OpenEverything => "open_everything",
+            ShortcutAction::TranslateSelection => "translate_selection",
         }
     }
 
@@ -61,6 +63,7 @@ impl ShortcutAction {
             "open_passwords" => Some(ShortcutAction::OpenPasswords),
             "open_settings" => Some(ShortcutAction::OpenSettings),
             "open_everything" => Some(ShortcutAction::OpenEverything),
+            "translate_selection" => Some(ShortcutAction::TranslateSelection),
             _ => None,
         }
     }
@@ -114,6 +117,14 @@ pub fn get_default_shortcuts() -> Vec<ShortcutConfig> {
             name: "打开文件搜索".to_string(),
             description: "快速访问文件搜索（Everything）".to_string(),
             default_keys: "Ctrl+Shift+F".to_string(),
+            custom_keys: None,
+            enabled: true,
+        },
+        ShortcutConfig {
+            id: "translate_selection".to_string(),
+            name: "划词翻译".to_string(),
+            description: "翻译当前选中的文本".to_string(),
+            default_keys: "Ctrl+Shift+T".to_string(),
             custom_keys: None,
             enabled: true,
         },
@@ -211,6 +222,7 @@ impl ShortcutManager {
             "open_everything",
             "open_settings",
             "open_passwords",
+            "translate_selection",
         ];
         let mut configs: Vec<_> = self.configs.values().cloned().collect();
         configs.sort_by_key(|c| {
@@ -588,6 +600,10 @@ fn handle_shortcut_action(app_handle: &AppHandle, action_id: &str) {
             }
             crate::emit_window_shown(app_handle);
             let _ = app_handle.emit("shortcut:open_module", plugin_id);
+        }
+        // 划词翻译：捕获选区 → 弹浮窗 → 流式翻译（不碰主窗口，前台焦点留在原应用）
+        "translate_selection" => {
+            crate::translate::trigger_selection_translate(app_handle);
         }
         "open_clipboard" | "open_notes" | "open_passwords" | "open_settings"
         | "open_everything" => {
