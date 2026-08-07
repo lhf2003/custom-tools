@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import { parse as parseJsonc, type ParseError } from 'jsonc-parser';
 import { useAppStore } from '@/stores/appStore';
 import { useToastStore } from '@/stores/toastStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import { useSearch } from '@/hooks/useSearch';
 import type { ViewMode } from '@/types';
 import { safeInvoke, debouncedResize } from '../../utils/tauri';
@@ -35,8 +36,9 @@ function isBuiltInEntryId(id: string | undefined): id is string {
 }
 
 const ITEMS_PER_ROW = 9;
-// 折叠态搜索结果数：192px 窗口物理上只容一整行网格，超出交给「展开」
-const SEARCH_COLLAPSED_COUNT = ITEMS_PER_ROW;
+// 折叠态条数随视图切换（grid=ITEMS_PER_ROW / list=LIST_COLLAPSED_COUNT），见组件内 collapsedCount
+// 列表视图折叠态条数：行高 40px × 7 ≈ 网格两行高度，窗口无需增高
+const LIST_COLLAPSED_COUNT = 7;
 // 冷启动填充上限（无任何使用记录时展示索引应用）：取 9 列 × 2 行，
 // 避免一次渲染全部索引应用、触发大量图标提取
 const RECENT_FALLBACK_COUNT = 18;
@@ -53,8 +55,15 @@ export function LauncherView() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
 
+  // 结果排列视图：grid 横向网格（默认）| list 列表（设置页可切）
+  const launcherView = useSettingsStore((s) => s.launcher_view);
+  const isListView = launcherView === 'list';
+  // 折叠态条数与垂直导航步长随视图切换：网格按行跳（9），列表逐项走（1）
+  const collapsedCount = isListView ? LIST_COLLAPSED_COUNT : ITEMS_PER_ROW;
+  const rowStep = isListView ? 1 : ITEMS_PER_ROW;
+
   // Compute displayed items before using in effects
-  const displayedItems = isExpanded ? recentItems : recentItems.slice(0, ITEMS_PER_ROW);
+  const displayedItems = isExpanded ? recentItems : recentItems.slice(0, collapsedCount);
 
   // 合并内置工具与外部应用为结果集（别名参与匹配），渲染与键盘导航共用
   // 排序：最近使用过的应用（recentItems 即按使用排序）> 内置工具 > 其余应用
@@ -133,9 +142,9 @@ export function LauncherView() {
       : isSuggestMode
         ? suggestResults
         : searchQuery && !isExpanded
-          ? allResults.slice(0, SEARCH_COLLAPSED_COUNT)
+          ? allResults.slice(0, collapsedCount)
           : allResults,
-  [isNoteMode, isTriggerMode, triggerResult, isSuggestMode, suggestResults, searchQuery, isExpanded, allResults]);
+  [isNoteMode, isTriggerMode, triggerResult, isSuggestMode, suggestResults, searchQuery, isExpanded, allResults, collapsedCount]);
 
   // Reset selection when items change
   useEffect(() => {
@@ -417,8 +426,8 @@ export function LauncherView() {
       return;
     }
 
-    // 备忘模式无结果网格：左右键放行给输入框移动光标，不做网格导航
-    if (isNoteMode && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+    // 备忘模式无结果网格、列表视图无横向移动：左右键放行给输入框移动光标，不做网格导航
+    if ((isNoteMode || isListView) && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
       return;
     }
 
@@ -435,12 +444,12 @@ export function LauncherView() {
             focusGridItem(0);
             return 0;
           }
-          if (prev + ITEMS_PER_ROW > maxIndex) {
-            // 已在最后一行：溢出聚焦「展开」按钮
+          if (prev + rowStep > maxIndex) {
+            // 已在最后一行/最后一项：溢出聚焦「展开」按钮
             focusExpandButton();
             return -1;
           }
-          return prev + ITEMS_PER_ROW;
+          return prev + rowStep;
         });
         break;
       case 'ArrowUp':
@@ -452,12 +461,12 @@ export function LauncherView() {
             focusGridItem(maxIndex);
             return maxIndex;
           }
-          if (prev - ITEMS_PER_ROW < 0) {
-            // 已在第一行：溢出聚焦设置按钮
+          if (prev - rowStep < 0) {
+            // 已在第一行/第一项：溢出聚焦设置按钮
             focusSettingsButton();
             return -1;
           }
-          return prev - ITEMS_PER_ROW;
+          return prev - rowStep;
         });
         break;
       case 'ArrowRight':
@@ -532,7 +541,7 @@ export function LauncherView() {
         }
         break;
     }
-  }, [searchQuery, navItems, selectedIndex, setActiveView, addToast, setSearchQuery, searchApps, buildResults, handleItemClick, isNoteMode, noteContent, isTriggerMode, triggerMatch, triggerResult, isSuggestMode, triggerSuggestions, suggestResults, focusSettingsButton, focusExpandButton, focusGridItem]);
+  }, [searchQuery, navItems, selectedIndex, setActiveView, addToast, setSearchQuery, searchApps, buildResults, handleItemClick, isNoteMode, noteContent, isTriggerMode, triggerMatch, triggerResult, isSuggestMode, triggerSuggestions, suggestResults, focusSettingsButton, focusExpandButton, focusGridItem, isListView, rowStep]);
 
   return (
     <div
@@ -603,6 +612,8 @@ export function LauncherView() {
             allResults={allResults}
             visibleResults={navItems}
             isExpanded={isExpanded}
+            isListView={isListView}
+            collapsedCount={collapsedCount}
             onToggleExpand={() => setIsExpanded(!isExpanded)}
             expandBtnRef={expandBtnRef}
             selectedIndex={selectedIndex}
@@ -615,7 +626,7 @@ export function LauncherView() {
             {/* Section Header */}
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-semibold text-app-text-tertiary">最近使用</h2>
-              {recentItems.length > ITEMS_PER_ROW && (
+              {recentItems.length > collapsedCount && (
                 <button
                   ref={expandBtnRef}
                   onClick={() => setIsExpanded(!isExpanded)}
@@ -626,17 +637,33 @@ export function LauncherView() {
               )}
             </div>
 
-            {/* App Grid */}
-            <div id="launcher-listbox" className="grid grid-cols-9 gap-2 overflow-y-auto overflow-x-hidden" role="listbox" aria-label="最近使用">
+            {/* App Grid / List */}
+            <div
+              id="launcher-listbox"
+              className={`overflow-y-auto overflow-x-hidden ${isListView ? 'flex flex-col gap-0.5' : 'grid grid-cols-9 gap-2'}`}
+              role="listbox"
+              aria-label="最近使用"
+            >
               {displayedItems.map((item, index) => (
-                <ItemCard
-                  key={item.path}
-                  id={`launcher-option-${index}`}
-                  item={item}
-                  isSelected={index === selectedIndex}
-                  onClick={() => handleItemClick(item)}
-                  onHover={() => handleHoverSelect(index)}
-                />
+                isListView ? (
+                  <ItemRow
+                    key={item.path}
+                    id={`launcher-option-${index}`}
+                    item={item}
+                    isSelected={index === selectedIndex}
+                    onClick={() => handleItemClick(item)}
+                    onHover={() => handleHoverSelect(index)}
+                  />
+                ) : (
+                  <ItemCard
+                    key={item.path}
+                    id={`launcher-option-${index}`}
+                    item={item}
+                    isSelected={index === selectedIndex}
+                    onClick={() => handleItemClick(item)}
+                    onHover={() => handleHoverSelect(index)}
+                  />
+                )
               ))}
             </div>
           </section>
@@ -646,31 +673,12 @@ export function LauncherView() {
   );
 }
 
-// Item Card Component - handles both built-in tools and external apps
-function ItemCard({
-  item,
-  isSelected,
-  onClick,
-  onHover,
-  id,
-}: {
-  item: AppItemData;
-  isSelected: boolean;
-  onClick: () => void;
-  onHover?: () => void;
-  id?: string;
-}) {
+// Item Icon：内置工具 Lucide / 系统功能设置图标 / 外部应用提取图标 / 字母兜底，
+// 自带一次性提取守卫与模块级缓存；网格卡片（ItemCard）与列表行（ItemRow）共用
+function ItemIcon({ item, className = '' }: { item: AppItemData; className?: string }) {
   const [iconData, setIconData] = useState<string | null>(() => getCachedIcon(item.path) ?? null);
-  // 一次性守卫：每个卡片实例只尝试提取一次图标（null 结果不重试）
+  // 一次性守卫：每个图标实例只尝试提取一次（null 结果不重试）
   const iconRequestedRef = useRef(false);
-  const cardRef = useRef<HTMLButtonElement>(null);
-
-  // 键盘选中项滚动跟随，保证 Enter 作用的对象始终可见
-  useEffect(() => {
-    if (isSelected) {
-      cardRef.current?.scrollIntoView({ block: 'nearest' });
-    }
-  }, [isSelected]);
 
   // Load icon for external apps (with module-level cache to survive view switches)
   useEffect(() => {
@@ -698,99 +706,76 @@ function ItemCard({
     loadIcon();
   }, [item.path, item.isBuiltIn, item.name]);
 
-  // 选中态信号统一为白纱底 + 白色加粗文字（list-item-selected 规范），不做缩放；
-  // hover 变色只作用于未选中项，避免与选中态颜色分叉（鼠标/键盘选中必须同色）
-  // For built-in tools, use Lucide icon
+  const tileCls = `w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform ${className}`;
+
+  // 内置工具：Lucide 图标
   if (item.isBuiltIn) {
     const tool = getLauncherEntries().find(t => t.id === item.toolId);
     if (tool) {
       const Icon = tool.icon;
       return (
-        <button
-          ref={cardRef}
-          id={id}
-          onClick={onClick}
-          onMouseEnter={onHover}
-          role="option"
-          aria-selected={isSelected}
-          tabIndex={-1}
-          className={`flex flex-col items-center group py-2 rounded-lg transition-colors ${isSelected ? 'bg-white/10' : ''}`}
-        >
-          <div className="w-8 h-8 rounded-lg bg-app-bg-elevated flex items-center justify-center mb-1.5 group-hover:scale-105 transition-transform">
-            <Icon className="w-4 h-4 text-app-text-secondary" />
-          </div>
-          <span
-            title={item.name}
-            className={`line-clamp-2 text-xs w-full text-center transition-colors leading-tight ${isSelected ? 'text-app-text-primary font-medium' : 'text-app-text-tertiary group-hover:text-app-text-primary'}`}
-          >
-            {item.name}
-          </span>
-        </button>
+        <div className={`${tileCls} bg-app-bg-elevated`}>
+          <Icon className="w-4 h-4 text-app-text-secondary" />
+        </div>
       );
     }
   }
 
-  // Windows 系统功能（ms-settings: URI，后端 system_features 清单）：
-  // 统一设置图标，与内置工具同一视觉纪律，不请求 extract_app_icon
+  // Windows 系统功能（ms-settings: URI）：统一设置图标，同一视觉纪律
   if (item.path.startsWith('ms-settings:')) {
     return (
-      <button
-        ref={cardRef}
-        id={id}
-        onClick={onClick}
-        onMouseEnter={onHover}
-        role="option"
-        aria-selected={isSelected}
-        tabIndex={-1}
-        className={`flex flex-col items-center group py-2 rounded-lg transition-colors ${isSelected ? 'bg-white/10' : ''}`}
-      >
-        <div className="w-8 h-8 rounded-lg bg-app-bg-elevated flex items-center justify-center mb-1.5 group-hover:scale-105 transition-transform">
-          <Settings className="w-4 h-4 text-app-text-secondary" />
-        </div>
-        <span
-          title={item.name}
-          className={`line-clamp-2 text-xs w-full text-center transition-colors leading-tight ${isSelected ? 'text-app-text-primary font-medium' : 'text-app-text-tertiary group-hover:text-app-text-primary'}`}
-        >
-          {item.name}
-        </span>
-      </button>
+      <div className={`${tileCls} bg-app-bg-elevated`}>
+        <Settings className="w-4 h-4 text-app-text-secondary" />
+      </div>
     );
   }
 
-  // For external apps with loaded icon
+  // 外部应用：已提取的图标
   if (iconData) {
     return (
-      <button
-        ref={cardRef}
-        id={id}
-        onClick={onClick}
-        onMouseEnter={onHover}
-        role="option"
-        aria-selected={isSelected}
-        tabIndex={-1}
-        className={`flex flex-col items-center group py-2 rounded-lg transition-colors ${isSelected ? 'bg-white/10' : ''}`}
-      >
-        <div className="w-8 h-8 rounded-lg overflow-hidden mb-1.5 group-hover:scale-105 transition-transform">
-          <img
-            src={iconData}
-            alt={item.name}
-            className="w-full h-full object-contain"
-            draggable={false}
-          />
-        </div>
-        <span
-          title={item.name}
-          className={`line-clamp-2 text-xs w-full text-center transition-colors leading-tight ${isSelected ? 'text-app-text-primary font-medium' : 'text-app-text-tertiary group-hover:text-app-text-primary'}`}
-        >
-          {item.name}
-        </span>
-      </button>
+      <div className={`w-8 h-8 rounded-lg overflow-hidden flex-shrink-0 group-hover:scale-105 transition-transform ${className}`}>
+        <img
+          src={iconData}
+          alt={item.name}
+          className="w-full h-full object-contain"
+          draggable={false}
+        />
+      </div>
     );
   }
 
-  // For external apps without icon yet, use a quiet zinc letter tile
-  // （Zinc Monolith：不引入灰阶以外的表面色，与内置工具图标同一纪律）
-  const initial = item.name.charAt(0).toUpperCase();
+  // 无图标兜底：quiet zinc 字母 tile（Zinc Monolith：不引入灰阶以外的表面色）
+  return (
+    <div className={`${tileCls} bg-app-bg-elevated`}>
+      <span className="text-app-text-secondary text-xs font-bold">{item.name.charAt(0).toUpperCase()}</span>
+    </div>
+  );
+}
+
+// Item Card Component - 网格视图的纵向卡片（图标上、名称下）
+// 选中态信号统一为白纱底 + 白色加粗文字（list-item-selected 规范），不做缩放；
+// hover 变色只作用于未选中项，避免与选中态颜色分叉（鼠标/键盘选中必须同色）
+function ItemCard({
+  item,
+  isSelected,
+  onClick,
+  onHover,
+  id,
+}: {
+  item: AppItemData;
+  isSelected: boolean;
+  onClick: () => void;
+  onHover?: () => void;
+  id?: string;
+}) {
+  const cardRef = useRef<HTMLButtonElement>(null);
+
+  // 键盘选中项滚动跟随，保证 Enter 作用的对象始终可见
+  useEffect(() => {
+    if (isSelected) {
+      cardRef.current?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [isSelected]);
 
   return (
     <button
@@ -803,9 +788,7 @@ function ItemCard({
       tabIndex={-1}
       className={`flex flex-col items-center group py-2 rounded-lg transition-colors ${isSelected ? 'bg-white/10' : ''}`}
     >
-      <div className="w-8 h-8 rounded-lg bg-app-bg-elevated flex items-center justify-center mb-1.5 group-hover:scale-105 transition-transform">
-        <span className="text-app-text-secondary text-xs font-bold">{initial}</span>
-      </div>
+      <ItemIcon item={item} className="mb-1.5" />
       <span
         title={item.name}
         className={`line-clamp-2 text-xs w-full text-center transition-colors leading-tight ${isSelected ? 'text-app-text-primary font-medium' : 'text-app-text-tertiary group-hover:text-app-text-primary'}`}
@@ -816,12 +799,62 @@ function ItemCard({
   );
 }
 
+// Item Row Component - 列表视图的横向行（图标左、名称中、选中回车提示右），选中语言与网格一致
+function ItemRow({
+  item,
+  isSelected,
+  onClick,
+  onHover,
+  id,
+}: {
+  item: AppItemData;
+  isSelected: boolean;
+  onClick: () => void;
+  onHover?: () => void;
+  id?: string;
+}) {
+  const rowRef = useRef<HTMLButtonElement>(null);
+
+  // 键盘选中项滚动跟随，保证 Enter 作用的对象始终可见
+  useEffect(() => {
+    if (isSelected) {
+      rowRef.current?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [isSelected]);
+
+  return (
+    <button
+      ref={rowRef}
+      id={id}
+      onClick={onClick}
+      onMouseEnter={onHover}
+      role="option"
+      aria-selected={isSelected}
+      tabIndex={-1}
+      className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors group text-left ${isSelected ? 'bg-white/10' : ''}`}
+    >
+      <ItemIcon item={item} />
+      <span
+        title={item.name}
+        className={`flex-1 min-w-0 truncate text-sm transition-colors ${isSelected ? 'text-app-text-primary font-medium' : 'text-app-text-tertiary group-hover:text-app-text-primary'}`}
+      >
+        {item.name}
+      </span>
+      {isSelected && (
+        <span className="text-xs text-app-text-tertiary flex-shrink-0">↵ 打开</span>
+      )}
+    </button>
+  );
+}
+
 // Search Results Component
 function SearchResults({
   query,
   allResults,
   visibleResults,
   isExpanded,
+  isListView,
+  collapsedCount,
   onToggleExpand,
   expandBtnRef,
   selectedIndex,
@@ -833,6 +866,8 @@ function SearchResults({
   allResults: AppItemData[];
   visibleResults: AppItemData[];
   isExpanded: boolean;
+  isListView: boolean;
+  collapsedCount: number;
   onToggleExpand: () => void;
   expandBtnRef: React.RefObject<HTMLButtonElement>;
   selectedIndex: number;
@@ -858,7 +893,7 @@ function SearchResults({
     );
   }
 
-  const showExpandButton = allResults.length > ITEMS_PER_ROW;
+  const showExpandButton = allResults.length > collapsedCount;
 
   return (
     <section className="h-full flex flex-col">
@@ -876,16 +911,32 @@ function SearchResults({
           </button>
         )}
       </div>
-      <div id="launcher-listbox" className="grid grid-cols-9 gap-2 overflow-y-auto overflow-x-hidden" role="listbox" aria-label="搜索结果">
+      <div
+        id="launcher-listbox"
+        className={`overflow-y-auto overflow-x-hidden ${isListView ? 'flex flex-col gap-0.5' : 'grid grid-cols-9 gap-2'}`}
+        role="listbox"
+        aria-label="搜索结果"
+      >
         {visibleResults.map((item, index) => (
-          <ItemCard
-            key={item.path}
-            id={`launcher-option-${index}`}
-            item={item}
-            isSelected={index === selectedIndex}
-            onClick={() => onItemClick(item)}
-            onHover={() => onSelect(index)}
-          />
+          isListView ? (
+            <ItemRow
+              key={item.path}
+              id={`launcher-option-${index}`}
+              item={item}
+              isSelected={index === selectedIndex}
+              onClick={() => onItemClick(item)}
+              onHover={() => onSelect(index)}
+            />
+          ) : (
+            <ItemCard
+              key={item.path}
+              id={`launcher-option-${index}`}
+              item={item}
+              isSelected={index === selectedIndex}
+              onClick={() => onItemClick(item)}
+              onHover={() => onSelect(index)}
+            />
+          )
         ))}
       </div>
     </section>

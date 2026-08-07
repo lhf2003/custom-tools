@@ -112,13 +112,13 @@
    Light Theme Tokens
    浅色主题：与深色基座同源（zinc）明度反向映射，
    遵守 DESIGN.md Even Tiers Rule（五档均匀拉开）。
-   通过 html[data-theme='light'] 切换，Tailwind 类全部走 var() 自动跟随。
+   通过 html[data-theme-family='light'] 切换，Tailwind 类全部走 var() 自动跟随。
    ============================================ */
-[data-theme='light'] {
+[data-theme-family='light'] {
   color-scheme: light;
 
-  /* 背景色五档（zinc-50/100/200/300/400 反向映射） */
-  --app-bg-primary: #fafafa;
+  /* 背景色五档（zinc 浅档反向映射；基座 2026-08-06 提亮为纯白，与 sidebar 档差达标 ≥0.03 OKLCH L） */
+  --app-bg-primary: #ffffff;
   --app-bg-secondary: #f4f4f5;
   --app-bg-tertiary: #e4e4e7;
   --app-bg-elevated: #d4d4d8;
@@ -131,7 +131,7 @@
   --app-text-secondary: #3f3f46;
   --app-text-tertiary: #52525b;
   --app-text-disabled: #a1a1aa;
-  --app-text-placeholder: #65656e;  /* 实测 5.53:1 on #fafafa / 4.55:1 on #e4e4e7，双达标（原 #71717a 在 Card 上仅 3.81:1） */
+  --app-text-placeholder: #65656e;  /* 实测 5.77:1 on #ffffff / 4.55:1 on #e4e4e7，双达标（原 #71717a 在 Card 上仅 3.81:1） */
 
   /* 边框色（黑色低透明度） */
   --app-border-default: rgba(0, 0, 0, 0.10);
@@ -174,7 +174,7 @@
 
   /* Window Effect：面板底色换浅色半透明、边框换黑系 */
   --window-bg: transparent;
-  --panel-bg: rgba(250, 250, 250, 0.72);
+  --panel-bg: rgba(255, 255, 255, 0.72);
   --panel-border: rgba(0, 0, 0, 0.08);
 
   /* 分类/图形标识色：浅底换深档（≥3:1 图形对比） */
@@ -200,6 +200,65 @@
   --json-boolean: #7c3aed;
   --json-null: #71717a;
   --json-plain: #3f3f46;
+}
+
+/* ============================================
+   Orange Sea Theme Tokens（data-theme='orange-sea'，深色族）
+   橘子海：暮色氛围的深色族变体——青相深色表面浮在
+   烟熏棕橙→深海青绿的海面渐变上，品牌橘点睛。
+   未列出的变量（阴影、白纱、--cat-*、--json-*）继承 :root。
+   ============================================ */
+[data-theme='orange-sea'] {
+  /* 表面五档：青相深色，档差节奏同深色族（1.10→1.14→1.18→1.24） */
+  --app-bg-primary: #1a2024;
+  --app-bg-secondary: #21282c;
+  --app-bg-tertiary: #2a3236;
+  --app-bg-elevated: #343d42;
+  --app-bg-pressed: #414b51;
+  --app-bg-hover: rgba(255, 255, 255, 0.07);
+  --app-bg-active: rgba(255, 255, 255, 0.10);
+
+  /* 墨阶：暖白纸 → 青灰尾（暮色的暖与海水的冷在文字层中和） */
+  --app-text-primary: #f5f2eb;
+  --app-text-secondary: #dbd8cf;
+  --app-text-tertiary: #a9ada7;
+  --app-text-disabled: #71766f;
+  --app-text-placeholder: #949a92;  /* 实测 5.72:1 on primary / 4.54:1 on tertiary */
+
+  /* 边框：白纱系 */
+  --app-border-default: rgba(255, 255, 255, 0.10);
+  --app-border-emphasis: rgba(255, 255, 255, 0.16);
+  --app-border-subtle: rgba(255, 255, 255, 0.06);
+
+  /* 品牌：橘子点睛 + 海青辅助 */
+  --app-brand-primary: #fb923c;
+  --app-brand-primary-light: #fdba74;  /* 选中文字亮橘，实测 9.76:1 on primary */
+  --app-brand-secondary: #2dd4bf;
+  --app-brand-selected: #fb923c;
+
+  /* 状态色：沿用深色族；info 换深橘实体底（白字 5.18:1 达标） */
+  --app-status-info: #c2410c;
+  --app-status-info-deep: #9a3412;
+
+  /* Tooltip */
+  --tooltip-bg: #343d42;
+  --tooltip-text: #dbd8cf;
+  --tooltip-border: rgba(255, 255, 255, 0.10);
+
+  /* Window：自绘海面渐变（body 承担），面板为青相深色玻璃 */
+  --panel-bg: rgba(26, 32, 36, 0.72);
+  --panel-border: rgba(255, 255, 255, 0.08);
+}
+
+/* 海面渐变：烟熏棕橙（天）→ 深海青绿（海），雾状光晕 + 轻暗角。
+   橘子海主题放弃 OS 材质透明穿透，由 body 自绘暮色海面。 */
+[data-theme='orange-sea'] body {
+  background:
+    radial-gradient(140% 120% at 50% 45%, transparent 56%, rgba(10, 13, 15, 0.30) 100%),
+    radial-gradient(120% 90% at 50% -12%, rgba(232, 130, 64, 0.32), transparent 55%),
+    radial-gradient(130% 100% at 50% 118%, rgba(38, 110, 128, 0.34), transparent 62%),
+    linear-gradient(180deg, #4d3828 0%, #33403c 46%, #1b3a45 100%) !important;
+  background-attachment: fixed !important;
 }
 
 /* ============================================
@@ -271,33 +330,33 @@
    ============================================ */
 
 /* 纯 CSS 毛玻璃兜底：浅色渐变 */
-[data-theme='light'] .css-glass-fallback {
-  background: rgba(250, 250, 250, 0.95) !important;
+[data-theme-family='light'] .css-glass-fallback {
+  background: rgba(255, 255, 255, 0.95) !important;
   background: linear-gradient(
     135deg,
-    rgba(250, 250, 250, 0.98) 0%,
+    rgba(255, 255, 255, 0.98) 0%,
     rgba(244, 244, 245, 0.95) 100%
   ) !important;
 }
 
 /* Mica/Acrylic/Blur 的 --panel-bg 硬编码值 → 浅色半透明；边框换黑系 */
-[data-theme='light'] .mica-active {
+[data-theme-family='light'] .mica-active {
   --panel-bg: var(--app-alpha-white-5);
   --panel-border: rgba(0, 0, 0, 0.08);
 }
 
-[data-theme='light'] .acrylic-active {
-  --panel-bg: rgba(250, 250, 250, 0.6);
+[data-theme-family='light'] .acrylic-active {
+  --panel-bg: rgba(255, 255, 255, 0.6);
   --panel-border: rgba(0, 0, 0, 0.08);
 }
 
-[data-theme='light'] .blur-active {
-  --panel-bg: rgba(250, 250, 250, 0.72);
+[data-theme-family='light'] .blur-active {
+  --panel-bg: rgba(255, 255, 255, 0.72);
   --panel-border: rgba(0, 0, 0, 0.08);
 }
 
-[data-theme='light'] .no-effect-active {
-  --window-bg: rgba(250, 250, 250, 0.95);
+[data-theme-family='light'] .no-effect-active {
+  --window-bg: rgba(255, 255, 255, 0.95);
 }
 
 /* ============================================
@@ -306,47 +365,47 @@
    浅色下白 on 浅 = 不可见）。类级覆盖为黑纱层，让存量组件浅色下自动跟随，
    避免逐文件改动（text-white 不覆盖：用于品牌/状态色按钮上的白字，浅色下依然正确）。
    ============================================ */
-[data-theme='light'] .bg-white\/5 {
+[data-theme-family='light'] .bg-white\/5 {
   background-color: rgba(0, 0, 0, 0.05);
 }
 
-[data-theme='light'] .hover\:bg-white\/5:hover {
+[data-theme-family='light'] .hover\:bg-white\/5:hover {
   background-color: rgba(0, 0, 0, 0.05);
 }
 
-[data-theme='light'] .bg-white\/10 {
+[data-theme-family='light'] .bg-white\/10 {
   background-color: rgba(0, 0, 0, 0.10);
 }
 
-[data-theme='light'] .hover\:bg-white\/10:hover {
+[data-theme-family='light'] .hover\:bg-white\/10:hover {
   background-color: rgba(0, 0, 0, 0.10);
 }
 
-[data-theme='light'] .active\:bg-white\/10:active {
+[data-theme-family='light'] .active\:bg-white\/10:active {
   background-color: rgba(0, 0, 0, 0.10);
 }
 
-[data-theme='light'] .bg-white\/15 {
+[data-theme-family='light'] .bg-white\/15 {
   background-color: rgba(0, 0, 0, 0.12);
 }
 
-[data-theme='light'] .border-white\/5 {
+[data-theme-family='light'] .border-white\/5 {
   border-color: rgba(0, 0, 0, 0.08);
 }
 
-[data-theme='light'] .border-white\/10 {
+[data-theme-family='light'] .border-white\/10 {
   border-color: rgba(0, 0, 0, 0.12);
 }
 
-[data-theme='light'] .border-white\/15 {
+[data-theme-family='light'] .border-white\/15 {
   border-color: rgba(0, 0, 0, 0.15);
 }
 
-[data-theme='light'] .border-white\/20 {
+[data-theme-family='light'] .border-white\/20 {
   border-color: rgba(0, 0, 0, 0.18);
 }
 
-[data-theme='light'] .border-white\/25 {
+[data-theme-family='light'] .border-white\/25 {
   border-color: rgba(0, 0, 0, 0.22);
 }
 
@@ -355,27 +414,27 @@
    a2ui surface 的选中态用 indigo 浅档（indigo-200/300 等），
    浅色下几乎不可见 → 换深档品牌色（对齐 --app-brand-primary）
    ============================================ */
-[data-theme='light'] .text-indigo-200 {
+[data-theme-family='light'] .text-indigo-200 {
   color: #4f46e5;
 }
 
-[data-theme='light'] .text-indigo-300 {
+[data-theme-family='light'] .text-indigo-300 {
   color: #6366f1;
 }
 
-[data-theme='light'] .text-indigo-400 {
+[data-theme-family='light'] .text-indigo-400 {
   color: #6366f1;
 }
 
-[data-theme='light'] .border-indigo-400 {
+[data-theme-family='light'] .border-indigo-400 {
   border-color: #6366f1;
 }
 
-[data-theme='light'] .border-indigo-500\/50 {
+[data-theme-family='light'] .border-indigo-500\/50 {
   border-color: rgba(99, 102, 241, 0.35);
 }
 
-[data-theme='light'] .bg-indigo-500\/20 {
+[data-theme-family='light'] .bg-indigo-500\/20 {
   background-color: rgba(99, 102, 241, 0.15);
 }
 
@@ -386,78 +445,78 @@
    40~50=tertiary、25~35=placeholder。
    品牌/状态色按钮上的纯 text-white 白字由恢复规则保留（见块尾）。
    ============================================ */
-[data-theme='light'] .text-white {
+[data-theme-family='light'] .text-white {
   color: var(--app-text-primary);
 }
 
-[data-theme='light'] .text-white\/80,
-[data-theme='light'] .text-white\/85,
-[data-theme='light'] .text-white\/90 {
+[data-theme-family='light'] .text-white\/80,
+[data-theme-family='light'] .text-white\/85,
+[data-theme-family='light'] .text-white\/90 {
   color: var(--app-text-primary);
 }
 
-[data-theme='light'] .text-white\/60,
-[data-theme='light'] .text-white\/70 {
+[data-theme-family='light'] .text-white\/60,
+[data-theme-family='light'] .text-white\/70 {
   color: var(--app-text-secondary);
 }
 
-[data-theme='light'] .text-white\/40,
-[data-theme='light'] .text-white\/45,
-[data-theme='light'] .text-white\/50 {
+[data-theme-family='light'] .text-white\/40,
+[data-theme-family='light'] .text-white\/45,
+[data-theme-family='light'] .text-white\/50 {
   color: var(--app-text-tertiary);
 }
 
-[data-theme='light'] .text-white\/25,
-[data-theme='light'] .text-white\/30,
-[data-theme='light'] .text-white\/35 {
+[data-theme-family='light'] .text-white\/25,
+[data-theme-family='light'] .text-white\/30,
+[data-theme-family='light'] .text-white\/35 {
   color: var(--app-text-placeholder);
 }
 
 /* hover 变体 */
-[data-theme='light'] .hover\:text-white:hover {
+[data-theme-family='light'] .hover\:text-white:hover {
   color: var(--app-text-primary);
 }
 
-[data-theme='light'] .hover\:text-white\/70:hover,
-[data-theme='light'] .hover\:text-white\/80:hover {
+[data-theme-family='light'] .hover\:text-white\/70:hover,
+[data-theme-family='light'] .hover\:text-white\/80:hover {
   color: var(--app-text-secondary);
 }
 
 /* placeholder 变体 */
-[data-theme='light'] .placeholder\:text-white\/20::placeholder,
-[data-theme='light'] .placeholder\:text-white\/30::placeholder,
-[data-theme='light'] .placeholder\:text-white\/40::placeholder {
+[data-theme-family='light'] .placeholder\:text-white\/20::placeholder,
+[data-theme-family='light'] .placeholder\:text-white\/30::placeholder,
+[data-theme-family='light'] .placeholder\:text-white\/40::placeholder {
   color: var(--app-text-placeholder);
 }
 
 /* focus 边框变体（基础 border-white/N 已在上方翻黑） */
-[data-theme='light'] .focus\:border-white\/20:focus {
+[data-theme-family='light'] .focus\:border-white\/20:focus {
   border-color: rgba(0, 0, 0, 0.18);
 }
 
-[data-theme='light'] .focus\:border-white\/25:focus {
+[data-theme-family='light'] .focus\:border-white\/25:focus {
   border-color: rgba(0, 0, 0, 0.22);
 }
 
 /* divide 分隔线翻黑 */
-[data-theme='light'] .divide-white\/5 > :not([hidden]) ~ :not([hidden]) {
+[data-theme-family='light'] .divide-white\/5 > :not([hidden]) ~ :not([hidden]) {
   border-color: rgba(0, 0, 0, 0.06);
 }
 
 /* 品牌/状态色按钮恢复白字：彩色底上白字在浅色下依然正确 */
-[data-theme='light'] .bg-blue-600.text-white,
-[data-theme='light'] .bg-violet-500.text-white,
-[data-theme='light'] .bg-app-status-info.text-white,
-[data-theme='light'] .bg-app-status-error\/90.text-white {
+[data-theme-family='light'] .bg-blue-600.text-white,
+[data-theme-family='light'] .bg-violet-500.text-white,
+[data-theme-family='light'] .bg-app-status-info.text-white,
+[data-theme-family='light'] .bg-app-status-error\/90.text-white {
   color: #ffffff;
 }
 
 /* 暗幕（bg-black/80 图片放大态）后代恢复白字白纱：暗幕不随主题翻转 */
-[data-theme='light'] .bg-black\/80 .text-white {
+[data-theme-family='light'] .bg-black\/80 .text-white {
   color: #ffffff;
 }
 
-[data-theme='light'] .bg-black\/80 .bg-white\/10 {
+[data-theme-family='light'] .bg-black\/80 .bg-white\/10 {
   background-color: rgba(255, 255, 255, 0.1);
 }
 
@@ -466,111 +525,111 @@
    深色下验证过的浅档彩色文字（300/400 档）在浅底对比度不达标
    → 换深档（对齐 --app-status-* / Deep Brand Rule），深色不动。
    ============================================ */
-[data-theme='light'] .text-blue-200,
-[data-theme='light'] .text-blue-300,
-[data-theme='light'] .text-blue-400,
-[data-theme='light'] .hover\:text-blue-300:hover,
-[data-theme='light'] .hover\:text-blue-400:hover {
+[data-theme-family='light'] .text-blue-200,
+[data-theme-family='light'] .text-blue-300,
+[data-theme-family='light'] .text-blue-400,
+[data-theme-family='light'] .hover\:text-blue-300:hover,
+[data-theme-family='light'] .hover\:text-blue-400:hover {
   color: #2563eb;
 }
 
-[data-theme='light'] .text-green-400,
-[data-theme='light'] .hover\:text-green-400:hover {
+[data-theme-family='light'] .text-green-400,
+[data-theme-family='light'] .hover\:text-green-400:hover {
   color: #16a34a;
 }
 
-[data-theme='light'] .text-green-400\/70 {
+[data-theme-family='light'] .text-green-400\/70 {
   color: rgba(22, 163, 74, 0.7);
 }
 
-[data-theme='light'] .text-red-300,
-[data-theme='light'] .text-red-400,
-[data-theme='light'] .hover\:text-red-400:hover {
+[data-theme-family='light'] .text-red-300,
+[data-theme-family='light'] .text-red-400,
+[data-theme-family='light'] .hover\:text-red-400:hover {
   color: #dc2626;
 }
 
-[data-theme='light'] .text-red-400\/80 {
+[data-theme-family='light'] .text-red-400\/80 {
   color: rgba(220, 38, 38, 0.8);
 }
 
-[data-theme='light'] .text-red-400\/60 {
+[data-theme-family='light'] .text-red-400\/60 {
   color: rgba(220, 38, 38, 0.6);
 }
 
-[data-theme='light'] .text-yellow-300,
-[data-theme='light'] .text-yellow-400 {
+[data-theme-family='light'] .text-yellow-300,
+[data-theme-family='light'] .text-yellow-400 {
   color: #b45309;
 }
 
-[data-theme='light'] .text-amber-300,
-[data-theme='light'] .text-amber-400,
-[data-theme='light'] .hover\:text-amber-300:hover {
+[data-theme-family='light'] .text-amber-300,
+[data-theme-family='light'] .text-amber-400,
+[data-theme-family='light'] .hover\:text-amber-300:hover {
   color: #d97706;
 }
 
-[data-theme='light'] .text-amber-400\/80 {
+[data-theme-family='light'] .text-amber-400\/80 {
   color: rgba(217, 119, 6, 0.8);
 }
 
-[data-theme='light'] .text-emerald-300,
-[data-theme='light'] .text-emerald-400 {
+[data-theme-family='light'] .text-emerald-300,
+[data-theme-family='light'] .text-emerald-400 {
   color: #059669;
 }
 
-[data-theme='light'] .text-emerald-400\/70 {
+[data-theme-family='light'] .text-emerald-400\/70 {
   color: rgba(5, 150, 105, 0.7);
 }
 
-[data-theme='light'] .text-violet-300,
-[data-theme='light'] .text-violet-400 {
+[data-theme-family='light'] .text-violet-300,
+[data-theme-family='light'] .text-violet-400 {
   color: #7c3aed;
 }
 
-[data-theme='light'] .text-purple-400 {
+[data-theme-family='light'] .text-purple-400 {
   color: #9333ea;
 }
 
-[data-theme='light'] .text-rose-400 {
+[data-theme-family='light'] .text-rose-400 {
   color: #e11d48;
 }
 
-[data-theme='light'] .text-cyan-400 {
+[data-theme-family='light'] .text-cyan-400 {
   color: #0891b2;
 }
 
-[data-theme='light'] .text-orange-400 {
+[data-theme-family='light'] .text-orange-400 {
   color: #ea580c;
 }
 
-[data-theme='light'] .text-sky-300 {
+[data-theme-family='light'] .text-sky-300 {
   color: #0284c7;
 }
 
 /* 任意值硬编码类（clipboard 类型图标） */
-[data-theme='light'] .text-\[\#60a5fa\] {
+[data-theme-family='light'] .text-\[\#60a5fa\] {
   color: #2563eb;
 }
 
-[data-theme='light'] .text-\[\#fbbf24\] {
+[data-theme-family='light'] .text-\[\#fbbf24\] {
   color: #d97706;
 }
 
-[data-theme='light'] .text-\[\#c084fc\] {
+[data-theme-family='light'] .text-\[\#c084fc\] {
   color: #9333ea;
 }
 
 /* prose（聊天 Markdown）内的浅档链接/代码色 */
-[data-theme='light'] .prose-a\:text-blue-400 :is(a) {
+[data-theme-family='light'] .prose-a\:text-blue-400 :is(a) {
   color: #2563eb;
 }
 
-[data-theme='light'] .prose-code\:text-emerald-300 :is(code) {
+[data-theme-family='light'] .prose-code\:text-emerald-300 :is(code) {
   color: #059669;
 }
 
 /* prose-invert（聊天 Markdown 深色变体）浅色回翻：invert 变量换回浅底墨阶，
    否则浅灰正文在浅底上整段不可读 */
-[data-theme='light'] .prose-invert {
+[data-theme-family='light'] .prose-invert {
   --tw-prose-invert-body: var(--app-text-secondary);
   --tw-prose-invert-headings: var(--app-text-primary);
   --tw-prose-invert-lead: var(--app-text-secondary);
@@ -591,7 +650,7 @@
 }
 
 /* 行内代码底：zinc-800 映射后是浅底实色，语义上应为黑纱（对齐 vditor --vditor-scrim-code） */
-[data-theme='light'] .prose-code\:bg-zinc-800 :is(code) {
+[data-theme-family='light'] .prose-code\:bg-zinc-800 :is(code) {
   background-color: rgba(0, 0, 0, 0.07);
 }
 
@@ -600,24 +659,24 @@
    bg-{color}-900/30 深色纱底 + 浅字组合在浅底对比崩塌
    → 纱底翻浅（同色相 12% 透明度），文字已由上方覆盖换深档。
    ============================================ */
-[data-theme='light'] .bg-red-900\/30 {
+[data-theme-family='light'] .bg-red-900\/30 {
   background-color: rgba(220, 38, 38, 0.12);
 }
 
-[data-theme='light'] .border-red-800\/50 {
+[data-theme-family='light'] .border-red-800\/50 {
   border-color: rgba(220, 38, 38, 0.3);
 }
 
-[data-theme='light'] .bg-emerald-900\/30 {
+[data-theme-family='light'] .bg-emerald-900\/30 {
   background-color: rgba(5, 150, 105, 0.12);
 }
 
-[data-theme='light'] .border-emerald-800\/50 {
+[data-theme-family='light'] .border-emerald-800\/50 {
   border-color: rgba(5, 150, 105, 0.3);
 }
 
 /* text-zinc-500：深色下为最淡辅助档，浅色下 #71717a 偏淡 → 对齐 placeholder */
-[data-theme='light'] .text-zinc-500 {
+[data-theme-family='light'] .text-zinc-500 {
   color: var(--app-text-placeholder);
 }
 

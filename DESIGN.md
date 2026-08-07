@@ -24,7 +24,7 @@ colors:
   status-info: "#2563eb"
   scrim-white-5: "#ffffff0d"
   scrim-white-10: "#ffffff1a"
-  light-surface-base: "#fafafa"
+  light-surface-base: "#ffffff"
   light-surface-sidebar: "#f4f4f5"
   light-surface-card: "#e4e4e7"
   light-surface-elevated: "#d4d4d8"
@@ -56,6 +56,24 @@ colors:
   light-syntax-sky: "#0284c7"
   light-syntax-pink: "#db2777"
   light-syntax-slate: "#64748b"
+  sea-surface-base: "#1a2024"
+  sea-surface-sidebar: "#21282c"
+  sea-surface-card: "#2a3236"
+  sea-surface-elevated: "#343d42"
+  sea-surface-pressed: "#414b51"
+  sea-ink-primary: "#f5f2eb"
+  sea-ink-secondary: "#dbd8cf"
+  sea-ink-tertiary: "#a9ada7"
+  sea-ink-disabled: "#71766f"
+  sea-ink-placeholder: "#949a92"
+  sea-brand-orange: "#fb923c"
+  sea-brand-orange-light: "#fdba74"
+  sea-brand-teal: "#2dd4bf"
+  sea-action-deep: "#c2410c"
+  sea-action-deeper: "#9a3412"
+  sea-sky-top: "#4d3828"
+  sea-sky-mid: "#33403c"
+  sea-sky-bottom: "#1b3a45"
 typography:
   display:
     fontFamily: "'HarmonyOS Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif"
@@ -122,7 +140,7 @@ components:
     backgroundColor: "#1e1e21b3"
     rounded: "{rounded.lg}"
   panel-glass-light:
-    backgroundColor: "#fafafab8"
+    backgroundColor: "#ffffffb8"
     rounded: "{rounded.lg}"
 ---
 
@@ -179,7 +197,7 @@ components:
 ### 浅色主题（[data-theme='light'] 镜像 token）
 浅色是深色系统的明度镜像：zinc 浅档（50→400）反向映射表面五档，文字换深档（900/700/600），品牌与状态色换深档保对比。同一语义、同一步骤、同一色相，只有方向相反。
 
-- **Light Surface Base** (#fafafa, zinc-50): 浅色主背景基座。与深色基座 (#1e1e21, zinc 深档) 同系同差。
+- **Light Surface Base** (#ffffff): 浅色主背景基座。2026-08-06 从 #fafafa 提亮为纯白——与 sidebar 的 OKLCH L 差从 0.016 拉到 0.032，Even Tiers 达标，浅色系基座为最亮档（镜像深色基座最暗）。
 - **Light Surface Sidebar / Card / Elevated / Pressed** (#f4f4f5 / #e4e4e7 / #d4d4d8 / #a1a1aa): 五档表面反向映射，档差与深色对称（相邻差 ≥0.03 OKLCH L，镜像 Even Tiers）。
 - **Light Ink Primary / Secondary / Tertiary** (#18181b / #3f3f46 / #52525b): 浅底上的文字档，Tertiary 在 Card 上实测 ≥5.4:1。
 - **Light Ink Placeholder** (#65656e): 浅色 placeholder 专用（实测 5.53:1 on Base、4.55:1 on Card，双达标）。2026-08-06 从 #71717a 加深：旧值在 Card 表面上仅 3.81:1。
@@ -203,6 +221,13 @@ components:
 - **阴影**：tailwind.config.js 把 `shadow-lg/xl/2xl` 映射 `--app-shadow-*` 词表，浅色自动降档。
 - **原生控件**：`:root` 声明 `color-scheme`，日期选择器等系统控件随主题。
 - **防闪屏**：index.html 内联脚本在 React 挂载前预读 localStorage 缓存的主题模式（`flowhub-theme-mode`，由 ThemeController 写入）并解析 `prefers-color-scheme`，消除首帧深色闪屏。
+- **陪伴 Toast 跟随主题**：companion-toast.html 同款内联脚本（与主窗口同 origin 共享 localStorage），组件的 `bg-zinc-900/95` 经 zinc 映射 + Tailwind color-mix 自动换浅色，`text-white/*` 由类级覆盖翻墨阶。
+- **导出图片跟随主题**：JSON Canvas 导出（jsonCanvas.ts PALETTE_DARK/LIGHT）与 Markdown 导出（export.ts STYLE_CONTENT_*、Vditor.preview mode/hljs github↔github-dark）均读 `document.documentElement.dataset.themeFamily` 出对应明暗族的图片。
+
+### 主题族架构与橘子海（2026-08-06）
+外观系统升级为两层：`data-theme` 是具体主题（dark / light / orange-sea），`data-theme-family` 是明暗族（dark / light）。全部浅色类级覆盖挂 `[data-theme-family='light']`，深色族新增主题（如橘子海）对覆盖层零改动。新主题登记三处：`ThemeController.tsx` 的 `THEME_FAMILY`、index.css 的 `[data-theme='<id>']` token 块、两个 html 防闪屏脚本的 FAMILY 映射。`theme=system` 只在 zinc dark/light 间跟随，变体主题一律显式选择。
+
+**橘子海（orange-sea，深色族）**：暮色氛围变体——青相深色表面（#1a2024→#414b51 五档，档差节奏同深色族）浮在烟熏棕橙→深海青绿的海面渐变上。墨阶暖白纸透青灰尾（#f5f2eb / #dbd8cf / #a9ada7 / #71766f / placeholder #949a92 双达标）；品牌橘 #fb923c 点睛（选中文字用更亮的 #fdba74），海青 #2dd4bf 作第二品牌色；主按钮实体底用深橘 #c2410c（白字 5.18:1，hover #9a3412）。海面渐变由 body 自绘（垂直渐变 + 橙/青双雾状光晕 + 30% 暗角），放弃 OS 材质穿透——材质即暮色，是本系统「Material-First」的极限表达。
 
 ### Named Rules
 **The One Voice Rule.** Signal Indigo 在任何单屏面积 ≤10%。它的稀缺性就是它的意义——满屏靛蓝等于没有品牌。

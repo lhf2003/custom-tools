@@ -6,9 +6,14 @@ export interface ExportOptions {
   scale?: number;
 }
 
-const EXPORT_CONTAINER_STYLE = {
-  backgroundColor: '#ffffff',
-  color: '#1f2937',
+type ExportTheme = 'dark' | 'light';
+
+/** 导出图片跟随当前应用明暗族（data-theme-family 由 ThemeController / index.html 内联脚本设置） */
+function resolveExportTheme(): ExportTheme {
+  return document.documentElement.dataset.themeFamily === 'light' ? 'light' : 'dark';
+}
+
+const EXPORT_CONTAINER_BASE = {
   padding: '40px',
   width: '800px',
   // 与编辑器正文保持一致的中英一体字体栈（HarmonyOS Sans SC）
@@ -17,28 +22,14 @@ const EXPORT_CONTAINER_STYLE = {
   boxSizing: 'border-box' as const,
 };
 
-export async function exportNoteAsImage(
-  markdown: string,
-  title: string,
-  options: ExportOptions = {}
-): Promise<Blob> {
-  const { scale = 2 } = options;
+/** 容器底色/正文色：浅底为经典导出白，深底对齐 app-bg-primary */
+const EXPORT_CONTAINER_THEME: Record<ExportTheme, { backgroundColor: string; color: string }> = {
+  light: { backgroundColor: '#ffffff', color: '#1f2937' },
+  dark: { backgroundColor: '#1e1e21', color: '#d4d4d8' },
+};
 
-  console.log('[Export] Starting export, title:', title);
-  console.log('[Export] Markdown length:', markdown?.length || 0);
-
-  if (!markdown.trim()) {
-    throw new Error('笔记内容为空');
-  }
-
-  // 创建临时容器
-  const container = document.createElement('div');
-  container.style.cssText = Object.entries(EXPORT_CONTAINER_STYLE)
-    .map(([k, v]) => `${k.replace(/[A-Z]/g, m => `-${m.toLowerCase()}`)}: ${v}`)
-    .join('; ');
-
-  // 添加浅色主题样式
-  const styleContent = `
+/** 浅色导出样式（GitHub light 风，配合 hljs github 高亮手写补丁） */
+const STYLE_CONTENT_LIGHT = `
     .vditor-reset {
       color: #1f2937 !important;
       background-color: #ffffff !important;
@@ -94,6 +85,74 @@ export async function exportNoteAsImage(
     .vditor-reset .hljs-strong { font-weight: bold !important; }
   `;
 
+/** 深色导出样式（镜像浅色结构；语法高亮交给 hljs github-dark 主题，不再手写补丁） */
+const STYLE_CONTENT_DARK = `
+    .vditor-reset {
+      color: #d4d4d8 !important;
+      background-color: #1e1e21 !important;
+      font-family: "HarmonyOS Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif !important;
+      font-size: 16px !important;
+      line-height: 1.6 !important;
+    }
+    .vditor-reset h1, .vditor-reset h2, .vditor-reset h3,
+    .vditor-reset h4, .vditor-reset h5, .vditor-reset h6 {
+      color: #f4f4f5 !important;
+      margin-top: 24px !important;
+      margin-bottom: 16px !important;
+      font-weight: 600 !important;
+    }
+    .vditor-reset h1 { font-size: 28px !important; border-bottom: 2px solid rgba(255, 255, 255, 0.14) !important; padding-bottom: 8px !important; }
+    .vditor-reset h2 { font-size: 24px !important; }
+    .vditor-reset h3 { font-size: 20px !important; }
+    .vditor-reset p { color: #d4d4d8 !important; margin-bottom: 16px !important; }
+    .vditor-reset code { background-color: rgba(255, 255, 255, 0.10) !important; color: #f472b6 !important; padding: 2px 6px !important; border-radius: 4px !important; font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace !important; font-size: 0.875em !important; }
+    .vditor-reset pre { background-color: #26262a !important; padding: 16px !important; border-radius: 8px !important; overflow-x: auto !important; margin-bottom: 16px !important; border: 1px solid rgba(255, 255, 255, 0.10) !important; }
+    .vditor-reset pre code { background-color: transparent !important; color: #e4e4e7 !important; padding: 0 !important; font-size: 14px !important; line-height: 1.6 !important; }
+    .vditor-reset blockquote { border-left: 4px solid rgba(255, 255, 255, 0.20) !important; padding-left: 16px !important; color: #a1a1aa !important; margin-bottom: 16px !important; }
+    .vditor-reset ul, .vditor-reset ol { color: #d4d4d8 !important; padding-left: 24px !important; margin-bottom: 16px !important; }
+    .vditor-reset ul { list-style-type: disc !important; }
+    .vditor-reset ol { list-style: none !important; counter-reset: list-counter !important; }
+    .vditor-reset ol > li { position: relative !important; counter-increment: list-counter !important; }
+    .vditor-reset ol > li::before { content: counter(list-counter) "." !important; position: absolute !important; right: 100% !important; margin-right: 8px !important; top: 0 !important; width: 20px !important; text-align: right !important; color: #d4d4d8 !important; font-size: inherit !important; line-height: inherit !important; }
+    .vditor-reset li { color: #d4d4d8 !important; margin-bottom: 4px !important; }
+    .vditor-reset table { width: 100% !important; border-collapse: collapse !important; margin-bottom: 16px !important; }
+    .vditor-reset th, .vditor-reset td { border: 1px solid rgba(255, 255, 255, 0.14) !important; padding: 8px 12px !important; color: #d4d4d8 !important; }
+    .vditor-reset th { background-color: #26262a !important; font-weight: 600 !important; }
+    .vditor-reset a { color: #818cf8 !important; text-decoration: none !important; }
+    .vditor-reset hr { border: none !important; border-top: 1px solid rgba(255, 255, 255, 0.14) !important; margin: 24px 0 !important; }
+    .vditor-reset img { max-width: 100% !important; height: auto !important; border-radius: 4px !important; }
+    .export-title { font-size: 28px; font-weight: 700; color: #f4f4f5; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 2px solid rgba(255, 255, 255, 0.14); }
+    /* 代码高亮：github-dark 主题 css 提供颜色，这里只保留基础排版 */
+    .vditor-reset .hljs { display: block; overflow-x: auto; padding: 0 !important; background: transparent !important; color: #e4e4e7 !important; }
+    .vditor-reset .hljs-emphasis { font-style: italic !important; }
+    .vditor-reset .hljs-strong { font-weight: bold !important; }
+  `;
+
+
+export async function exportNoteAsImage(
+  markdown: string,
+  title: string,
+  options: ExportOptions = {}
+): Promise<Blob> {
+  const { scale = 2 } = options;
+  const exportTheme = resolveExportTheme();
+
+  console.log('[Export] Starting export, title:', title);
+  console.log('[Export] Markdown length:', markdown?.length || 0);
+
+  if (!markdown.trim()) {
+    throw new Error('笔记内容为空');
+  }
+
+  // 创建临时容器
+  const container = document.createElement('div');
+  container.style.cssText = Object.entries({ ...EXPORT_CONTAINER_BASE, ...EXPORT_CONTAINER_THEME[exportTheme] })
+    .map(([k, v]) => `${k.replace(/[A-Z]/g, m => `-${m.toLowerCase()}`)}: ${v}`)
+    .join('; ');
+
+  // 添加当前主题的导出样式
+  const styleContent = exportTheme === 'light' ? STYLE_CONTENT_LIGHT : STYLE_CONTENT_DARK;
+
   const styleEl = document.createElement('style');
   styleEl.textContent = styleContent;
   container.appendChild(styleEl);
@@ -122,15 +181,15 @@ export async function exportNoteAsImage(
     await new Promise<void>((resolve, reject) => {
       try {
         Vditor.preview(contentEl, markdown, {
-          mode: 'light',
+          mode: exportTheme,
           theme: {
-            current: 'light',
+            current: exportTheme,
             path: '/vditor/dist/css/content-theme',
           },
           hljs: {
             enable: true,
             lineNumber: false,
-            style: 'github',
+            style: exportTheme === 'dark' ? 'github-dark' : 'github',
           },
           after: () => {
             console.log('[Export] Vditor.preview completed');
@@ -151,7 +210,7 @@ export async function exportNoteAsImage(
     // 使用 html2canvas 截图
     const canvas = await html2canvas(container, {
       scale: scale,
-      backgroundColor: '#ffffff',
+      backgroundColor: EXPORT_CONTAINER_THEME[exportTheme].backgroundColor,
       useCORS: true,
       allowTaint: true,
       logging: false,

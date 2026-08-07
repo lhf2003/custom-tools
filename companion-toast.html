@@ -4,6 +4,26 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>陪伴建议</title>
+  <script>
+    // 防主题闪屏：与主窗口同 origin 共享 localStorage，挂载前预读主题模式。
+    // 键名与 FAMILY 映射和 ThemeController.tsx 保持一致。
+    (function () {
+      try {
+        var FAMILY = { dark: 'dark', light: 'light', 'orange-sea': 'dark' };
+        var mode = localStorage.getItem('flowhub-theme-mode') || 'system';
+        var family = FAMILY[mode];
+        var theme = mode;
+        if (!family) {
+          family = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          theme = family;
+        }
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeFamily = family;
+      } catch (e) {
+        /* localStorage 不可用时保持默认深色 */
+      }
+    })();
+  </script>
 </head>
 <body class="overflow-hidden">
   <div id="root"></div>

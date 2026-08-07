@@ -83,21 +83,48 @@ function flatten(
   });
 }
 
-// ─── Color palette (mirrors Tailwind classes used in JsonTreeView) ────────────
+// ─── Color palettes (mirror Tailwind classes used in JsonTreeView) ────────────
 
-const C = {
+interface Palette {
+  bg: string; lineNum: string; keyObj: string; keyIdx: string; sep: string;
+  bracket: string; valString: string; valNumber: string; valBoolean: string;
+  valNull: string; comma: string;
+}
+
+/** 深色调色板（注释值为对应的界面 token / Tailwind 档） */
+const PALETTE_DARK: Palette = {
   bg:         '#1e1e21', // app-bg-primary（与界面树视图底色一致）
   lineNum:    '#9a9aa2', // app-text-placeholder（与界面行号一致）
-  keyObj:     '#7dd3fc', // sky-300
+  keyObj:     '#7dd3fc', // --json-key / sky-300
   keyIdx:     '#a1a1aa', // app-text-tertiary（下标是内容，zinc-500 不达标）
-  sep:        '#71717a', // zinc-500
+  sep:        '#71717a', // --json-punct / zinc-500
   bracket:    '#a1a1aa', // zinc-400
-  valString:  '#6ee7b7', // emerald-300
-  valNumber:  '#fcd34d', // amber-300
-  valBoolean: '#c4b5fd', // violet-400
+  valString:  '#6ee7b7', // --json-string / emerald-300
+  valNumber:  '#fcd34d', // --json-number / amber-300
+  valBoolean: '#c4b5fd', // --json-boolean / violet-400
   valNull:    '#a1a1aa', // app-text-tertiary（null 是内容，zinc-500 不达标）
   comma:      '#71717a', // zinc-500
 };
+
+/** 浅色调色板：light-syntax-* 深档，白底文字对比 ≥4.5:1（与 --json-* 浅色值同源） */
+const PALETTE_LIGHT: Palette = {
+  bg:         '#ffffff', // light app-bg-primary
+  lineNum:    '#65656e', // light app-text-placeholder
+  keyObj:     '#0284c7', // --json-key 浅色
+  keyIdx:     '#52525b', // light app-text-tertiary
+  sep:        '#71717a', // --json-punct（两主题同值）
+  bracket:    '#52525b', // light app-text-tertiary
+  valString:  '#059669', // --json-string 浅色
+  valNumber:  '#d97706', // --json-number 浅色
+  valBoolean: '#7c3aed', // --json-boolean 浅色
+  valNull:    '#52525b', // light app-text-tertiary
+  comma:      '#71717a',
+};
+
+/** 导出图片跟随当前应用明暗族（data-theme-family 由 ThemeController / index.html 内联脚本设置） */
+function palette(): Palette {
+  return document.documentElement.dataset.themeFamily === 'light' ? PALETTE_LIGHT : PALETTE_DARK;
+}
 
 // ─── Layout constants ─────────────────────────────────────────────────────────
 
@@ -126,36 +153,36 @@ interface Segment {
   color: string;
 }
 
-function buildLineSegments(line: FlatLine): Segment[] {
+function buildLineSegments(line: FlatLine, pal: Palette): Segment[] {
   const segs: Segment[] = [];
 
   if (line.isClosingBracket) {
-    segs.push({ text: line.closingChar, color: C.bracket });
+    segs.push({ text: line.closingChar, color: pal.bracket });
   } else {
     if (line.key !== null) {
-      segs.push({ text: line.key, color: line.keyIsIndex ? C.keyIdx : C.keyObj });
-      segs.push({ text: ': ', color: C.sep });
+      segs.push({ text: line.key, color: line.keyIsIndex ? pal.keyIdx : pal.keyObj });
+      segs.push({ text: ': ', color: pal.sep });
     }
     if (line.isExpandable) {
-      segs.push({ text: line.nodeType === 'object' ? '{' : '[', color: C.bracket });
+      segs.push({ text: line.nodeType === 'object' ? '{' : '[', color: pal.bracket });
     } else {
       switch (line.nodeType) {
         case 'string':
-          segs.push({ text: `"${String(line.primitiveValue)}"`, color: C.valString });
+          segs.push({ text: `"${String(line.primitiveValue)}"`, color: pal.valString });
           break;
         case 'number':
-          segs.push({ text: String(line.primitiveValue), color: C.valNumber });
+          segs.push({ text: String(line.primitiveValue), color: pal.valNumber });
           break;
         case 'boolean':
-          segs.push({ text: String(line.primitiveValue), color: C.valBoolean });
+          segs.push({ text: String(line.primitiveValue), color: pal.valBoolean });
           break;
         default:
-          segs.push({ text: 'null', color: C.valNull });
+          segs.push({ text: 'null', color: pal.valNull });
       }
     }
   }
 
-  if (line.addComma) segs.push({ text: ',', color: C.comma });
+  if (line.addComma) segs.push({ text: ',', color: pal.comma });
   return segs;
 }
 
@@ -192,7 +219,8 @@ export function renderJsonToCanvas(
   }
 
   // Segments are built once and shared by width measurement and drawing.
-  const rows = lines.map(line => ({ line, segs: buildLineSegments(line) }));
+  const pal = palette();
+  const rows = lines.map(line => ({ line, segs: buildLineSegments(line, pal) }));
 
   // Canvas width follows the widest line. Like height, exceeding the texture
   // limit is an explicit error — silently clamping would crop long lines.
@@ -216,7 +244,7 @@ export function renderJsonToCanvas(
   ctx.scale(pixelRatio, pixelRatio);
 
   // Background
-  ctx.fillStyle = C.bg;
+  ctx.fillStyle = pal.bg;
   ctx.fillRect(0, 0, canvasW, totalH);
   ctx.textBaseline = 'middle';
   ctx.font = FONT;
@@ -226,7 +254,7 @@ export function renderJsonToCanvas(
 
     // ── Line number ─────────────────────────────────────────────────────────
     ctx.font = HINT_FONT;
-    ctx.fillStyle = C.lineNum;
+    ctx.fillStyle = pal.lineNum;
     ctx.textAlign = 'right';
     ctx.fillText(String(line.lineNum), lineNumCol - PAD_LN_R, midY);
     ctx.textAlign = 'left';

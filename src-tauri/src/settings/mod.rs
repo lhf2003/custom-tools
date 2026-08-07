@@ -13,6 +13,8 @@ pub struct AppSettings {
     pub hide_on_blur: bool,
     pub startup_launch: bool,
     pub theme: String,
+    /// 启动器结果排列：grid（横向网格）| list（列表）
+    pub launcher_view: String,
     pub window_opacity: f32,
     pub clipboard_keep_days: i32,
     pub auto_update: bool,
@@ -44,6 +46,7 @@ impl Default for AppSettings {
             hide_on_blur: true,
             startup_launch: false,
             theme: "system".to_string(),
+            launcher_view: "grid".to_string(),
             window_opacity: 0.95,
             clipboard_keep_days: 30,
             auto_update: true,
@@ -71,11 +74,12 @@ impl Default for AppSettings {
 /// SettingsManager 管辖的全部键。settings 表与陪伴模块状态、
 /// custom_scan_dirs / notes_directory 共享，reset 只能按此白名单删键——
 /// 全表 DELETE 会误删陪伴调度水位和扫描目录配置
-const KNOWN_KEYS: [&str; 24] = [
+const KNOWN_KEYS: [&str; 25] = [
     "always_on_top",
     "hide_on_blur",
     "startup_launch",
     "theme",
+    "launcher_view",
     "window_opacity",
     "clipboard_keep_days",
     "auto_update",
@@ -154,6 +158,7 @@ impl SettingsManager {
                     }
                 }
                 "theme" => settings.theme = value,
+                "launcher_view" => settings.launcher_view = value,
                 "window_opacity" => {
                     if let Ok(v) = value.parse::<f32>() {
                         settings.window_opacity = v.clamp(0.5, 1.0);
@@ -310,6 +315,7 @@ impl SettingsManager {
                     }
                 }
                 "theme" => cache.theme = value.to_string(),
+                "launcher_view" => cache.launcher_view = value.to_string(),
                 "window_opacity" => {
                     if let Ok(v) = value.parse::<f32>() {
                         cache.window_opacity = v.clamp(0.5, 1.0);

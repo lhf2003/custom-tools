@@ -6,6 +6,8 @@ export interface AppSettings {
   hide_on_blur: boolean;
   startup_launch: boolean;
   theme: string;
+  /** 启动器结果排列：grid（横向网格）| list（列表） */
+  launcher_view: string;
   window_opacity: number;
   clipboard_keep_days: number;
   auto_update: boolean;
@@ -56,6 +58,7 @@ interface SettingsState extends AppSettings {
   setClipboardKeepDays: (days: number) => Promise<void>;
   /** 设置主题模式（system/dark/light）：落库；即时生效由 ThemeController 负责 */
   setTheme: (theme: string) => Promise<void>;
+  setLauncherView: (view: string) => Promise<void>;
   setAutoUpdate: (enabled: boolean) => Promise<void>;
   toggleAutoUpdate: () => Promise<boolean>;
   toggleDebugMode: () => Promise<boolean>;
@@ -94,6 +97,7 @@ const defaultSettings: AppSettings = {
   hide_on_blur: true,
   startup_launch: false,
   theme: 'system',
+  launcher_view: 'grid',
   window_opacity: 0.95,
   clipboard_keep_days: 30,
   auto_update: true,
@@ -219,6 +223,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       set({ theme });
     } catch (err) {
       console.error('Failed to set theme:', err);
+    }
+  },
+
+  setLauncherView: async (view: string) => {
+    try {
+      await invoke('set_setting', { key: 'launcher_view', value: view });
+      set({ launcher_view: view });
+    } catch (err) {
+      console.error('Failed to set launcher_view:', err);
     }
   },
 

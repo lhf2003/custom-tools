@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-mood="dawn">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>橘子海 · 外观样张</title>
+<style>
+  @import url('../src/styles/fonts/harmonyos-sans-sc.css');
+
+  /* ============================================
+     橘子海（Orange Sea）主题 token
+     暮色氛围：烟熏棕橙（天）→ 深海青绿（海）垂直渐变
+     两档亮度：dusk 暮色（接近参考图）/ dawn 拂晓（亮一档，默认）
+     ============================================ */
+  :root {
+    --font: 'HarmonyOS Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+
+    /* 墨阶：暖白纸、青灰尾——海的冷与暮的暖在文字层中和 */
+    --ink-1: #f5f2eb;
+    --ink-2: #dbd8cf;
+    --ink-3: #a9ada7;
+    --ink-4: #71766f;
+    --ink-placeholder: #8f948d;
+
+    /* 品牌橘：橘子的那一点睛 */
+    --brand: #fb923c;
+    --brand-ink: #341c0a;        /* 橘底上的深棕字（7.8:1，达标） */
+    --brand-scrim: rgba(251, 146, 60, 0.14);
+
+    /* 状态色 */
+    --ok: #34d399;
+    --warn: #fbbf24;
+
+    /* 纱层 */
+    --scrim-5: rgba(255, 255, 255, 0.05);
+    --scrim-8: rgba(255, 255, 255, 0.08);
+    --scrim-12: rgba(255, 255, 255, 0.12);
+  }
+
+  /* 暮色档（接近参考图） */
+  :root[data-mood='dusk'] {
+    --sky-top: #3a2b20;
+    --sky-mid: #27322f;
+    --sky-bottom: #122b33;
+    --glow-orange: rgba(214, 116, 56, 0.26);
+    --glow-teal: rgba(30, 95, 112, 0.30);
+    --vignette: rgba(8, 10, 12, 0.40);
+    --panel: rgba(22, 26, 28, 0.72);
+    --panel-border: rgba(255, 255, 255, 0.07);
+  }
+
+  /* 拂晓档（默认，比参考图亮一档） */
+  :root[data-mood='dawn'] {
+    --sky-top: #4d3828;
+    --sky-mid: #33403c;
+    --sky-bottom: #1b3a45;
+    --glow-orange: rgba(232, 130, 64, 0.32);
+    --glow-teal: rgba(38, 110, 128, 0.34);
+    --vignette: rgba(10, 13, 15, 0.30);
+    --panel: rgba(24, 30, 32, 0.62);
+    --panel-border: rgba(255, 255, 255, 0.09);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { height: 100%; }
+
+  body {
+    font-family: var(--font);
+    -webkit-font-smoothing: antialiased;
+    color: var(--ink-1);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* 双层背景：dusk/dawn 交叉淡入（渐变本身不可过渡） */
+  body::before, body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    transition: opacity 600ms ease-out;
+  }
+
+  body::before { /* 暮色层 */
+    background:
+      radial-gradient(140% 120% at 50% 45%, transparent 56%, var(--vignette) 100%),
+      radial-gradient(120% 90% at 50% -12%, var(--glow-orange), transparent 55%),
+      radial-gradient(130% 100% at 50% 118%, var(--glow-teal), transparent 62%),
+      linear-gradient(180deg, var(--sky-top) 0%, var(--sky-mid) 46%, var(--sky-bottom) 100%);
+    opacity: 1;
+  }
+
+  :root[data-mood='dusk'] body::before { opacity: 1; }
+
+  /* 顶栏：样张说明 + 亮度切换 */
+  .stage-note {
+    position: fixed;
+    top: 20px;
+    left: 24px;
+    font-size: 12px;
+    color: var(--ink-2);
+    letter-spacing: 0.02em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    text-shadow: 0 1px 8px rgba(0,0,0,0.3);
+  }
+  .stage-note .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--brand), #2e8ea3);
+  }
+
+  .mood-switch {
+    position: fixed;
+    top: 16px;
+    right: 24px;
+    display: flex;
+    gap: 4px;
+    padding: 3px;
+    border-radius: 10px;
+    background: rgba(20, 24, 26, 0.5);
+    border: 1px solid var(--scrim-8);
+    backdrop-filter: blur(12px);
+  }
+  .mood-switch button {
+    font-family: var(--font);
+    font-size: 12px;
+    padding: 5px 14px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--ink-3);
+    cursor: pointer;
+    transition: all 150ms ease-out;
+  }
+  .mood-switch button:hover { color: var(--ink-1); }
+  .mood-switch button.active {
+    background: var(--scrim-12);
+    color: var(--ink-1);
+  }
+  .mood-switch button:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+
+  /* ============================================
+     启动器窗口：玻璃面板浮在海面上
+     ============================================ */
+  .window {
+    width: 760px;
+    border-radius: 16px;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    backdrop-filter: blur(24px) saturate(1.1);
+    -webkit-backdrop-filter: blur(24px) saturate(1.1);
+    box-shadow:
+      0 32px 80px rgba(0, 0, 0, 0.45),
+      0 4px 16px rgba(0, 0, 0, 0.2);
+    overflow: hidden;
+    animation: rise 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(14px) scale(0.985); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .window { animation: none; }
+    body::before, body::after { transition: none; }
+  }
+
+  /* 搜索框 */
+  .search {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 18px 20px;
+    border-bottom: 1px solid var(--scrim-8);
+  }
+  .search svg { color: var(--ink-3); flex-shrink: 0; }
+  .search input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    font-family: var(--font);
+    font-size: 18px;
+    line-height: 1.4;
+    color: var(--ink-1);
+  }
+  .search input::placeholder { color: var(--ink-placeholder); }
+  .search kbd {
+    font-family: var(--font);
+    font-size: 11px;
+    color: var(--ink-3);
+    background: var(--scrim-8);
+    border: 1px solid var(--scrim-8);
+    border-radius: 6px;
+    padding: 3px 7px;
+  }
+
+  /* 分组标题 */
+  .group-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink-3);
+    padding: 14px 20px 6px;
+  }
+
+  /* 结果列表 */
+  .list { padding: 4px 10px 10px; list-style: none; }
+  .item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 10px;
+    border-radius: 10px;
+    cursor: default;
+    transition: background-color 150ms ease-out;
+  }
+  .item:hover { background: var(--scrim-5); }
+  .item.selected {
+    background: var(--brand-scrim);
+  }
+  .item .icon {
+    width: 30px; height: 30px;
+    border-radius: 8px;
+    background: var(--ic, #555);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .item .icon.dark-text { color: #2b2b2b; }
+  .item .meta { flex: 1; min-width: 0; }
+  .item .name {
+    font-size: 14px;
+    color: var(--ink-1);
+    line-height: 1.35;
+    transition: color 150ms ease-out;
+  }
+  .item.selected .name { color: var(--brand); }
+  .item .desc {
+    font-size: 12px;
+    color: var(--ink-3);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .item .hint {
+    font-size: 11px;
+    color: var(--ink-4);
+    opacity: 0;
+    transition: opacity 150ms ease-out;
+  }
+  .item.selected .hint { opacity: 1; }
+
+  /* 底部状态栏 */
+  .statusbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 20px;
+    border-top: 1px solid var(--scrim-8);
+    font-size: 12px;
+    color: var(--ink-4);
+  }
+  .statusbar .keys { display: flex; gap: 14px; }
+  .statusbar kbd {
+    font-family: var(--font);
+    color: var(--ink-3);
+    background: var(--scrim-5);
+    border-radius: 5px;
+    padding: 1px 6px;
+    margin-right: 4px;
+  }
+
+  /* ============================================
+     组件样张条：验证品牌橘在控件上的成色
+     ============================================ */
+  .swatches {
+    width: 760px;
+    margin-top: 18px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 18px;
+    border-radius: 14px;
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    animation: rise 380ms 60ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .swatches .label { font-size: 12px; color: var(--ink-4); margin-right: 4px; }
+
+  .btn-primary {
+    font-family: var(--font);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--brand-ink);
+    background: var(--brand);
+    border: none;
+    border-radius: 8px;
+    padding: 8px 16px;
+    cursor: pointer;
+    transition: background-color 150ms ease-out, transform 100ms ease-out;
+  }
+  .btn-primary:hover { background: #fca35a; }
+  .btn-primary:active { transform: scale(0.97); }
+  .btn-primary:focus-visible { outline: 2px solid var(--ink-1); outline-offset: 2px; }
+
+  .btn-ghost {
+    font-family: var(--font);
+    font-size: 13px;
+    color: var(--ink-3);
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 14px;
+    cursor: pointer;
+    transition: all 150ms ease-out;
+  }
+  .btn-ghost:hover { background: var(--scrim-8); color: var(--ink-1); }
+
+  .chip {
+    font-size: 11px;
+    border-radius: 6px;
+    padding: 3px 8px;
+    font-weight: 500;
+  }
+  .chip.ok { background: rgba(52, 211, 153, 0.14); color: var(--ok); }
+  .chip.warn { background: rgba(251, 191, 36, 0.14); color: var(--warn); }
+
+  /* Toggle */
+  .toggle {
+    width: 36px; height: 20px;
+    border-radius: 999px;
+    border: none;
+    background: var(--brand);
+    position: relative;
+    cursor: pointer;
+    transition: background-color 150ms ease-out;
+    margin-left: auto;
+  }
+  .toggle::after {
+    content: '';
+    position: absolute;
+    top: 2px; left: 18px;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: #fff;
+    transition: left 150ms ease-out;
+  }
+  .toggle[aria-pressed='false'] { background: var(--scrim-12); }
+  .toggle[aria-pressed='false']::after { left: 2px; }
+
+  .col { display: flex; flex-direction: column; align-items: center; }
+</style>
+</head>
+<body>
+
+  <div class="stage-note"><span class="dot"></span>橘子海 · 外观样张 — 暮色在海平线上烧完最后一层橘</div>
+
+  <div class="mood-switch" role="group" aria-label="亮度档位">
+    <button data-mood="dusk">暮色</button>
+    <button data-mood="dawn" class="active">拂晓</button>
+  </div>
+
+  <div class="col">
+    <!-- 启动器窗口 -->
+    <div class="window" role="dialog" aria-label="启动器预览">
+      <div class="search">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input type="text" placeholder="搜索应用、功能、文件…" aria-label="搜索" />
+        <kbd>⌘ K</kbd>
+      </div>
+
+      <div class="group-title">最近使用</div>
+      <ul class="list" id="appList">
+        <li class="item selected">
+          <div class="icon" style="--ic:#3eb575">微</div>
+          <div class="meta"><div class="name">微信</div><div class="desc">WeChat · 2 分钟前</div></div>
+          <span class="hint">↵ 打开</span>
+        </li>
+        <li class="item">
+          <div class="icon" style="--ic:#3a9bdc">VS</div>
+          <div class="meta"><div class="name">Visual Studio Code</div><div class="desc">代码编辑器 · 18 分钟前</div></div>
+          <span class="hint">↵ 打开</span>
+        </li>
+        <li class="item">
+          <div class="icon" style="--ic:#e8b04b">Ch</div>
+          <div class="meta"><div class="name">Chrome</div><div class="desc">浏览器 · 1 小时前</div></div>
+          <span class="hint">↵ 打开</span>
+        </li>
+        <li class="item">
+          <div class="icon dark-text" style="--ic:#e8e4dd">N</div>
+          <div class="meta"><div class="name">Notion</div><div class="desc">笔记 · 昨天</div></div>
+          <span class="hint">↵ 打开</span>
+        </li>
+        <li class="item">
+          <div class="icon" style="--ic:#d2453a">云</div>
+          <div class="meta"><div class="name">网易云音乐</div><div class="desc">音乐 · 昨天</div></div>
+          <span class="hint">↵ 打开</span>
+        </li>
+        <li class="item">
+          <div class="icon" style="--ic:#2dd4bf">&gt;_</div>
+          <div class="meta"><div class="name">终端</div><div class="desc">Windows Terminal · 3 天前</div></div>
+          <span class="hint">↵ 打开</span>
+        </li>
+      </ul>
+
+      <div class="statusbar">
+        <div class="keys">
+          <span><kbd>↑↓</kbd>选择</span>
+          <span><kbd>↵</kbd>打开</span>
+          <span><kbd>esc</kbd>关闭</span>
+        </div>
+        <span>6 个结果</span>
+      </div>
+    </div>
+
+    <!-- 组件样张 -->
+    <div class="swatches">
+      <span class="label">组件样张</span>
+      <button class="btn-primary">打开应用</button>
+      <button class="btn-ghost">稍后再说</button>
+      <span class="chip ok">已完成</span>
+      <span class="chip warn">待处理</span>
+      <button class="toggle" aria-pressed="true" aria-label="开关示例"></button>
+    </div>
+  </div>
+
+<script>
+  // 亮度档位切换
+  const moodButtons = document.querySelectorAll('.mood-switch button');
+  moodButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.documentElement.dataset.mood = btn.dataset.mood;
+      moodButtons.forEach(b => b.classList.toggle('active', b === btn));
+    });
+  });
+
+  // 列表选中：↑↓ 键盘 + 鼠标点击（真实还原启动器手感）
+  const items = Array.from(document.querySelectorAll('#appList .item'));
+  let current = 0;
+  function select(index) {
+    current = (index + items.length) % items.length;
+    items.forEach((it, i) => it.classList.toggle('selected', i === current));
+  }
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); select(current + 1); }
+    if (e.key === 'ArrowUp')   { e.preventDefault(); select(current - 1); }
+  });
+  items.forEach((it, i) => it.addEventListener('click', () => select(i)));
+
+  // Toggle 演示
+  const toggle = document.querySelector('.toggle');
+  toggle.addEventListener('click', () => {
+    toggle.setAttribute('aria-pressed', toggle.getAttribute('aria-pressed') !== 'true');
+  });
+</script>
+</body>
+</html>

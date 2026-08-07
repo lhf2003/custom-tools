@@ -2,12 +2,13 @@ import { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 're
 import Vditor from 'vditor';
 import 'vditor/dist/index.css';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { THEME_FAMILY } from '@/components/ThemeController';
 import '../styles/vditor.css';
 
-/** 用户主题模式解析为 vditor 实际主题（与 ThemeController 同规则） */
+/** 用户主题模式解析为 vditor 实际主题（明暗族规则与 ThemeController 同源） */
 function resolveThemeMode(mode: string): 'dark' | 'light' {
-  if (mode === 'light') return 'light';
-  if (mode === 'dark') return 'dark';
+  const family = THEME_FAMILY[mode];
+  if (family) return family;
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
@@ -54,10 +55,11 @@ export const VditorEditor = forwardRef<VditorEditorRef, VditorEditorProps>(
         const markdown = vditor.getValue();
         if (!markdown.trim()) return '';
 
-        // 创建临时容器用于渲染预览
+        // 创建临时容器用于渲染预览（跟随当前应用主题）
+        const isLight = document.documentElement.dataset.themeFamily === 'light';
         const tempDiv = document.createElement('div');
         tempDiv.className = 'vditor-reset';
-        tempDiv.style.cssText = 'padding: 20px; background: #ffffff; min-width: 800px;';
+        tempDiv.style.cssText = `padding: 20px; background: ${isLight ? '#ffffff' : '#1e1e21'}; min-width: 800px;`;
         tempDiv.style.visibility = 'hidden';
         tempDiv.style.position = 'fixed';
         tempDiv.style.left = '0';
@@ -69,15 +71,15 @@ export const VditorEditor = forwardRef<VditorEditorRef, VditorEditorProps>(
           // 使用 Vditor.preview 渲染 HTML
           await new Promise<void>((resolve) => {
             Vditor.preview(tempDiv, markdown, {
-              mode: 'light',
+              mode: isLight ? 'light' : 'dark',
               theme: {
-                current: 'light',
+                current: isLight ? 'light' : 'dark',
                 path: '/vditor/dist/css/content-theme',
               },
               hljs: {
                 enable: true,
                 lineNumber: false,
-                style: 'github',
+                style: isLight ? 'github' : 'github-dark',
               },
               after: () => {
                 // 等待一小段时间确保高亮和样式应用完成

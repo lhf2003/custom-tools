@@ -3,7 +3,7 @@ import { safeInvoke } from '@/utils/tauri';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { SettingGroup, SettingRow, Toggle } from '../components/SettingsPrimitives';
 import { CustomSelect } from '../components/CustomSelect';
-import { Check } from 'lucide-react';
+import { Check, LayoutGrid, List } from 'lucide-react';
 
 const clipboardKeepDaysOptions = [
   { value: '7', label: '7天' },
@@ -12,26 +12,28 @@ const clipboardKeepDaysOptions = [
   { value: '0', label: '永久' },
 ];
 
-/* ==================== 主题三卡片 ==================== */
+/* ==================== 主题卡片 ==================== */
 
-type ThemeMode = 'system' | 'dark' | 'light';
+type ThemeMode = 'system' | 'dark' | 'light' | 'orange-sea';
 
 const THEME_OPTIONS: { id: ThemeMode; label: string; description: string }[] = [
   { id: 'system', label: '跟随系统', description: '随 Windows 深浅色自动切换' },
   { id: 'dark', label: '深色', description: '始终使用深色主题' },
   { id: 'light', label: '浅色', description: '始终使用浅色主题' },
+  { id: 'orange-sea', label: '橘子海', description: '暮色海面渐变 · 深色族' },
 ];
 
 interface PreviewSideColors {
   titlebar: string;
   sidebar: string;
+  /** 纯色或渐变（橘子海为海面渐变） */
   content: string;
   text: string;
   border: string;
 }
 
-/** 主题预览两侧的固定示意色：预览表达"另一种主题的样子"，不跟随当前主题 */
-const PREVIEW_COLORS: Record<'dark' | 'light', PreviewSideColors> = {
+/** 主题预览的固定示意色：预览表达"该主题的样子"，不跟随当前主题 */
+const PREVIEW_COLORS: Record<Exclude<ThemeMode, 'system'>, PreviewSideColors> = {
   dark: {
     titlebar: '#26262a',
     sidebar: '#26262a',
@@ -42,9 +44,16 @@ const PREVIEW_COLORS: Record<'dark' | 'light', PreviewSideColors> = {
   light: {
     titlebar: '#f4f4f5',
     sidebar: '#f4f4f5',
-    content: '#fafafa',
+    content: '#ffffff',
     text: '#d4d4d8',
     border: 'rgba(0, 0, 0, 0.08)',
+  },
+  'orange-sea': {
+    titlebar: 'rgba(26, 32, 36, 0.92)',
+    sidebar: 'rgba(33, 40, 44, 0.92)',
+    content: 'linear-gradient(180deg, #4d3828 0%, #33403c 46%, #1b3a45 100%)',
+    text: '#a9ada7',
+    border: 'rgba(251, 146, 60, 0.35)',
   },
 };
 
@@ -53,30 +62,30 @@ function MiniSide({ colors }: { colors: PreviewSideColors }) {
   return (
     <div
       className="w-full overflow-hidden rounded-[10px] border"
-      style={{ borderColor: colors.border, backgroundColor: colors.content }}
+      style={{ borderColor: colors.border, background: colors.content }}
     >
       <div
         className="h-4 flex items-center gap-[3px] px-1.5"
-        style={{ backgroundColor: colors.titlebar }}
+        style={{ background: colors.titlebar }}
       >
         <span className="w-[5px] h-[5px] rounded-full bg-white/10" />
         <span className="w-[5px] h-[5px] rounded-full bg-white/10" />
         <span className="w-[5px] h-[5px] rounded-full bg-white/10" />
       </div>
       <div className="p-2 flex gap-1.5">
-        <div className="w-[34px] h-[46px] rounded" style={{ backgroundColor: colors.sidebar }} />
+        <div className="w-[34px] h-[46px] rounded" style={{ background: colors.sidebar }} />
         <div className="flex-1 flex flex-col gap-[5px]">
-          <div className="h-[7px] rounded-sm w-[70%]" style={{ backgroundColor: colors.text }} />
-          <div className="h-[7px] rounded-sm" style={{ backgroundColor: colors.text }} />
-          <div className="h-[7px] rounded-sm w-[55%]" style={{ backgroundColor: colors.text }} />
-          <div className="h-[7px] rounded-sm w-[80%]" style={{ backgroundColor: colors.text }} />
+          <div className="h-[7px] rounded-sm w-[70%]" style={{ background: colors.text }} />
+          <div className="h-[7px] rounded-sm" style={{ background: colors.text }} />
+          <div className="h-[7px] rounded-sm w-[55%]" style={{ background: colors.text }} />
+          <div className="h-[7px] rounded-sm w-[80%]" style={{ background: colors.text }} />
         </div>
       </div>
     </div>
   );
 }
 
-/** 主题预览卡片：dark/light 单侧，system 左深右浅分裂示意 */
+/** 主题预览卡片：dark/light/orange-sea 单侧，system 左深右浅分裂示意 */
 function ThemeMiniPreview({ variant }: { variant: ThemeMode }) {
   if (variant === 'system') {
     return (
@@ -90,7 +99,43 @@ function ThemeMiniPreview({ variant }: { variant: ThemeMode }) {
       </div>
     );
   }
-  return <MiniSide colors={variant === 'dark' ? PREVIEW_COLORS.dark : PREVIEW_COLORS.light} />;
+  return <MiniSide colors={PREVIEW_COLORS[variant]} />;
+}
+
+/** 启动器视图两段切换：横向网格 / 列表 */
+function LauncherViewSwitch() {
+  const launcherView = useSettingsStore((s) => s.launcher_view);
+  const setLauncherView = useSettingsStore((s) => s.setLauncherView);
+
+  const options = [
+    { id: 'grid', label: '网格', icon: LayoutGrid },
+    { id: 'list', label: '列表', icon: List },
+  ] as const;
+
+  return (
+    <div className="flex gap-0.5 p-0.5 rounded-lg bg-app-bg-tertiary border border-app-border-subtle">
+      {options.map((opt) => {
+        const active = launcherView === opt.id;
+        const Icon = opt.icon;
+        return (
+          <button
+            key={opt.id}
+            type="button"
+            onClick={() => setLauncherView(opt.id)}
+            aria-pressed={active}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs transition-colors cursor-pointer ${
+              active
+                ? 'bg-app-bg-elevated text-app-text-primary font-medium'
+                : 'text-app-text-tertiary hover:text-app-text-secondary'
+            }`}
+          >
+            <Icon size={13} />
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 function ThemeSelector() {
@@ -273,6 +318,9 @@ export function GeneralSettings() {
 
       <SettingGroup title="外观">
         <ThemeSelector />
+        <SettingRow title="启动器视图" description="搜索结果的排列方式：横向网格或纵向列表">
+          <LauncherViewSwitch />
+        </SettingRow>
       </SettingGroup>
 
       <SearchSection />
