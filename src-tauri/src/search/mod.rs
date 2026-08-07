@@ -253,22 +253,50 @@ impl SearchIndex {
         }
 
         // UWP apps (Microsoft Store)
-        let uwp_apps = uwp::scan();
-        log::info!("UWP scan found {} apps", uwp_apps.len());
-        for uwp_app in uwp_apps {
-            let launch = uwp::launch_path(&uwp_app.app_id);
-            let target_key = launch.to_lowercase();
-            if !seen_targets.contains(&target_key)
-                && seen_names.insert(uwp_app.name.to_lowercase())
-            {
-                seen_targets.insert(target_key);
-                let pinyin = to_pinyin_initials(&uwp_app.name);
-                apps.push(AppItem {
-                    name: uwp_app.name,
-                    path: launch,
-                    icon: None,
-                    pinyin_initials: pinyin,
-                });
+        match uwp::scan() {
+            Ok(uwp_apps) => {
+                log::info!("UWP scan found {} apps", uwp_apps.len());
+                for uwp_app in uwp_apps {
+                    let launch = uwp::launch_path(&uwp_app.app_id);
+                    let target_key = launch.to_lowercase();
+                    if !seen_targets.contains(&target_key)
+                        && seen_names.insert(uwp_app.name.to_lowercase())
+                    {
+                        seen_targets.insert(target_key);
+                        let pinyin = to_pinyin_initials(&uwp_app.name);
+                        apps.push(AppItem {
+                            name: uwp_app.name,
+                            path: launch,
+                            icon: None,
+                            pinyin_initials: pinyin,
+                        });
+                    }
+                }
+            }
+            Err(e) => {
+                // 扫描失败 ≠ 确实没有 UWP 应用：沿用缓存旧条目，
+                // 否则 replace_batch 的全量替换会把 UWP 应用全部清空
+                log::warn!("UWP 扫描失败（{}），沿用缓存中已有的 UWP 条目", e);
+                if let Some(ref db_state) = db_state {
+                    if let Ok(conn) = rusqlite::Connection::open(&db_state.0) {
+                        if let Ok(entries) = app_cache::load_uwp_cached(&conn) {
+                            for entry in entries {
+                                let target_key = entry.path.to_lowercase();
+                                if !seen_targets.contains(&target_key)
+                                    && seen_names.insert(entry.name.to_lowercase())
+                                {
+                                    seen_targets.insert(target_key);
+                                    apps.push(AppItem {
+                                        name: entry.name,
+                                        path: entry.path,
+                                        icon: None,
+                                        pinyin_initials: entry.pinyin_initials,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -534,23 +562,23 @@ impl SearchIndex {
     ///
     /// 返回失效条目的 path 列表。
     pub fn verify_apps_on_disk(apps: &[AppItem], uwp_rescan: bool) -> Vec<String> {
-        let uwp_valid: HashSet<String> = if uwp_rescan {
+        // UWP 校验：扫描失败（Err）视为全部仍有效——不该因扫描失败误判卸载，
+        // 与 collect_all_apps 的「失败沿用缓存」同一原则
+        let uwp_valid: Option<HashSet<String>> = if uwp_rescan {
             uwp::scan()
-                .iter()
-                .map(|u| uwp::launch_path(&u.app_id))
-                .collect()
+                .ok()
+                .map(|apps| apps.iter().map(|u| uwp::launch_path(&u.app_id)).collect())
         } else {
-            HashSet::new()
+            Some(HashSet::new())
         };
 
         apps.iter()
             .filter_map(|app| {
                 let p = &app.path;
                 if p.starts_with("shell:AppsFolder\\") {
-                    if uwp_rescan && !uwp_valid.contains(p) {
-                        Some(p.clone())
-                    } else {
-                        None
+                    match uwp_valid {
+                        Some(ref valid) if !valid.contains(p) => Some(p.clone()),
+                        _ => None,
                     }
                 } else if p.starts_with("\\\\") {
                     None

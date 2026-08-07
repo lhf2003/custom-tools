@@ -22,22 +22,30 @@ pub fn launch_path(app_id: &str) -> String {
 
 /// Enumerate installed UWP apps using Get-StartApps.
 /// Only returns entries whose AppID contains '!' (UWP package format).
+///
+/// 返回 Err 表示「扫描失败」（powershell 超时/不可用/输出解析失败）——调用方
+/// 必须与「确实没有 UWP 应用」区分开：失败时沿用缓存旧条目，否则全量替换
+/// 会把所有 UWP 应用从缓存里清空（Get-StartApps 被 EDR/组策略挂起即全灭）。
 #[cfg(windows)]
-pub fn scan() -> Vec<UwpApp> {
+pub fn scan() -> Result<Vec<UwpApp>, String> {
+    // 必须显式把管道输出编码设为 UTF-8：PowerShell 5.1 默认按 OEM 代码页
+    // （中文系统 = GBK）向管道写字节，Rust 按 UTF-8 读会遇第一个中文应用名
+    // 解码失败 → 整个输出被丢弃 → 假性「empty output」→ UWP 应用全灭
     let output = run_powershell(
-        "Get-StartApps | Where-Object { $_.AppID -like '*!*' } | \
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \
+         Get-StartApps | Where-Object { $_.AppID -like '*!*' } | \
          Select-Object Name, AppID | ConvertTo-Json -Compress",
     );
 
     match output {
         Some(json) => parse_json(&json),
-        None => Vec::new(),
+        None => Err("Get-StartApps 执行失败（超时或不可用）".to_string()),
     }
 }
 
 #[cfg(not(windows))]
-pub fn scan() -> Vec<UwpApp> {
-    Vec::new()
+pub fn scan() -> Result<Vec<UwpApp>, String> {
+    Ok(Vec::new())
 }
 
 fn run_powershell(script: &str) -> Option<String> {
@@ -66,11 +74,22 @@ fn run_powershell(script: &str) -> Option<String> {
 
     // stdout/stderr 各起一个读取线程:输出超过 pipe 缓冲(64KB)时子进程会
     // 阻塞在写管道上,不持续读取的话 try_wait 永远等不到退出。
+    // 读取用 read_to_end + 宽容解码：read_to_string 遇非 UTF-8 字节整个
+    // 返回 Err 导致输出静默丢失（8/1 起 UWP 全灭的根因，见 scan 注释）。
     let mut stdout_pipe = child.stdout.take()?;
     let stdout_reader = std::thread::spawn(move || {
-        let mut buf = String::new();
-        let _ = stdout_pipe.read_to_string(&mut buf);
-        buf
+        let mut buf = Vec::new();
+        let _ = stdout_pipe.read_to_end(&mut buf);
+        match String::from_utf8(buf) {
+            Ok(s) => s,
+            Err(e) => {
+                log::warn!(
+                    "powershell 输出非 UTF-8（{}），宽容解码，中文内容可能乱码",
+                    e.utf8_error()
+                );
+                String::from_utf8_lossy(e.as_bytes()).into_owned()
+            }
+        }
     });
     let mut stderr_pipe = child.stderr.take()?;
     let stderr_reader = std::thread::spawn(move || {
@@ -124,25 +143,21 @@ fn run_powershell(script: &str) -> Option<String> {
     }
 }
 
-fn parse_json(json: &str) -> Vec<UwpApp> {
+/// 解析失败视为扫描失败（Err），成功但无条目视为确实没有（Ok 空）
+fn parse_json(json: &str) -> Result<Vec<UwpApp>, String> {
     // Handle both array and single-object responses
     let arr: Vec<serde_json::Value> = if json.starts_with('[') {
-        serde_json::from_str(json).unwrap_or_else(|e| {
-            log::warn!("Failed to parse UWP JSON array: {}", e);
-            Vec::new()
-        })
+        serde_json::from_str(json).map_err(|e| format!("解析 UWP JSON 数组失败: {}", e))?
     } else if json.starts_with('{') {
         serde_json::from_str::<serde_json::Value>(json)
             .map(|v| vec![v])
-            .unwrap_or_else(|e| {
-                log::warn!("Failed to parse UWP JSON object: {}", e);
-                Vec::new()
-            })
+            .map_err(|e| format!("解析 UWP JSON 对象失败: {}", e))?
     } else {
-        return Vec::new();
+        return Err("Get-StartApps 输出不是 JSON".to_string());
     };
 
-    arr.into_iter()
+    Ok(arr
+        .into_iter()
         .filter_map(|item| {
             let name = item["Name"].as_str()?.trim().to_string();
             let app_id = item["AppID"].as_str()?.trim().to_string();
@@ -151,5 +166,5 @@ fn parse_json(json: &str) -> Vec<UwpApp> {
             }
             Some(UwpApp { name, app_id })
         })
-        .collect()
+        .collect())
 }
