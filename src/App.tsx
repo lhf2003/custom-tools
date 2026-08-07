@@ -16,7 +16,14 @@ import { AboutDialog } from '@/components/AboutDialog';
 import { ToastContainer } from '@/components/Toast';
 import type { VersionCheckResult } from '@/components/ChangelogDialog';
 import type { MenuItem, OpenViewDetail, ShellView } from '@/types';
-import { getPlugin, getPluginByShortcutModule, isPluginView, preloadPlugins } from '@/plugins/registry';
+import {
+  getPlugin,
+  getPluginByShortcutModule,
+  isBuiltInPluginEnabled,
+  isPluginView,
+  loadBuiltInPluginStates,
+  preloadPlugins,
+} from '@/plugins/registry';
 import { refreshExternalPlugins } from '@/plugins/external';
 import { getPluginShortcutConflicts } from '@/plugins/pluginShortcuts';
 import { PluginHost } from '@/plugins/PluginHost';
@@ -145,6 +152,13 @@ function App() {
     });
   }, []);
 
+  // 加载内置插件启用状态：禁用的插件在启动器/trigger/快捷键入口过滤
+  useEffect(() => {
+    loadBuiltInPluginStates().catch((err: unknown) => {
+      console.error('[plugins] 内置插件状态加载失败:', err);
+    });
+  }, []);
+
   // Handle keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -171,7 +185,8 @@ function App() {
         return;
       }
       const plugin = getPluginByShortcutModule(moduleId) ?? getPlugin(moduleId);
-      if (plugin) {
+      // getPluginByShortcutModule 已过滤禁用的内置插件；fallback 兜底外部插件直接 id 时再查一次
+      if (plugin && isBuiltInPluginEnabled(plugin.id)) {
         setActiveView(plugin.id);
       } else {
         console.warn(`[plugins] 快捷键事件未知 moduleId「${moduleId}」，已忽略`);

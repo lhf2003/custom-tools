@@ -7,10 +7,24 @@ import { SettingGroup, SettingRow, Toggle } from '../components/SettingsPrimitiv
 import { MenuPanel } from '@/components/ActionMenu';
 import { useToastStore } from '@/stores/toastStore';
 import { useExternalPluginsStore, type ExternalPluginItem } from '@/stores/externalPluginsStore';
-import { listPlugins } from '@/plugins/registry';
+import {
+  isBuiltInPluginEnabled,
+  listPlugins,
+  loadBuiltInPluginStates,
+  setBuiltInPluginEnabled,
+} from '@/plugins/registry';
 import { setPluginEnabled, isPluginTrusted, markPluginTrusted } from '@/plugins/external';
 import { getPluginShortcutConflicts } from '@/plugins/pluginShortcuts';
 import { GeneratePluginModal } from './GeneratePluginModal';
+
+/** 内置插件 id → 全局快捷键 id（禁用插件时联动禁用快捷键并释放组合键；反之为恢复） */
+const BUILTIN_SHORTCUT_MAP: Record<string, string> = {
+  clipboard: 'open_clipboard',
+  markdown: 'open_notes',
+  password: 'open_passwords',
+  everything: 'open_everything',
+  translate: 'translate_selection',
+};
 
 /** 信任确认弹窗 */
 function TrustConfirmModal({
@@ -207,6 +221,8 @@ export function PluginMarketSettings({ onOpenPluginSettings }: PluginMarketSetti
   const [pendingEnable, setPendingEnable] = useState<ExternalPluginItem | null>(null);
   // AI 生成弹窗（任务 12：流式步骤 + 校验 + 预览 + 试运行 + 安装）
   const [showGenerate, setShowGenerate] = useState(false);
+  // 内置插件开关的本地镜像（初始化/加载后刷新；切换时同步）
+  const [builtInEnabled, setBuiltInEnabled] = useState<Record<string, boolean>>({});
 
   const load = useCallback(async () => {
     try {
@@ -220,6 +236,19 @@ export function PluginMarketSettings({ onOpenPluginSettings }: PluginMarketSetti
   useEffect(() => {
     load();
   }, [load]);
+
+  // 内置插件状态：内存集加载后刷新本地镜像（listPlugins 含外部已注册项，仅内置行消费）
+  useEffect(() => {
+    loadBuiltInPluginStates()
+      .catch((err: unknown) => {
+        console.error('[plugins] 内置插件状态加载失败:', err);
+      })
+      .finally(() => {
+        setBuiltInEnabled(
+          Object.fromEntries(listPlugins().map((p) => [p.id, isBuiltInPluginEnabled(p.id)]))
+        );
+      });
+  }, []);
 
   // 内置插件：注册表中不在扫描结果里的部分（注册表只含启用的外部插件，
   // 扫描结果含全部外部插件，差集恰好是内置；依赖 items 让刷新后重算）
@@ -241,6 +270,34 @@ export function PluginMarketSettings({ onOpenPluginSettings }: PluginMarketSetti
     await load();
     addToast({ type: 'success', title: enabled ? `已启用「${item.manifest.name}」` : `已禁用「${item.manifest.name}」` });
   }, [load, addToast]);
+
+  /**
+   * 内置插件开关：落盘 builtin.<id>.enabled → 同步注册表内存集 → 本地镜像 →
+   * 联动全局快捷键（保留用户自定义键位，仅强制 enabled 与插件一致；reregister 在 update_shortcut 内部）。
+   */
+  const handleBuiltInToggle = useCallback(async (pluginId: string, pluginName: string, enabled: boolean) => {
+    try {
+      await invoke('set_setting', {
+        key: `builtin.${pluginId}.enabled`,
+        value: enabled ? '1' : '0',
+      });
+      setBuiltInPluginEnabled(pluginId, enabled);
+      setBuiltInEnabled((s) => ({ ...s, [pluginId]: enabled }));
+      const shortcutId = BUILTIN_SHORTCUT_MAP[pluginId];
+      if (shortcutId) {
+        const shortcuts = await invoke<{ id: string; custom_keys: string | null }[]>('get_shortcuts');
+        const current = shortcuts.find((s) => s.id === shortcutId);
+        await invoke('update_shortcut', {
+          id: shortcutId,
+          customKeys: current?.custom_keys ?? null,
+          enabled,
+        });
+      }
+      addToast({ type: 'success', title: enabled ? `已启用「${pluginName}」` : `已禁用「${pluginName}」` });
+    } catch (err) {
+      addToast({ type: 'error', title: '设置失败', message: String(err) });
+    }
+  }, [addToast]);
 
   const confirmEnable = useCallback(async () => {
     if (!pendingEnable) return;
@@ -286,12 +343,15 @@ export function PluginMarketSettings({ onOpenPluginSettings }: PluginMarketSetti
 
   return (
     <>
-      {/* 内置插件：系统能力，锁定展示 */}
+      {/* 内置插件：系统能力，支持开关；禁用联动其全局快捷键（释放组合键） */}
       <SettingGroup title="内置插件">
         {builtInPlugins.map((plugin) => {
           return (
             <SettingRow key={plugin.id} title={plugin.name} description={plugin.description}>
-              <span className="text-xs text-app-text-disabled">系统内置</span>
+              <Toggle
+                enabled={builtInEnabled[plugin.id] ?? true}
+                onToggle={(v) => handleBuiltInToggle(plugin.id, plugin.name, v)}
+              />
             </SettingRow>
           );
         })}

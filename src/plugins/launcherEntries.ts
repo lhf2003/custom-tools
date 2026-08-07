@@ -1,7 +1,7 @@
 import type { ComponentType } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import type { ViewMode } from '@/types';
-import { SHELL_ENTRIES, listPlugins, type ShellEntry } from './registry';
+import { SHELL_ENTRIES, listEnabledPlugins, listPlugins, type ShellEntry } from './registry';
 
 /**
  * 启动器/操作手册共用的内置入口枚举：
@@ -44,9 +44,9 @@ function byOrder(a: { order?: number }, b: { order?: number }): number {
   return (a.order ?? Number.MAX_SAFE_INTEGER) - (b.order ?? Number.MAX_SAFE_INTEGER);
 }
 
-/** 全部内置入口：插件 + 壳，按 order 排序（缺的排最后） */
+/** 全部内置入口：启用插件 + 壳，按 order 排序（缺的排最后）；禁用的内置插件不出现 */
 export function listLauncherEntries(): LauncherEntry[] {
-  return [...listPlugins().map(entryOf), ...SHELL_ENTRIES.map(shellEntryOf)].sort(byOrder);
+  return [...listEnabledPlugins().map(entryOf), ...SHELL_ENTRIES.map(shellEntryOf)].sort(byOrder);
 }
 
 /** 内置视图 id 集合（含壳视图） */

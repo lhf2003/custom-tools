@@ -1,3 +1,4 @@
+import { invoke } from '@tauri-apps/api/core';
 import { MessageCircle, Settings } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { ShellView } from '@/types';
@@ -34,6 +35,41 @@ function byOrder(a: { order?: number }, b: { order?: number }): number {
 /** 全部插件，按 order 排序（缺的排最后） */
 export function listPlugins(): ViewPlugin[] {
   return [...byId.values()].sort(byOrder);
+}
+
+/**
+ * 内置插件启用状态（内存镜像 settings 表 builtin.<id>.enabled）：
+ * 无设置 = 启用（默认），显式 '0' 为禁用。禁用 = 软删除：注册表保留
+ * （当前打开的视图可继续渲染），入口层（启动器/trigger/快捷键）过滤。
+ */
+const disabledBuiltInIds = new Set<string>();
+
+/** 加载内置插件启用状态（App 挂载时调用；外部插件 id 读 builtin key 不存在，自动跳过） */
+export async function loadBuiltInPluginStates(): Promise<void> {
+  for (const plugin of byId.values()) {
+    if (externalIds.has(plugin.id)) continue;
+    const enabled = await invoke<string | null>('get_setting', {
+      key: `builtin.${plugin.id}.enabled`,
+    });
+    if (enabled === '0') disabledBuiltInIds.add(plugin.id);
+    else disabledBuiltInIds.delete(plugin.id);
+  }
+}
+
+/** 更新内置插件启用状态（市场页开关后同步内存；落盘由调用方负责） */
+export function setBuiltInPluginEnabled(id: string, enabled: boolean): void {
+  if (enabled) disabledBuiltInIds.delete(id);
+  else disabledBuiltInIds.add(id);
+}
+
+/** 插件是否可用：内置插件查禁用集；外部插件恒可用（未启用的不会注册进来） */
+export function isBuiltInPluginEnabled(id: string): boolean {
+  return !disabledBuiltInIds.has(id);
+}
+
+/** 启用的插件（过滤禁用的内置插件），供启动器等入口消费 */
+export function listEnabledPlugins(): ViewPlugin[] {
+  return listPlugins().filter((p) => isBuiltInPluginEnabled(p.id));
 }
 
 export function getPlugin(id: string): ViewPlugin | undefined {
@@ -85,27 +121,30 @@ export function listExternalPluginIds(): string[] {
   return [...externalIds];
 }
 
-/** 后端 shortcut:open_module 的 moduleId → 插件（吸收 notes/passwords 旧 id） */
+/** 后端 shortcut:open_module 的 moduleId → 插件（吸收 notes/passwords 旧 id）；禁用的内置插件不响应 */
 export function getPluginByShortcutModule(moduleId: string): ViewPlugin | undefined {
-  return byShortcutModuleId.get(moduleId);
+  const plugin = byShortcutModuleId.get(moduleId);
+  return plugin && isBuiltInPluginEnabled(plugin.id) ? plugin : undefined;
 }
 
 /**
- * 启动空闲时预热全部插件 chunk（本地并行拉取，不阻塞主线程）。
+ * 启动空闲时预热插件 chunk（本地并行拉取，不阻塞主线程；禁用的内置插件跳过）。
  * 预热后首次进入插件的 import() 立即 resolve，加载态消失。
  * 失败静默：预加载失败不影响运行，进入时懒加载仍会触发并走 ErrorBoundary 兜底。
  */
 export function preloadPlugins(): void {
   for (const plugin of byId.values()) {
+    if (!isBuiltInPluginEnabled(plugin.id)) continue;
     plugin.load().catch(() => {
       /* 静默 */
     });
   }
 }
 
-/** 行首前缀命中某插件 trigger 时返回该插件与剩余参数文本；大小写敏感 */
+/** 行首前缀命中某插件 trigger 时返回该插件与剩余参数文本；大小写敏感；禁用的内置插件不参与 */
 export function matchTrigger(query: string): { plugin: ViewPlugin; trigger: PluginTrigger; arg: string } | null {
   for (const plugin of byId.values()) {
+    if (!isBuiltInPluginEnabled(plugin.id)) continue;
     for (const trigger of plugin.triggers ?? []) {
       if (query.startsWith(trigger.keyword)) {
         return { plugin, trigger, arg: query.slice(trigger.keyword.length).trim() };
@@ -144,6 +183,7 @@ export function suggestTriggers(query: string): TriggerSuggestion[] {
 
   const out: TriggerSuggestion[] = [];
   for (const plugin of byId.values()) {
+    if (!isBuiltInPluginEnabled(plugin.id)) continue;
     for (const trigger of plugin.triggers ?? []) {
       const kw = trigger.keyword;
       if (!kw.startsWith('@')) continue;
