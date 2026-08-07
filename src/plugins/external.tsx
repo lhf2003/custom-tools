@@ -2,6 +2,8 @@ import { useEffect, useRef, type ComponentType } from 'react';
 import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import { Package } from 'lucide-react';
 import { useAppStore } from '@/stores/appStore';
+import { WINDOW_SIZE } from '@/constants/window';
+import { immediateResize } from '@/utils/tauri';
 import { listExternalPluginIds, registerExternalPlugins, unregisterExternalPlugins } from './registry';
 import { syncPluginShortcuts } from './pluginShortcuts';
 import type { ViewPlugin } from './types';
@@ -141,6 +143,9 @@ function createExternalViewComponent(pluginId: string): ComponentType {
     const unmountRef = useRef<(() => void) | null>(null);
 
     useEffect(() => {
+      // 插件窗口规范：打开插件视图时立即对齐内置工具视图尺寸（820×600），
+      // 与内置视图 mount 时 immediateResize 同策略（取消挂起的 debounced resize，避免 DWM 合成层脱节）
+      immediateResize(WINDOW_SIZE.PLUGIN.height, WINDOW_SIZE.PLUGIN.width);
       let cancelled = false;
       let mounted = false;
       loadExternalModule(pluginId)

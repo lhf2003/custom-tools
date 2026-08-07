@@ -39,6 +39,11 @@ export const WINDOW_SIZE = {
     height: 600,
     width: 820,
   },
+  /** 外部插件统一窗口规范：打开插件视图时与内置工具视图同尺寸 */
+  PLUGIN: {
+    height: 600,
+    width: 820,
+  },
   CHAT: {
     /** Height when only the input box is visible. */
     collapsed: 62,
