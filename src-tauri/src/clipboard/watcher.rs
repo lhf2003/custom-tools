@@ -175,51 +175,81 @@ impl ClipboardWatcher {
         unsafe {
             log::info!("Clipboard update detected");
 
-            // Resolve the source app before opening the clipboard — while the
-            // clipboard is open, ownership may be reported differently.
-            // 只采集 exe 路径；显示名由事件处理线程统一解析（app_cache → 版本信息 → 进程名）
-            let source_exe = Self::get_source_app();
+            // 部分应用（JetBrains IDE 等）剪切/复制时采用延迟渲染：
+            // 先登记格式，实际数据在收到渲染请求后才提供。事件触发
+            // 瞬间立即读取会拿到空内容，按递增延迟重试覆盖渲染窗口。
+            // 全部失败才放弃，避免剪切/复制内容丢记录。
+            const RETRY_DELAYS_MS: [u64; 4] = [0, 100, 300, 700];
 
-            // Open clipboard
-            if let Err(e) = OpenClipboard(None) {
-                log::error!("Failed to open clipboard: {:?}", e);
-                return Err(e.into());
-            }
+            let mut last_error = None;
+            for (idx, delay_ms) in RETRY_DELAYS_MS.iter().enumerate() {
+                if *delay_ms > 0 {
+                    std::thread::sleep(std::time::Duration::from_millis(*delay_ms));
+                }
 
-            // Get clipboard data
-            let result = Self::read_clipboard_content();
-
-            // Always close clipboard
-            let _ = CloseClipboard();
-
-            match result {
-                Ok(content) => {
-                    log::info!("Clipboard content read successfully");
-                    CLIPBOARD_SENDER.with(|sender| {
-                        if let Some(sender) = sender.borrow().as_ref() {
-                            let event = ClipboardEvent {
-                                content,
-                                source_app: None,
-                                source_exe,
-                            };
-                            if let Err(e) = sender.try_send(event) {
-                                log::error!("Failed to send clipboard event: {}", e);
+                match Self::try_read_clipboard_content() {
+                    Ok((source_exe, content)) => {
+                        log::info!("Clipboard content read successfully");
+                        CLIPBOARD_SENDER.with(|sender| {
+                            if let Some(sender) = sender.borrow().as_ref() {
+                                let event = ClipboardEvent {
+                                    content,
+                                    source_app: None,
+                                    source_exe,
+                                };
+                                if let Err(e) = sender.try_send(event) {
+                                    log::error!("Failed to send clipboard event: {}", e);
+                                } else {
+                                    log::info!("Clipboard event sent successfully");
+                                }
                             } else {
-                                log::info!("Clipboard event sent successfully");
+                                log::error!("No clipboard sender available");
                             }
-                        } else {
-                            log::error!("No clipboard sender available");
-                        }
-                    });
-                }
-
-                Err(e) => {
-                    log::warn!("Failed to read clipboard content: {}", e);
+                        });
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        last_error = Some(e);
+                        log::debug!(
+                            "Clipboard read attempt {}/{} failed, retrying...",
+                            idx + 1,
+                            RETRY_DELAYS_MS.len()
+                        );
+                    }
                 }
             }
 
+            if let Some(e) = last_error {
+                log::warn!(
+                    "Failed to read clipboard content after {} attempts: {}",
+                    RETRY_DELAYS_MS.len(),
+                    e
+                );
+            }
             Ok(())
         }
+    }
+
+    /// 单次剪贴板读取尝试：解析来源 exe（打开剪贴板前）→ 打开剪贴板
+    /// → 读取内容 → 关闭剪贴板。返回 (来源exe, 内容)。
+    ///
+    /// 来源 exe 必须在打开剪贴板前解析——剪贴板打开期间所有权
+    /// 报告可能不同。只采集 exe 路径；显示名由事件处理线程统一
+    /// 解析（app_cache → 版本信息 → 进程名）。
+    unsafe fn try_read_clipboard_content() -> anyhow::Result<(Option<String>, ClipboardContent)> {
+        let source_exe = Self::get_source_app();
+
+        if let Err(e) = OpenClipboard(None) {
+            log::error!("Failed to open clipboard: {:?}", e);
+            return Err(e.into());
+        }
+
+        let result = Self::read_clipboard_content();
+
+        // Always close clipboard
+        let _ = CloseClipboard();
+
+        result.map(|content| (source_exe, content))
     }
 
     /// Resolve the exe path of the app that set the clipboard content.

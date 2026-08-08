@@ -311,6 +311,25 @@ impl ClipboardManager {
                 let content = files.join("\n");
                 let hash = Self::calculate_hash(&content);
 
+                // 与文本/图片一致：1 小时窗口内按内容哈希去重。
+                // 资源管理器剪切文件时剪贴板会连续更新（事件触发两次），
+                // 无去重会导致同一文件列表重复入库。
+                let exists: bool = conn
+                    .query_row(
+                        "SELECT 1 FROM clipboard_history
+                     WHERE content_hash = ?1
+                     AND created_at > datetime('now', '-1 hour')
+                     LIMIT 1",
+                        [&hash],
+                        |_| Ok(true),
+                    )
+                    .unwrap_or(false);
+
+                if exists {
+                    log::debug!("Duplicate clipboard file list ignored");
+                    return Ok(());
+                }
+
                 conn.execute(
                     "INSERT INTO clipboard_history
                      (content, content_type, content_hash, source_app, source_exe)
