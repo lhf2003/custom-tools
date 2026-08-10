@@ -215,16 +215,21 @@ impl SearchIndex {
         // System start menu
         let system_start_menu =
             PathBuf::from("C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs");
-        scan_dir_if_local(&system_start_menu, &mut apps, &mut seen_targets);
+        scan_dir_if_local(&system_start_menu, &mut apps, &mut seen_targets, &mut seen_names);
 
         // User start menu & Desktop shortcuts
         if let Ok(user_profile) = std::env::var("USERPROFILE") {
             let user_start_menu = PathBuf::from(user_profile.clone())
                 .join("AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs");
-            scan_dir_if_local(&user_start_menu, &mut apps, &mut seen_targets);
+            scan_dir_if_local(
+                &user_start_menu,
+                &mut apps,
+                &mut seen_targets,
+                &mut seen_names,
+            );
 
             let desktop = PathBuf::from(user_profile).join("Desktop");
-            scan_dir_if_local(&desktop, &mut apps, &mut seen_targets);
+            scan_dir_if_local(&desktop, &mut apps, &mut seen_targets, &mut seen_names);
         }
 
         // Registry apps (green software without Start Menu shortcuts)。
@@ -300,7 +305,7 @@ impl SearchIndex {
         let custom_dirs = load_custom_dirs(db_state);
         for dir_path in custom_dirs {
             let dir = PathBuf::from(&dir_path);
-            scan_dir_if_local(&dir, &mut apps, &mut seen_targets);
+            scan_dir_if_local(&dir, &mut apps, &mut seen_targets, &mut seen_names);
         }
 
         // Sort by name alphabetically
@@ -404,11 +409,12 @@ impl SearchIndex {
         let Some(last) = crate::db::app_cache::last_full_scan(&conn) else {
             return false;
         };
-        // CURRENT_TIMESTAMP 存储的是 UTC
+        // last_full_scan 存北京时间（UTC+8），解析后换算回 UTC 再比较
         let Some(last_utc) = chrono::NaiveDateTime::parse_from_str(&last, "%Y-%m-%d %H:%M:%S").ok()
         else {
             return false;
         };
+        let last_utc = last_utc - chrono::Duration::hours(8);
         let elapsed = chrono::Utc::now().naive_utc() - last_utc;
         elapsed < chrono::Duration::from_std(Self::CACHE_STALE_AFTER).unwrap_or_default()
     }
@@ -597,7 +603,12 @@ const MAX_SCAN_DEPTH: usize = 5;
 
 /// Scan a local directory for shortcuts. UNC paths are skipped outright — a
 /// disconnected network drive can block `read_dir` for tens of seconds.
-fn scan_dir_if_local(dir: &Path, apps: &mut Vec<AppItem>, seen_targets: &mut HashSet<String>) {
+fn scan_dir_if_local(
+    dir: &Path,
+    apps: &mut Vec<AppItem>,
+    seen_targets: &mut HashSet<String>,
+    seen_names: &mut HashSet<String>,
+) {
     if dir.as_os_str().to_string_lossy().starts_with("\\\\") {
         log::warn!("Skipping UNC scan directory: {}", dir.display());
         return;
@@ -605,7 +616,7 @@ fn scan_dir_if_local(dir: &Path, apps: &mut Vec<AppItem>, seen_targets: &mut Has
     if !dir.exists() {
         return;
     }
-    if let Err(e) = scan_directory(dir, apps, seen_targets, 0) {
+    if let Err(e) = scan_directory(dir, apps, seen_targets, seen_names, 0) {
         log::warn!("Failed to scan directory {}: {}", dir.display(), e);
     }
 }
@@ -614,6 +625,7 @@ fn scan_directory(
     dir: &Path,
     apps: &mut Vec<AppItem>,
     seen_targets: &mut HashSet<String>,
+    seen_names: &mut HashSet<String>,
     depth: usize,
 ) -> anyhow::Result<()> {
     if depth > MAX_SCAN_DEPTH {
@@ -638,17 +650,21 @@ fn scan_directory(
 
         if file_type.is_dir() && !file_type.is_symlink() {
             // 单个子目录失败(权限/网络超时)不拖垮整个扫描
-            if let Err(e) = scan_directory(&path, apps, seen_targets, depth + 1) {
+            if let Err(e) = scan_directory(&path, apps, seen_targets, seen_names, depth + 1) {
                 log::warn!("Failed to scan subdirectory {}: {}", path.display(), e);
             }
         } else if let Some(ext) = path.extension() {
             if ext.eq_ignore_ascii_case("lnk") {
                 if let Some((app, target_path)) = parse_shortcut(&path) {
-                    // 按目标路径去重（不含 name）：同一 exe 的多个快捷方式
-                    // （如"向日葵远程控制.lnk"与"卸载向日葵远程控制.lnk"）
-                    // 只保留先扫到的条目
+                    // 双重去重与 collect_all_apps 顶层语义一致：
+                    // - target：同一 exe 的多个快捷方式（如"向日葵远程控制.lnk"
+                    //   与"卸载向日葵远程控制.lnk"）只保留先扫到的条目；
+                    // - name：进入结果集的名字必须登记 seen_names——否则注册表/
+                    //   UWP 来源的同名条目（如"暴雪战网"的 .lnk 指向
+                    //   Battle.net Launcher.exe、注册表指向 Battle.net.exe）会
+                    //   双双通过，app_cache 出现同名两行。
                     let key = target_path.to_lowercase();
-                    if seen_targets.insert(key) {
+                    if seen_targets.insert(key) && seen_names.insert(app.name.to_lowercase()) {
                         apps.push(app);
                     }
                 }
