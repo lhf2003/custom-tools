@@ -6,8 +6,8 @@
  * - 控件：播放/暂停、可拖拽进度条（asset 协议支持 HTTP Range）、时间、静音、音量、全屏（仅视频）
  * - 解码失败（坏文件/编解码缺失）→ 失败态提示，保留「打开所在文件夹」
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { convertFileSrc } from '@tauri-apps/api/core';
+import { useCallback, useEffect, useState } from 'react';
+import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import {
   Play,
@@ -112,7 +112,22 @@ function DragBar({
 export function MediaPlayer({ path, mode }: MediaPlayerProps) {
   const [mediaEl, setMediaEl] = useState<HTMLMediaElement | null>(null);
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
-  const src = useMemo(() => convertFileSrc(path), [path]);
+  // asset 协议按需放行（scope 只静态允许插件目录，媒体文件在任意路径）：
+  // 先调 allow_asset_file 授权该文件，再转 asset URL；授权失败仍转（静态
+  // scope 命中时可用），真正被拒由媒体 onError 的 failed 态兜底。
+  const [src, setSrc] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setSrc(null);
+    invoke('allow_asset_file', { path })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setSrc(convertFileSrc(path));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [path]);
 
   const [playing, setPlaying] = useState(false);
   const [current, setCurrent] = useState(0);
@@ -201,7 +216,7 @@ export function MediaPlayer({ path, mode }: MediaPlayerProps) {
 
   const mediaProps = {
     ref: setMediaEl,
-    src,
+    src: src ?? undefined,
     preload: 'metadata',
     onLoadedMetadata: (e: React.SyntheticEvent<HTMLMediaElement>) => {
       setDuration(e.currentTarget.duration);

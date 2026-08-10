@@ -1,3 +1,4 @@
+pub mod asset;
 pub mod changelog;
 pub mod chat;
 pub mod clipboard;

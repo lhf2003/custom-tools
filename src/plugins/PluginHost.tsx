@@ -91,21 +91,22 @@ export function PluginHost({ plugin, commonMenuItems, onBack }: PluginHostProps)
 
   // 菜单渲染后按实测尺寸修正越界：估算高度（37px/项）在菜单项多时偏小，
   // 贴底打开会被截断；实测溢出后上移/左移，菜单超高由容器 max-h + 内部滚动兜底。
-  // 修正后不再溢出，effect 收敛不重入。
+  // 修正后不再溢出，effect 收敛不重入。宽度侧由容器 max-w-[calc(100vw-16px)] 兜底，
+  // 这里再加收敛守卫：x/y 数值无变化时返回 prev（同一引用），
+  // 否则宽于视口的菜单会无限 setState 触发 React 崩溃。
   useLayoutEffect(() => {
     if (!contextMenu || !contextMenuRef.current) return;
     const rect = contextMenuRef.current.getBoundingClientRect();
     const overflowX = contextMenu.x + rect.width - window.innerWidth;
     const overflowY = contextMenu.y + rect.height - window.innerHeight;
     if (overflowX <= 0 && overflowY <= 0) return;
-    setContextMenu((prev) =>
-      prev
-        ? {
-            x: Math.max(8, prev.x - Math.max(0, overflowX)),
-            y: Math.max(8, prev.y - Math.max(0, overflowY)),
-          }
-        : prev
-    );
+    setContextMenu((prev) => {
+      if (!prev) return prev;
+      const x = Math.max(8, prev.x - Math.max(0, overflowX));
+      const y = Math.max(8, prev.y - Math.max(0, overflowY));
+      if (x === prev.x && y === prev.y) return prev;
+      return { x, y };
+    });
   }, [contextMenu]);
 
   return (
@@ -138,7 +139,7 @@ export function PluginHost({ plugin, commonMenuItems, onBack }: PluginHostProps)
       {contextMenu && (
         <div
           ref={contextMenuRef}
-          className="fixed z-[100] min-w-[220px] max-h-[calc(100vh-16px)] flex flex-col bg-app-bg-primary/80 border border-app-border rounded-xl shadow-lg animate-in fade-in duration-150 overflow-hidden"
+          className="fixed z-[100] min-w-[220px] max-w-[calc(100vw-16px)] max-h-[calc(100vh-16px)] flex flex-col bg-app-bg-primary/80 border border-app-border rounded-xl shadow-lg animate-in fade-in duration-150 overflow-hidden"
           style={{
             left: contextMenu.x,
             top: contextMenu.y,
