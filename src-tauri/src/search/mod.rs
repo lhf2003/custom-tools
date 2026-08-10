@@ -255,7 +255,7 @@ impl SearchIndex {
 
         // UWP apps (Microsoft Store)
         match uwp::scan() {
-            Ok(uwp_apps) => {
+            Ok(uwp_apps) if !uwp_apps.is_empty() => {
                 log::info!("UWP scan found {} apps", uwp_apps.len());
                 for uwp_app in uwp_apps {
                     let launch = uwp::launch_path(&uwp_app.app_id);
@@ -274,30 +274,19 @@ impl SearchIndex {
                     }
                 }
             }
+            Ok(_empty) => {
+                // 扫描返回 0 条（重试后仍为 0）≠ 确实没有 UWP 应用：
+                // Get-StartApps 偶发空输出（开机时 Start Menu 数据未就绪等），
+                // 若缓存中还有上次扫描的 UWP 条目则沿用——否则 replace_batch
+                // 的全量替换会把 UWP 应用全部清空（8/10 事故根因）。
+                log::warn!("UWP 扫描返回 0 条（重试后仍为 0），沿用缓存中已有的 UWP 条目");
+                merge_uwp_cached(db_state, &mut apps, &mut seen_targets, &mut seen_names);
+            }
             Err(e) => {
                 // 扫描失败 ≠ 确实没有 UWP 应用：沿用缓存旧条目，
                 // 否则 replace_batch 的全量替换会把 UWP 应用全部清空
                 log::warn!("UWP 扫描失败（{}），沿用缓存中已有的 UWP 条目", e);
-                if let Some(ref db_state) = db_state {
-                    if let Ok(conn) = rusqlite::Connection::open(&db_state.0) {
-                        if let Ok(entries) = app_cache::load_uwp_cached(&conn) {
-                            for entry in entries {
-                                let target_key = entry.path.to_lowercase();
-                                if !seen_targets.contains(&target_key)
-                                    && seen_names.insert(entry.name.to_lowercase())
-                                {
-                                    seen_targets.insert(target_key);
-                                    apps.push(AppItem {
-                                        name: entry.name,
-                                        path: entry.path,
-                                        icon: None,
-                                        pinyin_initials: entry.pinyin_initials,
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
+                merge_uwp_cached(db_state, &mut apps, &mut seen_targets, &mut seen_names);
             }
         }
 
@@ -564,11 +553,14 @@ impl SearchIndex {
     ///
     /// 返回失效条目的 path 列表。
     pub fn verify_apps_on_disk(apps: &[AppItem], uwp_rescan: bool) -> Vec<String> {
-        // UWP 校验：扫描失败（Err）视为全部仍有效——不该因扫描失败误判卸载，
-        // 与 collect_all_apps 的「失败沿用缓存」同一原则
+        // UWP 校验：扫描失败（Err）与返回空集（Ok(0)）都视为不可信——
+        // 不该因扫描失败误判卸载，与 collect_all_apps 的「失败沿用缓存」同一
+        // 原则。空集若被当作「确实没有」，会把缓存里所有 UWP 条目判为失效
+        // 删除（Get-StartApps 偶发空输出），因此仅在扫描成功且非空时执行 diff。
         let uwp_valid: Option<HashSet<String>> = if uwp_rescan {
             uwp::scan()
                 .ok()
+                .filter(|apps| !apps.is_empty())
                 .map(|apps| apps.iter().map(|u| uwp::launch_path(&u.app_id)).collect())
         } else {
             Some(HashSet::new())
@@ -705,6 +697,38 @@ fn parse_shortcut(path: &Path) -> Option<(AppItem, String)> {
     };
 
     Some((app, target_path))
+}
+
+/// 从缓存加载 UWP 条目并入结果集（UWP 扫描失败/返回 0 条时沿用旧条目）。
+/// 沿用与「确实没有 UWP」的差别在于：缓存里可能有上次扫描留下的条目，
+/// 若直接返回空结果,调用方的 replace_batch 全量替换会把它们清空。
+fn merge_uwp_cached(
+    db_state: &Option<Arc<DatabaseState>>,
+    apps: &mut Vec<AppItem>,
+    seen_targets: &mut HashSet<String>,
+    seen_names: &mut HashSet<String>,
+) {
+    let Some(ref db_state) = db_state else {
+        return;
+    };
+    let Ok(conn) = rusqlite::Connection::open(&db_state.0) else {
+        return;
+    };
+    let Ok(entries) = app_cache::load_uwp_cached(&conn) else {
+        return;
+    };
+    for entry in entries {
+        let target_key = entry.path.to_lowercase();
+        if !seen_targets.contains(&target_key) && seen_names.insert(entry.name.to_lowercase()) {
+            seen_targets.insert(target_key);
+            apps.push(AppItem {
+                name: entry.name,
+                path: entry.path,
+                icon: None,
+                pinyin_initials: entry.pinyin_initials,
+            });
+        }
+    }
 }
 
 /// Read custom scan directories from the database settings table.

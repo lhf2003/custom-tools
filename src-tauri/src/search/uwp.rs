@@ -20,14 +20,40 @@ pub fn launch_path(app_id: &str) -> String {
     format!("shell:AppsFolder\\{}", app_id)
 }
 
+/// Get-StartApps 返回 0 条后的重试间隔。
+/// 开机自启时 Start Menu 的 AppX 数据可能尚未就绪,Get-StartApps 偶发返回
+/// 0 条/空输出——等待片刻重试一次,排除瞬时状态,避免「0 条」被当成
+/// 「确实没有 UWP」而清空缓存。
+const SCAN_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// Enumerate installed UWP apps using Get-StartApps.
 /// Only returns entries whose AppID contains '!' (UWP package format).
 ///
 /// 返回 Err 表示「扫描失败」（powershell 超时/不可用/输出解析失败）——调用方
 /// 必须与「确实没有 UWP 应用」区分开：失败时沿用缓存旧条目，否则全量替换
 /// 会把所有 UWP 应用从缓存里清空（Get-StartApps 被 EDR/组策略挂起即全灭）。
+///
+/// 首次扫描返回 0 条时视为可疑（数据未就绪等瞬时状态），等待
+/// SCAN_RETRY_DELAY 后重试一次再返回。重试后仍为 0 条由调用方决定
+/// 是否接受——0 条与「确实没有」在结果上等价,但调用方若有缓存可
+/// 沿用,应优先沿用。
 #[cfg(windows)]
 pub fn scan() -> Result<Vec<UwpApp>, String> {
+    match scan_once() {
+        Ok(apps) if apps.is_empty() => {
+            log::warn!(
+                "Get-StartApps 首次返回 0 条，等待 {:?} 后重试一次",
+                SCAN_RETRY_DELAY
+            );
+            std::thread::sleep(SCAN_RETRY_DELAY);
+            scan_once()
+        }
+        other => other,
+    }
+}
+
+#[cfg(windows)]
+fn scan_once() -> Result<Vec<UwpApp>, String> {
     // 必须显式把管道输出编码设为 UTF-8：PowerShell 5.1 默认按 OEM 代码页
     // （中文系统 = GBK）向管道写字节，Rust 按 UTF-8 读会遇第一个中文应用名
     // 解码失败 → 整个输出被丢弃 → 假性「empty output」→ UWP 应用全灭
