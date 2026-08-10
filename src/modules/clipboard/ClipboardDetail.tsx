@@ -18,10 +18,13 @@ import {
   linkifyText,
   getTypeConfig,
   isImageFile,
+  isPlayableAudioFile,
+  isPlayableVideoFile,
   formatTime,
   JSON_TOKEN_COLORS,
 } from './utils';
 import { imageCache } from './imageCache';
+import { MediaPlayer } from './MediaPlayer';
 
 interface ClipboardDetailProps {
   item: ClipboardItemData;
@@ -109,8 +112,7 @@ export function ClipboardDetail({ item, onCopyPartial }: ClipboardDetailProps) {
     }
   };
 
-  const footerRight =
-    item.content_type === 'text' ? `${item.content.length} 字符` : isImage ? '' : item.content;
+  const footerRight = item.content_type === 'text' ? `${item.content.length} 字符` : '';
 
   return (
     <>
@@ -135,7 +137,14 @@ export function ClipboardDetail({ item, onCopyPartial }: ClipboardDetailProps) {
         {isImage ? (
           <ImageContent item={item} />
         ) : item.content_type === 'file' ? (
-          <FileContent path={item.content} />
+          // 单文件 + Chromium 可解码 → 内嵌播放器；多文件/不支持格式 → 路径卡片
+          !item.content.includes('\n') && isPlayableAudioFile(item.content) ? (
+            <MediaPlayer key={item.id} path={item.content} mode="audio" />
+          ) : !item.content.includes('\n') && isPlayableVideoFile(item.content) ? (
+            <MediaPlayer key={item.id} path={item.content} mode="video" />
+          ) : (
+            <FileContent path={item.content} />
+          )
         ) : (
           <TextContent content={item.content} onOpenUrl={openUrl} />
         )}

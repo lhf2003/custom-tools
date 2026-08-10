@@ -20,4 +20,4 @@ export interface ClipboardQuery {
   offset?: number;
 }
 
-export type TabType = 'all' | 'text' | 'image' | 'file' | 'favorite';
+export type TabType = 'all' | 'text' | 'image' | 'audio' | 'video' | 'file' | 'favorite';

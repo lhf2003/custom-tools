@@ -6,7 +6,7 @@
  * - JSON 着色的极简扫描器（输入限定为 JSON.stringify 的规范输出）
  * - 链接切分（linkify），中英混排安全
  */
-import { FileText, Image as ImageIcon, Folder, type LucideIcon } from 'lucide-react';
+import { FileText, Image as ImageIcon, Folder, Music, Video, type LucideIcon } from 'lucide-react';
 
 // ─── 类型配置 ────────────────────────────────────────────────────────────────
 
@@ -26,10 +26,26 @@ const IMAGE_CONFIG: TypeConfig = {
   chipClass: 'bg-[#a855f7]/15 text-[#c084fc]',
 };
 
+const AUDIO_CONFIG: TypeConfig = {
+  label: '音频',
+  icon: Music,
+  iconClass: 'text-[#34d399]',
+  chipClass: 'bg-[#10b981]/15 text-[#34d399]',
+};
+
+const VIDEO_CONFIG: TypeConfig = {
+  label: '视频',
+  icon: Video,
+  iconClass: 'text-[#fb7185]',
+  chipClass: 'bg-[#f43f5e]/15 text-[#fb7185]',
+};
+
 export function getTypeConfig(type: string, content?: string): TypeConfig {
-  // 文件类型但路径是图片 → 按图片处理
-  if (type === 'file' && content && isImageFile(content)) {
-    return IMAGE_CONFIG;
+  // 文件类型按路径后缀细分：图片 > 音频 > 视频 > 文件兜底（后缀集合与后端 SQL 分支一致）
+  if (type === 'file' && content) {
+    if (isImageFile(content)) return IMAGE_CONFIG;
+    if (isAudioFile(content)) return AUDIO_CONFIG;
+    if (isVideoFile(content)) return VIDEO_CONFIG;
   }
   switch (type) {
     case 'text':
@@ -47,6 +63,41 @@ export function isImageFile(path: string): boolean {
   const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico', '.svg'];
   const lowerPath = path.toLowerCase();
   return imageExtensions.some((ext) => lowerPath.endsWith(ext));
+}
+
+/** 音频后缀。不含 .m4a 的编码歧义（无），按常见媒体后缀匹配 */
+export function isAudioFile(path: string): boolean {
+  const audioExtensions = ['.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a', '.wma', '.opus'];
+  const lowerPath = path.toLowerCase();
+  return audioExtensions.some((ext) => lowerPath.endsWith(ext));
+}
+
+/**
+ * 视频后缀。刻意不含 .ts/.mts/.cts——这三个扩展与 TypeScript 源码冲突，
+ * 开发者剪贴板里源码出现的概率远高于流媒体分片，误判代价高；.m2ts 无歧义保留。
+ */
+export function isVideoFile(path: string): boolean {
+  const videoExtensions = [
+    '.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm',
+    '.m4v', '.mpg', '.mpeg', '.rmvb', '.rm', '.3gp', '.m2ts',
+  ];
+  const lowerPath = path.toLowerCase();
+  return videoExtensions.some((ext) => lowerPath.endsWith(ext));
+}
+
+/** Chromium（WebView2）原生可解码的音频容器：mp3/wav/flac/m4a/aac/ogg/opus */
+export function isPlayableAudioFile(path: string): boolean {
+  const extensions = ['.mp3', '.wav', '.flac', '.m4a', '.aac', '.ogg', '.opus'];
+  const lowerPath = path.toLowerCase();
+  return extensions.some((ext) => lowerPath.endsWith(ext));
+}
+
+/** Chromium（WebView2）原生可解码的视频容器：mp4/m4v/webm/mov（H.264/VP9 系）。
+ *  mkv/avi/wmv/flv/rmvb 等容器 WebView2 不支持，走路径卡片回退。 */
+export function isPlayableVideoFile(path: string): boolean {
+  const extensions = ['.mp4', '.m4v', '.webm', '.mov'];
+  const lowerPath = path.toLowerCase();
+  return extensions.some((ext) => lowerPath.endsWith(ext));
 }
 
 /** 列表单行预览：文本取首行；图片/文件取文件名（content 存的是完整路径，多文件附计数） */

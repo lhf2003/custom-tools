@@ -96,9 +96,10 @@ pub fn get_clipboard_history(
 
 /// 拼接历史查询的 SQL 与有序参数（抽成纯函数以便单测）。
 ///
-/// content_type='image' 特殊化：图片 tab 的语义 = image 类型 ∪ file 类型中的图片路径，
-/// 扩展名集合与前端 isImageFile 一致（后缀 LIKE 匹配；多路径 content 仅末尾路径参与判断，
-/// 与前端 endsWith 行为对齐）。合并下推到 SQL 后翻页口径统一，前端不再双查询合并
+/// content_type='image'/'audio'/'video' 特殊化：媒体 tab 的语义 = 对应类型 ∪ file 类型中
+/// 的匹配后缀路径，扩展名集合与前端 isImageFile/isAudioFile/isVideoFile 一致
+/// （后缀 LIKE 匹配；多路径 content 仅末尾路径参与判断，与前端 endsWith 行为对齐）。
+/// 合并下推到 SQL 后翻页口径统一，前端不再双查询合并
 /// （旧写法 image/file 各查一页再合并截断，offset 口径不一致，会重复/漏条）。
 fn build_history_query<'a>(
     query: &'a ClipboardQuery,
@@ -122,6 +123,28 @@ fn build_history_query<'a>(
                  lower(content) LIKE '%.jpeg' OR lower(content) LIKE '%.gif' OR \
                  lower(content) LIKE '%.webp' OR lower(content) LIKE '%.bmp' OR \
                  lower(content) LIKE '%.ico' OR lower(content) LIKE '%.svg')))",
+            );
+        } else if content_type == "audio" {
+            // 音频 tab：file 类型中的音频后缀（集合与前端 isAudioFile 一致）
+            sql.push_str(
+                " AND (content_type = 'file' AND (\
+                 lower(content) LIKE '%.mp3' OR lower(content) LIKE '%.wav' OR \
+                 lower(content) LIKE '%.flac' OR lower(content) LIKE '%.aac' OR \
+                 lower(content) LIKE '%.ogg' OR lower(content) LIKE '%.m4a' OR \
+                 lower(content) LIKE '%.wma' OR lower(content) LIKE '%.opus'))",
+            );
+        } else if content_type == "video" {
+            // 视频 tab：file 类型中的视频后缀（集合与前端 isVideoFile 一致，
+            // 不含 .ts/.mts/.cts——与 TypeScript 源码扩展冲突）
+            sql.push_str(
+                " AND (content_type = 'file' AND (\
+                 lower(content) LIKE '%.mp4' OR lower(content) LIKE '%.mkv' OR \
+                 lower(content) LIKE '%.avi' OR lower(content) LIKE '%.mov' OR \
+                 lower(content) LIKE '%.wmv' OR lower(content) LIKE '%.flv' OR \
+                 lower(content) LIKE '%.webm' OR lower(content) LIKE '%.m4v' OR \
+                 lower(content) LIKE '%.mpg' OR lower(content) LIKE '%.mpeg' OR \
+                 lower(content) LIKE '%.rmvb' OR lower(content) LIKE '%.rm' OR \
+                 lower(content) LIKE '%.3gp' OR lower(content) LIKE '%.m2ts'))",
             );
         } else {
             sql.push_str(&format!(" AND content_type = ?{}", param_index));
@@ -1246,6 +1269,45 @@ mod tests {
         assert!(sql.contains("lower(content) LIKE '%.png'"));
         assert!(sql.contains("lower(content) LIKE '%.svg'"));
         // image 分支走字面值、不占参数位：参数只剩 limit/offset
+        assert_eq!(params.len(), 2);
+    }
+
+    #[test]
+    fn test_build_history_query_audio_filters_file_extensions() {
+        let query = ClipboardQuery {
+            content_type: Some("audio".to_string()),
+            is_favorite: None,
+            search: None,
+            limit: Some(100),
+            offset: Some(0),
+        };
+        let (sql, params) = build_history_query(&query, &None, &100, &0);
+
+        assert!(sql.contains("content_type = 'file'"));
+        assert!(sql.contains("lower(content) LIKE '%.mp3'"));
+        assert!(sql.contains("lower(content) LIKE '%.opus'"));
+        assert!(!sql.contains("'image'"));
+        // audio 分支走字面值、不占参数位
+        assert_eq!(params.len(), 2);
+    }
+
+    #[test]
+    fn test_build_history_query_video_filters_file_extensions() {
+        let query = ClipboardQuery {
+            content_type: Some("video".to_string()),
+            is_favorite: None,
+            search: None,
+            limit: Some(100),
+            offset: Some(0),
+        };
+        let (sql, params) = build_history_query(&query, &None, &100, &0);
+
+        assert!(sql.contains("content_type = 'file'"));
+        assert!(sql.contains("lower(content) LIKE '%.mp4'"));
+        assert!(sql.contains("lower(content) LIKE '%.m2ts'"));
+        // 视频分支不含与 TypeScript 源码冲突的扩展
+        assert!(!sql.contains("LIKE '%.ts'"));
+        assert!(!sql.contains("LIKE '%.mts'"));
         assert_eq!(params.len(), 2);
     }
 

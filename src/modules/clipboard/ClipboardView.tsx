@@ -6,6 +6,8 @@ import {
   FileText,
   Image as ImageIcon,
   Folder,
+  Music,
+  Video,
   X,
   Filter,
 } from 'lucide-react';
@@ -65,6 +67,8 @@ export function ClipboardView() {
       { id: 'all' as TabType, label: '全部', icon: Filter },
       { id: 'text' as TabType, label: '文本', icon: FileText },
       { id: 'image' as TabType, label: '图片', icon: ImageIcon },
+      { id: 'audio' as TabType, label: '音频', icon: Music },
+      { id: 'video' as TabType, label: '视频', icon: Video },
       { id: 'file' as TabType, label: '文件', icon: Folder },
       { id: 'favorite' as TabType, label: '收藏', icon: Star },
     ],
@@ -427,14 +431,6 @@ export function ClipboardView() {
     );
   }
 
-  if (items.length === 0 && !searchQuery.trim()) {
-    return (
-      <div className="w-full h-full flex panel-glass">
-        <EmptyState activeTab={activeTab} />
-      </div>
-    );
-  }
-
   return (
     <div className="w-full h-full flex panel-glass">
       {/* 左栏：搜索 + 过滤 + 紧凑列表 */}
@@ -489,9 +485,14 @@ export function ClipboardView() {
               滚动后内容从槽位下方滑过被遮盖 */}
           <div className="h-full overflow-y-auto px-1.5 pb-3 pt-8" onScroll={handleListScroll}>
             {items.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-app-text-disabled px-4 text-center">
-                <p className="text-sm">没有匹配「{searchQuery.trim()}」的记录</p>
-              </div>
+              searchQuery.trim() ? (
+                <div className="flex flex-col items-center justify-center h-full text-app-text-disabled px-4 text-center">
+                  <p className="text-sm">没有匹配「{searchQuery.trim()}」的记录</p>
+                </div>
+              ) : (
+                // 空分类：tab 栏保留在左栏，仅列表区域呈现空态（不整窗替换，否则无法切 tab）
+                <EmptyState activeTab={activeTab} />
+              )
             ) : (
               // 分组边界只用组间距表达（mt-4），当前日期由固定槽位常驻显示。
               // 不用 position:sticky——透明 WebView2 窗口下 sticky 有合成层
@@ -564,12 +565,14 @@ export function ClipboardView() {
   );
 }
 
-// Empty State Component（非搜索态的空列表，整窗呈现）
+// 空列表空态（渲染在左栏列表区域内，tab 栏保留可切换）
 function EmptyState({ activeTab }: { activeTab: TabType }) {
   const messages: Record<TabType, { icon: React.ElementType; title: string; desc: string }> = {
     all: { icon: Filter, title: '暂无剪贴板记录', desc: '复制内容后将自动保存' },
     text: { icon: FileText, title: '暂无文本记录', desc: '复制文本后将显示在这里' },
     image: { icon: ImageIcon, title: '暂无图片记录', desc: '复制图片后将显示在这里' },
+    audio: { icon: Music, title: '暂无音频记录', desc: '复制音频文件后将显示在这里' },
+    video: { icon: Video, title: '暂无视频记录', desc: '复制视频文件后将显示在这里' },
     file: { icon: Folder, title: '暂无文件记录', desc: '复制文件后将显示在这里' },
     favorite: { icon: Star, title: '暂无收藏', desc: '点击星标收藏常用内容' },
   };
@@ -577,12 +580,10 @@ function EmptyState({ activeTab }: { activeTab: TabType }) {
   const { icon: Icon, title, desc } = messages[activeTab];
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center text-app-text-disabled py-20">
-      <div className="w-16 h-16 rounded-2xl bg-app-bg-elevated/30 flex items-center justify-center mb-4">
-        <Icon size={32} className="opacity-50" />
-      </div>
-      <p className="text-app-text-secondary font-medium">{title}</p>
-      <p className="text-sm mt-1 text-app-text-disabled">{desc}</p>
+    <div className="h-full flex flex-col items-center justify-center gap-2 px-4 text-center">
+      <Icon size={28} className="text-app-text-disabled opacity-60" />
+      <p className="text-app-text-secondary font-medium text-sm">{title}</p>
+      <p className="text-xs text-app-text-disabled">{desc}</p>
     </div>
   );
 }

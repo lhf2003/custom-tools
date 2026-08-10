@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ComponentType, type LazyExoticComponent } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type LazyExoticComponent } from 'react';
 import { Loader2 } from 'lucide-react';
 import { TopNavigationBar } from '@/components/TopNavigationBar';
 import { MenuPanel } from '@/components/ActionMenu';
@@ -89,6 +89,25 @@ export function PluginHost({ plugin, commonMenuItems, onBack }: PluginHostProps)
     });
   };
 
+  // 菜单渲染后按实测尺寸修正越界：估算高度（37px/项）在菜单项多时偏小，
+  // 贴底打开会被截断；实测溢出后上移/左移，菜单超高由容器 max-h + 内部滚动兜底。
+  // 修正后不再溢出，effect 收敛不重入。
+  useLayoutEffect(() => {
+    if (!contextMenu || !contextMenuRef.current) return;
+    const rect = contextMenuRef.current.getBoundingClientRect();
+    const overflowX = contextMenu.x + rect.width - window.innerWidth;
+    const overflowY = contextMenu.y + rect.height - window.innerHeight;
+    if (overflowX <= 0 && overflowY <= 0) return;
+    setContextMenu((prev) =>
+      prev
+        ? {
+            x: Math.max(8, prev.x - Math.max(0, overflowX)),
+            y: Math.max(8, prev.y - Math.max(0, overflowY)),
+          }
+        : prev
+    );
+  }, [contextMenu]);
+
   return (
     <>
       <div className="relative z-50">
@@ -119,7 +138,7 @@ export function PluginHost({ plugin, commonMenuItems, onBack }: PluginHostProps)
       {contextMenu && (
         <div
           ref={contextMenuRef}
-          className="fixed z-[100] min-w-[220px] bg-app-bg-primary/80 border border-app-border rounded-xl shadow-2xl animate-in fade-in duration-150"
+          className="fixed z-[100] min-w-[220px] max-h-[calc(100vh-16px)] flex flex-col bg-app-bg-primary/80 border border-app-border rounded-xl shadow-2xl animate-in fade-in duration-150 overflow-hidden"
           style={{
             left: contextMenu.x,
             top: contextMenu.y,
@@ -127,15 +146,18 @@ export function PluginHost({ plugin, commonMenuItems, onBack }: PluginHostProps)
             backdropFilter: 'blur(20px)',
           }}
         >
-          <MenuPanel
-            items={contextMenuItems}
-            onItemClick={(item) => {
-              if (!item.disabled) {
-                item.onClick();
-                setContextMenu(null);
-              }
-            }}
-          />
+          {/* 菜单超高时内部滚动（滚动条走全局 is-scrolling 自动显隐） */}
+          <div className="overflow-y-auto">
+            <MenuPanel
+              items={contextMenuItems}
+              onItemClick={(item) => {
+                if (!item.disabled) {
+                  item.onClick();
+                  setContextMenu(null);
+                }
+              }}
+            />
+          </div>
         </div>
       )}
     </>
