@@ -23,6 +23,10 @@ const REPORT_RETRY_SECS: i64 = 1800;
 const CLEANUP_HOUR: u32 = 3;
 /// 会话聚合：相邻同进程记录间隔小于该值则合并
 const SESSION_MERGE_GAP_SECS: i64 = 180;
+/// 时间线同名合并的最大间隙：超过该值（AFK 数小时回来继续用同一页面）
+/// 不再合并——否则 10:00-10:05 与 15:00-15:05 两段被并成 10:00-15:05，
+/// 正是「连续工作时长虚高」的另一种形态
+const TIMELINE_MERGE_GAP_SECS: i64 = 30 * 60;
 /// 送给 LLM 的聚合文本长度上限（控制 token 成本）
 const AGGREGATE_TEXT_CAP: usize = 5000;
 /// 增量分析窗口的最大回看时长（水位线异常时兜底，防一次巨型窗口）
@@ -1076,7 +1080,11 @@ pub(crate) fn aggregate_activities(
         }
         let mergeable = timeline
             .last()
-            .map(|last| last.process == s.process && last.title.chars().take(40).eq(s.title.chars().take(40)));
+            .map(|last| {
+                last.process == s.process
+                    && s.start - last.end < TIMELINE_MERGE_GAP_SECS
+                    && last.title.chars().take(40).eq(s.title.chars().take(40))
+            });
         if mergeable == Some(true) {
             if let Some(last) = timeline.last_mut() {
                 last.end = s.end;
@@ -2010,6 +2018,22 @@ mod tests {
             text
         );
         assert_eq!(text.matches("蝙蝠侠").count(), 1, "合并后应只剩一条: {}", text);
+    }
+
+    /// 回归：同名合并必须有时间间隙约束——AFK 数小时后回来继续用同一
+    /// 页面（中间无其他进程活动记录），长间隙同标题不得合并成一段虚高
+    #[test]
+    fn same_title_with_long_gap_stays_separate() {
+        let t0 = parse_flexible_datetime("2026-07-29 10:00", false).unwrap();
+        let acts = vec![
+            log_with_title(1, "msedge.exe", "蝙蝠侠", t0, 300),
+            // 间隔 4 小时，无其他进程记录夹在中间
+            log_with_title(2, "msedge.exe", "蝙蝠侠", t0 + 4 * 3600, 300),
+        ];
+        let text = aggregate_activities(&acts, false, AGGREGATE_TEXT_CAP, &Default::default());
+        assert_eq!(text.matches("蝙蝠侠").count(), 2, "长间隙不应合并: {}", text);
+        assert!(text.contains("10:00-10:05"), "第一段应保留: {}", text);
+        assert!(text.contains("14:00-14:05"), "第二段应保留: {}", text);
     }
 
     #[test]

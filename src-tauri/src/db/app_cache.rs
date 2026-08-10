@@ -205,6 +205,28 @@ pub fn replace_batch(conn: &mut Connection, entries: &[AppCacheEntry]) -> Result
             }
         }
     }
+    // proc: 虚拟行整行备份（含 description/description_reminded_at/created_at）：
+    // 扫描结果不含虚拟行，DELETE 后不重插则每次全量扫描抹掉描述与提醒标，
+    // 模型对同一批未知进程每轮分析重复回填（LLM 成本浪费）
+    let mut proc_backup: Vec<(String, String, String, i64, String)> = Vec::new();
+    {
+        let mut stmt = tx.prepare(
+            "SELECT path, target_path, description, description_reminded_at, created_at
+             FROM app_cache WHERE path LIKE 'proc:%'",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        })?;
+        for row in rows.flatten() {
+            proc_backup.push(row);
+        }
+    }
 
     tx.execute("DELETE FROM app_cache", [])?;
     for entry in entries {
@@ -229,6 +251,15 @@ pub fn replace_batch(conn: &mut Connection, entries: &[AppCacheEntry]) -> Result
                 &entry.pinyin_initials,
                 &description,
             ],
+        )?;
+    }
+    // 重插 proc: 虚拟行（字段与 fill_empty_descriptions 的 INSERT 对齐，created_at 保持原值）
+    for (path, target_path, description, reminded_at, created_at) in proc_backup {
+        tx.execute(
+            "INSERT OR IGNORE INTO app_cache
+                (path, name, target_path, last_modified, is_valid, description, description_reminded_at, created_at, updated_at)
+             VALUES (?1, '', ?2, 0, 1, ?3, ?4, ?5, datetime('now', '+8 hours'))",
+            rusqlite::params![path, target_path, description, reminded_at, created_at],
         )?;
     }
 
@@ -302,10 +333,13 @@ pub fn mark_invalid(conn: &Connection, path: &str) -> Result<()> {
 /// 用 substr 前缀比较而非 LIKE——路径中的 `_` 会被 LIKE 当通配符误匹配；
 /// 尾部边界判断防止 `...\Cursor` 误伤 `...\Cursor2\`。
 pub fn mark_invalid_by_prefix(conn: &Connection, dir: &str) -> Result<()> {
+    // 注意：边界反斜杠必须写 '\\'（Rust 源码双反斜杠）——写成 '\' 会被转义成
+    // 单引号，发给 SQLite 的实际是 = ''，子树边界恒不成立（此前 bug 导致目录
+    // 删除时子 .lnk 不被失效，只命中与 dir 完全相等的行）
     conn.execute(
         "UPDATE app_cache SET is_valid = 0, updated_at = datetime('now', '+8 hours')
          WHERE substr(path, 1, length(?1)) = ?1
-           AND (length(path) = length(?1) OR substr(path, length(?1) + 1, 1) = '\')",
+           AND (length(path) = length(?1) OR substr(path, length(?1) + 1, 1) = '\\')",
         [dir],
     )?;
 
@@ -645,6 +679,62 @@ mod tests {
         let entries = load_all(&conn).unwrap();
         assert_eq!(entries.len(), 1, "proc: 虚拟行不应出现在搜索索引");
         assert_eq!(entries[0].path, "a.lnk");
+    }
+
+    /// mark_invalid_by_prefix：目录子树失效（回归：边界反斜杠曾写成 '\' 被
+    /// 转义为单引号，子树前缀永不命中，只删与 dir 完全相等的行）
+    #[test]
+    fn prefix_invalidation_covers_subtree_and_boundary() {
+        let conn = setup();
+        insert_row(&conn, r"C:\apps\dir\a.lnk", r"C:\apps\dir\a.exe", "");
+        insert_row(&conn, r"C:\apps\dir\sub\b.lnk", r"C:\apps\dir\sub\b.exe", "");
+        insert_row(&conn, r"C:\apps\Cursor\c.lnk", r"C:\apps\Cursor\c.exe", "");
+        insert_row(&conn, r"C:\apps\Cursor2\d.lnk", r"C:\apps\Cursor2\d.exe", "");
+
+        mark_invalid_by_prefix(&conn, r"C:\apps\dir").unwrap();
+
+        let valid: Vec<String> = conn
+            .prepare("SELECT path FROM app_cache WHERE is_valid = 1")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            valid,
+            vec![r"C:\apps\Cursor\c.lnk", r"C:\apps\Cursor2\d.lnk"],
+            "dir 子树应全部失效，且 Cursor 前缀不得误伤 Cursor2"
+        );
+    }
+
+    /// 回归：replace_batch 全量重建后 proc: 虚拟行必须保留（描述 + 提醒标），
+    /// 否则每次全量扫描抹掉后，模型对同一批未知进程每轮分析重复回填
+    #[test]
+    fn replace_batch_keeps_virtual_rows() {
+        let mut conn = setup();
+        insert_row(&conn, "a.lnk", r"C:\apps\Code.exe", "代码编辑器");
+        fill_empty_descriptions(&conn, "ghost.exe", "幽灵应用").unwrap();
+
+        // 模拟一次全量扫描：结果不含 proc: 行
+        let scanned = vec![AppCacheEntry {
+            path: "a.lnk".into(),
+            name: "Code".into(),
+            target_path: r"C:\apps\Code.exe".into(),
+            last_modified: 0,
+            is_valid: true,
+            pinyin_initials: String::new(),
+        }];
+        replace_batch(&mut conn, &scanned).unwrap();
+
+        let (desc, reminded): (String, Option<i64>) = conn
+            .query_row(
+                "SELECT description, description_reminded_at FROM app_cache WHERE path = 'proc:ghost.exe'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(desc, "幽灵应用", "proc: 虚拟行描述应保留");
+        assert!(reminded.is_some(), "proc: 虚拟行提醒标应保留，防重复回填");
     }
 
     // ── 迁移测试（模拟 2026-08-10 前的旧版库：UTC 时间戳 + 同名重复行） ──
