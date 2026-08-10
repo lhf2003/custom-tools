@@ -522,7 +522,7 @@ messages 是消息数组，每条为四种之一：
   {"version":"v0.9","createSurface":{"surfaceId":"s1","catalogId":"basic"}},
   {"version":"v0.9","updateComponents":{"surfaceId":"s1","components":[
     {"id":"root","component":"Card","child":"col"},
-    {"id":"col","component":"Column","children":["t","list","dv","b","bt"]},
+    {"id":"col","component":"Column","children":["t","list","dv","b"]},
     {"id":"t","component":"Text","text":{"path":"/title"},"variant":"h2"},
     {"id":"list","component":"List","children":["r1","r2"]},
     {"id":"r1","component":"Row","justify":"spaceBetween","children":["n1","v1"]},

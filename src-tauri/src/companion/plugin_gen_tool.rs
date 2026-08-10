@@ -565,7 +565,8 @@ pub(crate) fn build_layout_card_messages(plugin_id: &str, with_create: bool) -> 
             "surfaceId": sid,
             "components": [
                 {"id":"root","component":"Card","child":"col"},
-                {"id":"col","component":"Column","children":["t","d","b","bt"]},
+                // 注意：bt 是 Button 的 child label，只被 Button 引用，不进 Column children
+                {"id":"col","component":"Column","children":["t","d","b"]},
                 {"id":"t","component":"Text","text":"插件布局预览","variant":"h2"},
                 {"id":"d","component":"Text","text":"仅布局预览，最终效果以插件实际生成为准","variant":"body"},
                 {"id":"b","component":"Button","child":"bt","action":{"invoke":{"command":"open_local_html","args":{"path":format!(".preview/{}/layout.html", plugin_id)}}}},
