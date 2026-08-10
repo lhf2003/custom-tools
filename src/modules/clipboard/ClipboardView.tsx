@@ -407,8 +407,12 @@ export function ClipboardView() {
     [hasMore, fetchClipboardHistory]
   );
 
-  // 整窗状态：加载中 / 错误 /（非搜索态的）空列表
-  if (isLoading) {
+  // 整窗状态：仅「无搜索词 + 无数据」的首拉/出错才整屏替换。
+  // 搜索路径（searchQuery 非空）永不整屏——否则输入框随整屏卸载而失焦，
+  // 表现为「搜索输入/删除一个字符就掉焦点」。注意不能只依赖 items.length：
+  // 搜索无结果时 items 已被清空，下一次输入会重新命中整屏条件，必须同时排除搜索态。
+  // 此类刷新只在左栏列表区域内呈现加载/错误态
+  if (isLoading && items.length === 0 && !searchQuery.trim()) {
     return (
       <div className="w-full h-full flex flex-col items-center justify-center text-app-text-disabled panel-glass">
         <Loader2 size={32} className="animate-spin mb-3" />
@@ -417,7 +421,7 @@ export function ClipboardView() {
     );
   }
 
-  if (error) {
+  if (error && items.length === 0 && !searchQuery.trim()) {
     return (
       <div className="w-full h-full flex flex-col items-center justify-center text-app-text-disabled panel-glass">
         <p className="text-app-status-error mb-2">{error}</p>
@@ -484,7 +488,22 @@ export function ClipboardView() {
           {/* 滚动层顶部留出槽位高度（pt-8=32px）：静态时首条与槽位相接，
               滚动后内容从槽位下方滑过被遮盖 */}
           <div className="h-full overflow-y-auto px-1.5 pb-3 pt-8" onScroll={handleListScroll}>
-            {items.length === 0 ? (
+            {isLoading ? (
+              // 已有数据时的刷新（搜索/tab）：仅列表区域显示加载态，搜索框保持在位不失焦
+              <div className="flex flex-col items-center justify-center h-full gap-2 text-app-text-disabled">
+                <Loader2 size={20} className="animate-spin" />
+              </div>
+            ) : error ? (
+              <div className="flex flex-col items-center justify-center h-full gap-3 text-app-text-disabled px-4 text-center">
+                <p className="text-sm text-app-status-error">{error}</p>
+                <button
+                  onClick={() => fetchClipboardHistory(false)}
+                  className="px-4 py-2 rounded-lg bg-app-bg-pressed/50 hover:bg-app-bg-elevated/50 text-sm text-app-text-primary transition-colors cursor-pointer"
+                >
+                  重试
+                </button>
+              </div>
+            ) : items.length === 0 ? (
               searchQuery.trim() ? (
                 <div className="flex flex-col items-center justify-center h-full text-app-text-disabled px-4 text-center">
                   <p className="text-sm">没有匹配「{searchQuery.trim()}」的记录</p>
@@ -520,7 +539,7 @@ export function ClipboardView() {
               ))
             )}
 
-            {hasMore && items.length > 0 && (
+            {hasMore && items.length > 0 && !isLoading && !error && (
               <div className="text-center py-2.5 text-app-text-disabled text-xs">
                 {isLoadingMore ? (
                   <span className="flex items-center justify-center gap-1">
