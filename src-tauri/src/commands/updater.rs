@@ -113,7 +113,7 @@ pub enum UpdateCheckResult {
 }
 
 #[derive(serde::Serialize, Clone)]
-#[serde(tag = "event", content = "data")]
+#[serde(tag = "event", content = "data", rename_all = "camelCase")]
 pub enum DownloadProgress {
     Progress {
         chunk_length: usize,

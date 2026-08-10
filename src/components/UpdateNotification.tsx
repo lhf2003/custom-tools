@@ -11,7 +11,7 @@ interface UpdateCheckResult {
 const RESULT_AUTO_DISMISS_MS = 5000;
 
 export function UpdateNotification() {
-  const { updateInfo, isDownloading, downloadProgress, setUpdateInfo, downloadAndInstall } = useUpdater();
+  const { updateInfo, isDownloading, downloadProgress, downloadedMB, setUpdateInfo, downloadAndInstall } = useUpdater();
   const [showNotification, setShowNotification] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const [checkResult, setCheckResult] = useState<UpdateCheckResult | null>(null);
@@ -148,7 +148,9 @@ export function UpdateNotification() {
                 <RefreshCw className="w-3 h-3 animate-spin" />
                 正在下载...
               </span>
-              <span className="text-blue-400">{downloadProgress}%</span>
+              <span className="text-blue-400">
+                {downloadProgress > 0 ? `${downloadProgress}%` : `${downloadedMB} MB`}
+              </span>
             </div>
             <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
               <div

@@ -17,6 +17,7 @@ export function AboutSettings() {
     isChecking,
     isDownloading,
     downloadProgress,
+    downloadedMB,
     checkForUpdate,
     downloadAndInstall,
   } = useUpdater();
@@ -64,7 +65,8 @@ export function AboutSettings() {
           {isDownloading ? (
             <span className="flex items-center gap-1.5 text-xs text-app-text-tertiary">
               <RefreshCw size={12} className="animate-spin" />
-              下载中 {downloadProgress}%
+              下载中{' '}
+              {downloadProgress > 0 ? `${downloadProgress}%` : `${downloadedMB} MB`}
             </span>
           ) : updateInfo ? (
             <>

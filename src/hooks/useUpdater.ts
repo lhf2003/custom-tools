@@ -30,6 +30,8 @@ export function useUpdater() {
   const [isChecking, setIsChecking] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
+  // 已下载 MB：Content-Length 缺失（如代理 chunked 传输）时兜底展示
+  const [downloadedMB, setDownloadedMB] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   // Check for updates
@@ -66,11 +68,12 @@ export function useUpdater() {
       // Create a channel for progress updates
       const channel = new Channel<DownloadProgress>();
       let totalDownloaded = 0;
-      let totalSize = 0;
+      let totalSize: number | null = null;
 
       channel.onmessage = (message) => {
         if (message.event === 'Progress' && message.data) {
           totalDownloaded += message.data.chunkLength;
+          setDownloadedMB(Math.round(totalDownloaded / 1024 / 1024));
           if (message.data.contentLength) {
             totalSize = message.data.contentLength;
             setDownloadProgress(Math.round((totalDownloaded / totalSize) * 100));
@@ -121,6 +124,7 @@ export function useUpdater() {
     isChecking,
     isDownloading,
     downloadProgress,
+    downloadedMB,
     error,
     checkForUpdate,
     downloadAndInstall,
