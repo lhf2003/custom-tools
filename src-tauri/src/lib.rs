@@ -5,7 +5,6 @@ use std::sync::{
 use std::time::Duration;
 use tauri::{Emitter, Manager};
 use tauri_plugin_autostart::ManagerExt;
-use tauri_plugin_updater::UpdaterExt;
 
 /// 应用数据目录名（必须与 tauri.conf.json 的 identifier 保持一致）。
 /// 没有 AppHandle 的模块（watcher 回调、MCP server、panic hook 等）
@@ -470,6 +469,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::asset::allow_asset_file,
             // Window commands
             commands::window::show_window,
             commands::window::hide_window,
@@ -866,7 +866,8 @@ fn emit_check_result(app_handle: &tauri::AppHandle, result: commands::updater::U
 async fn check_update_from_tray(app_handle: tauri::AppHandle) {
     let app_version = app_handle.package_info().version.clone();
 
-    let updater = match app_handle.updater() {
+    // build_updater 附加系统代理（插件注册的 client 直连，不读代理）
+    let updater = match commands::updater::build_updater(&app_handle) {
         Ok(u) => u,
         Err(e) => {
             log::error!("Failed to get updater: {}", e);
@@ -921,7 +922,7 @@ async fn check_update_from_tray(app_handle: tauri::AppHandle) {
 async fn check_update_on_startup(app_handle: tauri::AppHandle) {
     let app_version = app_handle.package_info().version.clone();
 
-    let updater = match app_handle.updater() {
+    let updater = match commands::updater::build_updater(&app_handle) {
         Ok(u) => u,
         Err(e) => {
             log::error!("Failed to get updater on startup: {}", e);

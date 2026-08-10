@@ -7,18 +7,22 @@ use tauri_plugin_updater::UpdaterExt;
 /// Avoids a second HTTP round-trip when the user confirms the install.
 pub struct PendingUpdate(pub Mutex<Option<tauri_plugin_updater::Update>>);
 
+/// 构建 updater：每次重新构建并附加「系统代理」配置。
+/// 必须用本函数（而非 AppHandle::updater()）——插件注册时构建的 client 是直连的，
+/// 不读系统代理；中国网络环境直连 GitHub releases 必失败。开关变更即时生效。
+pub fn build_updater(app: &AppHandle) -> Result<tauri_plugin_updater::Updater, String> {
+    app.updater_builder()
+        .configure_client(crate::http::apply_system_proxy)
+        .build()
+        .map_err(|e| format!("Failed to get updater: {}", e))
+}
+
 #[tauri::command]
 pub async fn check_for_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> {
     let app_version = app.package_info().version.clone();
     log::info!("Current app version: {}", app_version);
 
-    // 每次检查都重新构建 updater：configure_client 读取「系统代理」开关并附加代理，
-    // 开关变更即时生效（updater_builder() 每次新建，插件注册时的 client 不参与运行时检查）
-    let updater = app
-        .updater_builder()
-        .configure_client(crate::http::apply_system_proxy)
-        .build()
-        .map_err(|e| format!("Failed to get updater: {}", e))?;
+    let updater = build_updater(&app)?;
 
     log::info!("Checking for updates...");
 
