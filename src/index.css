@@ -903,8 +903,9 @@ input[type='range']:active + .range-readout {
 }
 
 /* Scrollbar Styles — 自动隐藏 + 淡入淡出
-   默认 thumb 透明（静止隐藏）；useAutoHideScrollbar 在任意容器滚动时给 <html>
-   加 .is-scrolling，thumb 淡入浅灰纱层，静止 900ms 后淡出。
+   默认 thumb 透明（静止隐藏）；useAutoHideScrollbar 在容器滚动时给滚动源容器自身
+   加 .is-scrolling，仅该容器的 thumb 淡入浅灰纱层，静止 900ms 后淡出
+   （按容器隔离：各区域滚动条独立显隐，互不点亮）。
    悬停 thumb 位置随时显现（可抓握拖拽），hover 加深一档。
    淡入 150ms（即时反馈）、淡出 400ms（余韵），与滑杆同一标准曲线。 */
 ::-webkit-scrollbar {
@@ -926,13 +927,13 @@ input[type='range']:active + .range-readout {
   transition: background-color 400ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-html.is-scrolling ::-webkit-scrollbar-thumb {
+.is-scrolling::-webkit-scrollbar-thumb {
   background-color: var(--scrollbar-thumb);
   transition-duration: 150ms;
 }
 
 ::-webkit-scrollbar-thumb:hover,
-html.is-scrolling ::-webkit-scrollbar-thumb:hover {
+.is-scrolling::-webkit-scrollbar-thumb:hover {
   background-color: var(--scrollbar-thumb-hover);
   transition-duration: 150ms;
 }
@@ -1080,16 +1081,16 @@ a:focus-visible {
   transition: background-color 400ms cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
 
-html.is-scrolling .w-md-editor-text-pre::-webkit-scrollbar-thumb,
-html.is-scrolling .w-md-editor-preview::-webkit-scrollbar-thumb {
+.w-md-editor-text-pre.is-scrolling::-webkit-scrollbar-thumb,
+.w-md-editor-preview.is-scrolling::-webkit-scrollbar-thumb {
   background-color: var(--scrollbar-thumb) !important;
   transition-duration: 150ms !important;
 }
 
 .w-md-editor-text-pre::-webkit-scrollbar-thumb:hover,
 .w-md-editor-preview::-webkit-scrollbar-thumb:hover,
-html.is-scrolling .w-md-editor-text-pre::-webkit-scrollbar-thumb:hover,
-html.is-scrolling .w-md-editor-preview::-webkit-scrollbar-thumb:hover {
+.w-md-editor-text-pre.is-scrolling::-webkit-scrollbar-thumb:hover,
+.w-md-editor-preview.is-scrolling::-webkit-scrollbar-thumb:hover {
   background-color: var(--scrollbar-thumb-hover) !important;
   transition-duration: 150ms !important;
 }
