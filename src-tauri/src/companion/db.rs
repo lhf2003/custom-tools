@@ -277,15 +277,34 @@ pub fn close_activity(conn: &Connection, id: i64, ended_at: i64) -> rusqlite::Re
     Ok(())
 }
 
-/// 当前未闭合的活动段（进程名, 开始时间）；无则 None（AFK 或未采集）
-pub fn current_open_activity(conn: &Connection) -> rusqlite::Result<Option<(String, i64)>> {
+/// 当前未闭合的活动段（进程名, 开始时间）；无则 None（AFK 或未采集）。
+/// 未闭合但开始于 5 分钟前的视为关机/崩溃残留残段，不当作当前段（启动清理外的兜底）。
+pub fn current_open_activity(
+    conn: &Connection,
+    now: i64,
+) -> rusqlite::Result<Option<(String, i64)>> {
     conn.query_row(
         "SELECT process_name, started_at FROM activity_log
-         WHERE ended_at IS NULL ORDER BY started_at DESC LIMIT 1",
-        [],
+         WHERE ended_at IS NULL AND started_at >= ?1
+         ORDER BY started_at DESC LIMIT 1",
+        [now - super::AFK_THRESHOLD_SECS],
         |row| Ok((row.get(0)?, row.get(1)?)),
     )
     .optional()
+}
+
+/// 闭合开始于 `before` 之前的未闭合段（0 时长），用于启动时清理关机残留，
+/// 避免隔夜残段被当成「连续工作」起点或污染时间线统计。返回清理条数。
+pub fn close_stale_open_activities(
+    conn: &Connection,
+    before: i64,
+) -> rusqlite::Result<usize> {
+    conn.execute(
+        "UPDATE activity_log
+         SET ended_at = started_at, duration_secs = 0
+         WHERE ended_at IS NULL AND started_at < ?1",
+        [before],
+    )
 }
 
 /// 查询某时间范围内的活动记录（按开始时间升序）
@@ -1214,6 +1233,63 @@ mod tests {
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .unwrap()
+    }
+
+    fn activity_setup() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE activity_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                process_name TEXT NOT NULL,
+                window_title TEXT NOT NULL DEFAULT '',
+                started_at INTEGER NOT NULL,
+                ended_at INTEGER,
+                duration_secs INTEGER
+            )",
+        )
+        .unwrap();
+        conn
+    }
+
+    fn insert_open(conn: &Connection, process: &str, started_at: i64) -> i64 {
+        conn.execute(
+            "INSERT INTO activity_log (process_name, started_at) VALUES (?1, ?2)",
+            params![process, started_at],
+        )
+        .unwrap();
+        conn.last_insert_rowid()
+    }
+
+    #[test]
+    fn stale_open_activity_ignored_by_current_open() {
+        let conn = activity_setup();
+        // 隔夜残段：10 小时前开始，未闭合
+        insert_open(&conn, "msedge.exe", -10 * 3600);
+        // 当前段：2 分钟前开始，未闭合
+        insert_open(&conn, "code.exe", -120);
+        let found = current_open_activity(&conn, 0).unwrap().unwrap();
+        assert_eq!(
+            found,
+            ("code.exe".to_string(), -120),
+            "残段不应被当作当前段"
+        );
+    }
+
+    #[test]
+    fn stale_open_activities_closed_on_startup() {
+        let conn = activity_setup();
+        insert_open(&conn, "msedge.exe", -10 * 3600); // 隔夜残段
+        insert_open(&conn, "code.exe", -120); // 新鲜段
+        let n = close_stale_open_activities(&conn, -super::super::AFK_THRESHOLD_SECS).unwrap();
+        assert_eq!(n, 1, "只应清理残段");
+        let leftovers: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM activity_log WHERE ended_at IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(leftovers, 1, "新鲜段应保持未闭合");
     }
 
     #[test]

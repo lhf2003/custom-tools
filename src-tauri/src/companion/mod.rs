@@ -226,6 +226,17 @@ fn run_collector(
     let mut last_digest_date =
         analyzer::load_setting(&db_path, "companion_last_digest_date").unwrap_or_default();
 
+    // 启动清理：闭合关机/崩溃残留的未闭合段（超过 AFK 阈值仍未闭合必为残段），
+    // 否则隔夜段会被 current_open_activity 当成「连续工作」起点
+    if let Ok(conn) = Connection::open(&db_path) {
+        let before = chrono::Local::now().timestamp() - AFK_THRESHOLD_SECS;
+        if let Ok(n) = db::close_stale_open_activities(&conn, before) {
+            if n > 0 {
+                log::info!("Companion 启动清理 {} 条残留活动段", n);
+            }
+        }
+    }
+
     for event in &rx {
         let f = read_flags(&flags);
 

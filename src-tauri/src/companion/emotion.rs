@@ -277,7 +277,7 @@ pub fn on_late_night(conn: &Connection, now: i64) {
         _ => return,
     };
     // 他真的还在干活才记——没有未闭合活动段说明人不在电脑前
-    if super::db::current_open_activity(conn)
+    if super::db::current_open_activity(conn, now)
         .ok()
         .flatten()
         .is_none()

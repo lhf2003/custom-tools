@@ -74,7 +74,7 @@ fn assemble(now: i64, open_since: Option<i64>, first_date: Option<chrono::NaiveD
 /// 当前状态叙事句，如「现在是深夜 23:40。他已经连续工作 3 小时 20 分钟。你们相处 42 天了，老搭档。」
 /// 无当前活动段时省略忙碌句；还没聊过天时省略关系句。
 pub fn current_state_sentence(conn: &Connection, now: i64) -> String {
-    let open_since = super::db::current_open_activity(conn)
+    let open_since = super::db::current_open_activity(conn, now)
         .ok()
         .flatten()
         .map(|(_, started)| started);

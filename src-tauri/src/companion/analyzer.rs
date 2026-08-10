@@ -24,7 +24,7 @@ const CLEANUP_HOUR: u32 = 3;
 /// 会话聚合：相邻同进程记录间隔小于该值则合并
 const SESSION_MERGE_GAP_SECS: i64 = 180;
 /// 送给 LLM 的聚合文本长度上限（控制 token 成本）
-const AGGREGATE_TEXT_CAP: usize = 3500;
+const AGGREGATE_TEXT_CAP: usize = 5000;
 /// 增量分析窗口的最大回看时长（水位线异常时兜底，防一次巨型窗口）
 const ANALYSIS_MAX_LOOKBACK_SECS: i64 = 7 * 86400;
 
@@ -1066,13 +1066,33 @@ pub(crate) fn aggregate_activities(
         text.push_str(&format!("- {} {:.1}h\n", proc_label(proc, labels), *secs as f64 / 3600.0));
     }
 
-    text.push_str("\n【时间线】\n");
-    let mut current_day = String::new();
+    // 时间线：短于 60s 的会话视为路过跳过；相邻同名（同进程+同标题）合并为一段，
+    // 取首条开始、末条结束，避免同一页面反复被拆成多行
+    let mut timeline: Vec<Session> = Vec::new();
     for s in &sessions {
-        // 短于 60s 的会话视为路过，不进时间线
         if s.end - s.start < 60 {
             continue;
         }
+        let mergeable = timeline
+            .last()
+            .map(|last| last.process == s.process && last.title.chars().take(40).eq(s.title.chars().take(40)));
+        if mergeable == Some(true) {
+            if let Some(last) = timeline.last_mut() {
+                last.end = s.end;
+            }
+        } else {
+            timeline.push(Session {
+                process: s.process.clone(),
+                title: s.title.clone(),
+                start: s.start,
+                end: s.end,
+            });
+        }
+    }
+
+    text.push_str("\n【时间线】\n");
+    let mut current_day = String::new();
+    for s in &timeline {
         // 跨天查询按天分节，只有 HH:MM 时分不清是哪天
         if multi_day {
             let day = fmt_local(s.start, "%m-%d");
@@ -1927,6 +1947,17 @@ mod tests {
         }
     }
 
+    fn log_with_title(id: i64, process: &str, title: &str, start: i64, secs: i64) -> ActivityLog {
+        ActivityLog {
+            id,
+            process_name: process.to_string(),
+            window_title: title.to_string(),
+            started_at: start,
+            ended_at: Some(start + secs),
+            duration_secs: Some(secs),
+        }
+    }
+
     #[test]
     fn parse_date_as_start_is_midnight() {
         let ts = parse_flexible_datetime("2026-07-29", false).unwrap();
@@ -1960,6 +1991,67 @@ mod tests {
         let text = aggregate_activities(&acts, true, AGGREGATE_TEXT_CAP, &Default::default());
         assert!(text.contains("【07-28】"), "缺第一天分节: {}", text);
         assert!(text.contains("【07-29】"), "缺第二天分节: {}", text);
+    }
+
+    #[test]
+    fn adjacent_same_title_sessions_merge_into_one() {
+        let t0 = parse_flexible_datetime("2026-07-29 10:00", false).unwrap();
+        let acts = vec![
+            log_with_title(1, "msedge.exe", "蝙蝠侠", t0, 300),
+            // 间隔 10min > 3min，3min 合并不生效，应被同名合并收拢
+            log_with_title(2, "msedge.exe", "蝙蝠侠", t0 + 900, 300),
+            log_with_title(3, "msedge.exe", "蝙蝠侠", t0 + 1800, 300),
+        ];
+        let text = aggregate_activities(&acts, false, AGGREGATE_TEXT_CAP, &Default::default());
+        assert!(
+            text.contains("10:00-10:35 msedge.exe「蝙蝠侠」"),
+            "相邻同名应合并为一段: {}",
+            text
+        );
+        assert_eq!(text.matches("蝙蝠侠").count(), 1, "合并后应只剩一条: {}", text);
+    }
+
+    #[test]
+    fn non_adjacent_same_title_stays_separate() {
+        let t0 = parse_flexible_datetime("2026-07-29 10:00", false).unwrap();
+        let acts = vec![
+            log_with_title(1, "msedge.exe", "蝙蝠侠", t0, 300),
+            log_with_title(2, "code.exe", "写代码", t0 + 900, 300),
+            log_with_title(3, "msedge.exe", "蝙蝠侠", t0 + 1800, 300),
+        ];
+        let text = aggregate_activities(&acts, false, AGGREGATE_TEXT_CAP, &Default::default());
+        assert!(
+            text.contains("10:00-10:05 msedge.exe「蝙蝠侠」"),
+            "第一段应在: {}",
+            text
+        );
+        assert!(
+            text.contains("10:30-10:35 msedge.exe「蝙蝠侠」"),
+            "第二段应在: {}",
+            text
+        );
+        assert_eq!(text.matches("蝙蝠侠").count(), 2, "中间隔开不应合并: {}", text);
+    }
+
+    #[test]
+    fn same_process_diff_title_stays_separate() {
+        let t0 = parse_flexible_datetime("2026-07-29 10:00", false).unwrap();
+        let acts = vec![
+            log_with_title(1, "msedge.exe", "蝙蝠侠", t0, 300),
+            log_with_title(2, "msedge.exe", "歌剧老师", t0 + 900, 300),
+        ];
+        let text = aggregate_activities(&acts, false, AGGREGATE_TEXT_CAP, &Default::default());
+        assert!(
+            text.contains("10:00-10:05 msedge.exe「蝙蝠侠」"),
+            "第一段应在: {}",
+            text
+        );
+        assert!(
+            text.contains("10:15-10:20 msedge.exe「歌剧老师」"),
+            "第二段应在: {}",
+            text
+        );
+        assert_eq!(text.matches("「").count(), 2, "同进程不同标题不应合并: {}", text);
     }
 
     #[test]
