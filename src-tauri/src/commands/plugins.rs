@@ -262,3 +262,4 @@ pub fn update_plugin_shortcut(
     let mut manager = shortcut_state.0.lock().map_err(|e| e.to_string())?;
     Ok(manager.sync_plugin_shortcuts(&app_handle, &shortcuts))
 }
+

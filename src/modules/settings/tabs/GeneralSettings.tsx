@@ -206,11 +206,13 @@ export function GeneralSettings() {
     startup_launch,
     auto_update,
     debug_mode,
+    game_mode_mute,
     toggleAlwaysOnTop,
     toggleHideOnBlur,
     setStartupLaunch,
     setAutoUpdate,
     toggleDebugMode,
+    toggleGameModeMute,
   } = useSettingsStore();
 
   return (
@@ -245,8 +247,14 @@ export function GeneralSettings() {
 
       <SettingGroup title="系统">
         <SettingRow
+          title="全屏静音"
+          description="前台应用全屏显示时，自动禁用全局快捷键与浮窗弹窗"
+        >
+          <Toggle enabled={game_mode_mute} onToggle={toggleGameModeMute} />
+        </SettingRow>
+        <SettingRow
           title="调试模式"
-          description="写入 debug 级日志（含模型调用的系统提示词），位于 %LOCALAPPDATA%\com.flowhub.app\logs"
+          description="写入 debug 级日志"
         >
           <Toggle enabled={debug_mode} onToggle={toggleDebugMode} />
         </SettingRow>

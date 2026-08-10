@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Copy, Check, Languages, X, ChevronDown, ChevronUp } from 'lucide-react';
 import { Tooltip } from '@/components/Tooltip';
@@ -16,6 +17,17 @@ interface TranslateStartPayload {
   source: string;
   target_lang: string;
 }
+
+/** translate:hint 事件的提示壳（与 Rust 端 TranslateHintPayload 对应）：
+ *  空选区等提示走独立通道——error 可能被视图链路触发，hint 永远只面向浮窗 */
+interface TranslateHintPayload {
+  message: string;
+}
+
+/** 挂载补拉的待展示内容（与 Rust 端 PendingTranslate 的 serde tag/content 对应） */
+type PendingTranslate =
+  | { kind: 'Start'; data: TranslateStartPayload }
+  | { kind: 'Hint'; data: TranslateHintPayload };
 
 type ToastStatus = 'idle' | 'translating' | 'done' | 'error';
 
@@ -40,6 +52,9 @@ export default function TranslateToast() {
   const [copied, setCopied] = useState(false);
   const latestIdRef = useRef(0);
   const staleTimerRef = useRef<number | null>(null);
+  // 就绪握手信号：start/hint 处理后递增，触发渲染完成回执（chunk/done/error 不触发——
+  // 进行中的后续帧若发回执，窗口会被重新定位拽回鼠标处）
+  const [showNonce, setShowNonce] = useState(0);
 
   const hideWindow = useCallback(() => {
     getCurrentWindow()
@@ -55,6 +70,35 @@ export default function TranslateToast() {
     staleTimerRef.current = window.setTimeout(hideWindow, STALE_HIDE_MS);
   }, [hideWindow]);
 
+  // start/hint 应用逻辑提取为稳定回调：事件监听与挂载补拉共用
+  const applyStart = useCallback(
+    (p: TranslateStartPayload) => {
+      latestIdRef.current = Math.max(latestIdRef.current, p.id);
+      setSource(p.source);
+      setTargetLang(p.target_lang);
+      setTranslation('');
+      setErrorMsg('');
+      setSourceExpanded(false);
+      setCopied(false);
+      updateStatus('translating');
+      resetStaleTimer();
+      setShowNonce((n) => n + 1);
+    },
+    [resetStaleTimer, updateStatus],
+  );
+
+  const applyHint = useCallback(
+    (p: TranslateHintPayload) => {
+      // 流式进行中不打扰（连按快捷键空选区时，提示让位当前翻译）
+      if (statusRef.current === 'translating') return;
+      setErrorMsg(p.message);
+      updateStatus('error');
+      window.setTimeout(hideWindow, 2000);
+      setShowNonce((n) => n + 1);
+    },
+    [hideWindow, updateStatus],
+  );
+
   // 事件通道：只接受最新 id（start 视为最高优先级新请求；chunk/done/error 按 id 过滤）。
   // 只挂一次：状态经 statusRef 读取，deps 均为稳定引用——随 status 重订阅会累积
   // 监听器（旧闭包不注销，chunk 被多份 append），cleanup 也必须无条件退订
@@ -62,18 +106,8 @@ export default function TranslateToast() {
     const unlistens: Promise<() => void>[] = [];
 
     unlistens.push(
-      listen<TranslateStartPayload>('translate:start', (event) => {
-        const p = event.payload;
-        latestIdRef.current = Math.max(latestIdRef.current, p.id);
-        setSource(p.source);
-        setTargetLang(p.target_lang);
-        setTranslation('');
-        setErrorMsg('');
-        setSourceExpanded(false);
-        setCopied(false);
-        updateStatus('translating');
-        resetStaleTimer();
-      }),
+      listen<TranslateStartPayload>('translate:start', (event) => applyStart(event.payload)),
+      listen<TranslateHintPayload>('translate:hint', (event) => applyHint(event.payload)),
       listen<TranslateEventPayload>('translate:chunk', (event) => {
         if (event.payload.id !== latestIdRef.current) return;
         setTranslation((prev) => prev + (event.payload.text ?? ''));
@@ -86,20 +120,24 @@ export default function TranslateToast() {
       }),
       listen<TranslateEventPayload>('translate:error', (event) => {
         const p = event.payload;
-        // 无 start 直接到 error = 空选区等提示类错误（后端为其分配新 id，必大于已知最新）：短显后自动隐藏
-        if (p.id > latestIdRef.current || statusRef.current === 'idle') {
-          setErrorMsg(p.message ?? '翻译失败');
-          updateStatus('error');
-          latestIdRef.current = p.id;
-          window.setTimeout(hideWindow, 2000);
-          return;
-        }
+        // 只受理当前请求的流式错误；提示走独立的 translate:hint，
+        // 视图链路（translate_text，无 start）的错误与浮窗无关
         if (p.id !== latestIdRef.current) return;
         setErrorMsg(p.message ?? '翻译失败');
         updateStatus('error');
         resetStaleTimer();
       }),
     );
+
+    // 本窗口是启动时预创建的隐藏窗口，页面异步加载可能晚于首次 emit
+    //（Tauri 事件即发即丢）：挂载后补拉待展示内容兜底
+    invoke<PendingTranslate | null>('get_pending_translate_toast')
+      .then((pending) => {
+        if (!pending) return;
+        if (pending.kind === 'Start') applyStart(pending.data);
+        else applyHint(pending.data);
+      })
+      .catch((err: unknown) => console.error('Failed to fetch pending translate toast:', err));
 
     return () => {
       // 无条件注销：promise 晚于 cleanup 才 resolve 时同样要退订（CompanionToast 同款）
@@ -109,7 +147,27 @@ export default function TranslateToast() {
         }),
       );
     };
-  }, [hideWindow, resetStaleTimer, updateStatus]);
+  }, [applyStart, applyHint, hideWindow, resetStaleTimer, updateStatus]);
+
+  // 渲染完成回执（就绪握手）：双 rAF 确保内容已实际绘制，
+  // Rust 收到回执后才把窗口定位到鼠标附近并 show——先 show 会呈现透明空帧
+  useEffect(() => {
+    if (showNonce === 0) return;
+    let cancelled = false;
+    const raf = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (!cancelled) {
+          invoke('translate_toast_ready').catch((err: unknown) =>
+            console.error('Failed to signal translate toast ready:', err),
+          );
+        }
+      });
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+    };
+  }, [showNonce]);
 
   // Esc 关闭
   useEffect(() => {

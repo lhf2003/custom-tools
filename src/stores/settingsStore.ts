@@ -14,6 +14,7 @@ export interface AppSettings {
   auto_update: boolean;
   clipboard_auto_paste: boolean;
   debug_mode: boolean;
+  game_mode_mute: boolean;
   /** 应用内网络请求（LLM 调用、模型列表等）使用 Windows 系统代理 */
   system_proxy_enabled: boolean;
   llm_base_url: string;
@@ -70,6 +71,7 @@ interface SettingsState extends AppSettings {
   setAutoUpdate: (enabled: boolean) => Promise<void>;
   toggleAutoUpdate: () => Promise<boolean>;
   toggleDebugMode: () => Promise<boolean>;
+  toggleGameModeMute: () => Promise<boolean>;
   setClipboardAutoPaste: (enabled: boolean) => Promise<void>;
   toggleClipboardAutoPaste: () => Promise<boolean>;
   setSystemProxyEnabled: (enabled: boolean) => Promise<void>;
@@ -109,11 +111,12 @@ const defaultSettings: AppSettings = {
   startup_launch: false,
   theme: 'system',
   launcher_view: 'grid',
-  panel_alpha: 0.72,
+  panel_alpha: 0.7,
   clipboard_keep_days: 30,
   auto_update: true,
   clipboard_auto_paste: true,
   debug_mode: false,
+  game_mode_mute: true,
   system_proxy_enabled: false,
   llm_base_url: 'https://api.openai.com/v1',
   llm_api_key: '',
@@ -292,6 +295,17 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     } catch (err) {
       console.error('Failed to toggle debug_mode:', err);
       return get().debug_mode;
+    }
+  },
+
+  toggleGameModeMute: async () => {
+    try {
+      const newValue = await invoke<boolean>('toggle_game_mode_mute');
+      set({ game_mode_mute: newValue });
+      return newValue;
+    } catch (err) {
+      console.error('Failed to toggle game_mode_mute:', err);
+      return get().game_mode_mute;
     }
   },
 

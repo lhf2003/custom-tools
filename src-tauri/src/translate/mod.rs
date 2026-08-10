@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::clipboard::ClipboardSuppressFlag;
 use crate::llm::ChatMessage;
@@ -17,6 +17,9 @@ pub const EVT_START: &str = "translate:start";
 pub const EVT_CHUNK: &str = "translate:chunk";
 pub const EVT_DONE: &str = "translate:done";
 pub const EVT_ERROR: &str = "translate:error";
+/// 提示类消息（空选区等）专用通道：与流式 error 区分——
+/// error 可能与视图链路共享，hint 永远只面向浮窗
+pub const EVT_HINT: &str = "translate:hint";
 
 /// 翻译请求 id（进程内递增，前端以此判断消息是否属于当前请求）
 static REQUEST_ID: AtomicU64 = AtomicU64::new(0);
@@ -43,6 +46,26 @@ pub struct TranslateEventPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
 }
+
+/// translate:hint payload：空选区等提示（浮窗短显后自动隐藏）
+#[derive(Debug, Clone, Serialize)]
+pub struct TranslateHintPayload {
+    pub message: String,
+}
+
+/// 待展示翻译浮窗内容（就绪握手，同 companion suggester::PendingToastState）：
+/// emit 后等前端渲染完成回执（translate_toast_ready）才 show——透明窗口先 show
+/// 会呈现全透明空帧；页面未加载完时 emit 即丢，前端挂载后经
+/// get_pending_translate_toast 补拉本状态兜底。
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", content = "data")]
+pub enum PendingTranslate {
+    Start(TranslateStartPayload),
+    Hint(TranslateHintPayload),
+}
+
+#[derive(Default)]
+pub struct PendingTranslateToast(pub std::sync::Mutex<Option<PendingTranslate>>);
 
 /// 翻译专用 system prompt：目标语言插值；硬约束让译文干净可复制
 fn build_prompt(target_lang: &str) -> String {
@@ -76,18 +99,23 @@ pub fn get_target_language(app_handle: &AppHandle) -> String {
 /// 快捷键链路入口（shortcuts.rs 的 handle_shortcut_action 调用，同步返回）。
 /// 流程：模拟 Ctrl+C 捕获选区 → 恢复原剪贴板 → 弹浮窗 → 流式翻译。
 pub fn trigger_selection_translate(app_handle: &AppHandle) {
+    // 全屏静音：游戏/全屏视频时不捕获选区、不弹翻译浮窗
+    if crate::game_mode::should_mute(app_handle) {
+        return;
+    }
+
     let app_handle = app_handle.clone();
     tauri::async_runtime::spawn(async move {
         match capture_selection_text(&app_handle).await {
             Ok(source) => {
                 if source.trim().is_empty() {
-                    show_selection_hint(&app_handle);
+                    push_selection_hint(&app_handle);
                     return;
                 }
                 let target_lang = get_target_language(&app_handle);
                 // 先分配请求 id 再弹窗：start/chunk/done 全挂同一 id，前端按最新 id 过滤
                 let req_id = REQUEST_ID.fetch_add(1, Ordering::Relaxed) + 1;
-                if !show_translate_toast(&app_handle, req_id, &source, &target_lang) {
+                if !push_translate_toast(&app_handle, req_id, &source, &target_lang) {
                     return; // 浮窗缺失（预创建失败）：不空跑 LLM
                 }
                 if let Err(e) = stream_translate(&app_handle, req_id, &source, &target_lang).await {
@@ -96,7 +124,7 @@ pub fn trigger_selection_translate(app_handle: &AppHandle) {
             }
             Err(e) => {
                 log::warn!("捕获选区失败: {}", e);
-                show_selection_hint(&app_handle);
+                push_selection_hint(&app_handle);
             }
         }
     });
@@ -232,7 +260,7 @@ fn simulate_ctrl_c() {
 fn simulate_ctrl_c() {}
 
 /// 把浮窗移动到鼠标右下方（贴近选区），越界回收到鼠标左上方。
-/// show_translate_toast 与 show_selection_hint 共用。
+/// 仅就绪回执（translate_toast_ready）调用——内容首帧就绪后才定位显示。
 fn move_toast_near_cursor(window: &tauri::WebviewWindow) {
     // 固定窗口尺寸（与前端卡片匹配）
     const TOAST_WIDTH: f64 = 420.0;
@@ -266,53 +294,70 @@ fn move_toast_near_cursor(window: &tauri::WebviewWindow) {
     let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
 }
 
-/// 弹出翻译浮窗并下发 start 事件（原文 + 目标语言）。返回窗口是否存在——
-/// 预创建失败时调用方应中止后续流式（跑了 LLM 也无处可显示）。
-fn show_translate_toast(app_handle: &AppHandle, req_id: u64, source: &str, target_lang: &str) -> bool {
-    let Some(window) = app_handle.get_webview_window("translate-toast") else {
+/// 推送翻译开始事件（就绪握手：落 pending + emit start，窗口由前端渲染回执再 show）。
+/// 返回窗口是否存在——预创建失败时调用方应中止后续流式（跑了 LLM 也无处可显示）。
+fn push_translate_toast(app_handle: &AppHandle, req_id: u64, source: &str, target_lang: &str) -> bool {
+    if app_handle.get_webview_window("translate-toast").is_none() {
         log::warn!("translate-toast 窗口不存在");
         return false;
-    };
-
-    move_toast_near_cursor(&window);
-
-    if let Err(e) = window.show() {
-        log::warn!("显示 translate-toast 窗口失败: {}", e);
-    } else {
-        // 抢焦点以支持 Esc/复制快捷键；被 Windows 焦点锁拦截时退化为点击后可用
-        let _ = window.set_focus();
     }
 
-    let _ = app_handle.emit(
-        EVT_START,
-        TranslateStartPayload {
-            id: req_id,
-            source: source.to_string(),
-            target_lang: target_lang.to_string(),
-        },
-    );
+    let payload = TranslateStartPayload {
+        id: req_id,
+        source: source.to_string(),
+        target_lang: target_lang.to_string(),
+    };
+    if let Some(state) = app_handle.try_state::<PendingTranslateToast>() {
+        if let Ok(mut pending) = state.0.lock() {
+            *pending = Some(PendingTranslate::Start(payload.clone()));
+        }
+    }
+    let _ = app_handle.emit(EVT_START, payload);
     true
 }
 
-/// 无选区/捕获失败提示：复用浮窗，短显后消失（前端对提示类错误 2s 后自动隐藏）。
-/// 提示也分配新请求 id——前端以「id 大于已知最新」识别提示类错误，
-/// 若复用旧 id，有历史翻译时提示会被当成普通错误滞留到兜底超时。
-fn show_selection_hint(app_handle: &AppHandle) {
-    let Some(window) = app_handle.get_webview_window("translate-toast") else {
+/// 无选区/捕获失败提示：复用浮窗，短显后消失（前端对提示 2s 后自动隐藏）。
+/// 就绪握手：提示经独立的 translate:hint 事件下发（与流式 error 区分——error
+/// 可能被视图链路触发，浮窗只对 start/hint 发渲染回执），窗口由前端回执再 show。
+fn push_selection_hint(app_handle: &AppHandle) {
+    if app_handle.get_webview_window("translate-toast").is_none() {
         return;
+    }
+    let payload = TranslateHintPayload {
+        message: "未检测到选中文本，请先在目标窗口选中文字".to_string(),
     };
-    move_toast_near_cursor(&window);
-    let _ = window.show();
-    let _ = window.set_focus();
-    let req_id = REQUEST_ID.fetch_add(1, Ordering::Relaxed) + 1;
-    let _ = app_handle.emit(
-        EVT_ERROR,
-        TranslateEventPayload {
-            id: req_id,
-            text: None,
-            message: Some("未检测到选中文本，请先在目标窗口选中文字".to_string()),
-        },
-    );
+    if let Some(state) = app_handle.try_state::<PendingTranslateToast>() {
+        if let Ok(mut pending) = state.0.lock() {
+            *pending = Some(PendingTranslate::Hint(payload.clone()));
+        }
+    }
+    let _ = app_handle.emit(EVT_HINT, payload);
+}
+
+/// toast 页面挂载后补拉待展示内容：预创建窗口的页面异步加载，
+/// 首次 emit 可能早于监听器注册（事件即发即丢），挂载时主动补拉兜底
+#[tauri::command]
+pub fn get_pending_translate_toast(
+    state: State<PendingTranslateToast>,
+) -> Option<PendingTranslate> {
+    state.0.lock().ok().and_then(|pending| pending.clone())
+}
+
+/// toast 前端渲染完成回执：内容首帧就绪后才定位到鼠标附近 + show + focus，消除透明空帧
+#[tauri::command]
+pub fn translate_toast_ready(app_handle: AppHandle, state: State<PendingTranslateToast>) {
+    if let Some(window) = app_handle.get_webview_window("translate-toast") {
+        move_toast_near_cursor(&window);
+        if let Err(e) = window.show() {
+            log::warn!("显示 translate-toast 窗口失败: {}", e);
+        } else {
+            // 抢焦点以支持 Esc/复制快捷键；被 Windows 焦点锁拦截时退化为点击后可用
+            let _ = window.set_focus();
+        }
+    }
+    if let Ok(mut pending) = state.0.lock() {
+        *pending = None;
+    }
 }
 
 /// 翻译请求配置：场景模型 + 提供商 + 密钥，prepare_translate_request 的产物

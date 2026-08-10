@@ -70,6 +70,7 @@ pub mod clipboard;
 pub mod commands;
 pub mod companion;
 pub mod db;
+pub mod game_mode;
 pub mod http;
 pub mod llm;
 pub mod llm_provider;
@@ -202,6 +203,9 @@ pub fn run() {
                 settings_manager,
             )));
             log::info!("Settings manager initialized");
+
+            // 全屏静音状态（游戏/全屏视频时禁用快捷键与弹窗），开关随设置持久化
+            app.manage(game_mode::GameModeState::new(settings.game_mode_mute));
 
             // 调试模式：恢复运行时日志级别闸门（prompt 日志等 debug 级输出的总开关）
             apply_log_level(settings.debug_mode);
@@ -440,6 +444,7 @@ pub fn run() {
                 if let Err(e) = translate_toast {
                     log::warn!("Failed to pre-create translate toast window: {}", e);
                 }
+                app.manage(translate::PendingTranslateToast::default());
             }
 
             // 启动陪伴模块（窗口活动采集 + 情境建议 + LLM 习惯分析）
@@ -455,6 +460,7 @@ pub fn run() {
                 };
                 let companion_state = companion::start(app.handle(), companion_db_path, flags);
                 app.manage(companion_state);
+                app.manage(companion::suggester::PendingToastState::default());
                 app.manage(companion::chat::JarvisChatChild::default());
                 app.manage(companion::scene_chat::JarvisSceneChatState::default());
                 app.manage(companion::websearch::WebSearchState::default());
@@ -505,6 +511,8 @@ pub fn run() {
             commands::plugin_gen::clear_plugin_preview,
             // 划词翻译
             translate::translate_text,
+            translate::get_pending_translate_toast,
+            translate::translate_toast_ready,
             commands::password::is_password_manager_unlocked,
             commands::password::unlock_password_manager,
             commands::password::lock_password_manager,
@@ -545,6 +553,7 @@ pub fn run() {
             commands::settings::check_shortcut_conflict,
             commands::settings::toggle_auto_update,
             commands::settings::toggle_debug_mode,
+            commands::settings::toggle_game_mode_mute,
             commands::settings::validate_claude_cli,
             commands::settings::get_custom_scan_dirs,
             commands::settings::set_custom_scan_dirs,
@@ -594,6 +603,8 @@ pub fn run() {
             commands::companion::get_companion_suggestions,
             commands::companion::act_on_companion_suggestion,
             commands::companion::dismiss_companion_suggestion,
+            commands::companion::get_pending_companion_toast,
+            commands::companion::companion_toast_ready,
             commands::companion::get_app_cache_entries,
             commands::companion::update_app_cache_description,
             commands::companion::list_manuals,

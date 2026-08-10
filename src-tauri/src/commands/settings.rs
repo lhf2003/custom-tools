@@ -353,6 +353,31 @@ pub fn toggle_debug_mode(state: State<'_, SettingsState>) -> Result<bool, String
     Ok(new_value)
 }
 
+/// 全屏静音开关：开 = 前台全屏（游戏/全屏视频）时禁用快捷键与弹窗。
+/// 持久化到设置，并同步运行时 GameModeState（should_mute 实时读取）。
+#[tauri::command]
+pub fn toggle_game_mode_mute(
+    app_handle: tauri::AppHandle,
+    state: State<'_, SettingsState>,
+) -> Result<bool, String> {
+    let manager = state.0.lock().map_err(|e| e.to_string())?;
+    let current = manager.get_settings().game_mode_mute;
+    let new_value = !current;
+
+    manager
+        .set_setting("game_mode_mute", &new_value.to_string())
+        .map_err(|e| e.to_string())?;
+
+    if let Some(game_mode) = app_handle.try_state::<crate::game_mode::GameModeState>() {
+        game_mode.set_enabled(new_value);
+    } else {
+        log::warn!("GameModeState 未托管，运行时静音开关未同步（DB 已更新，重启后生效）");
+    }
+    log::info!("Game mode mute toggled: {} -> {}", current, new_value);
+
+    Ok(new_value)
+}
+
 /// 获取自定义扫描目录列表（存在主 DB settings 表中，key = "custom_scan_dirs"）
 #[tauri::command]
 pub fn get_custom_scan_dirs(

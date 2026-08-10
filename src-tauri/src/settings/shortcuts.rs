@@ -576,6 +576,12 @@ fn parse_key_code(key: &str) -> Result<Code, String> {
 fn handle_shortcut_action(app_handle: &AppHandle, action_id: &str) {
     use tauri::Emitter;
 
+    // 全屏静音：前台全屏（游戏/全屏视频）时所有快捷键不响应
+    if crate::game_mode::should_mute(app_handle) {
+        log::debug!("全屏静音中，忽略快捷键 {}", action_id);
+        return;
+    }
+
     match action_id {
         "toggle_window" => {
             // 复用 lib.rs 的 toggle_main_window（含 HWND 捕获、防闪烁、窗口定位）

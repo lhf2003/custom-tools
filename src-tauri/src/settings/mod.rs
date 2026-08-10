@@ -34,6 +34,8 @@ pub struct AppSettings {
     pub companion_daily_report: bool,
     pub companion_monologue: bool,
     pub debug_mode: bool,
+    /// 全屏静音：前台应用为全屏（游戏、全屏视频）时禁用快捷键与弹窗
+    pub game_mode_mute: bool,
     /// 应用内网络请求（LLM 调用、模型列表等）使用 Windows 系统代理
     pub system_proxy_enabled: bool,
     /// 被手动关闭的陪伴工具名列表（JSON 数组字符串，只含可开关的非核心工具）
@@ -50,7 +52,7 @@ impl Default for AppSettings {
             startup_launch: false,
             theme: "system".to_string(),
             launcher_view: "grid".to_string(),
-            panel_alpha: 0.72,
+            panel_alpha: 0.70,
             clipboard_keep_days: 30,
             auto_update: true,
             clipboard_auto_paste: true,
@@ -68,6 +70,7 @@ impl Default for AppSettings {
             companion_daily_report: true,
             companion_monologue: true,
             debug_mode: false,
+            game_mode_mute: true,
             system_proxy_enabled: false,
             disabled_companion_tools: "[]".to_string(),
             shell_permission_mode: "confirm_all".to_string(),
@@ -78,7 +81,7 @@ impl Default for AppSettings {
 /// SettingsManager 管辖的全部键。settings 表与陪伴模块状态、
 /// custom_scan_dirs / notes_directory 共享，reset 只能按此白名单删键——
 /// 全表 DELETE 会误删陪伴调度水位和扫描目录配置
-const KNOWN_KEYS: [&str; 26] = [
+const KNOWN_KEYS: [&str; 27] = [
     "always_on_top",
     "hide_on_blur",
     "startup_launch",
@@ -102,6 +105,7 @@ const KNOWN_KEYS: [&str; 26] = [
     "companion_daily_report",
     "companion_monologue",
     "debug_mode",
+    "game_mode_mute",
     "system_proxy_enabled",
     "disabled_companion_tools",
     "shell_permission_mode",
@@ -232,6 +236,11 @@ impl SettingsManager {
                 "debug_mode" => {
                     if let Ok(v) = value.parse::<bool>() {
                         settings.debug_mode = v;
+                    }
+                }
+                "game_mode_mute" => {
+                    if let Ok(v) = value.parse::<bool>() {
+                        settings.game_mode_mute = v;
                     }
                 }
                 "system_proxy_enabled" => {
@@ -394,6 +403,11 @@ impl SettingsManager {
                 "debug_mode" => {
                     if let Ok(v) = value.parse::<bool>() {
                         cache.debug_mode = v;
+                    }
+                }
+                "game_mode_mute" => {
+                    if let Ok(v) = value.parse::<bool>() {
+                        cache.game_mode_mute = v;
                     }
                 }
                 "system_proxy_enabled" => {

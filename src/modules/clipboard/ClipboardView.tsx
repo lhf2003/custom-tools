@@ -29,6 +29,11 @@ function isTypingTarget(): boolean {
   return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
 }
 
+// 模块级首屏缓存：跨组件重挂载存活（与 PluginHost 的 lazyViewCache 同思路）。
+// 仅缓存「全部 + 无搜索」的首屏；切 tab/搜索/翻页不写缓存。
+// 进入工具时先用缓存渲染、后台静默刷新，消灭重挂载时的整屏「加载中...」闪帧。
+let cachedFirstPage: ClipboardItemData[] | null = null;
+
 export function ClipboardView() {
   // Resize window when view mounts — use immediateResize to cancel any
   // pending debounce left by LauncherView and apply the correct size at once.
@@ -38,8 +43,8 @@ export function ClipboardView() {
 
   const [activeTab, setActiveTab] = useState<TabType>('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [items, setItems] = useState<ClipboardItemData[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [items, setItems] = useState<ClipboardItemData[]>(cachedFirstPage ?? []);
+  const [isLoading, setIsLoading] = useState(cachedFirstPage === null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -66,11 +71,11 @@ export function ClipboardView() {
     []
   );
 
-  const fetchClipboardHistory = useCallback(async (loadMore = false) => {
+  const fetchClipboardHistory = useCallback(async (loadMore = false, silent = false) => {
     try {
       if (loadMore) {
         setIsLoadingMore(true);
-      } else {
+      } else if (!silent) {
         setIsLoading(true);
         setOffset(0);
       }
@@ -106,6 +111,10 @@ export function ClipboardView() {
       } else {
         setItems(result);
         setOffset(PAGE_SIZE);
+        // 仅「全部 + 无搜索」的整页结果写缓存（切 tab/搜索态不污染缓存）
+        if (activeTab === 'all' && !searchQuery.trim()) {
+          cachedFirstPage = result;
+        }
         // 双栏布局：刷新后自动选中首条，让详情面板始终有内容
         setSelectedId(result.length > 0 ? result[0].id : null);
       }
@@ -113,16 +122,29 @@ export function ClipboardView() {
       // If we got less than PAGE_SIZE items, there are no more
       setHasMore(result.length === PAGE_SIZE);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '获取剪贴板历史失败');
-      console.error('Failed to fetch clipboard history:', err);
+      // 静默刷新失败：保留缓存渲染、不上错误页（用户有旧数据可看），仅记录
+      if (!silent) {
+        setError(err instanceof Error ? err.message : '获取剪贴板历史失败');
+        console.error('Failed to fetch clipboard history:', err);
+      }
     } finally {
-      setIsLoading(false);
+      if (!silent) {
+        setIsLoading(false);
+      }
       setIsLoadingMore(false);
     }
   }, [activeTab, searchQuery]); // Remove offset from dependencies
 
+  // 挂载首拉：有缓存走静默刷新（先渲染缓存数据、后台更新），无缓存正常带 loading 首拉。
+  // tab/搜索变化触发的依赖重跑仍走原逻辑（保留主动操作的 loading 反馈）。
+  const firstRunRef = useRef(true);
   useEffect(() => {
-    fetchClipboardHistory(false);
+    if (firstRunRef.current) {
+      firstRunRef.current = false;
+      fetchClipboardHistory(false, cachedFirstPage !== null);
+    } else {
+      fetchClipboardHistory(false);
+    }
   }, [fetchClipboardHistory]);
 
   // Listen for clipboard updates from backend

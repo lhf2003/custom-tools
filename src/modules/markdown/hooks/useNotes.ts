@@ -7,6 +7,9 @@ const LS_SELECTED_NOTE = 'markdown:lastSelectedNote';
 const LS_EXPANDED_FOLDERS = 'markdown:lastExpandedFolders';
 const SAVE_RETRY_DELAYS = [3000, 8000];
 
+// 模块级笔记树缓存：跨组件重挂载存活，进入即渲染、后台静默刷新（消灭重挂载「加载中...」闪帧）
+let cachedNoteTree: NoteItemData[] | null = null;
+
 function loadSelectedNote(): string | null {
   try {
     return localStorage.getItem(LS_SELECTED_NOTE);
@@ -62,11 +65,11 @@ function buildPathIndex(items: NoteItemData[]): Map<string, NoteItemData[]> {
 }
 
 export function useNotes() {
-  const [notes, setNotes] = useState<NoteItemData[]>([]);
+  const [notes, setNotes] = useState<NoteItemData[]>(cachedNoteTree ?? []);
   const [selectedNote, setSelectedNoteState] = useState<string | null>(loadSelectedNote);
   const [noteContent, setNoteContent] = useState<NoteContentData | null>(null);
   const [editorContent, setEditorContent] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(cachedNoteTree === null);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -90,23 +93,26 @@ export function useNotes() {
     });
   }, []);
 
-  // Load note tree
-  const loadNoteTree = useCallback(async () => {
+  // Load note tree（silent：挂载时有缓存的后台静默刷新——不闪 loading、失败不覆盖缓存渲染）
+  const loadNoteTree = useCallback(async (silent = false) => {
     try {
-      setIsLoading(true);
+      if (!silent) setIsLoading(true);
       const tree = await invoke<NoteItemData[]>('get_note_tree');
       setNotes(tree);
+      cachedNoteTree = tree;
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加载笔记失败');
-      console.error('Failed to load note tree:', err);
+      if (!silent) {
+        setError(err instanceof Error ? err.message : '加载笔记失败');
+        console.error('Failed to load note tree:', err);
+      }
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    loadNoteTree();
+    loadNoteTree(cachedNoteTree !== null);
   }, [loadNoteTree]);
 
   // Save note content with a stale-write guard; on failure surfaces saveError and retries with backoff

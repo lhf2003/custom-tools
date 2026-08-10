@@ -22,6 +22,14 @@ function isTypingTarget(): boolean {
 
 type CopyField = 'password' | 'username' | 'url';
 
+// 模块级缓存：解锁状态 + 默认视图（全部分类、无搜索）列表，跨组件重挂载存活。
+// 进入时先用缓存渲染（已解锁直接出列表），挂载 effect 后台复核/刷新；无缓存才显示整屏「加载中...」。
+// 安全：entries 的 password/notes 为密文（后端查 encrypted_* 列），明文只在解锁后按需解密
+// （decryptedPasswords 存组件本地 state，重挂载即失）；锁定操作立即清空缓存。
+let cachedUnlock: boolean | null = null;
+let cachedCategories: PasswordCategory[] | null = null;
+let cachedEntries: PasswordEntry[] | null = null;
+
 /** 时间戳精确到分钟——秒级精度对密码管理是噪声 */
 function formatTime(ts: string): string {
   return new Date(ts.replace(' ', 'T')).toLocaleString('zh-CN', {
@@ -44,13 +52,13 @@ export function PasswordView() {
     immediateResize(WINDOW_SIZE.PASSWORD.height, WINDOW_SIZE.PASSWORD.width);
   }, []);
 
-  const [isUnlocked, setIsUnlocked] = useState(false);
+  const [isUnlocked, setIsUnlocked] = useState(cachedUnlock ?? false);
   const [masterPassword, setMasterPassword] = useState('');
   const [isUnlocking, setIsUnlocking] = useState(false);
   const [unlockError, setUnlockError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [categories, setCategories] = useState<PasswordCategory[]>([]);
-  const [entries, setEntries] = useState<PasswordEntry[]>([]);
+  const [isLoading, setIsLoading] = useState(cachedUnlock === null);
+  const [categories, setCategories] = useState<PasswordCategory[]>(cachedCategories ?? []);
+  const [entries, setEntries] = useState<PasswordEntry[]>(cachedEntries ?? []);
   const [selectedCategory, setSelectedCategory] = useState<number | 'all'>('all');
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -100,10 +108,11 @@ export function PasswordView() {
     setCopiedField(null);
   }, [selectedEntryId]);
 
-  // Check unlock status
+  // Check unlock status（复核结果回写缓存，切走再切回直接命中最新解锁态）
   const checkUnlockStatus = useCallback(async () => {
     try {
       const unlocked = await invoke<boolean>('is_password_manager_unlocked');
+      cachedUnlock = unlocked;
       setIsUnlocked(unlocked);
     } catch (err: unknown) {
       console.error('Failed to check unlock status:', err);
@@ -126,6 +135,10 @@ export function PasswordView() {
   const handleLock = useCallback(async () => {
     try {
       await invoke('lock_password_manager');
+      // 锁定即清缓存：下次进入直接显示解锁页，密文列表不残留
+      cachedUnlock = false;
+      cachedCategories = null;
+      cachedEntries = null;
       setIsUnlocked(false);
       setDecryptedPasswords({});
       setShowPasswordMap({});
@@ -169,6 +182,7 @@ export function PasswordView() {
     try {
       const cats = await invoke<PasswordCategory[]>('get_password_categories');
       setCategories(cats);
+      cachedCategories = cats;
     } catch (err: unknown) {
       console.error('Failed to load categories:', err);
       const message = err instanceof Error ? err.message : String(err);
@@ -184,6 +198,10 @@ export function PasswordView() {
         search: searchQuery || undefined,
       });
       setEntries(ents);
+      // 仅默认视图（全部分类、无搜索）写缓存（筛选/搜索态不污染缓存）
+      if (selectedCategory === 'all' && !searchQuery.trim()) {
+        cachedEntries = ents;
+      }
       setListError(null);
       // 选中 reconcile：保留仍在结果中的选中项，否则选中第一条（键盘流即达）
       setSelectedEntryId((prev) => {
@@ -216,6 +234,7 @@ export function PasswordView() {
       });
 
       if (result) {
+        cachedUnlock = true;
         setIsUnlocked(true);
         setMasterPassword('');
       }

@@ -30,6 +30,13 @@ pub const INFO_TYPES: &[&str] = &[
     TYPE_INTENT_REMINDER,
 ];
 
+/// 待展示建议（就绪握手）：emit 后等前端渲染完成回执（companion_toast_ready）才 show——
+/// 透明窗口先 show 后渲染会定格/闪出全透明首帧；且 toast 页面异步加载，
+/// 首次 emit 可能早于监听器注册（事件即发即丢），前端挂载后经
+/// get_pending_companion_toast 补拉本状态兜底。
+#[derive(Default)]
+pub struct PendingToastState(pub std::sync::Mutex<Option<db::Suggestion>>);
+
 /// Toast 窗口尺寸（与前端卡片尺寸匹配）
 const TOAST_WIDTH: f64 = 400.0;
 const TOAST_HEIGHT: f64 = 180.0;
@@ -83,9 +90,20 @@ pub fn push_suggestion_silent(
     Ok(suggestion.id)
 }
 
-/// 把一条已存在的建议/意图推送到 toast 窗口（情境触发意图时用）
+/// 把一条已存在的建议/意图推送到 toast 窗口（情境触发意图时用）。
+/// 就绪握手：只落 pending + emit，不直接 show——show 由前端渲染完成回执触发，
+/// 否则透明窗口会先呈现全透明首帧，且页面未就绪时 emit 丢失会让透明窗永久滞留。
 pub fn show_existing_suggestion(app_handle: &AppHandle, suggestion: &db::Suggestion) {
-    show_toast_window(app_handle);
+    // 全屏静音：游戏/全屏视频时不弹陪伴建议（建议仍落库，恢复后可在建议中心查看）
+    if crate::game_mode::should_mute(app_handle) {
+        return;
+    }
+
+    if let Some(state) = app_handle.try_state::<PendingToastState>() {
+        if let Ok(mut pending) = state.0.lock() {
+            *pending = Some(suggestion.clone());
+        }
+    }
     if let Err(e) = app_handle.emit("companion:suggestion", suggestion) {
         log::warn!("emit companion:suggestion 失败: {}", e);
     }
@@ -98,7 +116,8 @@ pub fn hide_toast_window(app_handle: &AppHandle) {
 }
 
 /// 把 toast 窗口定位到鼠标所在显示器的右下角并显示
-fn show_toast_window(app_handle: &AppHandle) {
+/// （仅在收到前端渲染完成回执后调用——内容首帧已就绪，不会呈现透明空帧）
+pub(crate) fn show_toast_window(app_handle: &AppHandle) {
     let Some(window) = app_handle.get_webview_window("companion-toast") else {
         log::warn!("companion-toast 窗口不存在");
         return;

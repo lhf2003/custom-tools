@@ -648,7 +648,7 @@ export function MarkdownView() {
             <div className="flex flex-col items-center justify-center h-full p-4 text-center" style={{ color: THEME.TEXT_DISABLED }}>
               <p className="text-sm mb-2" style={{ color: THEME.ERROR }}>{error}</p>
               <button
-                onClick={loadNoteTree}
+                onClick={() => loadNoteTree()}
                 className="text-sm transition-colors cursor-pointer"
                 style={{ color: THEME.INFO }}
               >

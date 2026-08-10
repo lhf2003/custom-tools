@@ -159,9 +159,12 @@ function EverythingInstallPage({ onInstalled }: { onInstalled: () => void }) {
   );
 }
 
+// 模块级缓存：初始空查询结果，跨组件重挂载存活；进入即渲染，后台静默重搜（消灭「搜索中...」闪帧）
+let cachedInitialFiles: FileResult[] | null = null;
+
 export function EverythingView() {
   const [query, setQuery] = useState('');
-  const [files, setFiles] = useState<FileResult[]>([]);
+  const [files, setFiles] = useState<FileResult[]>(cachedInitialFiles ?? []);
   const [isLoading, setIsLoading] = useState(false);
   const [everythingStatus, setEverythingStatus] = useState<EverythingStatus>(null);
   const [selectedCategory, setSelectedCategory] = useState<FileCategory>('all');
@@ -197,12 +200,12 @@ export function EverythingView() {
   }, []);
 
   // Search files
-  const searchFiles = useCallback(async (searchQuery: string, category: FileCategory) => {
+  const searchFiles = useCallback(async (searchQuery: string, category: FileCategory, silent = false) => {
     if (everythingStatus !== 'available') {
       return;
     }
 
-    setIsLoading(true);
+    if (!silent) setIsLoading(true);
 
     try {
       // Build query with category filter
@@ -230,20 +233,27 @@ export function EverythingView() {
         limit: 100
       }) as FileResult[];
       setFiles(results || []);
+      // 仅初始态（空查询 + 全部分类）写缓存（搜索/筛选态不污染缓存）
+      if (!searchQuery.trim() && category === 'all') {
+        cachedInitialFiles = results || [];
+      }
       setSelectedFile(results?.[0] || null);
     } catch (err) {
       console.error('Search failed:', err);
       setFiles([]);
       setSelectedFile(null);
     } finally {
-      setIsLoading(false);
+      if (!silent) setIsLoading(false);
     }
   }, [everythingStatus]);
 
-  // Debounced search
+  // Debounced search（挂载首跑且有缓存时静默重搜，不闪「搜索中...」；之后输入/筛选照常带 loading）
+  const firstRunRef = useRef(true);
   useEffect(() => {
     const timer = setTimeout(() => {
-      searchFiles(query, selectedCategory);
+      const silent = firstRunRef.current && cachedInitialFiles !== null;
+      firstRunRef.current = false;
+      searchFiles(query, selectedCategory, silent);
     }, 200);
     return () => clearTimeout(timer);
   }, [query, selectedCategory, searchFiles]);

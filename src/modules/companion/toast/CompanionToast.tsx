@@ -157,12 +157,42 @@ export default function CompanionToast() {
       setSuggestion(event.payload);
       setActing(false);
     });
+    // 本窗口是启动时预创建的隐藏窗口，页面异步加载可能晚于首次 emit
+    //（Tauri 事件即发即丢）：挂载后补拉待展示建议兜底，否则透明窗会永久滞留
+    invoke<Suggestion | null>('get_pending_companion_toast')
+      .then((pending) => {
+        if (pending) {
+          setSuggestion(pending);
+          setActing(false);
+        }
+      })
+      .catch((err: unknown) => console.error('Failed to fetch pending suggestion:', err));
     return () => {
       unlisten.then((fn) => fn()).catch((err: unknown) => {
         console.error('Failed to cleanup companion:suggestion listener:', err);
       });
     };
   }, []);
+
+  // 渲染完成回执：双 rAF 确保卡片已实际绘制，Rust 收到回执后才定位 + show——
+  // 透明窗口若先 show 后渲染，首帧全透明会定格/闪帧
+  useEffect(() => {
+    if (!suggestion) return;
+    let cancelled = false;
+    const raf = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (!cancelled) {
+          invoke('companion_toast_ready').catch((err: unknown) =>
+            console.error('Failed to signal toast ready:', err),
+          );
+        }
+      });
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+    };
+  }, [suggestion]);
 
   const handleAccept = useCallback(async () => {
     if (!suggestion || acting) return;
