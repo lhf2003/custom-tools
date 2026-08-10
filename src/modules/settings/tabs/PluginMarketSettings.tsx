@@ -159,7 +159,7 @@ function MoreMenu({
         createPortal(
           <div
             ref={menuRef}
-            className={`fixed min-w-[180px] bg-app-bg-primary/80 border border-app-border rounded-xl shadow-2xl z-50 animate-in fade-in duration-150 ${
+            className={`fixed min-w-[180px] bg-app-bg-primary/80 border border-app-border rounded-xl shadow-lg z-50 animate-in fade-in duration-150 ${
               dropUp ? 'slide-in-from-bottom-1' : 'slide-in-from-top-1'
             }`}
             style={{ ...menuBox, WebkitBackdropFilter: 'blur(20px)', backdropFilter: 'blur(20px)' }}

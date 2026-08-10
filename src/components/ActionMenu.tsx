@@ -80,7 +80,7 @@ export function ActionMenu({ items, label }: ActionMenuProps) {
       {isOpen && (
         <div
           ref={menuRef}
-          className="absolute right-0 top-full mt-2 min-w-[220px] bg-app-bg-primary/80 border border-app-border rounded-xl shadow-2xl z-10 animate-in fade-in slide-in-from-top-1 duration-150"
+          className="absolute right-0 top-full mt-2 min-w-[220px] bg-app-bg-primary/80 border border-app-border rounded-xl shadow-lg z-10 animate-in fade-in slide-in-from-top-1 duration-150"
           style={{ WebkitBackdropFilter: 'blur(20px)', backdropFilter: 'blur(20px)' }}>
           <MenuPanel items={items} onItemClick={handleItemClick} />
         </div>

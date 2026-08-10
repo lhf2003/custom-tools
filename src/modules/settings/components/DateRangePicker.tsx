@@ -240,7 +240,7 @@ export function DateRangePicker({
           {/* 点击遮罩关闭（草稿丢弃，与取消等价） */}
           <div className="fixed inset-0 z-40" onClick={close} />
           <div
-            className="absolute right-0 top-full mt-2 z-50 w-[560px] rounded-xl border border-app-border bg-app-bg-primary/80 shadow-2xl p-3 animate-slide-up"
+            className="absolute right-0 top-full mt-2 z-50 w-[560px] rounded-xl border border-app-border bg-app-bg-primary/80 shadow-lg p-3 animate-slide-up"
             style={{ WebkitBackdropFilter: 'blur(20px)', backdropFilter: 'blur(20px)' }}
           >
             {/* 预设 */}

@@ -92,7 +92,7 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
   return (
     <div
       ref={menuRef}
-      className="min-w-[160px] bg-app-bg-primary/80 border border-app-border rounded-xl shadow-2xl p-1.5 animate-in fade-in duration-150"
+      className="min-w-[160px] bg-app-bg-primary/80 border border-app-border rounded-xl shadow-lg p-1.5 animate-in fade-in duration-150"
       style={{
         ...getMenuStyle(),
         WebkitBackdropFilter: 'blur(20px)',

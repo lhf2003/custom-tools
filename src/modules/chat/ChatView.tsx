@@ -1076,7 +1076,7 @@ export function ChatView() {
           role="listbox"
           aria-label="会话历史"
           onKeyDown={handleHistoryKeyDown}
-          className={`fixed z-50 w-80 max-h-80 overflow-y-auto rounded-xl border border-app-border bg-app-bg-primary/80 shadow-2xl outline-none transition-all duration-150 ease-out motion-reduce:transition-none ${
+          className={`fixed z-50 w-80 max-h-80 overflow-y-auto rounded-xl border border-app-border bg-app-bg-primary/80 shadow-lg outline-none transition-all duration-150 ease-out motion-reduce:transition-none ${
             historyVisible ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-1'
           }`}
           style={{

@@ -363,7 +363,7 @@ export function CustomSelect({
           className={`
             fixed z-50 py-1 rounded-xl overflow-hidden
             bg-app-bg-primary/80
-            border border-app-border shadow-2xl
+            border border-app-border shadow-lg
             transition-[opacity,transform,visibility] duration-200 ease-out motion-reduce:transition-none
             ${menuClassName}
             ${dropdownPosition === 'top' ? 'origin-bottom' : 'origin-top'}

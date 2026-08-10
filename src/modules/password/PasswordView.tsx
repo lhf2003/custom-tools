@@ -753,7 +753,7 @@ export function PasswordView() {
           onContextMenu={(e) => { e.preventDefault(); setCategoryMenu(null); }}
         >
           <div
-            className="absolute min-w-[160px] bg-app-bg-primary/80 border border-app-border rounded-xl shadow-2xl animate-in fade-in duration-150"
+            className="absolute min-w-[160px] bg-app-bg-primary/80 border border-app-border rounded-xl shadow-lg animate-in fade-in duration-150"
             style={{
               left: Math.min(categoryMenu.x, window.innerWidth - 176),
               top: Math.min(categoryMenu.y, window.innerHeight - 64),
