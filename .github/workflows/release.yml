@@ -69,7 +69,9 @@ jobs:
           $version = $tag -replace '^v', ''
 
           # release body 经 gh CLI 读取，避免把多行内容直接插进脚本
-          $body = gh release view $tag --json body -q .body
+          # 注意：gh 多行输出会被 PowerShell 拆成 string[]，必须 join 回单字符串——
+          # latest.json 的 notes 是 string，数组会让 tauri-plugin-updater 反序列化失败
+          $body = ((gh release view $tag --json body -q .body) -join "`n").Trim()
           if ([string]::IsNullOrWhiteSpace($body)) {
             $body = "## 更新内容`n- 版本 $tag"
           }
