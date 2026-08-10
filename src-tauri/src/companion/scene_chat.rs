@@ -161,15 +161,17 @@ async fn run_scene_chat(
         .map_err(|e| e.to_string())?;
     let notes_dir = crate::notes::get_default_notes_dir().map_err(|e| e.to_string())?;
 
-    // 解析陪伴场景模型（同步 SQLite 走 spawn_blocking——本循环跑在 tokio
+    // 解析聊天场景模型（同步 SQLite 走 spawn_blocking——本循环跑在 tokio
     // worker 上，DB 锁等待会拖累整个前端事件泵；下同，不再逐处备注）
+    // 用 Chat 而非 Companion：聊天页头部模型/思考切换写的是 chat 场景配置，
+    // 必须与调用侧同源才生效；chat 未配置时 resolve_scene_provider 自动回退陪伴
     let app_c = app_handle.clone();
     let db_path_owned = db_path.clone();
     let (provider, model, thinking_mode, reasoning_effort, api_key, used_scene) =
         tauri::async_runtime::spawn_blocking(move || {
             let conn = crate::db::open_connection(&db_path_owned)
                 .map_err(|e| format!("打开数据库失败: {}", e))?;
-            analyzer::resolve_scene_provider(&app_c, &conn, Scene::Companion)
+            analyzer::resolve_scene_provider(&app_c, &conn, Scene::Chat)
         })
         .await
         .map_err(|e| format!("场景模型解析任务失败: {}", e))??;

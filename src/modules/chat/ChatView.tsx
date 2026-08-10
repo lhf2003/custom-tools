@@ -17,6 +17,7 @@ import { debouncedResize } from '@/utils/tauri';
 import { WINDOW_SIZE } from '@/constants/window';
 import { A2uiSurface } from './a2ui/A2uiSurface';
 import { parseActionMessage } from './a2ui/action';
+import { ModelSelector } from './ModelSelector';
 
 // ─────────────────────────────────────────────
 // Types
@@ -869,6 +870,7 @@ export function ChatView() {
         </span>
 
         <div className="flex items-center gap-1 shrink-0">
+          <ModelSelector />
           {!isLoading && (
             <>
               <button
@@ -1017,7 +1019,7 @@ export function ChatView() {
       </div>
 
       {/* ── Input area (bottom) ────────────────────────────────────── */}
-      <div className="px-3 py-2.5 shrink-0 border-t border-zinc-700/30">
+      <div className="px-3 py-2.5 shrink-0 border-t border-app-border">
         <div className="flex items-center gap-2 px-3 py-1.5">
           {/* TODO: 附件/上下文入口占位，逻辑后续加 */}
           <button
