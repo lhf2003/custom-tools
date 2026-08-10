@@ -27,6 +27,7 @@ import {
 import { refreshExternalPlugins } from '@/plugins/external';
 import { getPluginShortcutConflicts } from '@/plugins/pluginShortcuts';
 import { PluginHost } from '@/plugins/PluginHost';
+import { useAutoHideScrollbar } from '@/hooks/useAutoHideScrollbar';
 
 const SHELL_VIEWS: readonly ShellView[] = ['launcher', 'chat', 'settings'];
 
@@ -107,6 +108,9 @@ function App() {
     },
     ...commonMenuItems,
   ], [handleResetSettings, commonMenuItems]);
+
+  // 全局滚动条：任意容器滚动时淡入 thumb，静止后淡出
+  useAutoHideScrollbar();
 
   // Load settings on mount
   useEffect(() => {

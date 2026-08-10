@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Copy, Check, Languages, X, ChevronDown, ChevronUp } from 'lucide-react';
 import { Tooltip } from '@/components/Tooltip';
+import { useAutoHideScrollbar } from '@/hooks/useAutoHideScrollbar';
 
 /** translate:chunk / done / error 事件的统一壳（与 Rust 端 TranslateEventPayload 对应） */
 interface TranslateEventPayload {
@@ -35,6 +36,9 @@ type ToastStatus = 'idle' | 'translating' | 'done' | 'error';
 const STALE_HIDE_MS = 60_000;
 
 export default function TranslateToast() {
+  // 独立窗口共享 index.css：滚动条自动隐藏需在本窗口单独挂载
+  useAutoHideScrollbar();
+
   const [status, setStatus] = useState<ToastStatus>('idle');
   // 事件监听闭包经 ref 读最新状态：effect 不随 status 重订阅（重订阅会累积监听器）
   const statusRef = useRef<ToastStatus>('idle');

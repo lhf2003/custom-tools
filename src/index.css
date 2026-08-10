@@ -72,9 +72,9 @@
   --tooltip-font-size: 12px;
   --tooltip-backdrop: blur(8px);
 
-  /* Scrollbar */
-  --scrollbar-thumb: var(--app-bg-elevated);
-  --scrollbar-thumb-hover: var(--app-bg-pressed);
+  /* Scrollbar：alpha 纱层浅灰（随主题翻转），半透明叠加 = 系统原生材质观感 */
+  --scrollbar-thumb: var(--app-alpha-white-25);
+  --scrollbar-thumb-hover: var(--app-alpha-white-50);
 
   /* Window Effect Variables */
   --window-bg: transparent;
@@ -902,7 +902,11 @@ input[type='range']:active + .range-readout {
   }
 }
 
-/* Scrollbar Styles - Zinc Theme */
+/* Scrollbar Styles — 自动隐藏 + 淡入淡出
+   默认 thumb 透明（静止隐藏）；useAutoHideScrollbar 在任意容器滚动时给 <html>
+   加 .is-scrolling，thumb 淡入浅灰纱层，静止 900ms 后淡出。
+   悬停 thumb 位置随时显现（可抓握拖拽），hover 加深一档。
+   淡入 150ms（即时反馈）、淡出 400ms（余韵），与滑杆同一标准曲线。 */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -912,13 +916,31 @@ input[type='range']:active + .range-readout {
   background: transparent;
 }
 
-::-webkit-scrollbar-thumb {
-  background: var(--scrollbar-thumb);
-  border-radius: 8px;
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: var(--scrollbar-thumb-hover);
+::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 8px;
+  transition: background-color 400ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+html.is-scrolling ::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+  transition-duration: 150ms;
+}
+
+::-webkit-scrollbar-thumb:hover,
+html.is-scrolling ::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover);
+  transition-duration: 150ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::-webkit-scrollbar-thumb {
+    transition: none;
+  }
 }
 
 /* Selection Styles */
@@ -1039,7 +1061,7 @@ a:focus-visible {
   color: var(--app-text-tertiary) !important;
 }
 
-/* MDEditor scrollbar */
+/* MDEditor scrollbar（同全局自动隐藏：默认透明，is-scrolling 淡入，悬停常显） */
 .w-md-editor-text-pre::-webkit-scrollbar,
 .w-md-editor-preview::-webkit-scrollbar {
   width: 6px !important;
@@ -1053,13 +1075,23 @@ a:focus-visible {
 
 .w-md-editor-text-pre::-webkit-scrollbar-thumb,
 .w-md-editor-preview::-webkit-scrollbar-thumb {
-  background: var(--scrollbar-thumb) !important;
+  background-color: transparent !important;
   border-radius: 8px !important;
+  transition: background-color 400ms cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+html.is-scrolling .w-md-editor-text-pre::-webkit-scrollbar-thumb,
+html.is-scrolling .w-md-editor-preview::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb) !important;
+  transition-duration: 150ms !important;
 }
 
 .w-md-editor-text-pre::-webkit-scrollbar-thumb:hover,
-.w-md-editor-preview::-webkit-scrollbar-thumb:hover {
-  background: var(--scrollbar-thumb-hover) !important;
+.w-md-editor-preview::-webkit-scrollbar-thumb:hover,
+html.is-scrolling .w-md-editor-text-pre::-webkit-scrollbar-thumb:hover,
+html.is-scrolling .w-md-editor-preview::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover) !important;
+  transition-duration: 150ms !important;
 }
 
 /* Hide default scrollbars in editor container */
