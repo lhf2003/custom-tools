@@ -231,6 +231,22 @@ fn validate_action(component: &Value, id: &str) -> Result<(), String> {
                 ALLOWED_INVOKE_COMMANDS.join("/")
             ));
         }
+        // args 结构校验：必须是扁平对象、值只能是标量（string/number/bool/null）。
+        // 命令侧另有语义校验（如 plugin_id 的 charset），这里兜底拒绝嵌套载荷，
+        // 防止 LLM 构造复杂 args 绕过单一命令的参数校验面。
+        if let Some(args) = obj.get("invoke").and_then(|v| v.get("args")) {
+            let is_flat_scalar = args.as_object().is_some_and(|m| {
+                m.values().all(|v| {
+                    v.is_string() || v.is_number() || v.is_boolean() || v.is_null()
+                })
+            });
+            if !is_flat_scalar {
+                return Err(format!(
+                    "组件「{}」的 action.invoke.args 必须是键值标量的扁平对象",
+                    id
+                ));
+            }
+        }
     }
     Ok(())
 }

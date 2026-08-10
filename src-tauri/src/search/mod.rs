@@ -557,13 +557,15 @@ impl SearchIndex {
         // 不该因扫描失败误判卸载，与 collect_all_apps 的「失败沿用缓存」同一
         // 原则。空集若被当作「确实没有」，会把缓存里所有 UWP 条目判为失效
         // 删除（Get-StartApps 偶发空输出），因此仅在扫描成功且非空时执行 diff。
+        // 未到期（uwp_rescan=false）时 None 表示「不参与 diff」——曾误用
+        // Some(空集)，空集让所有条目 !contains 恒成立、整体判失效删除。
         let uwp_valid: Option<HashSet<String>> = if uwp_rescan {
             uwp::scan()
                 .ok()
                 .filter(|apps| !apps.is_empty())
                 .map(|apps| apps.iter().map(|u| uwp::launch_path(&u.app_id)).collect())
         } else {
-            Some(HashSet::new())
+            None
         };
 
         apps.iter()
@@ -913,4 +915,54 @@ pub fn launch_app(_path: &str) -> anyhow::Result<()> {
     Err(anyhow::anyhow!(
         "Launching apps is only supported on Windows"
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 构造最小 AppItem（仅 path 参与校验）
+    fn item(path: &str) -> AppItem {
+        AppItem {
+            name: path.to_string(),
+            path: path.to_string(),
+            icon: None,
+            pinyin_initials: String::new(),
+        }
+    }
+
+    /// 回归：未到期（uwp_rescan=false）时 UWP 条目必须全部保留。
+    /// 曾用 Some(空集)——空集让所有条目 !contains 恒成立、整体判失效删除
+    /// （10 分钟间隔内的第二次唤起即把全部 UWP 应用清出索引）。
+    #[test]
+    fn uwp_not_rescanned_keeps_all_uwp_entries() {
+        let apps = vec![
+            item("shell:AppsFolder\\Microsoft.WindowsCalculator_8wekyb3d8bbwe!App"),
+            item("shell:AppsFolder\\SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify"),
+            item("ms-settings:display"),
+            item("\\\\nas\\share\\app.lnk"),
+        ];
+        let invalid = SearchIndex::verify_apps_on_disk(&apps, false);
+        assert!(
+            invalid.is_empty(),
+            "未到期时 UWP/UNC/系统功能条目不应被判失效: {invalid:?}"
+        );
+    }
+
+    /// 文件条目的存在性校验仍生效：不存在的 .lnk 判失效，存在的不判
+    #[test]
+    fn file_entry_missing_invalidates() {
+        let missing = std::env::temp_dir()
+            .join(format!("uwp-review-{}", std::process::id()))
+            .join("nope.lnk");
+        let apps = vec![item(&missing.to_string_lossy())];
+        let invalid = SearchIndex::verify_apps_on_disk(&apps, false);
+        assert_eq!(invalid.len(), 1, "不存在的文件条目应判失效: {missing:?}");
+
+        let existing = std::env::temp_dir().join(format!("uwp-review-{}.lnk", std::process::id()));
+        std::fs::write(&existing, b"").unwrap();
+        let invalid = SearchIndex::verify_apps_on_disk(&[item(&existing.to_string_lossy())], false);
+        let _ = std::fs::remove_file(&existing);
+        assert!(invalid.is_empty(), "存在的文件条目不应判失效: {existing:?}");
+    }
 }

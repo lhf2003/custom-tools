@@ -151,6 +151,7 @@ pub fn read_plugin_files(
     app_handle: AppHandle,
     plugin_id: String,
 ) -> Result<PluginExistingFiles, String> {
+    validate_plugin_id(&plugin_id)?;
     let base = crate::commands::plugins::plugins_dir(&app_handle)?;
     let plugin_dir = base.join(&plugin_id);
     // 路径穿越防护：确认目标在 plugins 目录内
@@ -432,6 +433,20 @@ pub fn open_local_html(app_handle: AppHandle, path: String) -> Result<(), String
         .map_err(|e| format!("打开失败: {e}"))
 }
 
+/// 插件 id 合法性：非空且纯小写字母/数字/连字符。
+/// 与 plugin_gen_tool::preview_plugin_dir 同一规则；所有接收 plugin_id 的命令入口
+/// 必须先行调用——否则 `../` 路径穿越可指向 plugins/ 之外（删除/读取任意目录）。
+fn validate_plugin_id(plugin_id: &str) -> Result<(), String> {
+    let is_safe = !plugin_id.is_empty()
+        && plugin_id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    if !is_safe {
+        return Err(format!("插件 id「{}」非法（只允许小写字母/数字/连字符）", plugin_id));
+    }
+    Ok(())
+}
+
 /// 预览插件目录：app_data/plugins/.preview/（试运行用，不列正式列表）
 fn preview_dir(app_handle: &AppHandle) -> Result<std::path::PathBuf, String> {
     let dir = app_handle
@@ -452,6 +467,7 @@ pub fn write_plugin_preview(
     manifest: String,
     bundle: String,
 ) -> Result<(), String> {
+    validate_plugin_id(&plugin_id)?;
     let plugin_dir = preview_dir(&app_handle)?.join(&plugin_id);
     let _ = std::fs::remove_dir_all(&plugin_dir);
     std::fs::create_dir_all(&plugin_dir).map_err(|e| e.to_string())?;
@@ -463,6 +479,7 @@ pub fn write_plugin_preview(
 /// 从预览安装到正式目录（复制 + 清理预览）。已存在同名插件时拒绝（避免覆盖）。
 #[tauri::command]
 pub fn install_preview_plugin(app_handle: AppHandle, plugin_id: String) -> Result<(), String> {
+    validate_plugin_id(&plugin_id)?;
     let preview = preview_dir(&app_handle)?.join(&plugin_id);
     if !preview.exists() {
         return Err("预览插件不存在".to_string());
@@ -481,6 +498,7 @@ pub fn install_preview_plugin(app_handle: AppHandle, plugin_id: String) -> Resul
 /// 先清空旧目录再复制（避免新版本删除的文件残留），最后清理预览。
 #[tauri::command]
 pub fn update_plugin_from_preview(app_handle: AppHandle, plugin_id: String) -> Result<(), String> {
+    validate_plugin_id(&plugin_id)?;
     let preview = preview_dir(&app_handle)?.join(&plugin_id);
     if !preview.exists() {
         return Err("预览插件不存在".to_string());
@@ -507,6 +525,7 @@ pub fn update_plugin_from_preview(app_handle: AppHandle, plugin_id: String) -> R
 /// 清理预览（关闭试运行/预览弹窗时调用）
 #[tauri::command]
 pub fn clear_plugin_preview(app_handle: AppHandle, plugin_id: String) -> Result<(), String> {
+    validate_plugin_id(&plugin_id)?;
     let dir = preview_dir(&app_handle)?.join(&plugin_id);
     if dir.exists() {
         std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
