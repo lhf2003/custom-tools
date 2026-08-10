@@ -924,8 +924,10 @@ pub async fn run_daily_analysis(
 }
 
 /// 进程名带标注（exe 文件名小写 → (显示名, 描述) 映射，来自 app_cache）。
-/// 拼接规则：有 name 有描述 → `proc（name / 描述）`；只有 name → `proc（name）`；
-/// name 与进程名雷同（如 name 就是 "Code.exe"）跳过；都没有 → 原样进程名。
+/// 拼接规则：有 name 有描述 → `proc（name / 描述）`；有描述无 name → `proc（描述）`；
+/// 描述为空一律裸名——实测模型看到 `proc（name）` 会误判「已认识」跳过描述回填
+/// （任务三的识别标准就是「带（描述）才是已认识」），name 与进程名雷同（如
+/// name 就是 "Code.exe"）的同样跳过。
 fn proc_label(proc: &str, labels: &std::collections::HashMap<String, (String, String)>) -> String {
     let Some((name, desc)) = labels.get(&proc.to_lowercase()) else {
         return proc.to_string();
@@ -939,9 +941,8 @@ fn proc_label(proc: &str, labels: &std::collections::HashMap<String, (String, St
     };
     match (name_part, desc) {
         (Some(n), d) if !d.is_empty() => format!("{}（{} / {}）", proc, n, d),
-        (Some(n), _) => format!("{}（{}）", proc, n),
         (None, d) if !d.is_empty() => format!("{}（{}）", proc, d),
-        (None, _) => proc.to_string(),
+        _ => proc.to_string(),
     }
 }
 

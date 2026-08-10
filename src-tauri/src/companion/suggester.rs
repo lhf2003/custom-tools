@@ -30,12 +30,13 @@ pub const INFO_TYPES: &[&str] = &[
     TYPE_INTENT_REMINDER,
 ];
 
-/// 待展示建议（就绪握手）：emit 后等前端渲染完成回执（companion_toast_ready）才 show——
+/// 待展示建议队列（就绪握手）：emit 后等前端渲染完成回执（companion_toast_ready）才 show——
 /// 透明窗口先 show 后渲染会定格/闪出全透明首帧；且 toast 页面异步加载，
 /// 首次 emit 可能早于监听器注册（事件即发即丢），前端挂载后经
 /// get_pending_companion_toast 补拉本状态兜底。
+/// 队列而非单条：分析轮可能连发多条建议（如多个未知应用），连续 push 时不丢前面几条。
 #[derive(Default)]
-pub struct PendingToastState(pub std::sync::Mutex<Option<db::Suggestion>>);
+pub struct PendingToastState(pub std::sync::Mutex<std::collections::VecDeque<db::Suggestion>>);
 
 /// Toast 窗口尺寸（与前端卡片尺寸匹配）
 const TOAST_WIDTH: f64 = 400.0;
@@ -101,7 +102,7 @@ pub fn show_existing_suggestion(app_handle: &AppHandle, suggestion: &db::Suggest
 
     if let Some(state) = app_handle.try_state::<PendingToastState>() {
         if let Ok(mut pending) = state.0.lock() {
-            *pending = Some(suggestion.clone());
+            pending.push_back(suggestion.clone());
         }
     }
     if let Err(e) = app_handle.emit("companion:suggestion", suggestion) {

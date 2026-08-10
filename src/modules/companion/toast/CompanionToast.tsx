@@ -48,7 +48,7 @@ const REGULAR_META = {
 const TYPE_META: Record<string, TypeMeta> = {
   error_analysis: {
     icon: AlertTriangle,
-    iconColor: 'text-red-400',
+    iconColor: 'text-app-status-error-text',
     iconBg: 'bg-red-500/15',
     acceptLabel: 'AI 分析',
   },
@@ -85,7 +85,7 @@ const TYPE_META: Record<string, TypeMeta> = {
   },
   auto_executed: {
     icon: Zap,
-    iconColor: 'text-emerald-400',
+    iconColor: 'text-app-status-success',
     iconBg: 'bg-emerald-500/15',
   },
   app_unknown: {
@@ -106,20 +106,34 @@ const DEFAULT_META: TypeMeta = {
 const ACTION_TYPES = new Set(['work_suite', 'context_routine', 'error_analysis', 'app_unknown']);
 
 export default function CompanionToast() {
-  const [suggestion, setSuggestion] = useState<Suggestion | null>(null);
+  // 展示队列：分析轮可能连发多条建议（如多个未知应用），逐条展示、关闭后出队下一条
+  const [queue, setQueue] = useState<Suggestion[]>([]);
+  const suggestion = queue[0] ?? null;
   const [countdown, setCountdown] = useState(AUTO_HIDE_SECONDS);
   const [acting, setActing] = useState(false);
   const timerRef = useRef<number | null>(null);
   const suggestionIdRef = useRef<number | null>(null);
 
+  // 仅隐藏窗口，队列保留
   const hideWindow = useCallback(() => {
     suggestionIdRef.current = null;
     getCurrentWindow()
       .hide()
       .catch((err: unknown) => console.error('Failed to hide toast window:', err));
-    setSuggestion(null);
     setActing(false);
   }, []);
+
+  // 出队当前条：队列还有下一条则自动展示（suggestion 变化 → 回执 effect → 重新 show），
+  // 队列已空则隐藏窗口
+  const advance = useCallback(() => {
+    setQueue((q) => {
+      if (q.length <= 1) {
+        hideWindow();
+        return [];
+      }
+      return q.slice(1);
+    });
+  }, [hideWindow]);
 
   // 倒计时：到 0 仅隐藏窗口，不改变建议状态（用户可在设置页稍后处理）
   useEffect(() => {
@@ -139,7 +153,7 @@ export default function CompanionToast() {
           window.clearInterval(timerRef.current);
         }
         setCountdown(0);
-        hideWindow();
+        advance();
       } else {
         setCountdown(remaining);
       }
@@ -150,23 +164,24 @@ export default function CompanionToast() {
         window.clearInterval(timerRef.current);
       }
     };
-  }, [suggestion, hideWindow]);
+  }, [suggestion, advance]);
 
   useEffect(() => {
     const unlisten = listen<Suggestion>('companion:suggestion', (event) => {
-      setSuggestion(event.payload);
+      // 队列尾部追加；多条连发（如多个未知应用）逐条展示
+      setQueue((q) => [...q, event.payload]);
       setActing(false);
     });
     // 本窗口是启动时预创建的隐藏窗口，页面异步加载可能晚于首次 emit
-    //（Tauri 事件即发即丢）：挂载后补拉待展示建议兜底，否则透明窗会永久滞留
-    invoke<Suggestion | null>('get_pending_companion_toast')
+    //（Tauri 事件即发即丢）：挂载后补拉待展示建议队列兜底，否则透明窗会永久滞留
+    invoke<Suggestion[]>('get_pending_companion_toast')
       .then((pending) => {
-        if (pending) {
-          setSuggestion(pending);
+        if (pending.length > 0) {
+          setQueue((q) => [...q, ...pending]);
           setActing(false);
         }
       })
-      .catch((err: unknown) => console.error('Failed to fetch pending suggestion:', err));
+      .catch((err: unknown) => console.error('Failed to fetch pending suggestions:', err));
     return () => {
       unlisten.then((fn) => fn()).catch((err: unknown) => {
         console.error('Failed to cleanup companion:suggestion listener:', err);
@@ -202,9 +217,9 @@ export default function CompanionToast() {
     } catch (err) {
       console.error('Failed to act on suggestion:', err);
     } finally {
-      hideWindow();
+      advance();
     }
-  }, [suggestion, acting, hideWindow]);
+  }, [suggestion, acting, advance]);
 
   const handleDismiss = useCallback(async () => {
     if (!suggestion || acting) return;
@@ -214,9 +229,9 @@ export default function CompanionToast() {
     } catch (err) {
       console.error('Failed to dismiss suggestion:', err);
     } finally {
-      hideWindow();
+      advance();
     }
-  }, [suggestion, acting, hideWindow]);
+  }, [suggestion, acting, advance]);
 
   // 键盘快捷键：提示型 Esc/Enter 都只是本地关闭（状态已落 seen，不回传处置）；
   // 动作型 Esc 忽略直达、Enter 仅确认型直达（动作型防误触）。
@@ -228,7 +243,7 @@ export default function CompanionToast() {
       if (isInfo) {
         if (e.key === 'Escape' || e.key === 'Enter') {
           e.preventDefault();
-          hideWindow();
+          advance();
         }
         return;
       }
@@ -245,7 +260,7 @@ export default function CompanionToast() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [suggestion, handleAccept, handleDismiss, hideWindow]);
+  }, [suggestion, handleAccept, handleDismiss, advance]);
 
   if (!suggestion) {
     return null;
@@ -258,7 +273,10 @@ export default function CompanionToast() {
 
   return (
     <div className="w-full h-full flex items-stretch justify-stretch bg-transparent">
-      <div className="relative flex-1 m-1 rounded-xl border border-white/10 bg-zinc-900/95 backdrop-blur-md shadow-2xl overflow-hidden flex flex-col">
+      {/* panel-glass-toast：主题玻璃底色（透明度随全局滑杆）——与划词翻译浮窗同一
+          浮窗面板标准；zinc 灰阶在 tailwind 里已重映射为语义 token，不能再作背景，
+          且透明窗口下 backdrop-blur 走独立合成路径有渲染风险（TranslateToast 同款无 blur） */}
+      <div className="relative flex-1 m-1 rounded-xl border border-app-border-subtle panel-glass-toast shadow-2xl overflow-hidden flex flex-col">
         {/* 标题栏（可拖动） */}
         <div
           data-tauri-drag-region
@@ -267,13 +285,13 @@ export default function CompanionToast() {
           <div className={`w-6 h-6 rounded-lg ${meta.iconBg} flex items-center justify-center shrink-0`}>
             <Icon size={14} className={meta.iconColor} />
           </div>
-          <div data-tauri-drag-region className="flex-1 text-white text-sm font-medium truncate">
+          <div data-tauri-drag-region className="flex-1 text-app-text-primary text-sm font-medium truncate">
             {suggestion.title}
           </div>
           <Tooltip content={isInfoType ? '关闭（Esc）' : '忽略（Esc）'} wrapperClassName="shrink-0">
             <button
-              onClick={isInfoType ? hideWindow : () => void handleDismiss()}
-              className="text-white/40 hover:text-white/80 transition-colors cursor-pointer shrink-0"
+              onClick={isInfoType ? advance : () => void handleDismiss()}
+              className="text-app-text-tertiary hover:text-app-text-primary transition-colors cursor-pointer shrink-0"
             >
               <X size={14} />
             </button>
@@ -284,7 +302,7 @@ export default function CompanionToast() {
         {suggestion.body && (
           <div className="px-3 py-1 flex-1 min-h-0">
             <p
-              className={`text-white/60 text-xs leading-relaxed whitespace-pre-wrap ${
+              className={`text-app-text-tertiary text-xs leading-relaxed whitespace-pre-wrap ${
                 isInfoType ? 'line-clamp-6' : 'line-clamp-4'
               }`}
             >
@@ -296,13 +314,13 @@ export default function CompanionToast() {
         {/* 操作区（仅动作型；提示型看过即终结，无按钮） */}
         {!isInfoType && (
           <div className="flex items-center justify-end gap-2 px-3 pb-2.5 pt-1">
-            <span className="mr-auto text-[10px] font-medium text-white/30 select-none">
+            <span className="mr-auto text-[10px] font-medium text-app-text-placeholder select-none">
               {isActionType ? 'Esc 忽略' : '⏎ 接受 · Esc 忽略'}
             </span>
             <button
               onClick={handleDismiss}
               disabled={acting}
-              className="px-3 py-1.5 rounded-lg text-xs text-white/60 hover:text-white hover:bg-white/10 transition-colors cursor-pointer disabled:opacity-50"
+              className="px-3 py-1.5 rounded-lg text-xs text-app-text-secondary hover:text-app-text-primary hover:bg-app-bg-pressed transition-colors cursor-pointer disabled:opacity-50"
             >
               忽略
             </button>
@@ -310,7 +328,7 @@ export default function CompanionToast() {
               <button
                 onClick={handleAccept}
                 disabled={acting}
-                className="px-3 py-1.5 rounded-lg text-xs bg-blue-600 hover:bg-blue-700 text-white font-medium transition-colors cursor-pointer disabled:opacity-50"
+                className="px-3 py-1.5 rounded-lg text-xs bg-app-status-info hover:bg-app-status-info-deep text-white font-medium transition-colors cursor-pointer disabled:opacity-50"
               >
                 {acting ? '执行中…' : (meta.acceptLabel ?? '知道了')}
               </button>
@@ -318,10 +336,11 @@ export default function CompanionToast() {
           </div>
         )}
 
-        {/* 剩余时间细线（替代倒计时数字，降低催促感）；1s 步进靠 CSS 过渡抹平 */}
-        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white/5">
+        {/* 剩余时间细线（替代倒计时数字，降低催促感）；1s 步进靠 CSS 过渡抹平。
+           纱层用 --app-alpha-white-*（随主题翻转：浅色主题自动变黑纱） */}
+        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--app-alpha-white-5)]">
           <div
-            className="h-full bg-white/40 transition-[width] duration-1000 ease-linear motion-reduce:transition-none"
+            className="h-full bg-[var(--app-alpha-white-50)] transition-[width] duration-1000 ease-linear motion-reduce:transition-none"
             style={{ width: `${(countdown / AUTO_HIDE_SECONDS) * 100}%` }}
           />
         </div>

@@ -110,25 +110,26 @@ pub fn dismiss_companion_suggestion(
     Ok(())
 }
 
-/// toast 页面挂载后补拉待展示建议：预创建窗口的页面异步加载，
-/// 首次 emit 可能早于监听器注册（事件即发即丢），挂载时主动补拉兜底
+/// toast 页面挂载后补拉待展示建议队列：预创建窗口的页面异步加载，
+/// 首次 emit 可能早于监听器注册（事件即发即丢），挂载时主动补拉兜底。
+/// 返回整个队列（多条建议逐条展示，不丢前面的）。
 #[tauri::command]
 pub fn get_pending_companion_toast(
     state: State<suggester::PendingToastState>,
-) -> Option<db::Suggestion> {
-    state.0.lock().ok().and_then(|pending| pending.clone())
+) -> Vec<db::Suggestion> {
+    state
+        .0
+        .lock()
+        .ok()
+        .map(|mut pending| pending.drain(..).collect())
+        .unwrap_or_default()
 }
 
-/// toast 前端渲染完成回执：内容首帧就绪后才定位 + show + focus，消除透明空帧
+/// toast 前端渲染完成回执：内容首帧就绪后才定位 + show + focus，消除透明空帧。
+/// 队列已被前端补拉接管，这里只负责 show，不再改动 pending。
 #[tauri::command]
-pub fn companion_toast_ready(
-    app_handle: AppHandle,
-    state: State<suggester::PendingToastState>,
-) {
+pub fn companion_toast_ready(app_handle: AppHandle) {
     suggester::show_toast_window(&app_handle);
-    if let Ok(mut pending) = state.0.lock() {
-        *pending = None;
-    }
 }
 
 // ── 应用描述（设置页「应用」tab） ─────────────────────────────
