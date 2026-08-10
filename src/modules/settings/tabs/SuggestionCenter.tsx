@@ -122,10 +122,10 @@ export function SuggestionCenter({ onBack }: SuggestionCenterProps) {
       <div className="flex items-center gap-2 px-1 pb-3">
         <button
           onClick={onBack}
-          className="w-7 h-7 rounded-lg flex items-center justify-center text-white/50 hover:bg-white/10 hover:text-white transition-colors cursor-pointer"
+          className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-zinc-400 hover:text-zinc-200 hover:bg-white/10 transition-all cursor-pointer"
           aria-label="返回"
         >
-          <ArrowLeft size={15} />
+          <ArrowLeft className="w-4 h-4" />
         </button>
         <h2 className="text-white/90 text-sm font-medium">建议中心</h2>
         {pendingCount > 0 && (

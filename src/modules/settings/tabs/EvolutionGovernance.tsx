@@ -168,9 +168,9 @@ export function EvolutionGovernance({ onBack }: EvolutionGovernanceProps) {
       <div className="flex items-center gap-3 mb-6">
         <button
           onClick={onBack}
-          className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+          className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-zinc-400 hover:text-zinc-200 hover:bg-white/10 transition-all cursor-pointer"
         >
-          <ArrowLeft size={16} />
+          <ArrowLeft className="w-4 h-4" />
         </button>
         <div>
           <h2 className="text-white text-lg font-semibold">进化治理</h2>

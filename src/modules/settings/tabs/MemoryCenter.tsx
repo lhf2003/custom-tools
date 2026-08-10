@@ -274,9 +274,9 @@ export function MemoryCenter({ onBack }: MemoryCenterProps) {
         <Tooltip content="返回陪伴设置">
           <button
             onClick={onBack}
-            className="w-8 h-8 rounded-lg hover:bg-white/10 flex items-center justify-center text-white/50 hover:text-white transition-colors cursor-pointer"
+            className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-zinc-400 hover:text-zinc-200 hover:bg-white/10 transition-all cursor-pointer"
           >
-            <ArrowLeft size={16} />
+            <ArrowLeft className="w-4 h-4" />
           </button>
         </Tooltip>
         <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-app-brand-primary/30 to-app-brand-primary/20 flex items-center justify-center">
