@@ -12,7 +12,8 @@ use crate::llm_provider::models::Scene;
 
 /// AI 生成插件的私有 system prompt（只存在于生成调用内部：不进产物、不进 UI、不分发）。
 /// 含插件协议规范 + 本系统设计规范提炼（token 名）+ 分步生成指引（步骤标记）+ 安全约束。
-const PLUGIN_GEN_SYSTEM_PROMPT: &str = r#"你是 FlowHub（Windows 桌面效率启动器）的插件生成器。根据用户描述，生成一个完整的 FlowHub 外部插件。
+/// pub(crate)：场景工具（companion/plugin_gen_tool.rs）复用同一份，防两处漂移。
+pub(crate) const PLUGIN_GEN_SYSTEM_PROMPT: &str = r#"你是 FlowHub（Windows 桌面效率启动器）的插件生成器。根据用户描述，生成一个完整的 FlowHub 外部插件。
 
 # 外部插件格式（IIFE bundle + 全局注册，自包含零依赖）
 
@@ -64,10 +65,11 @@ const PLUGIN_GEN_SYSTEM_PROMPT: &str = r#"你是 FlowHub（Windows 桌面效率�
 
 # 本系统设计规范（UI 必须遵循，CSS 变量直接用 var() 引用）
 
-- 背景/表面：主背景 var(--app-bg-primary)；浮层/输入 var(--app-bg-elevated)、var(--app-bg-tertiary)；悬停 var(--app-bg-hover)
+- 背景/表面：插件根容器（renderView 里 container 的第一层）必须显式设置 background: var(--app-panel-bg)（玻璃面板底，与内置视图一致）——不得依赖宿主容器提供背景，也不得留透明；浮层/输入 var(--app-bg-elevated)、var(--app-bg-tertiary)；悬停 var(--app-bg-hover)
 - 文字：主 var(--app-text-primary)；次 var(--app-text-secondary)；弱/说明 var(--app-text-tertiary)；占位 var(--app-text-placeholder)
 - 边框：var(--app-border-default)、var(--app-border-subtle)
 - 状态色：操作/强调蓝 var(--app-status-info)；错误 var(--app-status-error)；警告 var(--app-status-warning)；成功 var(--app-status-success)
+- 禁止硬编码色值：所有颜色一律走 var() 引用（系统浅色/深色主题自动跟随），var() 的 fallback 只写深色系近似值
 - 圆角 8-12px；间距用 4 的倍数；字体继承系统（HarmonyOS Sans SC），不引入外部字体
 - 交互：hover 用半透明白纱层（rgba(255,255,255,0.05)）；主操作按钮用 var(--app-status-info) 底 + 白字
 - 风格：行式布局、简洁克制；禁止渐变文字、禁止玻璃拟态、禁止卡片套卡片、禁止纯装饰图形
@@ -100,7 +102,8 @@ const PLUGIN_GEN_SYSTEM_PROMPT: &str = r#"你是 FlowHub（Windows 桌面效率�
 
 /// AI 更新模式追加段（仅在 existing_files 存在时拼进 system prompt）。
 /// 核心约束：id 不变（否则安装链路拒绝覆盖）、version 递增、基于现有代码增量修改。
-const PLUGIN_UPDATE_SYSTEM_PROMPT: &str = r#"
+/// pub(crate)：场景工具复用。
+pub(crate) const PLUGIN_UPDATE_SYSTEM_PROMPT: &str = r#"
 
 # 更新任务（本次为 AI 更新模式）
 
@@ -416,6 +419,17 @@ async fn stream_generate_plugin(
 
     let _ = app_handle.emit("plugin_gen:done", "");
     Ok(content_acc)
+}
+
+/// 在默认浏览器打开布局预览 HTML（A2UI invoke 白名单命令）。
+/// 路径穿越防护：相对路径解析到 plugins/.preview/ 下，canonicalize 校验前缀后
+/// 交给 OS 默认处理器（浏览器）打开——不走 A2UI url 白名单（file: 不进渲染器）。
+#[tauri::command]
+pub fn open_local_html(app_handle: AppHandle, path: String) -> Result<(), String> {
+    let resolved =
+        crate::companion::plugin_gen_tool::resolve_preview_path(&app_handle, &path)?;
+    tauri_plugin_opener::open_path(&resolved, None::<&str>)
+        .map_err(|e| format!("打开失败: {e}"))
 }
 
 /// 预览插件目录：app_data/plugins/.preview/（试运行用，不列正式列表）

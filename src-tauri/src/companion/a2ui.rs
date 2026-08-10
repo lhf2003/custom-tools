@@ -8,8 +8,8 @@ use std::collections::{HashMap, HashSet};
 
 use serde_json::{json, Value};
 
-/// 基础目录全量 18 个组件（与前端渲染器一一对应）
-const ALLOWED_COMPONENTS: [&str; 18] = [
+/// 基础目录全量 19 个组件（与前端渲染器一一对应）
+const ALLOWED_COMPONENTS: [&str; 19] = [
     "Text",
     "Image",
     "Icon",
@@ -28,12 +28,23 @@ const ALLOWED_COMPONENTS: [&str; 18] = [
     "DateTimeInput",
     "ChoicePicker",
     "Slider",
+    "PluginPreview",
 ];
 
 /// 防失控上限：单次调用的消息数 / 组件总数 / 序列化体积
 const MAX_MESSAGES: usize = 20;
 const MAX_COMPONENTS: usize = 100;
 const MAX_PAYLOAD_BYTES: usize = 32 * 1024;
+
+/// 允许 A2UI invoke 型 action 直接调用的 Tauri command 白名单。
+/// 确定性动作（打开预览/安装/清理）绕过 LLM 语义代理直接执行，
+/// 但只放行受控命令——不做任意 command 直调。
+const ALLOWED_INVOKE_COMMANDS: [&str; 4] = [
+    "open_local_html",
+    "install_preview_plugin",
+    "update_plugin_from_preview",
+    "clear_plugin_preview",
+];
 
 /// 单个 surface 的累积状态（同一轮对话内多次 render_ui 调用间保持）
 #[derive(Default)]
@@ -140,6 +151,7 @@ pub fn validate_and_apply(
                         ALLOWED_COMPONENTS.join("/")
                     ));
                 }
+                validate_action(c, id)?;
                 if new_ids.insert(id.to_string()) && !ids.contains(id) {
                     component_count += 1;
                     if component_count > MAX_COMPONENTS {
@@ -173,6 +185,52 @@ pub fn validate_and_apply(
     if messages.iter().any(|m| m.get("deleteSurface").is_some()) {
         state.created = false;
         state.component_ids.clear();
+    }
+    Ok(())
+}
+
+/// 校验 Button 组件的 action 结构：
+/// - event 型（文本回传 LLM）：event.name 非空字符串
+/// - invoke 型（直接调用 Tauri command）：command 必须在白名单内
+/// 两种类型二选一，不能并存。
+fn validate_action(component: &Value, id: &str) -> Result<(), String> {
+    let Some(action) = component.get("action") else {
+        return Ok(());
+    };
+    let obj = action
+        .as_object()
+        .ok_or_else(|| format!("组件「{}」的 action 必须是对象", id))?;
+    let has_event = obj.contains_key("event");
+    let has_invoke = obj.contains_key("invoke");
+    if has_event == has_invoke {
+        return Err(format!(
+            "组件「{}」的 action 必须且只能包含 event 或 invoke 之一",
+            id
+        ));
+    }
+    if has_event {
+        let name = obj
+            .get("event")
+            .and_then(|v| v.get("name"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if name.is_empty() {
+            return Err(format!("组件「{}」的 action.event.name 不能为空", id));
+        }
+    } else {
+        let cmd = obj
+            .get("invoke")
+            .and_then(|v| v.get("command"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if !ALLOWED_INVOKE_COMMANDS.contains(&cmd) {
+            return Err(format!(
+                "组件「{}」的 action.invoke.command「{}」不在白名单（{}）",
+                id,
+                cmd,
+                ALLOWED_INVOKE_COMMANDS.join("/")
+            ));
+        }
     }
     Ok(())
 }
@@ -274,12 +332,19 @@ pub fn summarize_surface(messages: &[Value]) -> String {
                     .and_then(|v| v.as_str())
                     .map(|s| truncate_chars(s.trim(), 20));
                 let action = c.pointer("/action/event/name").and_then(|v| v.as_str());
-                match (label, action) {
-                    (Some(l), Some(a)) if !l.is_empty() => {
+                let invoke_cmd = c
+                    .pointer("/action/invoke/command")
+                    .and_then(|v| v.as_str());
+                match (label, action, invoke_cmd) {
+                    (Some(l), Some(a), None) if !l.is_empty() => {
                         buttons.push(format!("「{}」(action: {})", l, a))
                     }
-                    (Some(l), None) if !l.is_empty() => buttons.push(format!("「{}」", l)),
-                    (_, Some(a)) => buttons.push(format!("(action: {})", a)),
+                    (Some(l), None, Some(cmd)) if !l.is_empty() => {
+                        buttons.push(format!("「{}」(直接执行: {})", l, cmd))
+                    }
+                    (Some(l), None, None) if !l.is_empty() => buttons.push(format!("「{}」", l)),
+                    (_, Some(a), _) => buttons.push(format!("(action: {})", a)),
+                    (_, None, Some(cmd)) => buttons.push(format!("(直接执行: {})", cmd)),
                     _ => {}
                 }
             }
@@ -435,6 +500,51 @@ mod tests {
             ]}}),
         ];
         assert_eq!(summarize_surface(&msgs), "（向用户展示了一张界面卡片）");
+    }
+
+    #[test]
+    fn accepts_invoke_action_in_whitelist() {
+        let mut msgs = sample_create();
+        msgs[1]["updateComponents"]["components"][0]["action"] =
+            json!({"invoke": {"command": "open_local_html", "args": {"path": "layout.html"}}});
+        let mut surfaces = HashMap::new();
+        assert!(validate_and_apply(&msgs, "s1", &mut surfaces).is_ok());
+    }
+
+    #[test]
+    fn rejects_invoke_action_outside_whitelist() {
+        let mut msgs = sample_create();
+        msgs[1]["updateComponents"]["components"][0]["action"] =
+            json!({"invoke": {"command": "shell_execute", "args": {}}});
+        let mut surfaces = HashMap::new();
+        let err = validate_and_apply(&msgs, "s1", &mut surfaces);
+        assert!(err.is_err(), "非白名单 command 必须被拒绝");
+        assert!(err.unwrap_err().contains("白名单"), "错误信息应说明白名单");
+    }
+
+    #[test]
+    fn rejects_action_with_both_event_and_invoke() {
+        let mut msgs = sample_create();
+        msgs[1]["updateComponents"]["components"][0]["action"] =
+            json!({"event": {"name": "a"}, "invoke": {"command": "open_local_html"}});
+        let mut surfaces = HashMap::new();
+        assert!(validate_and_apply(&msgs, "s1", &mut surfaces).is_err());
+    }
+
+    #[test]
+    fn summarize_invoke_button_shows_direct_execute() {
+        let msgs = vec![
+            json!({"version":"v0.9","createSurface":{"surfaceId":"s1","catalogId":"basic"}}),
+            json!({"version":"v0.9","updateComponents":{"surfaceId":"s1","components":[
+                {"id":"root","component":"Card","child":"col"},
+                {"id":"col","component":"Column","children":["b","bt"]},
+                {"id":"b","component":"Button","child":"bt","action":{"invoke":{"command":"open_local_html","args":{"path":"layout.html"}}}},
+                {"id":"bt","component":"Text","text":"打开预览"}
+            ]}}),
+        ];
+        let s = summarize_surface(&msgs);
+        assert!(s.contains("直接执行"), "invoke 按钮摘要缺失: {}", s);
+        assert!(s.contains("open_local_html"), "command 名缺失: {}", s);
     }
 
     #[test]

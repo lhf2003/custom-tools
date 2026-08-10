@@ -503,12 +503,12 @@ pub fn run() {
             commands::plugins::uninstall_plugin,
             commands::plugins::sync_plugin_shortcuts,
             commands::plugins::update_plugin_shortcut,
-            commands::plugin_gen::generate_plugin,
+            // 插件制作已迁聊天页工具链路（layout_ui/generate_plugin_chat 直接 fs 落盘）；
+            // 保留安装/更新（PluginPreview 卡片 invoke 直调）与读文件（更新模式 prefill 组装）
             commands::plugin_gen::read_plugin_files,
-            commands::plugin_gen::write_plugin_preview,
             commands::plugin_gen::install_preview_plugin,
             commands::plugin_gen::update_plugin_from_preview,
-            commands::plugin_gen::clear_plugin_preview,
+            commands::plugin_gen::open_local_html,
             // 划词翻译
             translate::translate_text,
             translate::get_pending_translate_toast,

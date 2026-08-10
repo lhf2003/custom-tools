@@ -134,7 +134,17 @@ const UI_RULES: &str = "\
     需要更新界面就用同一 surface_id 再调 render_ui——surface 状态在会话内保持，直接发\n\
     updateComponents/updateDataModel 增量消息即可，不要重复 createSurface；想展示全新卡片\n\
     就换一个新的 surface_id。处理完用一两句文字向他确认结果，不要把「用户操作」消息\n\
-    当作闲聊话题，也不要复述「向用户展示了一张界面卡片」这类上下文里的占位文本。";
+    当作闲聊话题，也不要复述「向用户展示了一张界面卡片」这类上下文里的占位文本。\n\n\
+    【插件制作流程】用户描述插件需求（做一个 xx 工具/插件、改造现有插件）时，严格按阶段推进：\n\
+    阶段一（布局）：先用 layout_ui 产出布局预览 HTML（入参 plugin_id 保持小写连字符且多轮迭代不变）。\n\
+    调用成功后系统会自动展示布局预览卡片（含「打开预览」按钮，invoke 型直开浏览器），\n\
+    你无需调用 render_ui。用户对布局提修改意见时再次调用 layout_ui（覆盖同一文件），直到用户满意。\n\
+    阶段二（制作）：用户确认开始做（如「可以」「开始做」）后，调 generate_plugin_chat（传同一 plugin_id 与需求描述；\n\
+    更新现有插件时 mode=update 并附 existing_manifest/existing_bundle——先读取现有插件文件）。\n\
+    制作成功后系统会自动展示 PluginPreview 卡片（含代码预览、运行、安装按钮），你无需调用 render_ui，\n\
+    只需用一两句文字说明结果；用户反馈修改意见则再次调用 generate_plugin_chat。\n\
+    注意：布局打开与安装按钮是 invoke 型 action（直接执行，不回传给你），用户点击后不会收到「用户操作」消息；\n\
+    插件未生成完成前不要宣称「已运行/已安装」——运行与安装只能通过卡片按钮完成。";
 
 async fn run_scene_chat(
     app_handle: &AppHandle,
@@ -298,6 +308,108 @@ async fn run_scene_chat(
                         super::websearch::execute_web_search_tool(app_handle, &call.arguments)
                             .await
                             .unwrap_or_else(|e| e)
+                    } else if call.name == "layout_ui" {
+                        // 后端直发卡片（不经模型转述）：工具成功后自动展示布局卡。
+                        // 卡片数据（文件路径/按钮 action）由后端构造，模型只拿文本结果。
+                        let plugin_id = call
+                            .arguments
+                            .get("plugin_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let surf_sid = plugin_surface_id(&plugin_id, "layout");
+                        let with_create = !surface_exists(&surfaces, session_id, &surf_sid);
+                        match super::plugin_gen_tool::tool_layout_ui(
+                            app_handle,
+                            &provider.base_url,
+                            &api_key,
+                            &model.model_id,
+                            &provider_type,
+                            thinking_mode,
+                            &reasoning_effort,
+                            &call.arguments,
+                        )
+                        .await
+                        {
+                            Ok(text) => {
+                                let card_text = emit_tool_card(
+                                    app_handle,
+                                    db_path,
+                                    &surfaces,
+                                    session_id,
+                                    &surf_sid,
+                                    super::plugin_gen_tool::build_layout_card_messages(
+                                        &plugin_id, with_create,
+                                    ),
+                                )
+                                .await;
+                                format!("{}\n\n{}", text, card_text)
+                            }
+                            Err(e) => e,
+                        }
+                    } else if call.name == "generate_plugin_chat" {
+                        // 后端直发 PluginPreview 卡片：data model 带完整 manifestJson/bundleCode，
+                        // 不经模型转述（LLM 转述几百行代码必然断裂）。
+                        let plugin_id = call
+                            .arguments
+                            .get("plugin_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let surf_sid = plugin_surface_id(&plugin_id, "preview");
+                        let with_create = !surface_exists(&surfaces, session_id, &surf_sid);
+                        match super::plugin_gen_tool::tool_generate_plugin_chat(
+                            app_handle,
+                            &provider.base_url,
+                            &api_key,
+                            &model.model_id,
+                            &provider_type,
+                            thinking_mode,
+                            &reasoning_effort,
+                            &call.arguments,
+                        )
+                        .await
+                        {
+                            Ok(text) => {
+                                // 从落盘文件读回代码构造卡片（工具已写盘）
+                                let card_text = match super::plugin_gen_tool::read_preview_files(
+                                    app_handle, &plugin_id,
+                                ) {
+                                    Ok((manifest, bundle)) => {
+                                        let mode = call
+                                            .arguments
+                                            .get("mode")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("create");
+                                        let review_status =
+                                            if text.contains("审查状态：review_not_fully_passed") {
+                                                "review_not_fully_passed"
+                                            } else {
+                                                "passed"
+                                            };
+                                        emit_tool_card(
+                                            app_handle,
+                                            db_path,
+                                            &surfaces,
+                                            session_id,
+                                            &surf_sid,
+                                            super::plugin_gen_tool::build_preview_card_messages(
+                                                &plugin_id,
+                                                &manifest,
+                                                &bundle,
+                                                mode,
+                                                review_status,
+                                                with_create,
+                                            ),
+                                        )
+                                        .await
+                                    }
+                                    Err(e) => format!("（卡片渲染失败：{}）", e),
+                                };
+                                format!("{}\n\n{}", text, card_text)
+                            }
+                            Err(e) => e,
+                        }
                     } else {
                         let dp = db_path.clone();
                         let nd = notes_dir.clone();
@@ -451,6 +563,58 @@ async fn run_scene_chat(
     // 终态：文字已逐 chunk 流式送出，只发 done 收尾（assistant 落库由前端 done 监听完成）
     let _ = app_handle.emit("jarvis:done", total_cost);
     Ok(())
+}
+
+/// 插件工具专属 surface_id（与 plugin_gen_tool 的命名约定一致）
+fn plugin_surface_id(plugin_id: &str, suffix: &str) -> String {
+    format!("{}_{}", plugin_id.replace('-', "_"), suffix)
+}
+
+/// 查询 surface 是否已创建（后端直发卡片时决定是否带 createSurface）
+fn surface_exists(
+    surfaces: &Arc<Mutex<HashMap<i64, SurfaceMap>>>,
+    session_id: i64,
+    surface_id: &str,
+) -> bool {
+    // 逐层解引用取值（闭包里返回引用会逃逸锁，E0515）
+    if let Ok(all) = surfaces.lock() {
+        if let Some(map) = all.get(&session_id) {
+            if let Some(s) = map.get(surface_id) {
+                return s.created;
+            }
+        }
+    }
+    false
+}
+
+/// 后端直发 A2UI 卡片：构造消息 → 走 render_ui 校验链路 → emit + 落库。
+/// 校验失败不计数（后端直发消息结构受控，失败视为数据问题），
+/// 失败原因附加进返回文本让模型向用户说明。
+async fn emit_tool_card(
+    app_handle: &AppHandle,
+    db_path: &Path,
+    surfaces: &Arc<Mutex<HashMap<i64, SurfaceMap>>>,
+    session_id: i64,
+    surface_id: &str,
+    messages: serde_json::Value,
+) -> String {
+    let validated = match surfaces.lock() {
+        Ok(mut all) => {
+            let session_surfaces = all.entry(session_id).or_default();
+            let args = serde_json::json!({ "surface_id": surface_id, "messages": messages });
+            let mut tool_failures = 0usize;
+            validate_render_ui(session_id, &args, session_surfaces, &mut tool_failures)
+        }
+        Err(e) => Err(format!("surface 状态不可用：{}", e)),
+    };
+    match validated {
+        Ok((sid, payload)) => {
+            let _ = app_handle.emit("jarvis:surface", &payload);
+            persist_a2ui_message(db_path, session_id, &payload).await;
+            format!("系统已自动展示结果卡片（surface: {}），你无需再调用 render_ui 渲染它。", sid)
+        }
+        Err(e) => format!("卡片渲染失败（{}）——请直接向用户说明结果。", e),
+    }
 }
 
 /// render_ui 校验（同步纯 CPU，持 surfaces 锁期间调用）：A2UI 消息校验并

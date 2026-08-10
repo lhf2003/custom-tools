@@ -7,6 +7,7 @@ import type { SurfaceState } from './types';
 import { LayoutComponent, LAYOUT_TYPES } from './components/layout';
 import { DisplayComponent, DISPLAY_TYPES } from './components/display';
 import { InputComponent, INPUT_TYPES } from './components/input';
+import { PluginPreview } from './components/pluginPreview';
 
 export interface A2uiContextValue {
   surface: SurfaceState;
@@ -15,6 +16,8 @@ export interface A2uiContextValue {
   setValue: (absPath: string, value: unknown) => void;
   /** 按钮 action 回传：name + 已解析的 context（+ sendDataModel 时附全量数据） */
   dispatchAction: (name: string, contextSpec?: Record<string, unknown>, label?: string) => void;
+  /** invoke 型 action：直接调用 Tauri command（绕过 LLM 语义代理，命令白名单由后端校验） */
+  dispatchInvoke: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
 }
 
 export const A2uiContext = createContext<A2uiContextValue | null>(null);
@@ -45,6 +48,7 @@ export function RenderComponent({ id }: { id: string }) {
   const { surface } = useA2ui();
   const def = surface.components[id];
   if (!def) return null;
+  if (def.component === 'PluginPreview') return <PluginPreview />;
   if (LAYOUT_TYPES.has(def.component)) return <LayoutComponent def={def} />;
   if (DISPLAY_TYPES.has(def.component)) return <DisplayComponent def={def} />;
   if (INPUT_TYPES.has(def.component)) return <InputComponent def={def} />;

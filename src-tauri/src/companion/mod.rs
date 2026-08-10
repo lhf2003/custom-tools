@@ -8,6 +8,7 @@ pub mod diary;
 pub mod emotion;
 pub mod mcp;
 pub mod persona;
+pub mod plugin_gen_tool;
 pub mod recall;
 pub mod scene_chat;
 pub mod shell;

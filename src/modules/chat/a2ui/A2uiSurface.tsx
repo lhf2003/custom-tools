@@ -1,12 +1,15 @@
 // A2uiSurface 容器：从持久化负载重建 surface，持有双向绑定的本地数据模型，
-// 提供渲染上下文；按钮 action 组装成「用户操作」消息回传给聊天链路。
+// 提供渲染上下文；event 型按钮 action 组装成「用户操作」消息回传给聊天链路，
+// invoke 型 action 直接调用 Tauri command（绕过 LLM，白名单由后端校验）。
 
 import { useEffect, useMemo, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { formatActionMessage } from './action';
 import { resolveDynamic } from './functions';
 import { resolvePointer, setPointerImmutable } from './pointer';
 import { A2uiContext, RenderComponent } from './render';
 import { buildSurface } from './surface';
+import { useToastStore } from '@/stores/toastStore';
 import type { SurfacePayload } from './types';
 
 interface A2uiSurfaceProps {
@@ -17,6 +20,7 @@ interface A2uiSurfaceProps {
 }
 
 export function A2uiSurface({ payloadJson, onAction }: A2uiSurfaceProps) {
+  const { addToast } = useToastStore();
   const surface = useMemo(() => {
     try {
       return buildSurface(JSON.parse(payloadJson) as SurfacePayload);
@@ -51,6 +55,16 @@ export function A2uiSurface({ payloadJson, onAction }: A2uiSurfaceProps) {
       }
       onAction(formatActionMessage(label, name, resolved, data, surface.sendDataModel));
     },
+    dispatchInvoke: (command: string, args?: Record<string, unknown>) =>
+      invoke(command, args).catch((err: unknown) => {
+        // invoke 型 action 绕过 LLM 语义层，失败没有回传通道——toast 兜底反馈
+        addToast({
+          type: 'error',
+          title: '操作失败',
+          message: err instanceof Error ? err.message : String(err),
+        });
+        throw err;
+      }),
   };
 
   return (

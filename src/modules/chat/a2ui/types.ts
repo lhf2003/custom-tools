@@ -61,8 +61,14 @@ export interface A2uiCheck {
 }
 
 export interface A2uiAction {
+  /** event 型：按钮点击组装「用户操作」文本走聊天回传（LLM 语义代理） */
   event?: {
     name: string;
     context?: Record<string, unknown>;
+  };
+  /** invoke 型：直接调用 Tauri command（绕过 LLM），command 必须在后端白名单内 */
+  invoke?: {
+    command: string;
+    args?: Record<string, unknown>;
   };
 }

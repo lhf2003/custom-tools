@@ -16,7 +16,7 @@ import {
 } from '@/plugins/registry';
 import { setPluginEnabled, isPluginTrusted, markPluginTrusted } from '@/plugins/external';
 import { getPluginShortcutConflicts } from '@/plugins/pluginShortcuts';
-import { GeneratePluginModal } from './GeneratePluginModal';
+import { useAppStore } from '@/stores/appStore';
 
 /** 内置插件 id → 全局快捷键 id（禁用插件时联动禁用快捷键并释放组合键；反之为恢复） */
 const BUILTIN_SHORTCUT_MAP: Record<string, string> = {
@@ -231,10 +231,8 @@ export function PluginMarketSettings({ onOpenPluginSettings }: PluginMarketSetti
   const refresh = useExternalPluginsStore((s) => s.refresh);
   // 待确认启用的插件（信任流程）
   const [pendingEnable, setPendingEnable] = useState<ExternalPluginItem | null>(null);
-  // AI 生成弹窗（任务 12：流式步骤 + 校验 + 预览 + 试运行 + 安装）
-  const [showGenerate, setShowGenerate] = useState(false);
-  // AI 更新弹窗：待更新的已安装插件（复用生成管线，update 模式）
-  const [updatingPlugin, setUpdatingPlugin] = useState<ExternalPluginItem | null>(null);
+  // 聊天页入口：AI 生成/更新经 chatPrefill 跳转聊天页驱动（layout_ui/generate_plugin_chat 工具链路）
+  const { setActiveView, setChatPrefill } = useAppStore();
   // 内置插件开关的本地镜像（初始化/加载后刷新；切换时同步）
   const [builtInEnabled, setBuiltInEnabled] = useState<Record<string, boolean>>({});
 
@@ -346,18 +344,35 @@ export function PluginMarketSettings({ onOpenPluginSettings }: PluginMarketSetti
     }
   }, [addToast]);
 
+  // AI 生成：跳聊天页，文案进输入框（用户补充细节后发送）
   const handleAiGenerate = useCallback(() => {
-    setShowGenerate(true);
-  }, []);
+    setChatPrefill('帮我做一个插件：');
+    setActiveView('chat');
+  }, [setChatPrefill, setActiveView]);
 
-  const handleAiUpdate = useCallback((item: ExternalPluginItem) => {
-    setUpdatingPlugin(item);
-  }, []);
-
-  // 生成安装成功后的刷新（新插件出现在列表；启用走现有信任确认流程）
-  const handleGeneratedInstalled = useCallback(() => {
-    load();
-  }, [load]);
+  // AI 更新：读现有插件代码进聊天上下文（Q19：现有代码塞进提示词），
+  // 模型据上下文调 generate_plugin_chat（mode=update）
+  const handleAiUpdate = useCallback(
+    (item: ExternalPluginItem) => {
+      (async () => {
+        const files = await invoke<{ manifest: string; bundle: string }>('read_plugin_files', {
+          pluginId: item.manifest.id,
+        });
+        setChatPrefill(
+          `请更新插件「${item.manifest.name}」（id: ${item.manifest.id}），这是我的修改需求：\n\n` +
+            `现有 plugin.json：\n${files.manifest}\n\n现有 plugin.js：\n${files.bundle}`,
+        );
+        setActiveView('chat');
+      })().catch((err: unknown) => {
+        addToast({
+          type: 'error',
+          title: '读取插件代码失败',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      });
+    },
+    [setChatPrefill, setActiveView, addToast],
+  );
 
   return (
     <>
@@ -457,20 +472,6 @@ export function PluginMarketSettings({ onOpenPluginSettings }: PluginMarketSetti
         />
       )}
 
-      {/* AI 生成弹窗 */}
-      {showGenerate && (
-        <GeneratePluginModal onClose={() => setShowGenerate(false)} onInstalled={handleGeneratedInstalled} />
-      )}
-
-      {/* AI 更新弹窗：复用生成管线，基于现有插件代码增量更新 */}
-      {updatingPlugin && (
-        <GeneratePluginModal
-          mode="update"
-          existingPlugin={updatingPlugin}
-          onClose={() => setUpdatingPlugin(null)}
-          onInstalled={handleGeneratedInstalled}
-        />
-      )}
     </>
   );
 }

@@ -168,7 +168,10 @@ function createExternalViewComponent(pluginId: string): ComponentType {
       };
     }, [pluginId]);
 
-    return <div ref={containerRef} className="w-full h-full" />;
+    // panel-glass：主窗口透明，内置视图根容器均以 --app-panel-bg 铺玻璃面板底
+    // （随主题/透明度滑杆）。外部插件视图不假设插件自带背景，宿主兜底铺底，
+    // 与内置视图视觉一致；插件自身铺的背景会覆盖本层（子层在上）。
+    return <div ref={containerRef} className="w-full h-full panel-glass" />;
   };
 }
 

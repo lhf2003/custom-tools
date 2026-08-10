@@ -333,11 +333,18 @@ pub fn scene_tool_definitions(disabled: &[String]) -> Vec<ToolDef> {
 
 /// 可开关的扩展工具：只进场景通道，不进 MCP（Claude Code 自己有 shell 和搜索，
 /// 给了也是重复）。被用户关闭的不出现在声明里，模型根本看不见。
+/// 插件制作工具也走这里：执行层在 scene_chat 拦截（需要 app_handle 落盘 + LLM 调用 + emit A2UI），
+/// 不进 MCP 通道（那边是 Claude Code 终端，无 A2UI 渲染方与插件安装链路）。
 pub fn extension_tool_definitions(disabled: &[String]) -> Vec<ToolDef> {
-    [shell_tool_def(), web_search_tool_def()]
-        .into_iter()
-        .filter(|d| !disabled.iter().any(|n| n == d.name))
-        .collect()
+    [
+        shell_tool_def(),
+        web_search_tool_def(),
+        layout_ui_def(),
+        generate_plugin_chat_def(),
+    ]
+    .into_iter()
+    .filter(|d| !disabled.iter().any(|n| n == d.name))
+    .collect()
 }
 
 /// 设置页「工具」页签的全量清单：核心 + 扩展，不看开关状态
@@ -346,7 +353,74 @@ pub fn all_tool_definitions() -> Vec<ToolDef> {
     defs.push(render_ui_def());
     defs.push(shell_tool_def());
     defs.push(web_search_tool_def());
+    defs.push(layout_ui_def());
+    defs.push(generate_plugin_chat_def());
     defs
+}
+
+/// 插件布局预览工具：产出布局 HTML 落盘 .preview/<id>/layout.html（文件名固定），
+/// 配合 render_ui「打开预览」按钮让用户浏览器查看；多轮迭代覆盖同一文件。
+/// 执行层在 scene_chat 拦截——execute_tool 无此分支（不进 MCP 通道）。
+fn layout_ui_def() -> ToolDef {
+    ToolDef {
+        name: "layout_ui",
+        display_name: "插件布局",
+        group: ToolGroup::Interface,
+        core: false,
+        description: "用户描述插件需求时，先产出插件布局预览 HTML（纯排版设计，展示功能区的排布，不含最终样式细节），落盘到 .preview/<plugin_id>/layout.html（文件名固定），配合 render_ui 出「打开预览」按钮让用户在浏览器查看。\n\n适用：用户描述插件功能、想看布局/排版效果，或对布局提修改意见（再次调用覆盖同一文件，plugin_id 保持一致）。\n不适用：用户直接要最终可用的插件（调 generate_plugin_chat）；纯闲聊。\n\n产出 HTML 只展示功能排版，颜色等最终样式以插件实际生成为准——要向用户说明这是布局预览效果。".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "plugin_id": {
+                    "type": "string",
+                    "description": "插件 id（小写连字符，如 time-converter）；多轮迭代保持同一 id"
+                },
+                "description": {
+                    "type": "string",
+                    "description": "插件功能与布局需求描述（用户原话 + 你的整理）"
+                }
+            },
+            "required": ["plugin_id", "description"]
+        }),
+    }
+}
+
+/// 插件制作工具：基于已确认布局与需求生成完整插件（plugin.json + plugin.js），
+/// 内部自带自审循环（最多 3 轮，超限标注交付）。执行层在 scene_chat 拦截。
+fn generate_plugin_chat_def() -> ToolDef {
+    ToolDef {
+        name: "generate_plugin_chat",
+        display_name: "制作插件",
+        group: ToolGroup::Interface,
+        core: false,
+        description: "布局确认后调用：基于布局 HTML 与需求描述生成完整插件（plugin.json + plugin.js，IIFE bundle，遵循系统设计规范 CSS 变量），落盘 .preview/<plugin_id>/，内部自带自审循环（最多 3 轮，超限标注「审查未完全通过」交付）。配合 render_ui 出 PluginPreview 卡片（含运行/安装按钮）。\n\n更新模式：用户要求改现有插件时，传 existing_manifest/existing_bundle（先读取现有插件文件），保持 id 不变、version 递增、增量修改。".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "plugin_id": {
+                    "type": "string",
+                    "description": "插件 id（小写连字符），与 layout_ui 的 plugin_id 保持一致"
+                },
+                "description": {
+                    "type": "string",
+                    "description": "需求描述：用户原话 + 布局要点（引用已确认的布局结构）"
+                },
+                "mode": {
+                    "type": "string",
+                    "description": "create（新建，默认）| update（更新现有插件，需传 existing_manifest/existing_bundle）"
+                },
+                "existing_manifest": {
+                    "type": "string",
+                    "description": "更新模式：现有插件 plugin.json 原文"
+                },
+                "existing_bundle": {
+                    "type": "string",
+                    "description": "更新模式：现有插件 main bundle 原文"
+                }
+            },
+            "required": ["plugin_id", "description"]
+        }),
+    }
 }
 
 /// 读用户关闭的工具名列表（flowhub.db settings 表；设置模块未初始化按空——全开）
@@ -434,6 +508,7 @@ messages 是消息数组，每条为四种之一：
 - 布局：Column/Row（children 为子组件 id 数组）、List（children 为 id 数组，或 {"path":"/数组","componentId":"模板id"} 按数据逐项渲染，模板内路径用相对路径如 "name"）、Card（child 为单个 id）、Tabs（tabs:[{"title":"...","child":"id"}]）、Modal（trigger 为按钮 id、content 为内容 id）、Divider
 - 展示：Text（{"text":"静态文本"} 或 {"text":{"path":"/数据/路径"}}，可加 variant: h1|h2|h3|h4|h5|body|caption）、Image（{"url":"..."}）、Icon（{"name":"..."}）、Video（{"url":"..."}）、AudioPlayer（{"url":"..."}）
 - 交互：Button（{"child":"文本组件id","action":{"event":{"name":"动作名","context":{"键":{"path":"/x"}}}}}，可加 variant: primary|borderless；点击时 context 引用的数据回传给你）
+- 特殊：PluginPreview 组件由系统在插件制作工具（layout_ui/generate_plugin_chat）成功后自动渲染，你无需也不能构造该组件；invoke 型按钮 action（{"invoke":{"command":"open_local_html","args":{...}}}）点击时直接执行命令、不回传给你，仅用于系统保留命令
 - 表单（value 用 {"path":"/x"} 双向绑定，用户填写后随按钮 action 回传）：TextField（{"label":"...","value":{"path":"/x"}}）、CheckBox、Slider（加 min/max）、ChoicePicker（加 options:[{"label","value"}]）、DateTimeInput（加 enableDate/enableTime）
 - 校验：输入组件和 Button 可加 "checks":[{"call":"required|regex|email","args":{"value":{"path":"/x"}},"message":"失败提示"}]，Button 校验不过会自动禁用
 

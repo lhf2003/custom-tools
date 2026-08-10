@@ -59,7 +59,7 @@ function useValidation(def: A2uiComponentDef) {
 }
 
 function Button({ def }: { def: A2uiComponentDef }) {
-  const { dispatchAction, evalCtx, surface, resolve } = useA2ui();
+  const { dispatchAction, dispatchInvoke, evalCtx, surface, resolve } = useA2ui();
   const child = typeof def.child === 'string' ? def.child : null;
   const variant = typeof def.variant === 'string' ? def.variant : 'default';
   const checkResult = evalChecks(def.checks, evalCtx);
@@ -69,7 +69,7 @@ function Button({ def }: { def: A2uiComponentDef }) {
   const childDef = child ? surface.components[child] : undefined;
   const label =
     (childDef ? toDisplayString(resolve(childDef.text)) : '') ||
-    (action?.event?.name ?? '按钮');
+    (action?.event?.name ?? action?.invoke?.command ?? '按钮');
 
   const cls =
     variant === 'primary'
@@ -86,6 +86,9 @@ function Button({ def }: { def: A2uiComponentDef }) {
         onClick={() => {
           if (action?.event?.name) {
             dispatchAction(action.event.name, action.event.context, label);
+          } else if (action?.invoke?.command) {
+            // invoke 型：直接执行 Tauri command（绕过 LLM），失败由 dispatchInvoke toast 兜底
+            void dispatchInvoke(action.invoke.command, action.invoke.args);
           }
         }}
         className={`inline-flex items-center gap-1.5 text-sm transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${cls}`}
