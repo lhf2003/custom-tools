@@ -146,6 +146,28 @@ fn build_history_query<'a>(
                  lower(content) LIKE '%.rmvb' OR lower(content) LIKE '%.rm' OR \
                  lower(content) LIKE '%.3gp' OR lower(content) LIKE '%.m2ts'))",
             );
+        } else if content_type == "file" {
+            // 文件 tab：媒体文件（图片/音频/视频）已有单独分类，这里只留普通文件。
+            // 排除后缀集合与 image/audio/video 分支完全一致（多路径 content 按字符串
+            // 结尾 LIKE 判断，语义同各媒体分支；同样不含 .ts/.mts/.cts——TS 源码是普通文件）
+            sql.push_str(
+                " AND content_type = 'file' AND NOT (lower(content) LIKE '%.png' OR \
+                 lower(content) LIKE '%.jpg' OR lower(content) LIKE '%.jpeg' OR \
+                 lower(content) LIKE '%.gif' OR lower(content) LIKE '%.webp' OR \
+                 lower(content) LIKE '%.bmp' OR lower(content) LIKE '%.ico' OR \
+                 lower(content) LIKE '%.svg' OR lower(content) LIKE '%.mp3' OR \
+                 lower(content) LIKE '%.wav' OR lower(content) LIKE '%.flac' OR \
+                 lower(content) LIKE '%.aac' OR lower(content) LIKE '%.ogg' OR \
+                 lower(content) LIKE '%.m4a' OR lower(content) LIKE '%.wma' OR \
+                 lower(content) LIKE '%.opus' OR lower(content) LIKE '%.mp4' OR \
+                 lower(content) LIKE '%.mkv' OR lower(content) LIKE '%.avi' OR \
+                 lower(content) LIKE '%.mov' OR lower(content) LIKE '%.wmv' OR \
+                 lower(content) LIKE '%.flv' OR lower(content) LIKE '%.webm' OR \
+                 lower(content) LIKE '%.m4v' OR lower(content) LIKE '%.mpg' OR \
+                 lower(content) LIKE '%.mpeg' OR lower(content) LIKE '%.rmvb' OR \
+                 lower(content) LIKE '%.rm' OR lower(content) LIKE '%.3gp' OR \
+                 lower(content) LIKE '%.m2ts')",
+            );
         } else {
             sql.push_str(&format!(" AND content_type = ?{}", param_index));
             params_vec.push(content_type);
@@ -1237,6 +1259,7 @@ mod tests {
                 content_type TEXT NOT NULL,
                 content_hash TEXT UNIQUE,
                 source_app TEXT,
+                source_exe TEXT,
                 is_favorite INTEGER DEFAULT 0,
                 usage_count INTEGER DEFAULT 0,
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -1309,6 +1332,50 @@ mod tests {
         assert!(!sql.contains("LIKE '%.ts'"));
         assert!(!sql.contains("LIKE '%.mts'"));
         assert_eq!(params.len(), 2);
+    }
+
+    #[test]
+    fn test_build_history_query_file_excludes_media_extensions() {
+        let query = ClipboardQuery {
+            content_type: Some("file".to_string()),
+            is_favorite: None,
+            search: None,
+            limit: Some(100),
+            offset: Some(0),
+        };
+        let (sql, params) = build_history_query(&query, &None, &100, &0);
+
+        // 文件 tab 排除有单独分类的媒体：图片/音频/视频后缀
+        assert!(sql.contains("content_type = 'file' AND NOT"));
+        assert!(sql.contains("LIKE '%.png'"));
+        assert!(sql.contains("LIKE '%.mp3'"));
+        assert!(sql.contains("LIKE '%.mp4'"));
+        assert!(sql.contains("LIKE '%.m2ts'"));
+        // 视频排除集合同样不含与 TS 源码冲突的扩展
+        assert!(!sql.contains("LIKE '%.ts'"));
+        // 普通文件后缀不被排除
+        assert!(!sql.contains("LIKE '%.xlsx'"));
+        // file 分支走字面值、不占参数位
+        assert_eq!(params.len(), 2);
+    }
+
+    #[test]
+    fn test_build_history_query_sql_executes_on_real_db() {
+        let (conn, _temp) = create_test_db();
+        // 所有分类分支的 SQL 在真实库上执行——防字符串断言放过括号/字面量错误
+        // （曾出现 file 分支多一个右括号导致「获取剪贴板历史失败」，contains 断言全部通过）
+        for ct in ["all", "text", "image", "audio", "video", "file", "favorite"] {
+            let query = ClipboardQuery {
+                content_type: (ct != "all" && ct != "favorite").then(|| ct.to_string()),
+                is_favorite: (ct == "favorite").then_some(true),
+                search: None,
+                limit: Some(100),
+                offset: Some(0),
+            };
+            let (sql, params) = build_history_query(&query, &None, &100, &0);
+            conn.execute(&sql, rusqlite::params_from_iter(params))
+                .unwrap_or_else(|e| panic!("分类 {ct} 的 SQL 执行失败: {e}\n{sql}"));
+        }
     }
 
     #[test]
