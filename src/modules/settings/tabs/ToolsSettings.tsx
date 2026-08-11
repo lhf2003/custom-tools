@@ -22,8 +22,8 @@ const GROUP_ORDER = ['perception', 'growth', 'interface', 'system', 'network'];
 
 const SHELL_MODE_OPTIONS = [
   { value: 'confirm_all', label: '默认模式 — 每条命令都需系统弹窗确认' },
-  { value: 'accept_edits', label: '可编辑模式 — 文件读写自动接受，Bash 需系统弹窗确认' },
-  { value: 'unattended', label: '无打扰模式 — 只读安全命令自动放行，其余系统弹窗确认' },
+  { value: 'accept_edits', label: '可编辑模式 — 文件读取自动放行，Bash 需系统弹窗确认' },
+  { value: 'unattended', label: '无打扰模式 — 文件读取与只读安全命令自动放行' },
 ];
 
 export function ToolsSettings() {
@@ -73,6 +73,12 @@ export function ToolsSettings() {
         t.description.toLowerCase().includes(q)
     );
   }, [tools, query]);
+
+  // 权限模式选择器主要挂在「执行命令」下；它关闭而「读取文件」开启时下沉到后者
+  const shellEnabled = useMemo(
+    () => tools.some((t) => t.name === 'run_shell_command' && t.enabled),
+    [tools]
+  );
 
   const groups = useMemo(() => {
     const byGroup = new Map<string, CompanionToolInfo[]>();
@@ -192,8 +198,10 @@ export function ToolsSettings() {
                         </div>
                       </div>
 
-                      {/* Shell 工具附加：权限模式 */}
-                      {t.name === 'run_shell_command' && t.enabled && (
+                      {/* 系统工具附加：权限模式（执行命令/读取文件共用，挂在首个开启者下） */}
+                      {(t.name === 'run_shell_command' ||
+                        (t.name === 'read_file' && !shellEnabled)) &&
+                        t.enabled && (
                         <div className="mt-3 rounded-lg bg-white/5 px-3 py-2.5">
                           <div className="flex items-center gap-2 mb-2">
                             <Terminal size={13} className="text-app-text-tertiary" />
@@ -206,10 +214,12 @@ export function ToolsSettings() {
                             searchable={false}
                           />
                           <p className="text-app-text-disabled text-xs mt-2 leading-relaxed">
-                            需要确认时以系统原生弹窗形式弹出（在应用窗口之外），命令内容可见，
-                            每次确认或拒绝都会写入本地审计记录。无打扰模式自动放行只读命令
-                            （dir、ipconfig、git status、npm list 等）；灾难命令（格式化、删库、
-                            关机等）任何模式都直接拒绝。
+                            需要确认时以系统原生弹窗形式弹出（在应用窗口之外），内容可见，
+                            每次确认或拒绝都会写入本地审计记录。可编辑模式自动放行文件读取
+                            （read_file），命令仍需确认；无打扰模式再放宽到只读命令
+                            （dir、ipconfig、git status、npm list 等）。敏感文件（私钥、
+                            凭证、浏览器数据等）在自动模式下直接拒绝，仅默认模式可确认放行；
+                            灾难命令（格式化、删库、关机等）任何模式都直接拒绝。
                           </p>
                         </div>
                       )}

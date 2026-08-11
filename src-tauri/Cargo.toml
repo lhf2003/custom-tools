@@ -44,6 +44,8 @@ chrono = "0.4"
 open = "5.0"
 window-vibrancy = "0.7.1"
 reqwest = { version = "0.13", features = ["json", "stream", "socks"] }
+# read_file 工具的 GBK 回退解码（reqwest 传递依赖，已在依赖树中）
+encoding_rs = "0.8"
 futures-util = "0.3"
 tauri-plugin-process = "2.3.1"
 tauri-plugin-dialog = "2"

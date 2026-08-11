@@ -1,17 +1,18 @@
-//! Shell 工具执行层：权限模式 + 用户确认 + 进程执行。
+//! Shell 与文件读取工具的执行层：权限模式 + 用户确认 + 进程/文件执行。
 //!
 //! 只服务场景聊天通道（scene_chat.rs tool 循环特判调用），不进 MCP——
-//! Claude Code 自己有 shell。
+//! Claude Code 自己有 shell 和文件读写。
 //!
 //! 安全模型（设置页「工具」页签可配，settings 键 shell_permission_mode）：
-//! - confirm_all（默认）：每条命令执行前弹系统原生确认框（渲染在 WebView 外，
+//! - confirm_all（默认）：每条命令/每次读取前弹系统原生确认框（渲染在 WebView 外，
 //!   前端被注入也伪造不了点击），用户决策写 shell_confirm_audit 审计表
-//! - accept_edits：预留档位（对齐 Claude Code 权限语义），当前没有文件类工具，
-//!   行为同 confirm_all
-//! - unattended：安全命令自动放行——只读首词白名单（dir/ipconfig 等）+
-//!   子命令级白名单（git status/npm list 等只读组合），其余仍需确认
+//! - accept_edits：文件读取（read_file）自动放行，Bash 命令仍需确认
+//! - unattended：read_file 自动放行；只读 shell 命令自动放行——只读首词白名单
+//!   （dir/ipconfig 等）+ 子命令级白名单（git status/npm list 等只读组合），其余仍需确认
 //!
 //! 灾难命令硬拒绝清单不受权限模式影响，用户确认也救不回来。
+//! 敏感文件（私钥/凭证/浏览器数据/本应用数据库）在自动模式下直接拒绝，
+//! 仅 confirm_all 可由用户显式确认放行——这类内容发给云端模型就收不回。
 
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
@@ -120,7 +121,19 @@ pub async fn execute_shell_tool(app_handle: &AppHandle, args: &Value) -> Result<
         _ => true,
     };
 
-    if need_confirm && !confirm_with_user(app_handle, command).await {
+    if need_confirm
+        && !confirm_with_user(
+            app_handle,
+            "Shell 命令确认",
+            &format!(
+                "贾维斯要在你的电脑上执行命令：\n\n{}\n\n只放行你本人核实过的命令。",
+                command
+            ),
+            "等你确认命令（系统弹窗）…",
+            command,
+        )
+        .await
+    {
         return Ok("用户拒绝了这条命令，没有执行。换个思路，或直接问他想怎么做。".to_string());
     }
 
@@ -228,12 +241,21 @@ fn permission_mode(app_handle: &AppHandle) -> String {
 /// 发起用户确认：系统原生弹窗 + 审计留痕。
 /// 原生弹窗渲染在 WebView 外——前端被注入恶意脚本也伪造不了用户点击
 ///（此前 WebView 弹窗只回传 boolean，invoke 即可放行）；每条决策连同
-/// 命令全文、当时权限模式写入 shell_confirm_audit，事后可追溯。
+/// 操作全文、当时权限模式写入 shell_confirm_audit，事后可追溯。
+/// shell 与 read_file 共用此入口，audit_subject 区分来源（命令原文 / "read_file: 路径"）。
 /// 返回 true = 用户允许执行。
-async fn confirm_with_user(app_handle: &AppHandle, command: &str) -> bool {
-    let _ = app_handle.emit("jarvis:status", "等你确认命令（系统弹窗）…");
+async fn confirm_with_user(
+    app_handle: &AppHandle,
+    title: &str,
+    prompt: &str,
+    status: &str,
+    audit_subject: &str,
+) -> bool {
+    let _ = app_handle.emit("jarvis:status", status);
     let app = app_handle.clone();
-    let command_owned = command.to_string();
+    let title_owned = title.to_string();
+    let prompt_owned = prompt.to_string();
+    let audit_owned = audit_subject.to_string();
     let db_path = app_handle
         .try_state::<crate::db::DatabaseState>()
         .map(|s| s.0.clone());
@@ -241,23 +263,20 @@ async fn confirm_with_user(app_handle: &AppHandle, command: &str) -> bool {
     // blocking_show 是同步阻塞调用，必须进 spawn_blocking（顺带把审计写入
     // 也放这里——SQLite 同步写不占用 tokio worker）
     tauri::async_runtime::spawn_blocking(move || {
-        // 弹窗展示截断：命令全文在审计表，弹窗保证关键部分可见即可
-        let display: String = command_owned.chars().take(800).collect();
-        let display = if display.len() < command_owned.len() {
-            format!("{}\n…（命令过长已截断，全文见审计表）", display)
+        // 弹窗展示截断：全文在审计表，弹窗保证关键部分可见即可
+        let display: String = prompt_owned.chars().take(800).collect();
+        let display = if display.len() < prompt_owned.len() {
+            format!("{}\n…（内容过长已截断，全文见审计表）", display)
         } else {
             display
         };
         let allowed = app
             .dialog()
-            .message(format!(
-                "贾维斯要在你的电脑上执行命令：\n\n{}\n\n只放行你本人核实过的命令。",
-                display
-            ))
-            .title("Shell 命令确认")
+            .message(display)
+            .title(title_owned)
             .kind(MessageDialogKind::Warning)
             .buttons(MessageDialogButtons::OkCancelCustom(
-                "允许执行".to_string(),
+                "允许".to_string(),
                 "拒绝".to_string(),
             ))
             .blocking_show();
@@ -265,7 +284,7 @@ async fn confirm_with_user(app_handle: &AppHandle, command: &str) -> bool {
             if let Ok(conn) = crate::db::open_connection(&db_path) {
                 let _ = conn.execute(
                     "INSERT INTO shell_confirm_audit (command, allowed, mode) VALUES (?1, ?2, ?3)",
-                    rusqlite::params![command_owned, allowed as i64, mode],
+                    rusqlite::params![audit_owned, allowed as i64, mode],
                 );
             }
         }
@@ -329,6 +348,223 @@ fn truncate(s: &str) -> String {
     }
     let kept: String = s.chars().take(MAX_OUTPUT_CHARS).collect();
     format!("{}\n…（输出过长，已截断）", kept)
+}
+
+// ---------- read_file 工具 ----------
+
+/// read_file 默认/最大返回字符数（防烧 token）
+const DEFAULT_READ_CHARS: usize = 8000;
+const MAX_READ_CHARS: usize = 20000;
+/// 读取前 N 字节做二进制嗅探
+const BINARY_SNIFF_BYTES: usize = 8192;
+
+/// read_file 工具入口：消毒 → 敏感路径闸门 → 权限闸门 → 读取。
+/// 与 shell 共用权限模式（settings 键 shell_permission_mode）：
+/// - confirm_all：每次读取弹窗确认
+/// - accept_edits / unattended：普通文件自动放行
+/// 敏感路径在自动模式下直接拒绝（内容发给云端模型就收不回），
+/// 仅 confirm_all 可经用户显式确认放行。
+pub async fn execute_read_file_tool(app_handle: &AppHandle, args: &Value) -> Result<String, String> {
+    let raw_path = args
+        .get("path")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or("缺少参数 path")?;
+    let max_chars = args
+        .get("max_chars")
+        .and_then(|v| v.as_u64())
+        .map(|n| n as usize)
+        .unwrap_or(DEFAULT_READ_CHARS)
+        .clamp(1, MAX_READ_CHARS);
+
+    // 同 shell：控制字符/双向覆盖字符一律拒绝（防路径显示与实际不一致）
+    if raw_path.chars().any(|c| {
+        c.is_control()
+            || ('\u{202a}'..='\u{202e}').contains(&c)
+            || ('\u{2066}'..='\u{2069}').contains(&c)
+    }) {
+        return Err("路径包含控制字符，已拒绝读取".to_string());
+    }
+
+    let expanded = expand_path(raw_path);
+    let normalized = expanded.replace('/', "\\").to_lowercase();
+    let sensitive = sensitive_path_reason(&normalized);
+    let auto_allow = matches!(
+        permission_mode(app_handle).as_str(),
+        "accept_edits" | "unattended"
+    );
+
+    match sensitive {
+        Some(reason) if auto_allow => {
+            return Err(format!(
+                "该路径命中敏感文件策略（{}），当前权限模式下不允许读取。确需读取请切到默认模式（每次确认）后重试。",
+                reason
+            ));
+        }
+        Some(reason) => {
+            let prompt = format!(
+                "贾维斯要读取敏感文件（{}）：\n\n{}\n\n文件内容会发送给 AI 模型。只放行你本人核实过的路径。",
+                reason, raw_path
+            );
+            let audit = format!("read_file(敏感): {}", raw_path);
+            if !confirm_with_user(
+                app_handle,
+                "敏感文件读取确认",
+                &prompt,
+                "等你确认文件读取（系统弹窗）…",
+                &audit,
+            )
+            .await
+            {
+                return Ok("用户拒绝了这次读取，没有执行。换个思路，或直接问他想怎么做。".to_string());
+            }
+        }
+        None if !auto_allow => {
+            let prompt = format!(
+                "贾维斯要在你的电脑上读取文件：\n\n{}\n\n文件内容会发送给 AI 模型。只放行你本人核实过的路径。",
+                raw_path
+            );
+            let audit = format!("read_file: {}", raw_path);
+            if !confirm_with_user(
+                app_handle,
+                "文件读取确认",
+                &prompt,
+                "等你确认文件读取（系统弹窗）…",
+                &audit,
+            )
+            .await
+            {
+                return Ok("用户拒绝了这次读取，没有执行。换个思路，或直接问他想怎么做。".to_string());
+            }
+        }
+        None => {}
+    }
+
+    read_text_file(&expanded, max_chars)
+}
+
+/// 路径展开：去引号 + %VAR% 环境变量 + ~ 家目录（黑名单匹配与文件打开都用展开后的路径，
+/// 否则 %USERPROFILE%\.ssh\id_rsa 会绕过片段匹配）
+fn expand_path(raw: &str) -> String {
+    let p = raw.trim().trim_matches(|c| c == '"' || c == '\'');
+    let p = expand_env_vars(p);
+    if p == "~" || p.starts_with("~/") || p.starts_with("~\\") {
+        if let Some(home) = std::env::var_os("USERPROFILE") {
+            return format!("{}{}", home.to_string_lossy(), &p[1..]);
+        }
+    }
+    p
+}
+
+/// 展开 %VAR% 形式的环境变量；未定义或变量名非法时原样保留
+fn expand_env_vars(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(start) = rest.find('%') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        let Some(end) = after.find('%') else {
+            // 落单的 %：原样输出收尾
+            out.push_str(&rest[start..]);
+            return out;
+        };
+        let name = &after[..end];
+        if !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+            match std::env::var(name) {
+                Ok(val) => out.push_str(&val),
+                Err(_) => out.push_str(&rest[start..start + end + 2]),
+            }
+            rest = &after[end + 1..];
+        } else {
+            out.push('%');
+            rest = after;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// 敏感路径判定：输入已统一为小写 + 反斜杠。片段 contains 匹配，宁宽勿窄——
+/// 误伤的代价只是一次确认/拒绝提示，漏过的代价是密钥发上云端。
+fn sensitive_path_reason(normalized: &str) -> Option<&'static str> {
+    const KEY_DIRS: &[&str] = &[
+        "\\.ssh\\",
+        "\\.gnupg\\",
+        "\\.aws\\",
+        "\\.azure\\",
+        "\\.kube\\",
+        "\\.docker\\",
+    ];
+    const KEY_FILES: &[&str] = &["id_rsa", "id_ed25519", "id_ecdsa", "id_dsa"];
+    const CRED_FILES: &[&str] = &[".git-credentials", ".netrc", ".npmrc", ".pypirc", "\\.env"];
+    const BROWSER_DATA: &[&str] = &["\\cookies", "login data", "web data"];
+
+    if KEY_DIRS.iter().any(|f| normalized.contains(f)) {
+        Some("私钥/云凭证目录")
+    } else if KEY_FILES.iter().any(|f| normalized.contains(f)) {
+        Some("SSH 私钥文件")
+    } else if CRED_FILES.iter().any(|f| normalized.contains(f)) {
+        Some("密钥/凭证文件")
+    } else if normalized.contains("flowhub.db") {
+        Some("本应用数据库")
+    } else if BROWSER_DATA.iter().any(|f| normalized.contains(f)) {
+        Some("浏览器凭证数据")
+    } else {
+        None
+    }
+}
+
+/// 二进制嗅探：前 8KB 含 NUL 即判二进制（UTF-16 文本也会命中，同样不支持）
+fn looks_binary(bytes: &[u8]) -> bool {
+    bytes.iter().take(BINARY_SNIFF_BYTES).any(|&b| b == 0)
+}
+
+/// 读取文本文件：限流读取（防大文件撑爆内存）→ 二进制检测 → UTF-8/GBK 解码 → 字符截断
+fn read_text_file(path: &str, max_chars: usize) -> Result<String, String> {
+    use std::io::Read;
+
+    let file = std::fs::File::open(path).map_err(|e| match e.kind() {
+        std::io::ErrorKind::NotFound => format!("文件不存在: {}", path),
+        std::io::ErrorKind::PermissionDenied => format!("没有读取权限: {}", path),
+        _ => format!("无法打开文件: {}", e),
+    })?;
+    if file.metadata().map(|m| m.is_dir()).unwrap_or(false) {
+        return Err("这是一个目录，不是文件。列目录请用 run_shell_command 的 dir。".to_string());
+    }
+
+    // UTF-8 最多 4 字节/字符，按上限截流（+64 容纳截断点后的半个字符）
+    let cap = (max_chars as u64).saturating_mul(4).saturating_add(64);
+    let mut buf = Vec::new();
+    file.take(cap)
+        .read_to_end(&mut buf)
+        .map_err(|e| format!("读取文件失败: {}", e))?;
+
+    if looks_binary(&buf) {
+        return Err(
+            "这是二进制文件（图片/程序/压缩包等）或 UTF-16 编码，read_file 只支持 UTF-8/GBK 文本。"
+                .to_string(),
+        );
+    }
+
+    let text = match String::from_utf8(buf) {
+        Ok(t) => t,
+        Err(e) => {
+            // 中文 Windows 的文本文件常见 GBK，回退解码
+            let (cow, _, _) = encoding_rs::GBK.decode(e.as_bytes());
+            cow.into_owned()
+        }
+    };
+
+    let total = text.chars().count();
+    if total <= max_chars {
+        return Ok(text);
+    }
+    let kept: String = text.chars().take(max_chars).collect();
+    Ok(format!(
+        "{}\n…（文件共约 {} 字符，已截断到前 {} 字符。要看后面的内容用 run_shell_command 的 findstr 定位）",
+        kept, total, max_chars
+    ))
 }
 
 #[cfg(test)]
@@ -427,5 +663,66 @@ mod tests {
         assert!(bidi.chars().any(|c| ('\u{202a}'..='\u{202e}').contains(&c)));
         // 正常命令不含
         assert!(!"dir /b".chars().any(|c| c.is_control()));
+    }
+
+    #[test]
+    fn sensitive_path_hits() {
+        let n = |s: &str| expand_path(s).replace('/', "\\").to_lowercase();
+        assert!(sensitive_path_reason(&n("C:\\Users\\me\\.ssh\\id_rsa")).is_some());
+        assert!(sensitive_path_reason(&n("C:/Users/me/.ssh/config")).is_some());
+        assert!(sensitive_path_reason(&n("D:\\project\\.env")).is_some());
+        assert!(sensitive_path_reason(&n("D:\\project\\.env.local")).is_some());
+        assert!(sensitive_path_reason(&n("C:\\Users\\me\\.aws\\credentials")).is_some());
+        assert!(sensitive_path_reason(&n("D:\\data\\flowhub.db-wal")).is_some());
+        assert!(sensitive_path_reason(&n(
+            "C:\\Users\\me\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Cookies"
+        ))
+        .is_some());
+        assert!(sensitive_path_reason(&n("C:\\Users\\me\\.git-credentials")).is_some());
+        // 环境变量展开后也命中（防 %USERPROFILE% 绕过）
+        assert!(sensitive_path_reason(&n("%USERPROFILE%\\.ssh\\id_rsa")).is_some());
+    }
+
+    #[test]
+    fn sensitive_path_allows_normal() {
+        let n = |s: &str| expand_path(s).replace('/', "\\").to_lowercase();
+        assert!(sensitive_path_reason(&n("D:\\notes\\todo.md")).is_none());
+        assert!(sensitive_path_reason(&n("D:\\workspace\\custom-tools\\Cargo.toml")).is_none());
+        assert!(sensitive_path_reason(&n("C:\\Windows\\System32\\drivers\\etc\\hosts")).is_none());
+    }
+
+    #[test]
+    fn expand_env_vars_works() {
+        // PATH 在 Windows 必有
+        let expanded = expand_env_vars("%PATH%");
+        assert!(!expanded.contains("%PATH%"));
+        // 未定义变量原样保留
+        assert_eq!(
+            expand_env_vars("%DEFINITELY_NOT_EXIST_VAR_12345%"),
+            "%DEFINITELY_NOT_EXIST_VAR_12345%"
+        );
+        // 无变量原样
+        assert_eq!(expand_env_vars("d:\\plain\\path"), "d:\\plain\\path");
+        // 落单的 % 原样
+        assert_eq!(expand_env_vars("100%"), "100%");
+        // 非法变量名（含空格）不当变量展开
+        assert_eq!(expand_env_vars("%not a var%"), "%not a var%");
+    }
+
+    #[test]
+    fn expand_path_tilde() {
+        let home = std::env::var("USERPROFILE").unwrap_or_default();
+        if !home.is_empty() {
+            let expanded = expand_path("~/.ssh/config");
+            assert!(expanded.starts_with(&home));
+            assert!(expanded.ends_with("/.ssh/config"));
+        }
+    }
+
+    #[test]
+    fn binary_detection() {
+        assert!(looks_binary(&[b'h', b'i', 0, b'x']));
+        assert!(!looks_binary("你好世界".as_bytes()));
+        assert!(!looks_binary(&[]));
     }
 }

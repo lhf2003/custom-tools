@@ -96,10 +96,7 @@ export function MemosView() {
   return (
     <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
       {/* Header */}
-      <div
-        className="px-6 py-3 flex items-center gap-2"
-        style={{ borderBottom: `1px solid ${THEME.BORDER_DEFAULT}` }}
-      >
+      <div className="px-6 py-3 flex items-center gap-2">
         <ListTodo size={15} style={{ color: THEME.TEXT_TERTIARY }} />
         <span className="text-sm font-semibold" style={{ color: THEME.TEXT_PRIMARY }}>
           备忘

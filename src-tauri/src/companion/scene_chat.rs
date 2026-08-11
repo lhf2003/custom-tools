@@ -306,6 +306,10 @@ async fn run_scene_chat(
                         super::shell::execute_shell_tool(app_handle, &call.arguments)
                             .await
                             .unwrap_or_else(|e| e)
+                    } else if call.name == "read_file" {
+                        super::shell::execute_read_file_tool(app_handle, &call.arguments)
+                            .await
+                            .unwrap_or_else(|e| e)
                     } else if call.name == "web_search" {
                         super::websearch::execute_web_search_tool(app_handle, &call.arguments)
                             .await

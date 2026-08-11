@@ -88,9 +88,10 @@
    工具栏
    ============================================ */
 .vditor-container .vditor-toolbar {
-  /* 透明：透出玻璃面板（与设置页侧栏同范式），靠 border-b 分层 */
+  /* 透明：透出玻璃面板（与设置页侧栏同范式）。底部分隔由笔记标题栏承担，
+     工具栏自身不划线——且必须显式 none 压掉官方暗色主题的 #141414 border-bottom */
   background: transparent;
-  border-bottom: 1px solid var(--vditor-border-default);
+  border-bottom: none;
   padding: 4px 8px;
   display: flex;
   align-items: center;
@@ -165,7 +166,8 @@
                'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   font-size: 15px;
   line-height: 1.75;
-  padding: 16px 0;
+  /* 垂直间距由 pre.vditor-reset 的 16px 承担，此处不再叠加（否则工具栏与正文隔 32px） */
+  padding: 0;
 }
 
 .vditor-container .vditor-ir__node--expand {

@@ -331,13 +331,14 @@ pub fn scene_tool_definitions(disabled: &[String]) -> Vec<ToolDef> {
     defs
 }
 
-/// 可开关的扩展工具：只进场景通道，不进 MCP（Claude Code 自己有 shell 和搜索，
-/// 给了也是重复）。被用户关闭的不出现在声明里，模型根本看不见。
+/// 可开关的扩展工具：只进场景通道，不进 MCP（Claude Code 自己有 shell、
+/// 文件读写和搜索，给了也是重复）。被用户关闭的不出现在声明里，模型根本看不见。
 /// 插件制作工具也走这里：执行层在 scene_chat 拦截（需要 app_handle 落盘 + LLM 调用 + emit A2UI），
 /// 不进 MCP 通道（那边是 Claude Code 终端，无 A2UI 渲染方与插件安装链路）。
 pub fn extension_tool_definitions(disabled: &[String]) -> Vec<ToolDef> {
     [
         shell_tool_def(),
+        read_file_def(),
         web_search_tool_def(),
         layout_ui_def(),
         generate_plugin_chat_def(),
@@ -352,6 +353,7 @@ pub fn all_tool_definitions() -> Vec<ToolDef> {
     let mut defs = tool_definitions();
     defs.push(render_ui_def());
     defs.push(shell_tool_def());
+    defs.push(read_file_def());
     defs.push(web_search_tool_def());
     defs.push(layout_ui_def());
     defs.push(generate_plugin_chat_def());
@@ -443,7 +445,7 @@ fn shell_tool_def() -> ToolDef {
         display_name: "执行命令",
         group: ToolGroup::System,
         core: false,
-        description: "在这台 Windows 电脑上执行一条命令（cmd /c 语义）。\n\n适用：用户明确让你操作系统——查文件、看进程、跑脚本、装东西。\n不适用：读本应用自己的数据（用专用数据工具）；用户没让你动系统时主动动。\n\n规则：\n- 执行默认要用户点头确认；被拒绝就换思路或问用户，不要换着花样重试同一件事\n- 命令尽量只读、可逆；写操作执行前先想好怎么向用户解释\n- 输出会被截断，需要精确结果时用更窄的命令（findstr、定向文件）".to_string(),
+        description: "在这台 Windows 电脑上执行一条命令（cmd /c 语义）。\n\n适用：用户明确让你操作系统——查文件、看进程、跑脚本、装东西。\n不适用：读本应用自己的数据（用专用数据工具）；读文件内容（用 read_file，可编辑/无打扰模式下免确认，别用 type/more）；用户没让你动系统时主动动。\n\n规则：\n- 执行默认要用户点头确认；被拒绝就换思路或问用户，不要换着花样重试同一件事\n- 命令尽量只读、可逆；写操作执行前先想好怎么向用户解释\n- 输出会被截断，需要精确结果时用更窄的命令（findstr、定向文件）".to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -457,6 +459,31 @@ fn shell_tool_def() -> ToolDef {
                 }
             },
             "required": ["command"]
+        }),
+    }
+}
+
+/// 文件读取工具（执行层在 companion/shell.rs，与 shell 共用权限模式与确认流程）
+fn read_file_def() -> ToolDef {
+    ToolDef {
+        name: "read_file",
+        display_name: "读取文件",
+        group: ToolGroup::System,
+        core: false,
+        description: "读取本机一个文本文件的内容（UTF-8/GBK 自动识别）。\n\n适用：看文件内容——代码、配置、日志、笔记、文档。\n不适用：本应用自己的数据（记忆、备忘、剪贴板有专用工具）；二进制文件（图片、exe、数据库）读不了；找文件（先用 run_shell_command 的 dir/where 定位）。\n\n规则：\n- 读文件一律用本工具，不要用 run_shell_command 的 type/more——可编辑/无打扰模式下本工具自动放行，不打扰用户\n- 敏感路径（私钥、凭证、浏览器数据等）自动模式下直接拒绝，不要换着路径重试\n- 大文件按 max_chars 截断；要看中段/后段内容，用 run_shell_command 的 findstr 定位".to_string(),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "文件路径，如 D:\\notes\\todo.md（支持 ~ 和 %USERPROFILE% 等环境变量）"
+                },
+                "max_chars": {
+                    "type": "integer",
+                    "description": "最多返回字符数，默认 8000，最大 20000"
+                }
+            },
+            "required": ["path"]
         }),
     }
 }
