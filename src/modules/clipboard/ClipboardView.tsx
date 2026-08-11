@@ -485,9 +485,18 @@ export function ClipboardView() {
 
         {/* List（外层 relative 容器承载固定组头槽位） */}
         <div className="relative flex-1 min-h-0" data-guide="clipboard-list">
-          {/* 滚动层顶部留出槽位高度（pt-8=32px）：静态时首条与槽位相接，
-              滚动后内容从槽位下方滑过被遮盖 */}
-          <div className="h-full overflow-y-auto px-1.5 pb-3 pt-8" onScroll={handleListScroll}>
+          {/* 滚动层顶部留出槽位高度（pt-8=32px）+ mask 顶部 32px 渐隐：
+              条目滚入槽位区域即渐隐消失，槽位无需自铺背景（半透明背景
+              压不住滚动内容，文字会透上来），直接透出 panel-glass 底——
+              深浅/橘子海主题与透明度滑杆天然跟随 */}
+          <div
+            className="h-full overflow-y-auto px-1.5 pb-3 pt-8"
+            style={{
+              maskImage: 'linear-gradient(to bottom, transparent 0, black 32px)',
+              WebkitMaskImage: 'linear-gradient(to bottom, transparent 0, black 32px)',
+            }}
+            onScroll={handleListScroll}
+          >
             {isLoading ? (
               // 已有数据时的刷新（搜索/tab）：仅列表区域显示加载态，搜索框保持在位不失焦
               <div className="flex flex-col items-center justify-center h-full gap-2 text-app-text-disabled">
@@ -554,13 +563,11 @@ export function ClipboardView() {
           </div>
 
           {/* 固定组头槽位：常驻显示当前日期组（滚动时由 handleListScroll 跟踪切换），
-              高 32px、文字左缘与条目文字对齐（16px）。
+              高 32px、文字左缘与条目文字对齐（16px）。不铺背景——滚动内容已被
+              列表 mask 渐隐，透出 panel-glass 底即与全局透明度设置一致。
               pointer-events-none 让点击/滚动穿透到列表 */}
           {currentGroup && (
-            <div
-              className="absolute top-0 inset-x-0 px-4 pt-2.5 pb-1.5 text-xs font-medium text-app-text-tertiary pointer-events-none"
-              style={{ background: 'var(--app-panel-bg)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}
-            >
+            <div className="absolute top-0 inset-x-0 px-4 pt-2.5 pb-1.5 text-xs font-medium text-app-text-tertiary pointer-events-none">
               {currentGroup}
             </div>
           )}
