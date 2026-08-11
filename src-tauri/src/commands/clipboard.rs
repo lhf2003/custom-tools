@@ -955,10 +955,10 @@ unsafe fn read_dib_data_and_save(ptr: *mut std::ffi::c_void) -> Result<String, S
 /// Paste clipboard item to previous focused window
 /// This copies the item to clipboard, hides the window, and simulates Ctrl+V
 #[tauri::command]
-pub fn paste_to_clipboard_item(
-    db_state: State<DatabaseState>,
+pub async fn paste_to_clipboard_item(
+    db_state: State<'_, DatabaseState>,
     app_handle: tauri::AppHandle,
-    suppress_flag: State<ClipboardSuppressFlag>,
+    suppress_flag: State<'_, ClipboardSuppressFlag>,
     id: i64,
 ) -> Result<(), String> {
     // First copy to clipboard (suppress_flag is forwarded to avoid duplicate history entry)
@@ -1006,9 +1006,17 @@ pub fn paste_to_clipboard_item(
             );
             #[cfg(windows)]
             {
-                // Small delay to ensure window is hidden and target is ready
-                std::thread::sleep(std::time::Duration::from_millis(50));
-                unsafe { simulate_paste_to_window(hwnd) };
+                // 激活+SendInput 含多段 sleep/轮询（最差约 900ms），放进 blocking
+                // 线程池执行，避免阻塞主线程事件循环（全局快捷键/其他命令排队）
+                let result = tauri::async_runtime::spawn_blocking(move || {
+                    // Small delay to ensure window is hidden and target is ready
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    unsafe { simulate_paste_to_window(hwnd) };
+                })
+                .await;
+                if let Err(e) = result {
+                    log::error!("Paste simulation task failed to complete: {}", e);
+                }
             }
         } else {
             log::info!("No previous focused window available, only copied to clipboard");
@@ -1116,13 +1124,18 @@ unsafe fn simulate_paste_to_window(target_hwnd: isize) {
     // 无真实鼠标按下时系统检测不到左键状态，不会启动窗口拖拽循环。
     send_nclbutton_click(hwnd);
     // 等待目标窗口成为前台（窗口销毁/挂起导致 SendMessageTimeout 超时时
-    // 可能失败，但 Ctrl+V 仍会发出，仅记录日志便于排查）
+    // 可能失败，Ctrl+V 仍会发出，记 warn 日志便于排查）
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(150);
     while std::time::Instant::now() < deadline {
         if GetForegroundWindow() == hwnd {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    if GetForegroundWindow() != hwnd {
+        log::warn!(
+            "Title-bar message click did not bring target to foreground; Ctrl+V will go to the current foreground window"
+        );
     }
 
     // 等窗口完成用户级激活与内部焦点恢复（IDE 激活慢，需留出时间）
@@ -1152,7 +1165,8 @@ unsafe fn simulate_paste_to_window(target_hwnd: isize) {
 /// 窗口走 DefWindowProc 默认处理时会触发与真实点击相同的 WA_CLICKACTIVE 激活，
 /// 但鼠标完全不移动——无飘移、不会误触标题栏交互控件（浏览器标签页/微信搜索框）。
 /// 无真实鼠标按下时系统检测不到左键状态，不会启动窗口拖拽循环。
-/// 是否激活生效由调用方的前台归属检查决定（窗口销毁/挂起时自然回退真实点击）。
+/// 激活是否生效由调用方的前台归属检查确认；失败时不回退真实鼠标点击，
+/// Ctrl+V 仍会发出（调用方记 warn 日志）。
 #[cfg(windows)]
 unsafe fn send_nclbutton_click(hwnd: HWND) {
     use windows::Win32::UI::WindowsAndMessaging::{
