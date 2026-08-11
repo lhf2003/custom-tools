@@ -94,11 +94,33 @@ pub fn get_clipboard_history(
     Ok(items)
 }
 
+/// 媒体后缀集合（无点号，与前端 src/modules/clipboard/utils.ts 的
+/// isImageFile/isAudioFile/isVideoFile 完全一致）。
+/// image/audio/video 三个媒体 tab 与 file tab 的排除条件共用，新增后缀只改这里。
+const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "svg"];
+const AUDIO_EXTENSIONS: &[&str] = &["mp3", "wav", "flac", "aac", "ogg", "m4a", "wma", "opus"];
+/// 视频后缀刻意不含 .ts/.mts/.cts——与 TypeScript 源码扩展冲突（开发者剪贴板里
+/// 源码出现的概率远高于流媒体分片，误判代价高）；.m2ts 无歧义保留。
+const VIDEO_EXTENSIONS: &[&str] = &[
+    "mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "m4v", "mpg", "mpeg", "rmvb", "rm",
+    "3gp", "m2ts",
+];
+
+/// 由后缀集合生成 `lower(content) LIKE '%.ext' OR ...` 条件片段（不含外层括号）
+fn extension_like_clause(extensions: &[&str]) -> String {
+    extensions
+        .iter()
+        .map(|ext| format!("lower(content) LIKE '%.{}'", ext))
+        .collect::<Vec<_>>()
+        .join(" OR ")
+}
+
 /// 拼接历史查询的 SQL 与有序参数（抽成纯函数以便单测）。
 ///
-/// content_type='image'/'audio'/'video' 特殊化：媒体 tab 的语义 = 对应类型 ∪ file 类型中
-/// 的匹配后缀路径，扩展名集合与前端 isImageFile/isAudioFile/isVideoFile 一致
-/// （后缀 LIKE 匹配；多路径 content 仅末尾路径参与判断，与前端 endsWith 行为对齐）。
+/// content_type='image'/'audio'/'video'/'file' 特殊化：
+/// 媒体 tab 的语义 = 对应类型 ∪ file 类型中的匹配后缀路径（file tab 则反向排除全部媒体）；
+/// 扩展名集合统一取上方常量（与前端 isImageFile/isAudioFile/isVideoFile 一致），
+/// 后缀 LIKE 匹配；多路径 content 仅末尾路径参与判断，与前端 endsWith 行为对齐。
 /// 合并下推到 SQL 后翻页口径统一，前端不再双查询合并
 /// （旧写法 image/file 各查一页再合并截断，offset 口径不一致，会重复/漏条）。
 fn build_history_query<'a>(
@@ -117,57 +139,36 @@ fn build_history_query<'a>(
 
     if let Some(content_type) = &query.content_type {
         if content_type == "image" {
-            sql.push_str(
-                " AND (content_type = 'image' OR (content_type = 'file' AND (\
-                 lower(content) LIKE '%.png' OR lower(content) LIKE '%.jpg' OR \
-                 lower(content) LIKE '%.jpeg' OR lower(content) LIKE '%.gif' OR \
-                 lower(content) LIKE '%.webp' OR lower(content) LIKE '%.bmp' OR \
-                 lower(content) LIKE '%.ico' OR lower(content) LIKE '%.svg')))",
-            );
+            // 图片 tab：image 类型 ∪ file 类型中的图片后缀路径
+            sql.push_str(&format!(
+                " AND (content_type = 'image' OR (content_type = 'file' AND ({})))",
+                extension_like_clause(IMAGE_EXTENSIONS)
+            ));
         } else if content_type == "audio" {
-            // 音频 tab：file 类型中的音频后缀（集合与前端 isAudioFile 一致）
-            sql.push_str(
-                " AND (content_type = 'file' AND (\
-                 lower(content) LIKE '%.mp3' OR lower(content) LIKE '%.wav' OR \
-                 lower(content) LIKE '%.flac' OR lower(content) LIKE '%.aac' OR \
-                 lower(content) LIKE '%.ogg' OR lower(content) LIKE '%.m4a' OR \
-                 lower(content) LIKE '%.wma' OR lower(content) LIKE '%.opus'))",
-            );
+            // 音频 tab：file 类型中的音频后缀路径
+            sql.push_str(&format!(
+                " AND (content_type = 'file' AND ({}))",
+                extension_like_clause(AUDIO_EXTENSIONS)
+            ));
         } else if content_type == "video" {
-            // 视频 tab：file 类型中的视频后缀（集合与前端 isVideoFile 一致，
-            // 不含 .ts/.mts/.cts——与 TypeScript 源码扩展冲突）
-            sql.push_str(
-                " AND (content_type = 'file' AND (\
-                 lower(content) LIKE '%.mp4' OR lower(content) LIKE '%.mkv' OR \
-                 lower(content) LIKE '%.avi' OR lower(content) LIKE '%.mov' OR \
-                 lower(content) LIKE '%.wmv' OR lower(content) LIKE '%.flv' OR \
-                 lower(content) LIKE '%.webm' OR lower(content) LIKE '%.m4v' OR \
-                 lower(content) LIKE '%.mpg' OR lower(content) LIKE '%.mpeg' OR \
-                 lower(content) LIKE '%.rmvb' OR lower(content) LIKE '%.rm' OR \
-                 lower(content) LIKE '%.3gp' OR lower(content) LIKE '%.m2ts'))",
-            );
+            // 视频 tab：file 类型中的视频后缀路径
+            sql.push_str(&format!(
+                " AND (content_type = 'file' AND ({}))",
+                extension_like_clause(VIDEO_EXTENSIONS)
+            ));
         } else if content_type == "file" {
-            // 文件 tab：媒体文件（图片/音频/视频）已有单独分类，这里只留普通文件。
-            // 排除后缀集合与 image/audio/video 分支完全一致（多路径 content 按字符串
-            // 结尾 LIKE 判断，语义同各媒体分支；同样不含 .ts/.mts/.cts——TS 源码是普通文件）
-            sql.push_str(
-                " AND content_type = 'file' AND NOT (lower(content) LIKE '%.png' OR \
-                 lower(content) LIKE '%.jpg' OR lower(content) LIKE '%.jpeg' OR \
-                 lower(content) LIKE '%.gif' OR lower(content) LIKE '%.webp' OR \
-                 lower(content) LIKE '%.bmp' OR lower(content) LIKE '%.ico' OR \
-                 lower(content) LIKE '%.svg' OR lower(content) LIKE '%.mp3' OR \
-                 lower(content) LIKE '%.wav' OR lower(content) LIKE '%.flac' OR \
-                 lower(content) LIKE '%.aac' OR lower(content) LIKE '%.ogg' OR \
-                 lower(content) LIKE '%.m4a' OR lower(content) LIKE '%.wma' OR \
-                 lower(content) LIKE '%.opus' OR lower(content) LIKE '%.mp4' OR \
-                 lower(content) LIKE '%.mkv' OR lower(content) LIKE '%.avi' OR \
-                 lower(content) LIKE '%.mov' OR lower(content) LIKE '%.wmv' OR \
-                 lower(content) LIKE '%.flv' OR lower(content) LIKE '%.webm' OR \
-                 lower(content) LIKE '%.m4v' OR lower(content) LIKE '%.mpg' OR \
-                 lower(content) LIKE '%.mpeg' OR lower(content) LIKE '%.rmvb' OR \
-                 lower(content) LIKE '%.rm' OR lower(content) LIKE '%.3gp' OR \
-                 lower(content) LIKE '%.m2ts')",
-            );
+            // 文件 tab：媒体文件（图片/音频/视频）已有单独分类，这里只留普通文件——
+            // 排除全部媒体后缀（多路径 content 按字符串结尾 LIKE 判断，同媒体分支语义）
+            let media_likes = [IMAGE_EXTENSIONS, AUDIO_EXTENSIONS, VIDEO_EXTENSIONS]
+                .concat()
+                .iter()
+                .map(|ext| format!("lower(content) LIKE '%.{}'", ext))
+                .collect::<Vec<_>>()
+                .join(" OR ");
+            sql.push_str(&format!(
+                " AND content_type = 'file' AND NOT ({})",
+                media_likes
+            ));
         } else {
             sql.push_str(&format!(" AND content_type = ?{}", param_index));
             params_vec.push(content_type);
