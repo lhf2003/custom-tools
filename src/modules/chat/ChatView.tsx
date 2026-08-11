@@ -1033,6 +1033,7 @@ export function ChatView() {
           <textarea
             ref={textareaRef}
             id="chat-input"
+            data-guide="chat-input"
             aria-label="消息输入框"
             value={input}
             onChange={(e) => setInput(e.target.value)}

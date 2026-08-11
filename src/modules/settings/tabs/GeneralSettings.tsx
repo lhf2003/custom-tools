@@ -102,6 +102,7 @@ function PanelAlphaSlider() {
 
   return (
     <div className="flex items-center gap-2">
+
       <input
         type="range"
         min={0.4}
@@ -114,6 +115,7 @@ function PanelAlphaSlider() {
         aria-label="面板背景不透明度"
         aria-valuetext={`${Math.round(panelAlpha * 100)}%`}
       />
+
       <span className="range-readout w-10 text-xs text-app-text-secondary tabular-nums text-right transition-colors duration-150">
         {Math.round(panelAlpha * 100)}%
       </span>

@@ -475,6 +475,7 @@ pub fn run() {
             commands::window::hide_window,
             commands::window::toggle_window,
             commands::window::resize_window,
+            commands::window::set_blur_hold,
             commands::clipboard::get_clipboard_history,
             commands::clipboard::get_app_icon,
             commands::clipboard::toggle_clipboard_favorite,
@@ -660,13 +661,18 @@ fn setup_window_handlers(app_handle: &tauri::AppHandle) {
     let ignore_blur = Arc::new(AtomicBool::new(false));
     let ignore_blur_clone = ignore_blur.clone();
 
+    // 引导教学等场景的显式失焦挂起（前端 set_blur_hold 开/关）：
+    // 与上方 300ms 定时 ignore 正交，避免定时线程提前复位教学挂起
+    let blur_hold = Arc::new(AtomicBool::new(false));
+    let blur_hold_clone = blur_hold.clone();
+
     // Hide window when it loses focus (if hide_on_blur is enabled)
     let app_handle_clone = app_handle.clone();
     window.on_window_event(move |event| {
         if let tauri::WindowEvent::Focused(focused) = event {
             if !focused {
-                // Skip if we're ignoring blur events (recently shown)
-                if ignore_blur_clone.load(Ordering::Relaxed) {
+                // Skip if we're ignoring blur events (recently shown or explicitly held)
+                if ignore_blur_clone.load(Ordering::Relaxed) || blur_hold_clone.load(Ordering::Relaxed) {
                     return;
                 }
 
@@ -699,7 +705,7 @@ fn setup_window_handlers(app_handle: &tauri::AppHandle) {
     });
 
     // Store the ignore_blur flag in app state so toggle_main_window can access it
-    app_handle.manage(WindowFocusState { ignore_blur });
+    app_handle.manage(WindowFocusState { ignore_blur, blur_hold });
 
     // 划词翻译浮窗：失焦即隐藏（点外部 = 看完译文走人）。窗口无边框透明，
     // 不做 ignore_blur 处理——浮窗必须即时响应失焦，否则会滞留在屏幕上。
@@ -718,6 +724,8 @@ fn setup_window_handlers(app_handle: &tauri::AppHandle) {
 // State to track window focus behavior
 pub struct WindowFocusState {
     ignore_blur: Arc<AtomicBool>,
+    /// 显式失焦挂起（引导教学期间由前端开/关）；内存态不落盘，进程退出自然复位
+    blur_hold: Arc<AtomicBool>,
 }
 
 impl WindowFocusState {
@@ -728,6 +736,10 @@ impl WindowFocusState {
             std::thread::sleep(duration);
             flag.store(false, Ordering::Relaxed);
         });
+    }
+
+    pub fn set_blur_hold(&self, hold: bool) {
+        self.blur_hold.store(hold, Ordering::Relaxed);
     }
 }
 

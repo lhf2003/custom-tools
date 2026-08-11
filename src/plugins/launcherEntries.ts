@@ -4,10 +4,10 @@ import type { ViewMode } from '@/types';
 import { SHELL_ENTRIES, listEnabledPlugins, listPlugins, type ShellEntry } from './registry';
 
 /**
- * 启动器/操作手册共用的内置入口枚举：
+ * 启动器内置入口枚举：
  * 插件（注册表派生，按 order）+ 壳入口（SHELL_ENTRIES，封闭集合）。
  * 替代已删除的 src/constants/tools.ts（BUILT_IN_TOOLS）。
- * 别名参与搜索匹配；description 缺省的条目不进操作手册。
+ * 别名参与搜索匹配。
  */
 export interface LauncherEntry {
   id: string;
@@ -56,13 +56,6 @@ export function isLauncherEntryId(id: string): boolean {
 
 export function getLauncherEntry(id: string): LauncherEntry | undefined {
   return listLauncherEntries().find((entry) => entry.id === id);
-}
-
-/** 供操作手册筛选有 description 的条目 */
-export function listLauncherEntriesWithDescription(): LauncherEntry[] {
-  return listLauncherEntries().filter((entry): entry is LauncherEntry & { description: string } =>
-    entry.description !== undefined
-  );
 }
 
 /** 供打开视图时把入口 id 规整为 ViewMode（含壳视图字面量） */

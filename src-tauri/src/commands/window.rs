@@ -92,3 +92,10 @@ pub async fn resize_window(
     }
     Ok(())
 }
+
+/// 显式挂起/恢复失焦隐藏（首启引导教学期间使用）。
+/// 内存态不落盘：进程退出自然复位，不会污染用户的 hide_on_blur 设置。
+#[tauri::command]
+pub fn set_blur_hold(state: tauri::State<'_, crate::WindowFocusState>, hold: bool) {
+    state.set_blur_hold(hold);
+}

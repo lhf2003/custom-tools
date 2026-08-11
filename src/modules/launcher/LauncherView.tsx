@@ -568,6 +568,7 @@ export function LauncherView() {
           aria-activedescendant={!isNoteMode && navItems.length > 0 && selectedIndex >= 0 ? `launcher-option-${selectedIndex}` : undefined}
           className="flex-1 bg-transparent text-lg text-app-text-primary placeholder-app-text-placeholder outline-none"
           data-tauri-drag-region={undefined}
+          data-guide="launcher-search"
           autoFocus
         />
 

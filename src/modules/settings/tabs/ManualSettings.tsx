@@ -1,45 +1,67 @@
-import { Search, Command as CommandIcon } from 'lucide-react';
-import { listLauncherEntriesWithDescription } from '@/plugins/launcherEntries';
-import { SettingGroup } from '../components/SettingsPrimitives';
+import { Search } from 'lucide-react';
+import { useToastStore } from '@/stores/toastStore';
+import { useGuideStore } from '@/modules/guide';
+import { SettingGroup, SettingRow } from '../components/SettingsPrimitives';
 
-export function ManualSettings() {
-  const toolsWithDescription = listLauncherEntriesWithDescription();
+/** 新手引导区：重看欢迎页 + 重置功能提示（看完即焚的一次性气泡） */
+function GuideSection() {
+  const seenCount = useGuideStore((s) => Object.keys(s.seenTips).length);
+  const replayWelcome = useGuideStore((s) => s.replayWelcome);
+  const resetTips = useGuideStore((s) => s.resetTips);
+  const addToast = useToastStore((s) => s.addToast);
+
+  const ghostButton =
+    'px-3 py-1.5 rounded-lg text-xs text-app-text-tertiary hover:text-app-text-primary hover:bg-app-bg-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-app-text-tertiary';
+
+  const handleResetTips = async () => {
+    const count = await resetTips();
+    addToast({
+      type: 'success',
+      title: count > 0 ? `已重置 ${count} 条功能提示` : '没有已读的功能提示',
+    });
+  };
 
   return (
+    <SettingGroup title="新手引导">
+      <SettingRow title="重新查看欢迎页" description="再次展示首次启动时的引导">
+        <button type="button" className={ghostButton} onClick={replayWelcome}>
+          查看
+        </button>
+      </SettingRow>
+      <SettingRow
+        title="重置功能提示"
+        description={
+          seenCount > 0
+            ? `已读 ${seenCount} 条，重置后将在对应功能中重新出现`
+            : '各功能首次使用时的一次性提示'
+        }
+      >
+        <button
+          type="button"
+          className={ghostButton}
+          disabled={seenCount === 0}
+          onClick={() => void handleResetTips()}
+        >
+          重置
+        </button>
+      </SettingRow>
+    </SettingGroup>
+  );
+}
+
+export function ManualSettings() {
+  return (
     <>
-      {/* 内置工具介绍 */}
-      <SettingGroup title="内置工具">
-        {toolsWithDescription.map((tool) => {
-          const Icon = tool.icon;
-          return (
-            <div
-              key={tool.id}
-              className="flex items-start gap-3 px-3 py-3"
-            >
-              <div className="w-9 h-9 rounded-lg bg-app-bg-elevated flex items-center justify-center flex-shrink-0">
-                <Icon className="text-app-text-secondary" size={18} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <h4 className="text-app-text-primary text-sm font-medium">{tool.name}</h4>
-                <p className="text-app-text-tertiary text-xs mt-0.5 leading-relaxed">{tool.description}</p>
-              </div>
-            </div>
-          );
-        })}
-      </SettingGroup>
+      {/* 新手引导（重看欢迎页 / 重置气泡） */}
+      <GuideSection />
 
       {/* 搜索框使用方法 */}
       <SettingGroup title="搜索框使用">
         {[
           {
             icon: <Search className="w-4 h-4 text-app-text-secondary" />,
-            title: '应用搜索',
-            desc: '在搜索框中输入应用名称，系统会实时显示匹配的程序。支持模糊搜索，无需输入完整名称。',
-          },
-          {
-            icon: <CommandIcon className="w-4 h-4 text-app-text-secondary" />,
-            title: '快速启动内置工具',
-            desc: '输入"剪贴板"、"笔记"、"密码"等关键词可直接启动对应工具。',
+            title: '搜索应用或命令/@快速调用命令',
+            desc: '输入应用名称或功能关键词实时匹配，支持模糊搜索；以 @ 开头直接调用对应功能（如 @time），空格后可带参数。',
           },
           {
             icon: <span className="text-app-text-secondary text-xs font-mono">Ctrl+V</span>,

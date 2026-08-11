@@ -522,15 +522,13 @@ export function MarkdownView() {
       {!isEditorFullscreen && (
         <aside
           className="flex flex-col transition-all duration-300"
-          style={{
-            width: '192px',
-            borderRight: `1px solid ${THEME.BORDER_DEFAULT}`,
-          }}
+          style={{ width: '192px' }}
         >
-          {/* Search and toolbar */}
+          {/* Search and toolbar：固定 48px，与右侧笔记标题栏同高，底线对齐成一条通栏线 */}
             <div
-              className="flex items-center gap-1 px-2 py-2"
+              className="flex items-center gap-1 px-2 h-12"
               style={{ borderBottom: `1px solid ${THEME.BORDER_DEFAULT}` }}
+              data-guide="markdown-toolbar"
             >
           <div
             className="flex-1 flex items-center gap-1.5 rounded-lg px-2 py-1.5 min-w-0"
@@ -745,9 +743,9 @@ export function MarkdownView() {
           </ErrorBoundary>
         ) : selectedNote && noteContent ? (
           <>
-            {/* Title Bar */}
+            {/* Title Bar：固定 48px 与左侧搜索行同高，底线与之连成通栏分割线 */}
             <div
-              className="px-6 py-3 flex items-center justify-between"
+              className="px-6 h-12 flex items-center justify-between"
               style={{ borderBottom: `1px solid ${THEME.BORDER_DEFAULT}` }}
             >
               <div className="flex-1 flex items-center gap-1.5 min-w-0">
@@ -936,7 +934,6 @@ export function MarkdownView() {
                 className="flex items-center justify-between px-6 py-1.5 text-xs"
                 style={{
                   backgroundColor: 'rgba(59, 130, 246, 0.12)',
-                  borderBottom: `1px solid ${THEME.BORDER_DEFAULT}`,
                   color: THEME.SELECTED,
                 }}
                 role="status"

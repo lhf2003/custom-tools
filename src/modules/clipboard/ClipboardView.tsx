@@ -484,7 +484,7 @@ export function ClipboardView() {
         </div>
 
         {/* List（外层 relative 容器承载固定组头槽位） */}
-        <div className="relative flex-1 min-h-0">
+        <div className="relative flex-1 min-h-0" data-guide="clipboard-list">
           {/* 滚动层顶部留出槽位高度（pt-8=32px）：静态时首条与槽位相接，
               滚动后内容从槽位下方滑过被遮盖 */}
           <div className="h-full overflow-y-auto px-1.5 pb-3 pt-8" onScroll={handleListScroll}>

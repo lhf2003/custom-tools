@@ -28,6 +28,7 @@ import { refreshExternalPlugins } from '@/plugins/external';
 import { getPluginShortcutConflicts } from '@/plugins/pluginShortcuts';
 import { PluginHost } from '@/plugins/PluginHost';
 import { useAutoHideScrollbar } from '@/hooks/useAutoHideScrollbar';
+import { WelcomeGuide, GuideTipLayer, useGuideStore } from '@/modules/guide';
 
 const SHELL_VIEWS: readonly ShellView[] = ['launcher', 'chat', 'settings'];
 
@@ -42,6 +43,21 @@ function App() {
   const [showChangelog, setShowChangelog] = useState(false);
   const [changelogData, setChangelogData] = useState<VersionCheckResult | null>(null);
   const [showAbout, setShowAbout] = useState(false);
+
+  // 操作引导：冷启动一次性初始化（窗口 hide/show 不重建 React 树，不会重复跑）
+  const guideReady = useGuideStore((s) => s.ready);
+  const welcomeDone = useGuideStore((s) => s.welcomeDone);
+  const initGuide = useGuideStore((s) => s.init);
+  const maybeShowTipFor = useGuideStore((s) => s.maybeShowTipFor);
+
+  useEffect(() => {
+    void initGuide();
+  }, [initGuide]);
+
+  // 视图切换触发该视图首条未读气泡；跨视图残留由 store 内静默清除
+  useEffect(() => {
+    maybeShowTipFor(activeView);
+  }, [activeView, guideReady, welcomeDone, maybeShowTipFor]);
 
   // Stable callback for toggle always on top
   const handleToggleAlwaysOnTop = useCallback(async () => {
@@ -120,6 +136,8 @@ function App() {
   // Check for unread changelogs on mount (after auto-update)
   useEffect(() => {
     const checkChangelogs = async () => {
+      // 欢迎页进行时不消费未读 changelog：教学优先级最高，未读标记保留到下次启动
+      if (!useGuideStore.getState().welcomeDone) return;
       try {
         const result = await invoke<VersionCheckResult>('check_version_changelog');
         if (result.unread_changelogs.length > 0) {
@@ -338,7 +356,17 @@ function App() {
       {/* 主题与窗口不透明度应用（无渲染） */}
       <ThemeController />
 
-      {renderView()}
+      {/* 首启欢迎页接管主窗口；init 未就绪时铺主题底色，避免启动器闪切欢迎页 */}
+      {!guideReady ? (
+        <div className="flex-1 panel-glass rounded-lg" />
+      ) : !welcomeDone ? (
+        <WelcomeGuide />
+      ) : (
+        renderView()
+      )}
+
+      {/* Update Notification（欢迎页期间抑制，不与教学叠罗汉） */}
+      {welcomeDone && <UpdateNotification />}
 
       {/* Update Notification */}
       <UpdateNotification />
@@ -355,6 +383,9 @@ function App() {
 
       {/* Toast Notifications */}
       <ToastContainer />
+
+      {/* 引导气泡层（锚定视图元素，同时至多一条） */}
+      <GuideTipLayer />
     </div>
   );
 }

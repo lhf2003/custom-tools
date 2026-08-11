@@ -99,7 +99,7 @@ python scripts/prompt_regression.py
 - `app_usage` - Tracks app launch frequency for search ranking
 - `settings` - User preferences
 
-**Global Shortcuts**: Registered in `lib.rs::register_shortcuts()`. Default: `Ctrl+Shift+Space` to toggle window visibility.
+**Global Shortcuts**: Registered in `lib.rs::register_shortcuts()`. Default: `Alt+Space` to toggle window visibility.
 
 **Window Behavior**:
 - Frameless transparent window
