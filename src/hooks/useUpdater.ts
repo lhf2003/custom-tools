@@ -1,5 +1,5 @@
-import { useState, useCallback } from 'react';
-import { Channel } from '@tauri-apps/api/core';
+import { useState, useCallback, useRef, useEffect } from 'react';
+import { listen } from '@tauri-apps/api/event';
 
 // Safe invoke for browser mode
 const safeInvoke = async (cmd: string, args?: Record<string, unknown>) => {
@@ -30,9 +30,35 @@ export function useUpdater() {
   const [isChecking, setIsChecking] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
-  // 已下载 MB：Content-Length 缺失（如代理 chunked 传输）时兜底展示
-  const [downloadedMB, setDownloadedMB] = useState(0);
+  // 已下载字节数：进度条按百分比；KB/MB 标签展示真实字节数（总大小缺失时兜底）
+  const [downloadedBytes, setDownloadedBytes] = useState(0);
   const [error, setError] = useState<string | null>(null);
+
+  // 下载期间累计字节数的同步引用：listen 回调是闭包，state 会过期
+  const totalDownloadedRef = useRef(0);
+  const totalSizeRef = useRef<number | null>(null);
+
+  // 订阅下载进度事件（Channel 在 WebView2 透明窗口下投递静默失败，改用 emit 事件流）
+  useEffect(() => {
+    const unlisten = listen<DownloadProgress>('update-download-progress', (event) => {
+      const msg = event.payload;
+      if (msg.event === 'Progress' && msg.data) {
+        totalDownloadedRef.current += msg.data.chunkLength;
+        setDownloadedBytes(totalDownloadedRef.current);
+        if (msg.data.contentLength) {
+          totalSizeRef.current = msg.data.contentLength;
+          setDownloadProgress(
+            Math.round((totalDownloadedRef.current / totalSizeRef.current) * 100)
+          );
+        }
+      } else if (msg.event === 'Finished') {
+        setDownloadProgress(100);
+      }
+    });
+    return () => {
+      unlisten.then((fn) => fn()).catch(() => {});
+    };
+  }, []);
 
   // Check for updates
   const checkForUpdate = useCallback(async () => {
@@ -59,33 +85,16 @@ export function useUpdater() {
 
     setIsDownloading(true);
     setDownloadProgress(0);
+    setDownloadedBytes(0);
+    totalDownloadedRef.current = 0;
+    totalSizeRef.current = null;
     setError(null);
 
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       const { relaunch } = await import('@tauri-apps/plugin-process');
 
-      // Create a channel for progress updates
-      const channel = new Channel<DownloadProgress>();
-      let totalDownloaded = 0;
-      let totalSize: number | null = null;
-
-      channel.onmessage = (message) => {
-        if (message.event === 'Progress' && message.data) {
-          totalDownloaded += message.data.chunkLength;
-          setDownloadedMB(Math.round(totalDownloaded / 1024 / 1024));
-          if (message.data.contentLength) {
-            totalSize = message.data.contentLength;
-            setDownloadProgress(Math.round((totalDownloaded / totalSize) * 100));
-          }
-        } else if (message.event === 'Finished') {
-          setDownloadProgress(100);
-        }
-      };
-
-      await invoke('download_and_install_update', {
-        onProgress: channel,
-      });
+      await invoke('download_and_install_update');
 
       // Save changelog before relaunching
       if (updateInfo?.version && updateInfo?.body) {
@@ -124,7 +133,7 @@ export function useUpdater() {
     isChecking,
     isDownloading,
     downloadProgress,
-    downloadedMB,
+    downloadedBytes,
     error,
     checkForUpdate,
     downloadAndInstall,

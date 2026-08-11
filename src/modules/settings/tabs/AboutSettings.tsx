@@ -8,6 +8,13 @@ import { ChangelogModal } from '../components/ChangelogModal';
 
 const TECH_STACK = ['Tauri 2.0', 'Rust', 'React 18', 'TypeScript', 'Vite', 'Tailwind CSS', 'SQLite', 'nucleo'];
 
+// 进度标签：有总大小时显示百分比，否则按 KB/MB 显示已下载量
+function formatProgress(progress: number, bytes: number): string {
+  if (progress > 0) return `${progress}%`;
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${Math.round(bytes / 1024)} KB`;
+}
+
 export function AboutSettings() {
   const [version, setVersion] = useState('');
   const [showChangelog, setShowChangelog] = useState(false);
@@ -17,7 +24,7 @@ export function AboutSettings() {
     isChecking,
     isDownloading,
     downloadProgress,
-    downloadedMB,
+    downloadedBytes,
     checkForUpdate,
     downloadAndInstall,
   } = useUpdater();
@@ -65,8 +72,7 @@ export function AboutSettings() {
           {isDownloading ? (
             <span className="flex items-center gap-1.5 text-xs text-app-text-tertiary">
               <RefreshCw size={12} className="animate-spin" />
-              下载中{' '}
-              {downloadProgress > 0 ? `${downloadProgress}%` : `${downloadedMB} MB`}
+              下载中 {formatProgress(downloadProgress, downloadedBytes)}
             </span>
           ) : updateInfo ? (
             <>

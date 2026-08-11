@@ -10,8 +10,15 @@ interface UpdateCheckResult {
 
 const RESULT_AUTO_DISMISS_MS = 5000;
 
+// 进度标签：有总大小时显示百分比，否则按 KB/MB 显示已下载量
+function formatProgress(progress: number, bytes: number): string {
+  if (progress > 0) return `${progress}%`;
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${Math.round(bytes / 1024)} KB`;
+}
+
 export function UpdateNotification() {
-  const { updateInfo, isDownloading, downloadProgress, downloadedMB, setUpdateInfo, downloadAndInstall } = useUpdater();
+  const { updateInfo, isDownloading, downloadProgress, downloadedBytes, setUpdateInfo, downloadAndInstall } = useUpdater();
   const [showNotification, setShowNotification] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const [checkResult, setCheckResult] = useState<UpdateCheckResult | null>(null);
@@ -149,7 +156,7 @@ export function UpdateNotification() {
                 正在下载...
               </span>
               <span className="text-blue-400">
-                {downloadProgress > 0 ? `${downloadProgress}%` : `${downloadedMB} MB`}
+                {formatProgress(downloadProgress, downloadedBytes)}
               </span>
             </div>
             <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">

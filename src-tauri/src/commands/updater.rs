@@ -62,10 +62,9 @@ pub async fn check_for_update(app: AppHandle) -> Result<Option<UpdateInfo>, Stri
 }
 
 #[tauri::command]
-pub async fn download_and_install_update(
-    app: AppHandle,
-    on_progress: tauri::ipc::Channel<DownloadProgress>,
-) -> Result<(), String> {
+pub async fn download_and_install_update(app: AppHandle) -> Result<(), String> {
+    use tauri::Emitter;
+
     // Take the cached update — no second HTTP check needed
     let update = {
         let state = app
@@ -77,20 +76,60 @@ pub async fn download_and_install_update(
             .ok_or("No cached update, please check for updates first")?
     };
 
+    log::info!(
+        "Starting download: {} (url logged by reqwest on connect)",
+        update.version
+    );
+
+    let chunk_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let bytes_received = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let app_for_chunks = app.clone();
+    let app_for_finish = app.clone();
+    let chunk_count_chunks = chunk_count.clone();
+    let bytes_received_chunks = bytes_received.clone();
+    let chunk_count_finish = chunk_count.clone();
+    let bytes_received_finish = bytes_received.clone();
     update
         .download_and_install(
-            |chunk_length, content_length| {
-                let _ = on_progress.send(DownloadProgress::Progress {
-                    chunk_length,
-                    content_length,
-                });
+            move |chunk_length, content_length| {
+                let n =
+                    chunk_count_chunks.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                let bytes =
+                    bytes_received_chunks.fetch_add(chunk_length as u64, std::sync::atomic::Ordering::Relaxed)
+                        + chunk_length as u64;
+                if n == 1 || n % 500 == 0 {
+                    log::info!(
+                        "[download] chunk #{n}, +{chunk_length}B, total {bytes}B, content_length {content_length:?}"
+                    );
+                }
+                // emit 事件流（替代 Channel——后者在 WebView2 透明窗口下投递被静默吞）
+                let _ = app_for_chunks.emit(
+                    "update-download-progress",
+                    DownloadProgress::Progress {
+                        chunk_length,
+                        content_length,
+                    },
+                );
             },
-            || {
-                let _ = on_progress.send(DownloadProgress::Finished);
+            move || {
+                log::info!(
+                    "[download] finished: {} chunks, {} bytes",
+                    chunk_count_finish.load(std::sync::atomic::Ordering::Relaxed),
+                    bytes_received_finish.load(std::sync::atomic::Ordering::Relaxed)
+                );
+                let _ = app_for_finish.emit("update-download-progress", DownloadProgress::Finished);
             },
         )
         .await
-        .map_err(|e| format!("Download/install failed: {}", e))?;
+        .map_err(|e| {
+            log::error!(
+                "[download] failed after {} chunks / {} bytes: {}",
+                chunk_count.load(std::sync::atomic::Ordering::Relaxed),
+                bytes_received.load(std::sync::atomic::Ordering::Relaxed),
+                e
+            );
+            format!("Download/install failed: {}", e)
+        })?;
 
     Ok(())
 }
