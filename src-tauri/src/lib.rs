@@ -745,7 +745,8 @@ impl WindowFocusState {
 
 // State to store the previous focused window for auto-paste
 pub struct PreviousFocusedWindow {
-    hwnd: Arc<Mutex<isize>>, // 0 means no valid window
+    hwnd: Arc<Mutex<isize>>,          // 0 means no valid window
+    cursor: Arc<Mutex<(i32, i32)>>,   // 呼出剪贴板时鼠标位置，粘贴完成后还原到此处
 }
 
 impl Default for PreviousFocusedWindow {
@@ -758,12 +759,19 @@ impl PreviousFocusedWindow {
     pub fn new() -> Self {
         Self {
             hwnd: Arc::new(Mutex::new(0)),
+            cursor: Arc::new(Mutex::new((0, 0))),
         }
     }
 
     pub fn store(&self, hwnd: isize) {
         if let Ok(mut guard) = self.hwnd.lock() {
             *guard = hwnd;
+        }
+    }
+
+    pub fn store_cursor(&self, pos: (i32, i32)) {
+        if let Ok(mut guard) = self.cursor.lock() {
+            *guard = pos;
         }
     }
 
@@ -777,20 +785,32 @@ impl PreviousFocusedWindow {
             }
         })
     }
+
+    pub fn get_cursor(&self) -> Option<(i32, i32)> {
+        self.cursor.lock().ok().map(|c| *c)
+    }
 }
 
-/// 捕获当前前台窗口的 HWND，存入 PreviousFocusedWindow 状态（用于自动粘贴）。
+/// 捕获当前前台窗口的 HWND 与鼠标位置，存入 PreviousFocusedWindow 状态
+/// （用于自动粘贴：粘贴后鼠标还原到呼出剪贴板时的位置，而不是双击条目的位置）。
 #[cfg(windows)]
 pub(crate) fn capture_prev_window_hwnd(app_handle: &tauri::AppHandle) {
     if let Some(prev_window_state) = app_handle.try_state::<PreviousFocusedWindow>() {
         unsafe {
-            use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+            use windows::Win32::Foundation::POINT;
+            use windows::Win32::UI::WindowsAndMessaging::{
+                GetCursorPos, GetForegroundWindow,
+            };
             let hwnd = GetForegroundWindow();
             if !hwnd.0.is_null() {
                 prev_window_state.store(hwnd.0 as isize);
                 log::info!("Captured previous window HWND: {}", hwnd.0 as isize);
             } else {
                 log::warn!("GetForegroundWindow returned null, cannot capture");
+            }
+            let mut cursor_pos = POINT::default();
+            if GetCursorPos(&mut cursor_pos).is_ok() {
+                prev_window_state.store_cursor((cursor_pos.x, cursor_pos.y));
             }
         }
     } else {
