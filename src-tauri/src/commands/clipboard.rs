@@ -7,20 +7,18 @@ use crate::clipboard::ClipboardSuppressFlag;
 use crate::db::DatabaseState;
 
 #[cfg(windows)]
-use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 #[cfg(windows)]
 use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 #[cfg(windows)]
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    MapVirtualKeyW, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT,
-    KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, MAPVK_VK_TO_VSC, MOUSEEVENTF_LEFTDOWN,
-    MOUSEEVENTF_LEFTUP, MOUSEINPUT, VIRTUAL_KEY, VK_CONTROL, VK_V,
+    MapVirtualKeyW, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS,
+    KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, MAPVK_VK_TO_VSC, VIRTUAL_KEY, VK_CONTROL, VK_V,
 };
 #[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::{
-    BringWindowToTop, GetCursorPos, GetForegroundWindow, GetGUIThreadInfo, GetWindowRect,
-    GetWindowTextW, GetWindowThreadProcessId, GUITHREADINFO, IsWindow, IsWindowVisible,
-    SetCursorPos, SetForegroundWindow,
+    BringWindowToTop, GetForegroundWindow, GetGUIThreadInfo, GetWindowTextW,
+    GetWindowThreadProcessId, GUITHREADINFO, IsWindow, IsWindowVisible, SetForegroundWindow,
 };
 
 /// Result type for clipboard read operations
@@ -1008,13 +1006,9 @@ pub fn paste_to_clipboard_item(
             );
             #[cfg(windows)]
             {
-                // 呼出剪贴板时（用户在目标窗口操作时）的鼠标位置，粘贴完成后还原到此处
-                let restore_cursor = app_handle
-                    .try_state::<crate::PreviousFocusedWindow>()
-                    .and_then(|state| state.get_cursor());
                 // Small delay to ensure window is hidden and target is ready
                 std::thread::sleep(std::time::Duration::from_millis(50));
-                unsafe { simulate_paste_to_window(hwnd, restore_cursor) };
+                unsafe { simulate_paste_to_window(hwnd) };
             }
         } else {
             log::info!("No previous focused window available, only copied to clipboard");
@@ -1033,14 +1027,8 @@ pub fn paste_to_clipboard_item(
 /// 1. 所有按键带真实扫描码（MapVirtualKeyW 转换），而非纯虚拟键码
 /// 2. 前台激活：ALT trick + AttachThreadInput 兜底，发送前轮询
 ///    GetForegroundWindow 确认目标窗口真正拿到前台焦点
-/// restore_cursor：呼出剪贴板时（用户在目标窗口操作时）的鼠标位置，
-/// 点击标题栏后还原到此处——而非双击条目时的位置（剪贴板窗口位于屏幕
-/// 顶部，还原到那里鼠标会悬停在目标窗口顶部，看起来像"飘移"）。
 #[cfg(windows)]
-unsafe fn simulate_paste_to_window(
-    target_hwnd: isize,
-    restore_cursor: Option<(i32, i32)>,
-) {
+unsafe fn simulate_paste_to_window(target_hwnd: isize) {
     // Validate the window still exists
     let hwnd = HWND(target_hwnd as *mut _);
     if !IsWindow(Some(hwnd)).as_bool() {
@@ -1121,88 +1109,20 @@ unsafe fn simulate_paste_to_window(
     // Chromium（VS Code）/Java（IDEA）只有在 WA_CLICKACTIVE（鼠标点击激活）
     // 时才恢复内部键盘焦点——所以 Windows 层焦点正确、Ctrl+V 仍会被吞。
     //
-    // 激活方式首选消息级标题栏点击：向目标窗口发送 WM_NCLBUTTONDOWN/UP
+    // 激活方式采用消息级标题栏点击：向目标窗口发送 WM_NCLBUTTONDOWN/UP
     // （wParam=HTCAPTION），系统默认处理触发与真实点击相同的 WA_CLICKACTIVE
     // 激活（AHK 类工具的窗口激活标准做法），但鼠标完全不移动——没有飘移，
     // 也不会误触标题栏上的交互控件（浏览器标签页、微信搜索框、控制按钮）。
     // 无真实鼠标按下时系统检测不到左键状态，不会启动窗口拖拽循环。
-    // 个别应用会丢弃合成消息，此时回退为真实鼠标点击标题栏。
     send_nclbutton_click(hwnd);
-    // 确认前台归属：窗口销毁/挂起（SendMessageTimeout 超时）时不会成为前台，
-    // 需要回退真实点击；已在前台则消息点击路径成立
-    let mut real_click_needed = true;
+    // 等待目标窗口成为前台（窗口销毁/挂起导致 SendMessageTimeout 超时时
+    // 可能失败，但 Ctrl+V 仍会发出，仅记录日志便于排查）
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(150);
     while std::time::Instant::now() < deadline {
         if GetForegroundWindow() == hwnd {
-            real_click_needed = false;
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
-    }
-    if real_click_needed {
-        log::warn!("Message-level titlebar click did not activate window, falling back to real click");
-    }
-
-    if real_click_needed {
-        // ── 回退：真实鼠标点击标题栏 ──
-        // 点击标题栏不改动编辑器光标；点击后还原鼠标坐标，用户无感。
-        let mut cursor_pos = POINT::default();
-        let has_cursor = GetCursorPos(&mut cursor_pos).is_ok();
-        // 还原目标：呼出剪贴板时的鼠标位置（用户仍在目标窗口操作的位置）；
-        // 取不到时兜底为当前（双击条目时）的位置
-        let restore_pos = restore_cursor
-            .or_else(|| has_cursor.then(|| (cursor_pos.x, cursor_pos.y)))
-            .unwrap_or((cursor_pos.x, cursor_pos.y));
-        let mut rect = RECT::default();
-        if GetWindowRect(hwnd, &mut rect).is_ok() {
-            // 物理屏幕坐标。不用 MOUSEEVENTF_ABSOLUTE 归一化坐标——其 0-65535
-            // 映射对副屏（负坐标）会算错，点击落到错误屏幕
-            // 点击点 x 优先贴近当前鼠标位置（只做垂直小距离移动，避免鼠标
-            // 大范围横跳——目标窗口最大化时标题栏与剪贴板窗口同在屏幕顶部，
-            // 鼠标几乎不动），但强制避开标题栏左侧图标区(~60px)与右侧窗口
-            // 控制按钮区(~160px)，防止误触图标菜单/最小化/关闭。
-            let safe_left = rect.left + 60;
-            let safe_right = rect.right - 160;
-            let x = if safe_left < safe_right {
-                if has_cursor {
-                    cursor_pos.x.clamp(safe_left, safe_right)
-                } else {
-                    (rect.left + rect.right) / 2
-                }
-            } else {
-                (rect.left + rect.right) / 2 // 窄窗口退化居中
-            };
-            let y = rect.top + 10;
-            let _ = SetCursorPos(x, y);
-            // 相对模式点击：鼠标已在标题栏位置，dx/dy 置 0
-            let click = |flags: windows::Win32::UI::Input::KeyboardAndMouse::MOUSE_EVENT_FLAGS| {
-                INPUT {
-                    r#type: INPUT_MOUSE,
-                    Anonymous: INPUT_0 {
-                        mi: MOUSEINPUT {
-                            dx: 0,
-                            dy: 0,
-                            mouseData: 0,
-                            dwFlags: flags,
-                            time: 0,
-                            dwExtraInfo: 0,
-                        },
-                    },
-                }
-            };
-            SendInput(
-                &[click(MOUSEEVENTF_LEFTDOWN), click(MOUSEEVENTF_LEFTUP)],
-                std::mem::size_of::<INPUT>() as i32,
-            );
-            // 保留鼠标在标题栏片刻再还原：CEF/Chromium（微信等）对 down→up
-            // 之间的鼠标位移敏感，点击后立即瞬移鼠标会被判定为拖拽而非点击，
-            // WA_CLICKACTIVE 激活失效（微信实测无法粘贴）。50ms 足够完成点击
-            // 序列处理，且人眼几乎无感。
-            std::thread::sleep(std::time::Duration::from_millis(50));
-            // 还原鼠标到呼出剪贴板前的位置（用户仍在目标窗口操作的位置），
-            // 避免还原到屏幕顶部悬空被用户看到"飘移"。
-            let _ = SetCursorPos(restore_pos.0, restore_pos.1);
-        }
     }
 
     // 等窗口完成用户级激活与内部焦点恢复（IDE 激活慢，需留出时间）
