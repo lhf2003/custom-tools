@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { RotateCcw, AlertCircle } from 'lucide-react';
 import { Tooltip } from '@/components/Tooltip';
 import { useSettingsStore, type ShortcutConfig } from '@/stores/settingsStore';
+import { confirmDialog } from '@/stores/confirmStore';
 import { useExternalPluginsStore } from '@/stores/externalPluginsStore';
 import { useToastStore } from '@/stores/toastStore';
 import {
@@ -106,12 +107,17 @@ export function ShortcutsSettings() {
     config.custom_keys !== null && config.custom_keys !== config.default_keys;
 
   const handleResetAll = async () => {
-    if (confirm('确定要重置所有快捷键为默认值吗？')) {
-      try {
-        await resetAllShortcuts();
-      } catch (err) {
-        console.error('Failed to reset all shortcuts:', err);
-      }
+    const ok = await confirmDialog({
+      title: '重置快捷键',
+      message: '确定要重置所有快捷键为默认值吗？',
+      danger: true,
+      confirmLabel: '重置',
+    });
+    if (!ok) return;
+    try {
+      await resetAllShortcuts();
+    } catch (err) {
+      console.error('Failed to reset all shortcuts:', err);
     }
   };
 

@@ -201,11 +201,31 @@ impl LlmProviderDb {
         })
     }
 
-    pub fn delete_provider(&self, conn: &Connection, id: i64) -> Result<bool, String> {
-        let rows_affected = conn
+    /// 删除提供商：先解除下游引用再删本体（事务原子）。
+    /// llm_scene_configs.provider_id 引用无 CASCADE——外键开启时直接删会被
+    /// "FOREIGN KEY constraint failed" 拦截（场景配置绑定的提供商删不掉）；
+    /// llm_models 是 ON DELETE CASCADE，但显式删一遍不依赖外键开关。
+    pub fn delete_provider(&self, conn: &mut Connection, id: i64) -> Result<bool, String> {
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("开启删除事务失败: {}", e))?;
+
+        // 场景配置解除对该提供商的引用（场景行保留，provider/model 置空 = 清除配置）
+        tx.execute(
+            "UPDATE llm_scene_configs SET provider_id = NULL, model_id = NULL WHERE provider_id = ?1",
+            [id],
+        )
+        .map_err(|e| format!("清理场景配置失败: {}", e))?;
+
+        // 其下模型一并删除（双保险：CASCADE 之外显式清）
+        tx.execute("DELETE FROM llm_models WHERE provider_id = ?1", [id])
+            .map_err(|e| format!("删除模型失败: {}", e))?;
+
+        let rows_affected = tx
             .execute("DELETE FROM llm_providers WHERE id = ?1", [id])
             .map_err(|e| format!("删除提供商失败: {}", e))?;
 
+        tx.commit().map_err(|e| format!("提交删除事务失败: {}", e))?;
         Ok(rows_affected > 0)
     }
 

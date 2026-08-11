@@ -58,9 +58,9 @@ pub async fn update_llm_provider(
 
 #[tauri::command]
 pub async fn delete_llm_provider(db: State<'_, DatabaseState>, id: i64) -> Result<bool, String> {
-    let conn = Connection::open(&db.0).map_err(|e| format!("打开数据库失败: {}", e))?;
+    let mut conn = Connection::open(&db.0).map_err(|e| format!("打开数据库失败: {}", e))?;
     let db_ops = LlmProviderDb;
-    db_ops.delete_provider(&conn, id)
+    db_ops.delete_provider(&mut conn, id)
 }
 
 #[tauri::command]

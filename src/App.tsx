@@ -14,6 +14,8 @@ import { UpdateNotification } from '@/components/UpdateNotification';
 import { ChangelogDialog } from '@/components/ChangelogDialog';
 import { AboutDialog } from '@/components/AboutDialog';
 import { ToastContainer } from '@/components/Toast';
+import { ConfirmDialogHost } from '@/components/ConfirmDialog';
+import { confirmDialog } from '@/stores/confirmStore';
 import type { VersionCheckResult } from '@/components/ChangelogDialog';
 import type { MenuItem, OpenViewDetail, ShellView } from '@/types';
 import {
@@ -70,7 +72,14 @@ function App() {
 
   // 恢复所有设置为默认值
   const handleResetSettings = useCallback(async () => {
-    if (!confirm('确定要恢复所有设置为默认值吗？（包括 LLM 配置）')) return;
+    const ok = await confirmDialog({
+      title: '恢复默认设置',
+      message: '确定要恢复所有设置为默认值吗？',
+      detail: '包括 LLM 配置。',
+      danger: true,
+      confirmLabel: '恢复默认',
+    });
+    if (!ok) return;
     try {
       await invoke('reset_settings');
       await loadSettings();
@@ -383,6 +392,9 @@ function App() {
 
       {/* Toast Notifications */}
       <ToastContainer />
+
+      {/* 全局确认弹窗（原生 confirm 在 WebView2 不可用，危险操作统一走这里） */}
+      <ConfirmDialogHost />
 
       {/* 引导气泡层（锚定视图元素，同时至多一条） */}
       <GuideTipLayer />

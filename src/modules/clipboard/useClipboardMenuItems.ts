@@ -4,6 +4,7 @@ import { save } from '@tauri-apps/plugin-dialog';
 import { ClipboardPaste, Copy, Download, FolderOpen, Sparkles, Star, Trash2 } from 'lucide-react';
 import { useClipboardSelectionStore } from '@/stores/clipboardSelectionStore';
 import { useToastStore } from '@/stores/toastStore';
+import { confirmDialog } from '@/stores/confirmStore';
 import type { MenuItem } from '@/types';
 
 type ClipboardEntryAction = 'paste' | 'copy' | 'favorite' | 'delete' | 'reveal' | 'send-to-ai';
@@ -86,12 +87,16 @@ export function useClipboardMenuItems(): MenuItem[] {
 
   // 清空剪贴板历史（keepFavorites=true 时仅删除非收藏记录）
   const handleClearClipboard = useCallback(async (keepFavorites: boolean) => {
-    const confirmed = confirm(
-      keepFavorites
+    const ok = await confirmDialog({
+      title: keepFavorites ? '删除非收藏记录' : '清空剪贴板历史',
+      message: keepFavorites
         ? '确定要删除所有非收藏的剪贴板记录吗？'
-        : '确定要清空所有剪贴板历史吗？（含收藏）'
-    );
-    if (!confirmed) return;
+        : '确定要清空所有剪贴板历史吗？',
+      detail: keepFavorites ? undefined : '此操作会同时删除收藏项。',
+      danger: true,
+      confirmLabel: keepFavorites ? '删除' : '清空',
+    });
+    if (!ok) return;
     try {
       const count = await invoke<number>('clear_clipboard_history', { keepFavorites });
       addToast({

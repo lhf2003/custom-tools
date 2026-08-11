@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Bot,
   Plus,
@@ -17,10 +17,13 @@ import {
   BookHeart,
   FolderOpen,
   RotateCcw,
+  X,
 } from 'lucide-react';
 import { Tooltip } from '@/components/Tooltip';
 import { useLlmProviderStore, type Provider, type ProviderType, type Model, type Scene } from '@/stores/llmProviderStore';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { useToastStore } from '@/stores/toastStore';
+import { confirmDialog } from '@/stores/confirmStore';
 import { SettingGroup, SettingRow, Toggle } from '../components/SettingsPrimitives';
 import { CustomSelect, type SelectGroup } from '../components/CustomSelect';
 import { LlmObserveSection } from './stats/LlmObserveSection';
@@ -67,6 +70,7 @@ const smallInputClass =
   'bg-app-bg-tertiary text-app-text-secondary text-xs rounded px-1.5 py-1 outline-none border border-app-border-subtle focus:border-app-border-emphasis transition-colors placeholder:text-app-text-placeholder';
 
 export function ModelSettings() {
+  const { addToast } = useToastStore();
   const {
     providers,
     models,
@@ -187,11 +191,22 @@ export function ModelSettings() {
   };
 
   // Cancel form
-  const handleCancelForm = () => {
+  const handleCancelForm = useCallback(() => {
     setIsAddingProvider(false);
     setEditingProvider(null);
     setFormData({ name: '', label: '', providerType: 'openai', baseUrl: '', apiKey: '' });
-  };
+  }, []);
+
+  // 弹窗 ESC 关闭
+  const providerFormOpen = isAddingProvider || editingProvider !== null;
+  useEffect(() => {
+    if (!providerFormOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') handleCancelForm();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [providerFormOpen, handleCancelForm]);
 
   // Handle provider type change
   const handleProviderTypeChange = (type: ProviderType) => {
@@ -245,6 +260,9 @@ export function ModelSettings() {
     setRefreshingProvider(providerId);
     try {
       await refreshProviderModels(providerId);
+    } catch (err) {
+      // 安装版无 DevTools：错误已由 store 落盘日志，这里 toast 即时提示
+      addToast({ type: 'error', title: '刷新模型失败', message: String(err) });
     } finally {
       setRefreshingProvider(null);
     }
@@ -252,8 +270,19 @@ export function ModelSettings() {
 
   // Delete provider
   const handleDeleteProvider = async (providerId: number) => {
-    if (confirm('确定要删除此提供商吗？')) {
+    const ok = await confirmDialog({
+      title: '删除提供商',
+      message: '确定要删除此提供商吗？',
+      detail: '此操作不可恢复。',
+      danger: true,
+      confirmLabel: '删除',
+    });
+    if (!ok) return;
+    try {
       await deleteProvider(providerId);
+    } catch (err) {
+      // alert 在 WebView2 弹不出，用 Toast 保证失败可见
+      addToast({ type: 'error', title: '删除提供商失败', message: String(err) });
     }
   };
 
@@ -300,9 +329,9 @@ export function ModelSettings() {
 
   const isFormValid = formData.name && formData.label && formData.baseUrl;
 
-  // 提供商行内编辑/添加表单（模态 → 行内：添加时插列表顶部，编辑时替换展开区）
+  // 提供商添加/编辑表单（弹窗内容，外壳在下方 Modal 里）
   const renderProviderForm = () => (
-    <div className="px-4 py-4 bg-app-bg-tertiary">
+    <div>
       <div className="space-y-3">
         {/* Provider Type（仅新建时可选） */}
         {!editingProvider && (
@@ -494,9 +523,6 @@ export function ModelSettings() {
           </button>
         }
       >
-        {/* 添加表单（行内展开于列表顶部） */}
-        {isAddingProvider && renderProviderForm()}
-
         {isLoading ? (
           <p className="px-3 py-6 text-center text-app-text-disabled text-sm">加载中...</p>
         ) : providers.length === 0 ? (
@@ -595,11 +621,8 @@ export function ModelSettings() {
                   </div>
                 </div>
 
-                {/* 编辑表单（行内替换展开区） */}
-                {editingProvider?.id === provider.id ? (
-                  renderProviderForm()
-                ) : (
-                  isExpanded && (
+                {/* 展开区（模型列表；编辑改弹窗，不再替换此处） */}
+                {isExpanded && (
                     <div className="px-3 pb-3 pl-9">
                       {/* 展开区头部：可用模型 + 筛选 + 刷新 */}
                       <div className="flex items-center justify-between py-1.5 gap-2">
@@ -712,8 +735,7 @@ export function ModelSettings() {
                         </div>
                       )}
                     </div>
-                  )
-                )}
+                  )}
               </div>
             );
           })
@@ -850,6 +872,35 @@ export function ModelSettings() {
 
       {/* 模型调用观测：各功能的 LLM 调用次数、token、耗时与成本 */}
       <LlmObserveSection />
+
+      {/* 提供商添加/编辑弹窗（设置页玻璃面板范式；ESC/遮罩点击/X 均关闭） */}
+      {providerFormOpen && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) handleCancelForm();
+          }}
+          role="dialog"
+          aria-modal="true"
+          aria-label={editingProvider ? '编辑提供商' : '添加提供商'}
+        >
+          <div className="w-[480px] bg-app-bg-tertiary border border-app-border rounded-xl shadow-2xl p-5 animate-in fade-in duration-100">
+            {/* Header */}
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold text-app-text-primary">
+                {editingProvider ? '编辑提供商' : '添加提供商'}
+              </h3>
+              <button
+                onClick={handleCancelForm}
+                className="p-1.5 rounded-lg text-app-text-tertiary hover:text-app-text-primary hover:bg-app-bg-hover transition-colors cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            {renderProviderForm()}
+          </div>
+        </div>
+      )}
     </>
   );
 }

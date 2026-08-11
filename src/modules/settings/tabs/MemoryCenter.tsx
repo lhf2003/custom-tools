@@ -13,6 +13,7 @@ import {
   Brain,
 } from 'lucide-react';
 import { Tooltip } from '@/components/Tooltip';
+import { confirmDialog } from '@/stores/confirmStore';
 import { useToastStore } from '@/stores/toastStore';
 import { CustomSelect } from '../components/CustomSelect';
 
@@ -145,7 +146,14 @@ export function MemoryCenter({ onBack }: MemoryCenterProps) {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('确定删除这条记忆吗？（变更历史会保留在审计记录里）')) return;
+    const ok = await confirmDialog({
+      title: '删除记忆',
+      message: '确定删除这条记忆吗？',
+      detail: '变更历史会保留在审计记录里。',
+      danger: true,
+      confirmLabel: '删除',
+    });
+    if (!ok) return;
     try {
       await invoke('delete_companion_memory_fact', { id });
       await loadData();

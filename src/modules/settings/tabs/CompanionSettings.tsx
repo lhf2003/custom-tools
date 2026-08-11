@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useToastStore } from '@/stores/toastStore';
+import { confirmDialog } from '@/stores/confirmStore';
 import { Tooltip } from '@/components/Tooltip';
 import { SettingGroup, SettingRow, Toggle } from '../components/SettingsPrimitives';
 import { CustomSelect } from '../components/CustomSelect';
@@ -127,7 +128,14 @@ export function CompanionSettings() {
   };
 
   const handleClearData = async () => {
-    if (!confirm('确定要清空全部采集的活动数据吗？此操作不可恢复。')) return;
+    const ok = await confirmDialog({
+      title: '清空采集数据',
+      message: '确定要清空全部采集的活动数据吗？',
+      detail: '此操作不可恢复。',
+      danger: true,
+      confirmLabel: '清空',
+    });
+    if (!ok) return;
     try {
       await invoke('clear_companion_activities');
       addToast({ type: 'success', title: '已清空采集数据' });

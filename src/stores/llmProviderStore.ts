@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
+import { error as logError } from '@tauri-apps/plugin-log';
 
 export type ProviderType = 'openai' | 'ollama' | 'deepseek' | 'bailian' | 'custom';
 export type ConnectionStatus = 'unknown' | 'connected' | 'disconnected' | 'error';
@@ -190,6 +191,8 @@ export const useLlmProviderStore = create<LlmProviderState>((set, get) => ({
       return models;
     } catch (err) {
       console.error('Failed to refresh models:', err);
+      // 安装版无 DevTools，错误必须落盘（%LOCALAPPDATA%\com.flowhub.app\logs）才能排查
+      logError(`刷新模型列表失败 (providerId=${id}): ${err}`).catch(() => {});
       throw err;
     }
   },
@@ -213,6 +216,7 @@ export const useLlmProviderStore = create<LlmProviderState>((set, get) => ({
       return models;
     } catch (err) {
       console.error('Failed to load models:', err);
+      logError(`加载模型列表失败 (providerId=${providerId}): ${err}`).catch(() => {});
       throw err;
     }
   },

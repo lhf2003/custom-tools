@@ -10,6 +10,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { useToastStore } from '@/stores/toastStore';
+import { confirmDialog } from '@/stores/confirmStore';
 
 interface ManualInfo {
   name: string;
@@ -131,9 +132,14 @@ export function EvolutionGovernance({ onBack }: EvolutionGovernanceProps) {
   };
 
   const handleRollback = async (entry: BackupEntry) => {
-    if (!confirm(`把 ${entry.file} 回滚到 ${formatStamp(entry.stamp)} 的版本？\n当前版本会先自动备份。`)) {
-      return;
-    }
+    const ok = await confirmDialog({
+      title: '回滚备份',
+      message: `把 ${entry.file} 回滚到 ${formatStamp(entry.stamp)} 的版本？`,
+      detail: '当前版本会先自动备份。',
+      danger: true,
+      confirmLabel: '回滚',
+    });
+    if (!ok) return;
     try {
       await invoke('rollback_evolution_backup', { file: entry.file, stamp: entry.stamp });
       addToast({ type: 'success', title: '已回滚', message: entry.file });

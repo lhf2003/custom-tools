@@ -8,6 +8,7 @@ import { MenuPanel } from '@/components/ActionMenu';
 import { useToastStore } from '@/stores/toastStore';
 import { Tooltip } from '@/components/Tooltip';
 import { useExternalPluginsStore, type ExternalPluginItem } from '@/stores/externalPluginsStore';
+import { confirmDialog } from '@/stores/confirmStore';
 import {
   isBuiltInPluginEnabled,
   listPlugins,
@@ -326,7 +327,14 @@ export function PluginMarketSettings({ onOpenPluginSettings }: PluginMarketSetti
   }, [pendingEnable, load, addToast]);
 
   const handleUninstall = useCallback(async (item: ExternalPluginItem) => {
-    if (!confirm(`确定要卸载插件「${item.manifest.name}」吗？将删除其插件目录。`)) return;
+    const ok = await confirmDialog({
+      title: '卸载插件',
+      message: `确定要卸载插件「${item.manifest.name}」吗？`,
+      detail: '将删除其插件目录。',
+      danger: true,
+      confirmLabel: '卸载',
+    });
+    if (!ok) return;
     try {
       await invoke('uninstall_plugin', { pluginId: item.manifest.id });
       await load();
