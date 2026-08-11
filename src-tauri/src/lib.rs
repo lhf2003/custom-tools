@@ -897,22 +897,13 @@ async fn check_update_from_tray(app_handle: tauri::AppHandle) {
                 app_version
             );
 
-            // Cache the update for later install
-            if let Some(state) = app_handle.try_state::<commands::updater::PendingUpdate>() {
-                if let Ok(mut guard) = state.0.lock() {
-                    *guard = Some(update.clone());
-                }
-            }
+            // 重写下载 URL（关代理走镜像）+ 缓存 + 构造展示信息（与命令/启动路径共用）
+            let update_info = commands::updater::cache_update(&app_handle, update);
 
             // Show main window so user can see the update UI
             show_main_window(&app_handle);
 
             // Emit event to frontend to show update UI
-            let update_info = commands::updater::UpdateInfo {
-                version: update.version.clone(),
-                date: update.date.as_ref().map(|d| d.to_string()),
-                body: update.body.clone(),
-            };
             if let Err(e) = app_handle.emit("update-available", update_info) {
                 log::warn!("Failed to emit update-available event: {}", e);
             }
@@ -950,22 +941,13 @@ async fn check_update_on_startup(app_handle: tauri::AppHandle) {
                 app_version
             );
 
-            // Cache the update for later install
-            if let Some(state) = app_handle.try_state::<commands::updater::PendingUpdate>() {
-                if let Ok(mut guard) = state.0.lock() {
-                    *guard = Some(update.clone());
-                }
-            }
+            // 重写下载 URL（关代理走镜像）+ 缓存 + 构造展示信息（与命令/托盘路径共用）
+            let update_info = commands::updater::cache_update(&app_handle, update);
 
             // Show main window so user can see the update UI
             show_main_window(&app_handle);
 
             // Emit event to frontend to show update UI
-            let update_info = commands::updater::UpdateInfo {
-                version: update.version.clone(),
-                date: update.date.as_ref().map(|d| d.to_string()),
-                body: update.body.clone(),
-            };
             if let Err(e) = app_handle.emit("update-available", update_info) {
                 log::warn!("Failed to emit update-available event: {}", e);
             }

@@ -54,7 +54,9 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENGNEE0MzY5NDc1OUFBN0QKUldSOXFsbEhhVU5Lejk1eUN3V3ZJTTBMZm1uQlZzZUZ6NlZJNkFxaHBIRXRMSlU3YjFzb1pjYzUK",
       "endpoints": [
-        "https://github.com/lhf2003/custom-tools/releases/latest/download/latest.json"
+        "https://github.com/lhf2003/custom-tools/releases/latest/download/latest.json",
+        "https://gh-proxy.com/https://github.com/lhf2003/custom-tools/releases/latest/download/latest.json",
+        "https://ghfast.top/https://github.com/lhf2003/custom-tools/releases/latest/download/latest.json"
       ]
     },
     "process": {},

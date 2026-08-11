@@ -162,7 +162,8 @@ fn build_proxies(specs: &[ProxySpec]) -> Vec<Proxy> {
 
 /// 当前代理配置：(开关, 代理字符串)。开关来自设置内存缓存；
 /// 代理字符串只在开启时读注册表。句柄未设置（MCP 模式）或读取失败 → 直连。
-fn current_proxy_config() -> (bool, String) {
+/// pub(crate)：updater.rs 据开关决定是否把下载 URL 重写为镜像。
+pub(crate) fn current_proxy_config() -> (bool, String) {
     let handle = APP_HANDLE.get();
     let mut enabled = false;
     if let Some(handle) = handle {
