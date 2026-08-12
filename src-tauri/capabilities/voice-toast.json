@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "voice-toast",
+  "description": "全局语音输入浮窗的最小权限集（事件监听 + 窗口隐藏/拖动）",
+  "windows": [
+    "voice-toast"
+  ],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:event:allow-listen",
+    "core:window:default",
+    "core:window:allow-hide",
+    "core:window:allow-start-dragging"
+  ]
+}

@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { AlertTriangle, Coffee, Rocket, X, Sparkles, Pin, Sunrise, Music, Zap, FileText, HelpCircle } from 'lucide-react';
 import { Tooltip } from '@/components/Tooltip';
+import { speakText, stopSpeech } from '@/utils/speech';
 
 interface Suggestion {
   id: number;
@@ -137,6 +138,8 @@ export default function CompanionToast() {
   // 出队当前条：队列还有下一条则自动展示（suggestion 变化 → 回执 effect → 重新 show），
   // 队列已空则隐藏窗口；相邻两条都是未知应用标注时先藏窗冷却，到点再放行下一条
   const advance = useCallback(() => {
+    // 卡片关闭即停播（下一条若存在，它的播报会自然接管）
+    stopSpeech();
     // 新卡片复位操作态；冷却期不允许旧倒计时残留（否则到点会再触发一次 advance）
     setActing(false);
     if (timerRef.current !== null) {
@@ -228,6 +231,10 @@ export default function CompanionToast() {
   // 透明窗口若先 show 后渲染，首帧全透明会定格/闪帧
   useEffect(() => {
     if (!suggestion) return;
+    // 语音播报：卡片出现即开口（开关/Key/设备在 Rust 端裁决，失败静默）
+    void speakText(
+      suggestion.body ? `${suggestion.title}。${suggestion.body}` : suggestion.title,
+    ).catch(() => {});
     let cancelled = false;
     const raf = requestAnimationFrame(() => {
       requestAnimationFrame(() => {

@@ -5,7 +5,11 @@ import remarkGfm from 'remark-gfm';
 import {
   ArrowLeft,
   ArrowUp,
+  Loader2,
+  Mic,
   Plus,
+  Square,
+  Volume2,
   X,
   Check,
   History,
@@ -18,6 +22,8 @@ import { WINDOW_SIZE } from '@/constants/window';
 import { A2uiSurface } from './a2ui/A2uiSurface';
 import { parseActionMessage } from './a2ui/action';
 import { ModelSelector } from './ModelSelector';
+import { useVoiceInput } from './useVoiceInput';
+import { speakMarkdown, stopSpeech } from '@/utils/speech';
 
 // ─────────────────────────────────────────────
 // Types
@@ -278,6 +284,33 @@ export function ChatView() {
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const streamTextRef = useRef('');
+
+  // 语音输入：转写文本追加进草稿（待确认后手动发送），错误走统一 error 条
+  const voiceInput = useVoiceInput({
+    onTranscribed: useCallback((text: string) => {
+      setInput((prev) => prev + text);
+      textareaRef.current?.focus();
+    }, []),
+    onError: useCallback((message: string) => setError(message), []),
+  });
+
+  // 消息重播：正在播报的消息下标（Rust 播完/被打断广播 moss:tts:done 清态）
+  const [playingIdx, setPlayingIdx] = useState<number | null>(null);
+
+  /** 朗读/停止一条回复:播报中再点即停;新播报后端自动打断旧的 */
+  const handleSpeakMessage = useCallback(
+    (idx: number, content: string) => {
+      if (playingIdx === idx) {
+        stopSpeech();
+        setPlayingIdx(null);
+        return;
+      }
+      setPlayingIdx(idx);
+      void speakMarkdown(content).catch(() => setPlayingIdx(null));
+    },
+    [playingIdx],
+  );
+
   const responseBodyRef = useRef<HTMLDivElement>(null);
   const isCancelledRef = useRef(false);
   const sessionIdRef = useRef<number | null>(null);
@@ -286,16 +319,8 @@ export function ChatView() {
   const historyBtnRef = useRef<HTMLButtonElement>(null);
   const historyPanelRef = useRef<HTMLDivElement>(null);
 
-  // Consume prefill: 原文填入输入框（companion 错误分析 / 剪贴板「发送给AI」共用通道，包装文案由发送方组装）
-  useEffect(() => {
-    if (chatPrefill) {
-      setInput(chatPrefill);
-      setChatPrefill(null);
-      setMode('chat');
-      // 等视图切换渲染完成后聚焦
-      setTimeout(() => textareaRef.current?.focus(), 100);
-    }
-  }, [chatPrefill, setChatPrefill]);
+  // Consume prefill 的 effect 在 handleSend 定义之后
+  // （autoSend 直发要用代发通道，受声明顺序约束）
 
   // keep ref in sync with state (used inside event callbacks)
   useEffect(() => {
@@ -403,6 +428,8 @@ export function ChatView() {
             console.error('Failed to save assistant message:', e);
           }
         }
+        // 语音播报回复全文（开关/Key/设备在 Rust 端裁决，失败静默）
+        void speakMarkdown(finalText).catch(() => {});
         pokeRecall();
       });
       const u3 = await listen<string>('llm:error', (event) => {
@@ -451,6 +478,8 @@ export function ChatView() {
             console.error('Failed to save assistant message:', e);
           }
         }
+        // 语音播报回复全文（开关/Key/设备在 Rust 端裁决，失败静默）
+        void speakMarkdown(finalText).catch(() => {});
         pokeRecall();
       });
       const u6 = await listen<string>('jarvis:error', (event) => {
@@ -484,11 +513,15 @@ export function ChatView() {
           );
         },
       );
+      // TTS 播完/被打断（interrupt 或收流自然结束都会广播）：清掉消息重播的播放态
+      const u10 = await listen<void>('moss:tts:done', () => {
+        setPlayingIdx(null);
+      });
       if (!active) {
-        u1(); u2(); u3(); u4(); u5(); u6(); u7(); u8(); u9();
+        u1(); u2(); u3(); u4(); u5(); u6(); u7(); u8(); u9(); u10();
         return;
       }
-      unlistenFns = [u1, u2, u3, u4, u5, u6, u7, u8, u9];
+      unlistenFns = [u1, u2, u3, u4, u5, u6, u7, u8, u9, u10];
     };
 
     setupListeners();
@@ -508,6 +541,8 @@ export function ChatView() {
     // 复位取消标记：清空/取消/切换会话会置 true，若不复位，
     // 本轮回复的 chunk 会被监听器全部丢弃，最终消息既不回显也不入库
     isCancelledRef.current = false;
+    // 发新消息打断上一条播报（接着念旧回复会很怪）
+    stopSpeech();
 
     const userMessage: ChatMessage = { role: 'user', content };
     const systemMessage: ChatMessage = {
@@ -565,6 +600,33 @@ export function ChatView() {
     }
   }, [input, isLoading, messages, mode]);
 
+  // Consume prefill: 原文填入输入框（companion 错误分析 / 剪贴板「发送给AI」共用通道，
+  // 包装文案由发送方组装）;autoSend(语音输入)走代发通道直接发送,不进草稿
+  useEffect(() => {
+    if (chatPrefill) {
+      const autoSend = useAppStore.getState().chatPrefillAutoSend;
+      setChatPrefill(null);
+      setMode('chat');
+      if (autoSend) {
+        // 等会话恢复(sessionId 就绪)再代发,否则消息不入库;
+        // 2s 轮询上限兜底(restoreSession 总会 setSessionId,含新建分支)
+        let tries = 0;
+        const trySend = () => {
+          if (sessionIdRef.current !== null) {
+            void handleSend(chatPrefill);
+          } else if (++tries < 20) {
+            setTimeout(trySend, 100);
+          }
+        };
+        trySend();
+        return;
+      }
+      setInput(chatPrefill);
+      // 等视图切换渲染完成后聚焦
+      setTimeout(() => textareaRef.current?.focus(), 100);
+    }
+  }, [chatPrefill, setChatPrefill, handleSend]);
+
   // ── Restore session when mode changes ────────────────────────────
   useEffect(() => {
     const restoreModeSession = async () => {
@@ -606,6 +668,7 @@ export function ChatView() {
 
   // ── Cancel streaming ──────────────────────────────────────────────
   const handleCancel = useCallback(async () => {
+    stopSpeech();
     isCancelledRef.current = true;
     setCancelled(true);
     setIsLoading(false);
@@ -626,6 +689,7 @@ export function ChatView() {
     setHistoryOpen(false);
     // 先取消后端在飞流式，避免旧会话回调继续改状态
     invoke('jarvis_chat_cancel').catch(() => {});
+    stopSpeech();
     isCancelledRef.current = true;
     setMessages([]);
     setStreamText('');
@@ -959,8 +1023,27 @@ export function ChatView() {
                 />
               </div>
             ) : (
-              <div className="max-w-[90%] prose prose-invert prose-sm max-w-none prose-p:my-1.5 prose-headings:mt-3 prose-headings:mb-1.5 prose-pre:bg-zinc-800 prose-pre:border prose-pre:border-zinc-700 prose-pre:rounded-lg prose-code:text-emerald-300 prose-code:bg-zinc-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-a:text-blue-400 prose-strong:text-zinc-200">
-                <AssistantContent text={msg.content} />
+              <div className="max-w-[90%] group">
+                <div className="prose prose-invert prose-sm max-w-none prose-p:my-1.5 prose-headings:mt-3 prose-headings:mb-1.5 prose-pre:bg-zinc-800 prose-pre:border prose-pre:border-zinc-700 prose-pre:rounded-lg prose-code:text-emerald-300 prose-code:bg-zinc-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-a:text-blue-400 prose-strong:text-zinc-200">
+                  <AssistantContent text={msg.content} />
+                </div>
+                {/* 重播入口:hover 浮现;播报中常亮方块,再点即停 */}
+                <button
+                  type="button"
+                  onClick={() => handleSpeakMessage(idx, msg.content)}
+                  className={`mt-1 w-6 h-6 rounded-md flex items-center justify-center transition-all cursor-pointer ${
+                    playingIdx === idx
+                      ? 'text-indigo-400 opacity-100'
+                      : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/10 opacity-0 group-hover:opacity-100'
+                  }`}
+                  aria-label={playingIdx === idx ? '停止播报' : '朗读这条回复'}
+                >
+                  {playingIdx === idx ? (
+                    <Square className="w-3.5 h-3.5" />
+                  ) : (
+                    <Volume2 className="w-3.5 h-3.5" />
+                  )}
+                </button>
               </div>
             )}
           </div>
@@ -1054,6 +1137,33 @@ export function ChatView() {
               <X className="w-4 h-4" />
             </button>
           )}
+
+          {/* Voice input：点击开始录音、再点停止转写，文本追加进输入框 */}
+          <button
+            type="button"
+            onClick={voiceInput.toggle}
+            disabled={voiceInput.state === 'transcribing'}
+            className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-all ${
+              voiceInput.state === 'recording'
+                ? 'text-red-400 bg-red-400/10 animate-pulse cursor-pointer'
+                : voiceInput.state === 'transcribing'
+                  ? 'text-zinc-500 cursor-wait'
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/10 cursor-pointer'
+            }`}
+            aria-label={
+              voiceInput.state === 'recording'
+                ? '停止录音'
+                : voiceInput.state === 'transcribing'
+                  ? '语音转写中'
+                  : '语音输入'
+            }
+          >
+            {voiceInput.state === 'transcribing' ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Mic className="w-4 h-4" />
+            )}
+          </button>
 
           {/* Send button（贾维斯通道在飞时可排队发送） */}
           <button

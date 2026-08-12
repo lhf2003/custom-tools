@@ -73,11 +73,13 @@ pub mod game_mode;
 pub mod http;
 pub mod llm;
 pub mod llm_provider;
+pub mod moss;
 pub mod notes;
 pub mod password;
 pub mod search;
 pub mod settings;
 pub mod translate;
+pub mod voice;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -446,6 +448,10 @@ pub fn run() {
                 app.manage(translate::PendingTranslateToast::default());
             }
 
+            // 预创建全局语音输入浮窗（隐藏）:Ctrl+Alt+V 唤醒录音,范式同划词翻译浮窗
+            voice::preload_window(app);
+            app.manage(voice::VoiceToastState::default());
+
             // 启动陪伴模块（窗口活动采集 + 情境建议 + LLM 习惯分析）
             {
                 let companion_db_path = app.path().app_data_dir().unwrap().join(DB_FILE_NAME);
@@ -464,6 +470,9 @@ pub fn run() {
                 app.manage(companion::scene_chat::JarvisSceneChatState::default());
                 app.manage(companion::websearch::WebSearchState::default());
             }
+
+            // Moss 语音播报:当前播报句柄(音频流按次开关,跟随系统默认设备)
+            app.manage(moss::tts::TtsState::new());
 
             log::info!("Application setup completed");
             Ok(())
@@ -488,6 +497,7 @@ pub fn run() {
             commands::clipboard::get_clipboard_image_base64,
             commands::clipboard::handle_pasted_file,
             commands::clipboard::read_clipboard_image,
+            commands::clipboard::read_clipboard_text,
             commands::clipboard::read_image_file_as_base64,
             commands::notes::get_notes_directory,
             commands::notes::get_note_tree,
@@ -600,6 +610,18 @@ pub fn run() {
             llm_provider::commands::get_scene_configs,
             llm_provider::commands::set_scene_model,
             llm_provider::commands::get_scene_model,
+            // Moss 语音服务(Key 管理 + 音频转写)
+            moss::moss_key_status,
+            moss::moss_set_api_key,
+            moss::moss_transcribe,
+            // Moss 流式 TTS 播报
+            moss::tts::moss_tts_speak,
+            moss::tts::moss_tts_stop,
+            // 全局语音输入浮窗
+            voice::voice_take_pending_toggle,
+            voice::voice_bar_ready,
+            voice::voice_set_phase,
+            voice::voice_send_to_chat,
             // Companion commands
             commands::companion::get_companion_suggestions,
             commands::companion::act_on_companion_suggestion,

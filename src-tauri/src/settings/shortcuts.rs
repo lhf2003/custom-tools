@@ -40,6 +40,7 @@ pub enum ShortcutAction {
     OpenSettings,
     OpenEverything,
     TranslateSelection,
+    VoiceInput,
 }
 
 impl ShortcutAction {
@@ -52,6 +53,7 @@ impl ShortcutAction {
             ShortcutAction::OpenSettings => "open_settings",
             ShortcutAction::OpenEverything => "open_everything",
             ShortcutAction::TranslateSelection => "translate_selection",
+            ShortcutAction::VoiceInput => "voice_input",
         }
     }
 
@@ -64,6 +66,7 @@ impl ShortcutAction {
             "open_settings" => Some(ShortcutAction::OpenSettings),
             "open_everything" => Some(ShortcutAction::OpenEverything),
             "translate_selection" => Some(ShortcutAction::TranslateSelection),
+            "voice_input" => Some(ShortcutAction::VoiceInput),
             _ => None,
         }
     }
@@ -125,6 +128,14 @@ pub fn get_default_shortcuts() -> Vec<ShortcutConfig> {
             name: "划词翻译".to_string(),
             description: "翻译当前选中的文本".to_string(),
             default_keys: "Ctrl+Shift+T".to_string(),
+            custom_keys: None,
+            enabled: true,
+        },
+        ShortcutConfig {
+            id: "voice_input".to_string(),
+            name: "语音输入".to_string(),
+            description: "唤醒全局语音输入浮窗（开始/结束录音）".to_string(),
+            default_keys: "Ctrl+Alt+V".to_string(),
             custom_keys: None,
             enabled: true,
         },
@@ -605,6 +616,10 @@ fn handle_shortcut_action(app_handle: &AppHandle, action_id: &str) {
         // 划词翻译：捕获选区 → 弹浮窗 → 流式翻译（不碰主窗口，前台焦点留在原应用）
         "translate_selection" => {
             crate::translate::trigger_selection_translate(app_handle);
+        }
+        // 语音输入：toggle 浮窗录音（不碰主窗口；开始/结束由浮窗前端按状态裁决）
+        "voice_input" => {
+            crate::voice::toggle(app_handle);
         }
         "open_clipboard" | "open_notes" | "open_passwords" | "open_settings"
         | "open_everything" => {

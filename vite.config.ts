@@ -24,6 +24,7 @@ export default defineConfig({
         main: path.resolve(__dirname, 'index.html'),
         'companion-toast': path.resolve(__dirname, 'companion-toast.html'),
         'translate-toast': path.resolve(__dirname, 'translate-toast.html'),
+        'voice-toast': path.resolve(__dirname, 'voice-toast.html'),
       },
     },
   },

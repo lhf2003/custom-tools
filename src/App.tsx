@@ -15,6 +15,7 @@ import { ChangelogDialog } from '@/components/ChangelogDialog';
 import { AboutDialog } from '@/components/AboutDialog';
 import { ToastContainer } from '@/components/Toast';
 import { ConfirmDialogHost } from '@/components/ConfirmDialog';
+import { GlobalContextMenu } from '@/components/GlobalContextMenu';
 import { confirmDialog } from '@/stores/confirmStore';
 import type { VersionCheckResult } from '@/components/ChangelogDialog';
 import type { MenuItem, OpenViewDetail, ShellView } from '@/types';
@@ -193,12 +194,14 @@ function App() {
   // Handle keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        if (activeView !== 'launcher') {
-          setActiveView('launcher');
-        } else {
-          toggleWindow();
-        }
+      if (e.key !== 'Escape') return;
+      // 浮层（弹窗/右键菜单/放大预览等）消费过的 Escape 不再落到壳：
+      // 约定消费方 e.preventDefault() 标记，壳见 defaultPrevented 直接放行
+      if (e.defaultPrevented) return;
+      if (activeView !== 'launcher') {
+        setActiveView('launcher');
+      } else {
+        toggleWindow();
       }
     };
 
@@ -255,6 +258,20 @@ function App() {
     return () => {
       unlisten.then((fn) => fn()).catch((err: unknown) => {
         console.error('Failed to cleanup companion:analyze listener:', err);
+      });
+    };
+  }, [setActiveView]);
+
+  // 全局语音输入「发送给 AI 聊天」（voice-toast 浮窗经 Rust 中转）：
+  // autoSend 直发——语音场景零键盘，不再等一次回车
+  useEffect(() => {
+    const unlisten = listen<string>('voice:chat_send', (event) => {
+      useAppStore.getState().setChatPrefill(event.payload, true);
+      setActiveView('chat');
+    });
+    return () => {
+      unlisten.then((fn) => fn()).catch((err: unknown) => {
+        console.error('Failed to cleanup voice:chat_send listener:', err);
       });
     };
   }, [setActiveView]);
@@ -398,6 +415,9 @@ function App() {
 
       {/* 引导气泡层（锚定视图元素，同时至多一条） */}
       <GuideTipLayer />
+
+      {/* 全局右键菜单：替代 WebView 原生菜单；空白区项复用导航栏公共项 */}
+      <GlobalContextMenu fallbackItems={commonMenuItems} />
     </div>
   );
 }

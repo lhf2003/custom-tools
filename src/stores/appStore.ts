@@ -25,8 +25,10 @@ interface AppState {
   consumePayload: (id: string) => unknown;
 
   // Chat prefill (set by companion "AI 分析" suggestion)
+  // autoSend=true:语音输入「发送给 AI」等场景——填入即直接发送,不进输入框草稿
   chatPrefill: string | null;
-  setChatPrefill: (data: string | null) => void;
+  chatPrefillAutoSend: boolean;
+  setChatPrefill: (data: string | null, autoSend?: boolean) => void;
 
   // Loading states
   isLoading: boolean;
@@ -82,7 +84,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   // Chat prefill
   chatPrefill: null,
-  setChatPrefill: (data) => set({ chatPrefill: data }),
+  chatPrefillAutoSend: false,
+  setChatPrefill: (data, autoSend = false) =>
+    set({ chatPrefill: data, chatPrefillAutoSend: data !== null && autoSend }),
 
   // Loading
   isLoading: false,
