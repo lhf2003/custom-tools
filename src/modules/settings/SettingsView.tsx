@@ -79,7 +79,7 @@ const MISC_NAV_GROUP: NavGroup = {
   ],
 };
 
-/** 固定 tab 内容（插件市场与插件设置 tab 走动态渲染，不在此表） */
+/** 固定 tab 内容（插件市场/插件设置/操作手册需回调 prop，走动态渲染，不在此表） */
 const STATIC_TAB_CONTENT: Record<string, React.ReactNode> = {
   general: <GeneralSettings />,
   builtin: <BuiltinSettings />,
@@ -90,7 +90,6 @@ const STATIC_TAB_CONTENT: Record<string, React.ReactNode> = {
   companion: <CompanionSettings />,
   stats: <StatsSettings />,
   advanced: <AdvancedSettings />,
-  manual: <ManualSettings />,
   about: <AboutSettings />,
 };
 
@@ -161,6 +160,9 @@ export function SettingsView() {
     );
   } else if (activeTab === 'plugin-market') {
     content = <PluginMarketSettings onOpenPluginSettings={openPluginSettings} />;
+  } else if (activeTab === 'manual') {
+    // 操作手册内含「前往快捷键」等 tab 跳转入口
+    content = <ManualSettings onNavigateTab={setActiveTab} />;
   } else {
     content = STATIC_TAB_CONTENT[activeTab] ?? STATIC_TAB_CONTENT.general;
   }
