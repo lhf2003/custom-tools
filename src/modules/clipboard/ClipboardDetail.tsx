@@ -354,10 +354,14 @@ function ImageContent({ item }: { item: ClipboardItemData }) {
   useEffect(() => {
     if (!zoomed) return;
     const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setZoomed(false);
+      if (e.key !== 'Escape') return;
+      // 挂 document（冒泡先于壳的 window 监听触发）+ preventDefault 标记已消费，
+      // 避免关放大预览的同时被壳的 Escape 带回启动器
+      e.preventDefault();
+      setZoomed(false);
     };
-    window.addEventListener('keydown', handleEsc);
-    return () => window.removeEventListener('keydown', handleEsc);
+    document.addEventListener('keydown', handleEsc);
+    return () => document.removeEventListener('keydown', handleEsc);
   }, [zoomed]);
 
   if (!src) {

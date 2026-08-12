@@ -5,6 +5,7 @@ import { Copy, Check, Eraser, Languages, Loader2 } from 'lucide-react';
 import { useToastStore } from '@/stores/toastStore';
 import { Tooltip } from '@/components/Tooltip';
 import { CustomSelect } from '@/modules/settings/components/CustomSelect';
+import { usePluginPayload } from '@/plugins/usePluginPayload';
 import { TARGET_LANG_OPTIONS, TARGET_LANG_KEY, DEFAULT_TARGET_LANG } from './constants';
 
 /** translate:chunk / done / error 事件的统一壳（与 Rust 端 TranslateEventPayload 对应） */
@@ -65,22 +66,43 @@ export function TranslateView() {
     };
   }, []);
 
-  const handleTranslate = useCallback(async () => {
-    const text = source.trim();
-    if (!text) return;
-    if (status === 'translating') return;
+  // 开始一次翻译（文本显式传入，供按钮与外部预填共用；新请求覆盖旧 id，旧流块天然被忽略）
+  const startTranslate = useCallback(
+    async (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
 
-    setTranslation('');
-    setErrorMsg('');
-    setStatus('translating');
-    try {
-      const id = await invoke<number>('translate_text', { text, targetLang });
-      ownIdRef.current = id;
-    } catch (err) {
-      setStatus('error');
-      setErrorMsg(err instanceof Error ? err.message : String(err));
-    }
-  }, [source, targetLang, status]);
+      setTranslation('');
+      setErrorMsg('');
+      setStatus('translating');
+      try {
+        const id = await invoke<number>('translate_text', { text: trimmed, targetLang });
+        ownIdRef.current = id;
+      } catch (err) {
+        setStatus('error');
+        setErrorMsg(err instanceof Error ? err.message : String(err));
+      }
+    },
+    [targetLang],
+  );
+
+  const handleTranslate = useCallback(() => {
+    if (status === 'translating') return;
+    void startTranslate(source);
+  }, [source, status, startTranslate]);
+
+  // 外部入口预填（全局右键菜单「翻译所选」）：填入原文并直接开译
+  usePluginPayload(
+    'translate',
+    useCallback(
+      (payload: unknown) => {
+        if (typeof payload !== 'string' || !payload.trim()) return;
+        setSource(payload);
+        void startTranslate(payload);
+      },
+      [startTranslate],
+    ),
+  );
 
   const handleCopy = useCallback(async () => {
     if (!translation) return;

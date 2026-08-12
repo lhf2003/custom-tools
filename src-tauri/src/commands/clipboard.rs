@@ -705,6 +705,66 @@ pub fn read_clipboard_image() -> Result<ClipboardReadResult, String> {
     })
 }
 
+/// Read clipboard text from backend using Windows API.
+/// 供全局右键菜单「粘贴」用：WebView2 中 navigator.clipboard.readText 受权限约束不可靠，
+/// 与 read_clipboard_image 同理由走后端。无文本返回 Ok(None)。
+#[cfg(windows)]
+#[tauri::command]
+pub fn read_clipboard_text() -> Result<Option<String>, String> {
+    use windows::Win32::System::DataExchange::{CloseClipboard, OpenClipboard};
+
+    unsafe {
+        if OpenClipboard(None).is_err() {
+            return Err("Failed to open clipboard".to_string());
+        }
+
+        let result = read_clipboard_text_inner();
+        let _ = CloseClipboard();
+
+        result
+    }
+}
+
+#[cfg(not(windows))]
+#[tauri::command]
+pub fn read_clipboard_text() -> Result<Option<String>, String> {
+    Ok(None)
+}
+
+#[cfg(windows)]
+unsafe fn read_clipboard_text_inner() -> Result<Option<String>, String> {
+    use windows::Win32::System::DataExchange::GetClipboardData;
+    use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
+
+    const CF_UNICODETEXT: u32 = 13;
+
+    let handle = GetClipboardData(CF_UNICODETEXT).map_err(|e| e.to_string())?;
+    if handle.is_invalid() {
+        return Ok(None);
+    }
+
+    let hglobal = windows::Win32::Foundation::HGLOBAL(handle.0);
+    let ptr = GlobalLock(hglobal);
+    if ptr.is_null() {
+        return Ok(None);
+    }
+
+    let size = GlobalSize(hglobal);
+    let wide_slice = std::slice::from_raw_parts(ptr as *const u16, size / 2);
+    let len = wide_slice
+        .iter()
+        .position(|&c| c == 0)
+        .unwrap_or(wide_slice.len());
+    let text = String::from_utf16_lossy(&wide_slice[..len]);
+    let _ = GlobalUnlock(hglobal);
+
+    if text.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(text))
+    }
+}
+
 #[cfg(windows)]
 unsafe fn read_clipboard_content_inner() -> Result<ClipboardReadResult, String> {
     use windows::Win32::System::DataExchange::GetClipboardData;

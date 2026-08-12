@@ -158,7 +158,7 @@ components:
 
 **Key Characteristics:**
 - 深色一体表面（#1e1e21 基座），五档表面明度均匀拉开（相邻档差 ≥0.03 OKLCH L）
-- 浅色主题为同系镜像（#fafafa 基座，五档反向拉开），禁止引入新色相
+- 浅色主题为同系镜像（#ffffff 基座，五档反向拉开），禁止引入新色相
 - OS 窗口材质（Mica/Acrylic/Blur）即分层的第一手段
 - Signal Indigo 点睛，面积 ≤10%
 - 无营销级大字号；最大字级是 18px 搜索框

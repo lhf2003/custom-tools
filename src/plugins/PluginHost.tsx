@@ -67,7 +67,10 @@ export function PluginHost({ plugin, commonMenuItems, onBack }: PluginHostProps)
       }
     };
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setContextMenu(null);
+      if (e.key !== 'Escape') return;
+      // preventDefault 标记已消费：壳的 Escape（返回启动器/隐藏窗口）不再响应本次按键
+      e.preventDefault();
+      setContextMenu(null);
     };
     document.addEventListener('mousedown', handleMouseDown);
     document.addEventListener('keydown', handleKeyDown);
@@ -78,7 +81,7 @@ export function PluginHost({ plugin, commonMenuItems, onBack }: PluginHostProps)
   }, [contextMenu]);
 
   const handleContextMenu = (e: React.MouseEvent) => {
-    // 输入框/文本域内保留 WebView 原生编辑菜单（剪切/复制/粘贴）
+    // 输入框/文本域不弹插件菜单,交给全局右键菜单(剪切/复制/粘贴)
     if ((e.target as HTMLElement).closest('input, textarea')) return;
     e.preventDefault();
     const MENU_WIDTH = 240;

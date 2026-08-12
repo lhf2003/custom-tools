@@ -28,6 +28,8 @@ export function ContextMenu({ items, position, onClose }: ContextMenuProps) {
 
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        // preventDefault 标记已消费：壳的 Escape（返回启动器/隐藏窗口）不再响应本次按键
+        e.preventDefault();
         onClose();
       }
     };
