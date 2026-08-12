@@ -42,9 +42,9 @@ const PREVIEW_COLORS: Record<Exclude<ThemeMode, 'system'>, PreviewSideColors> = 
   'orange-sea': {
     titlebar: 'rgba(26, 32, 36, 0.92)',
     sidebar: 'rgba(33, 40, 44, 0.92)',
-    content: 'linear-gradient(180deg, #4d3828 0%, #33403c 46%, #1b3a45 100%)',
+    content: 'linear-gradient(180deg, #553521 0%, #384944 46%, #234c59 100%)',
     text: '#a9ada7',
-    border: 'rgba(251, 146, 60, 0.35)',
+    border: 'rgba(251, 132, 50, 0.35)',
   },
 };
 

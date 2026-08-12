@@ -246,10 +246,10 @@
   --app-border-subtle: rgba(255, 255, 255, 0.06);
 
   /* 品牌：橘子点睛 + 海青辅助 */
-  --app-brand-primary: #fb923c;
-  --app-brand-primary-light: #fdba74;  /* 选中文字亮橘，实测 9.76:1 on primary */
+  --app-brand-primary: #fb8432;
+  --app-brand-primary-light: #fdae6c;  /* 选中文字亮橘，对比度 ≈9:1 on primary */
   --app-brand-secondary: #2dd4bf;
-  --app-brand-selected: #fb923c;
+  --app-brand-selected: #fb8432;
 
   /* 状态色：沿用深色族；info 换深橘实体底（白字 5.18:1 达标） */
   --app-status-info: #c2410c;
@@ -271,9 +271,9 @@
   --app-panel-rgb: 26 32 36;
   --app-panel-bg:
     radial-gradient(140% 120% at 50% 45%, transparent 56%, rgb(10 13 15 / calc(0.30 * var(--app-panel-alpha))) 100%) fixed,
-    radial-gradient(120% 90% at 50% -12%, rgb(232 130 64 / calc(0.32 * var(--app-panel-alpha))), transparent 55%) fixed,
-    radial-gradient(130% 100% at 50% 118%, rgb(38 110 128 / calc(0.34 * var(--app-panel-alpha))), transparent 62%) fixed,
-    linear-gradient(180deg, rgb(77 56 40 / var(--app-panel-alpha)) 0%, rgb(51 64 60 / var(--app-panel-alpha)) 46%, rgb(27 58 69 / var(--app-panel-alpha)) 100%) fixed;
+    radial-gradient(120% 90% at 50% -12%, rgb(240 120 52 / calc(0.32 * var(--app-panel-alpha))), transparent 55%) fixed,
+    radial-gradient(130% 100% at 50% 118%, rgb(46 130 148 / calc(0.34 * var(--app-panel-alpha))), transparent 62%) fixed,
+    linear-gradient(180deg, rgb(85 53 33 / var(--app-panel-alpha)) 0%, rgb(56 73 68 / var(--app-panel-alpha)) 46%, rgb(35 76 89 / var(--app-panel-alpha)) 100%) fixed;
 }
 
 /* 海面渐变：烟熏棕橙（天）→ 深海青绿（海），雾状光晕 + 轻暗角。

@@ -227,7 +227,7 @@ components:
 ### 主题族架构与橘子海（2026-08-06）
 外观系统升级为两层：`data-theme` 是具体主题（dark / light / orange-sea），`data-theme-family` 是明暗族（dark / light）。全部浅色类级覆盖挂 `[data-theme-family='light']`，深色族新增主题（如橘子海）对覆盖层零改动。新主题登记三处：`ThemeController.tsx` 的 `THEME_FAMILY`、index.css 的 `[data-theme='<id>']` token 块、两个 html 防闪屏脚本的 FAMILY 映射。`theme=system` 只在 zinc dark/light 间跟随，变体主题一律显式选择。
 
-**橘子海（orange-sea，深色族）**：暮色氛围变体——青相深色表面（#1a2024→#414b51 五档，档差节奏同深色族）浮在烟熏棕橙→深海青绿的海面渐变上。墨阶暖白纸透青灰尾（#f5f2eb / #dbd8cf / #a9ada7 / #71766f / placeholder #949a92 双达标）；品牌橘 #fb923c 点睛（选中文字用更亮的 #fdba74），海青 #2dd4bf 作第二品牌色；主按钮实体底用深橘 #c2410c（白字 5.18:1，hover #9a3412）。海面渐变由 body 自绘（垂直渐变 + 橙/青双雾状光晕 + 30% 暗角），放弃 OS 材质穿透——材质即暮色，是本系统「Material-First」的极限表达。
+**橘子海（orange-sea，深色族）**：暮色氛围变体——青相深色表面（#1a2024→#414b51 五档，档差节奏同深色族）浮在暖橙→亮青的海面渐变上（2026-08-12 暖化/提亮：主渐变 #553521→#384944→#234c59，天橙光晕 rgb(240 120 52)、海底光晕 rgb(46 130 148)、30% 暗角）。墨阶暖白纸透青灰尾（#f5f2eb / #dbd8cf / #a9ada7 / #71766f / placeholder #949a92 双达标）；品牌橘 #fb8432 点睛（选中文字用更亮的 #fdae6c，≈9:1），海青 #2dd4bf 作第二品牌色；主按钮实体底用深橘 #c2410c（白字 5.18:1，hover #9a3412）。海面渐变由 --app-panel-bg 承担（逐层 fixed，--app-panel-alpha 乘进色标随全局透明度滑杆；勿挂 body，会被不透明面板盖死），放弃 OS 材质穿透——材质即暮色，是本系统「Material-First」的极限表达。设置页主题预览卡（GeneralSettings.tsx）按主渐变三色 + 品牌橘硬编码示意，调色时同步。
 
 ### Named Rules
 **The One Voice Rule.** Signal Indigo 在任何单屏面积 ≤10%。它的稀缺性就是它的意义——满屏靛蓝等于没有品牌。
