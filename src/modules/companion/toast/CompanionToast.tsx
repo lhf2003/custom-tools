@@ -19,6 +19,11 @@ interface Suggestion {
 /** 无操作自动隐藏时间（秒） */
 const AUTO_HIDE_SECONDS = 15;
 
+/** 未知应用标注链的弹窗间隔（秒）：相邻两条都是标注提醒时，上一条关闭后藏窗冷却
+ *  这么久再弹下一条——给用户留出去设置页填描述的时间，否则第一个标注还没填完，
+ *  第二个弹窗就出来抢焦点 */
+const ANNOTATION_GAP_SECONDS = 20;
+
 /** 纯提示型（与 Rust suggester::INFO_TYPES 一致）：accept 无后续动作，
  *  推送即落 seen——卡片只展示，不渲染按钮，关闭只是本地隐藏 */
 const INFO_TYPES = new Set([
@@ -106,13 +111,19 @@ const DEFAULT_META: TypeMeta = {
 const ACTION_TYPES = new Set(['work_suite', 'context_routine', 'error_analysis', 'app_unknown']);
 
 export default function CompanionToast() {
-  // 展示队列：分析轮可能连发多条建议（如多个未知应用），逐条展示、关闭后出队下一条
+  // 展示队列：分析轮可能连发多条建议（如多个未知应用），逐条展示、关闭后出队下一条。
+  // queueRef 是同步真值源——emit 追加与 advance 出队落在同一宏任务时以 ref 为准，
+  // 不丢新到的建议；queue 只是它的渲染镜像
+  const queueRef = useRef<Suggestion[]>([]);
   const [queue, setQueue] = useState<Suggestion[]>([]);
-  const suggestion = queue[0] ?? null;
+  // 标注冷却期：上一条未知应用标注关闭后，藏窗冷却再放行队列里的下一条标注
+  const [cooldown, setCooldown] = useState(false);
+  const suggestion = cooldown ? null : (queue[0] ?? null);
   const [countdown, setCountdown] = useState(AUTO_HIDE_SECONDS);
   const [acting, setActing] = useState(false);
   const timerRef = useRef<number | null>(null);
   const suggestionIdRef = useRef<number | null>(null);
+  const cooldownTimerRef = useRef<number | null>(null);
 
   // 仅隐藏窗口，队列保留
   const hideWindow = useCallback(() => {
@@ -124,15 +135,30 @@ export default function CompanionToast() {
   }, []);
 
   // 出队当前条：队列还有下一条则自动展示（suggestion 变化 → 回执 effect → 重新 show），
-  // 队列已空则隐藏窗口
+  // 队列已空则隐藏窗口；相邻两条都是未知应用标注时先藏窗冷却，到点再放行下一条
   const advance = useCallback(() => {
-    setQueue((q) => {
-      if (q.length <= 1) {
-        hideWindow();
-        return [];
-      }
-      return q.slice(1);
-    });
+    // 新卡片复位操作态；冷却期不允许旧倒计时残留（否则到点会再触发一次 advance）
+    setActing(false);
+    if (timerRef.current !== null) {
+      window.clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    const closed = queueRef.current[0];
+    queueRef.current = queueRef.current.slice(1);
+    setQueue(queueRef.current);
+    const next = queueRef.current[0];
+
+    if (closed?.suggestion_type === 'app_unknown' && next?.suggestion_type === 'app_unknown') {
+      hideWindow();
+      setCooldown(true);
+      if (cooldownTimerRef.current !== null) window.clearTimeout(cooldownTimerRef.current);
+      cooldownTimerRef.current = window.setTimeout(() => {
+        cooldownTimerRef.current = null;
+        setCooldown(false);
+      }, ANNOTATION_GAP_SECONDS * 1000);
+      return;
+    }
+    if (!next) hideWindow();
   }, [hideWindow]);
 
   // 倒计时：到 0 仅隐藏窗口，不改变建议状态（用户可在设置页稍后处理）
@@ -169,7 +195,8 @@ export default function CompanionToast() {
   useEffect(() => {
     const unlisten = listen<Suggestion>('companion:suggestion', (event) => {
       // 队列尾部追加；多条连发（如多个未知应用）逐条展示
-      setQueue((q) => [...q, event.payload]);
+      queueRef.current = [...queueRef.current, event.payload];
+      setQueue(queueRef.current);
       setActing(false);
     });
     // 本窗口是启动时预创建的隐藏窗口，页面异步加载可能晚于首次 emit
@@ -177,7 +204,8 @@ export default function CompanionToast() {
     invoke<Suggestion[]>('get_pending_companion_toast')
       .then((pending) => {
         if (pending.length > 0) {
-          setQueue((q) => [...q, ...pending]);
+          queueRef.current = [...queueRef.current, ...pending];
+          setQueue(queueRef.current);
           setActing(false);
         }
       })
@@ -186,6 +214,13 @@ export default function CompanionToast() {
       unlisten.then((fn) => fn()).catch((err: unknown) => {
         console.error('Failed to cleanup companion:suggestion listener:', err);
       });
+    };
+  }, []);
+
+  // 卸载兜底：清掉标注冷却定时器（toast 窗口随应用生命周期，正常不卸载）
+  useEffect(() => {
+    return () => {
+      if (cooldownTimerRef.current !== null) window.clearTimeout(cooldownTimerRef.current);
     };
   }, []);
 
