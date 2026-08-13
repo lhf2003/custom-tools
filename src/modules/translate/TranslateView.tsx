@@ -7,6 +7,8 @@ import { Tooltip } from '@/components/Tooltip';
 import { CustomSelect } from '@/modules/settings/components/CustomSelect';
 import { usePluginPayload } from '@/plugins/usePluginPayload';
 import { TARGET_LANG_OPTIONS, TARGET_LANG_KEY, DEFAULT_TARGET_LANG } from './constants';
+import { useSpeechPlayback } from './useSpeechPlayback';
+import { SpeakButton } from './SpeakButton';
 
 /** translate:chunk / done / error 事件的统一壳（与 Rust 端 TranslateEventPayload 对应） */
 interface TranslateEventPayload {
@@ -26,6 +28,8 @@ export function TranslateView() {
   const [copied, setCopied] = useState(false);
   const ownIdRef = useRef<number | null>(null);
   const { addToast } = useToastStore();
+  const { playing: speechPlaying, toggle: toggleSpeech, stop: stopSpeechPlayback } =
+    useSpeechPlayback();
 
   // 初始目标语言：读设置值（缺省中文）
   useEffect(() => {
@@ -75,6 +79,7 @@ export function TranslateView() {
       setTranslation('');
       setErrorMsg('');
       setStatus('translating');
+      stopSpeechPlayback(); // 新翻译开始：旧内容播报停止（对齐发新消息停播语义）
       try {
         const id = await invoke<number>('translate_text', { text: trimmed, targetLang });
         ownIdRef.current = id;
@@ -83,7 +88,7 @@ export function TranslateView() {
         setErrorMsg(err instanceof Error ? err.message : String(err));
       }
     },
-    [targetLang],
+    [targetLang, stopSpeechPlayback],
   );
 
   const handleTranslate = useCallback(() => {
@@ -204,9 +209,17 @@ export function TranslateView() {
             {/* 原文 */}
             {source.trim() && (
               <div className="flex-shrink-0 px-3 py-2 border-b border-app-border-subtle">
-                <p className="text-xs text-app-text-tertiary leading-relaxed line-clamp-3 whitespace-pre-wrap break-all">
-                  {source.trim()}
-                </p>
+                <div className="relative">
+                  <p className="text-xs text-app-text-tertiary leading-relaxed line-clamp-3 whitespace-pre-wrap break-all pr-6">
+                    {source.trim()}
+                  </p>
+                  <SpeakButton
+                    playing={speechPlaying === 'source'}
+                    onToggle={() => toggleSpeech('source', source)}
+                    label="听原文"
+                    wrapperClassName="absolute right-0 top-0"
+                  />
+                </div>
               </div>
             )}
             {/* 译文 */}
@@ -226,6 +239,14 @@ export function TranslateView() {
             </div>
             {/* 操作行 */}
             <div className="flex-shrink-0 flex items-center justify-end gap-2 px-3 py-2 border-t border-app-border-subtle">
+              {status === 'done' && translation && (
+                <SpeakButton
+                  playing={speechPlaying === 'translation'}
+                  onToggle={() => toggleSpeech('translation', translation)}
+                  label="播报译文"
+                  wrapperClassName="shrink-0"
+                />
+              )}
               <button
                 onClick={handleCopy}
                 disabled={!translation}

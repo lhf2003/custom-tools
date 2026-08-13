@@ -5,6 +5,10 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Copy, Check, Languages, X, ChevronDown, ChevronUp } from 'lucide-react';
 import { Tooltip } from '@/components/Tooltip';
 import { useAutoHideScrollbar } from '@/hooks/useAutoHideScrollbar';
+import { TargetLangMenu } from './TargetLangMenu';
+import { TARGET_LANG_KEY } from '../constants';
+import { useSpeechPlayback } from '../useSpeechPlayback';
+import { SpeakButton } from '../SpeakButton';
 
 /** translate:chunk / done / error 事件的统一壳（与 Rust 端 TranslateEventPayload 对应） */
 interface TranslateEventPayload {
@@ -59,8 +63,13 @@ export default function TranslateToast() {
   // 就绪握手信号：start/hint 处理后递增，触发渲染完成回执（chunk/done/error 不触发——
   // 进行中的后续帧若发回执，窗口会被重新定位拽回鼠标处）
   const [showNonce, setShowNonce] = useState(0);
+  // 停播入口的 ref 中转：hideWindow（声明在前）依赖它，useSpeechPlayback（声明在后）填充它，
+  // 解开「hideWindow → stop → hook → onPlaybackChange → resetStaleTimer → hideWindow」声明环
+  const stopSpeechRef = useRef<() => void>(() => {});
 
   const hideWindow = useCallback(() => {
+    // 消失即停播（Esc/X/stale 全走这里）
+    stopSpeechRef.current();
     getCurrentWindow()
       .hide()
       .catch((err: unknown) => console.error('Failed to hide translate toast:', err));
@@ -74,10 +83,35 @@ export default function TranslateToast() {
     staleTimerRef.current = window.setTimeout(hideWindow, STALE_HIDE_MS);
   }, [hideWindow]);
 
+  // 播报期间禁用 stale 兜底：播报中的浮窗是活跃状态，不能被 60s 无事件规则隐藏；
+  // 播报结束重新武装（窗口若已隐藏，60s 后重复 hide 无害）
+  const handlePlaybackChange = useCallback(
+    (isPlaying: boolean) => {
+      if (isPlaying) {
+        if (staleTimerRef.current !== null) {
+          window.clearTimeout(staleTimerRef.current);
+          staleTimerRef.current = null;
+        }
+      } else {
+        resetStaleTimer();
+      }
+    },
+    [resetStaleTimer],
+  );
+
+  const {
+    playing: speechPlaying,
+    toggle: toggleSpeech,
+    stop: stopSpeechPlayback,
+  } = useSpeechPlayback({ onPlaybackChange: handlePlaybackChange });
+  // 同步给 ref：hideWindow/applyStart 等声明在前的回调经此调停播
+  stopSpeechRef.current = stopSpeechPlayback;
+
   // start/hint 应用逻辑提取为稳定回调：事件监听与挂载补拉共用
   const applyStart = useCallback(
     (p: TranslateStartPayload) => {
       latestIdRef.current = Math.max(latestIdRef.current, p.id);
+      stopSpeechRef.current(); // 新划词到达：旧内容播报停止（对齐发新消息停播语义）
       setSource(p.source);
       setTargetLang(p.target_lang);
       setTranslation('');
@@ -202,6 +236,36 @@ export default function TranslateToast() {
     setSourceClamped(el.scrollHeight > el.clientHeight + 1);
   }, [source]);
 
+  // 切换目标语言：保存为默认（后续划词翻译生效）+ 当前原文立即重译。
+  // 先换新 id 再清空译文——此后旧流 chunk 全被 id 过滤，清空后的译文区不会被旧块污染
+  const handleTargetLangChange = useCallback(
+    (lang: string) => {
+      if (lang === targetLang) return;
+      setTargetLang(lang);
+      invoke('set_setting', { key: TARGET_LANG_KEY, value: lang }).catch(() => {});
+
+      const text = source.trim();
+      if (!text) return; // 提示态无原文可译，仅更新默认语言
+
+      stopSpeechPlayback(); // 重译即内容变更，进行中的播报停止
+      invoke<number>('translate_text', { text, targetLang: lang })
+        .then((id) => {
+          latestIdRef.current = id;
+          setTranslation('');
+          setErrorMsg('');
+          setCopied(false);
+          updateStatus('translating');
+          resetStaleTimer();
+        })
+        .catch((err: unknown) => {
+          setErrorMsg(err instanceof Error ? err.message : String(err));
+          updateStatus('error');
+          resetStaleTimer();
+        });
+    },
+    [targetLang, source, updateStatus, resetStaleTimer, stopSpeechPlayback],
+  );
+
   const handleCopy = useCallback(async () => {
     if (!translation) return;
     try {
@@ -231,9 +295,7 @@ export default function TranslateToast() {
           划词翻译
         </div>
         {targetLang && status !== 'idle' && (
-          <span className="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium text-app-text-tertiary bg-app-bg-elevated">
-            译成{targetLang}
-          </span>
+          <TargetLangMenu value={targetLang} onChange={handleTargetLangChange} />
         )}
         <Tooltip content="关闭（Esc）" wrapperClassName="shrink-0">
           <button
@@ -255,14 +317,22 @@ export default function TranslateToast() {
           {/* 原文（超 3 行截断，可出现展开按钮） */}
           {source && (
             <div className="flex-shrink-0 px-3 pb-1.5">
-              <p
-                ref={sourceTextRef}
-                className={`text-xs leading-relaxed text-app-text-tertiary whitespace-pre-wrap break-words ${
-                  sourceExpanded ? '' : 'line-clamp-3'
-                }`}
-              >
-                {source}
-              </p>
+              <div className="relative">
+                <p
+                  ref={sourceTextRef}
+                  className={`text-xs leading-relaxed text-app-text-tertiary whitespace-pre-wrap break-words pr-6 ${
+                    sourceExpanded ? '' : 'line-clamp-3'
+                  }`}
+                >
+                  {source}
+                </p>
+                <SpeakButton
+                  playing={speechPlaying === 'source'}
+                  onToggle={() => toggleSpeech('source', source)}
+                  label="听原文"
+                  wrapperClassName="absolute right-0 top-0"
+                />
+              </div>
               {(sourceClamped || sourceExpanded) && (
                 <button
                   onClick={() => setSourceExpanded((v) => !v)}
@@ -294,6 +364,14 @@ export default function TranslateToast() {
               <span className="mr-auto text-[10px] text-app-text-placeholder select-none">
                 {status === 'translating' ? '翻译中…' : 'Esc 关闭'}
               </span>
+              {status === 'done' && translation && (
+                <SpeakButton
+                  playing={speechPlaying === 'translation'}
+                  onToggle={() => toggleSpeech('translation', translation)}
+                  label="播报译文"
+                  wrapperClassName="shrink-0"
+                />
+              )}
               {status === 'done' && (
                 <button
                   onClick={handleCopy}
