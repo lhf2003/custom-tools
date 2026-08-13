@@ -887,9 +887,21 @@ impl Default for SearchIndex {
     }
 }
 
+/// 路径是否可用于启动：文件系统路径必须仍然存在；
+/// shell:AppsFolder\...（UWP）不是文件系统路径，exists 恒 false，无条件放行
+pub(crate) fn path_launchable(path: &str) -> bool {
+    path.starts_with("shell:") || std::path::Path::new(path).exists()
+}
+
 /// Launch an application by its shortcut path
 #[cfg(windows)]
 pub fn launch_app(path: &str) -> anyhow::Result<()> {
+    // 路径失效时直接报错，绝不交给 explorer——explorer.exe 收到不存在的路径，
+    // 兜底行为是打开一个文件管理器窗口：应用没开成，用户却被丢进资源管理器。
+    // （典型场景：Edge/Chrome 更新后旧版本目录被删，建议 payload 里的路径过期）
+    if !path_launchable(path) {
+        return Err(anyhow::anyhow!("应用路径不存在: {}", path));
+    }
     // 通过 explorer.exe 启动应用，而不是直接使用 ShellExecuteW。
     //
     // 原因：在 Windows 上，直接用 ShellExecuteW 启动的进程可能会被包含在

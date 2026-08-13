@@ -424,8 +424,10 @@ fn graduation_gate(
 
     if accepted >= 3 {
         for app in launchable {
+            // 启动成功才记 usage——失败计数会把失效路径顶得更高，下次还选它
             if let Err(e) = crate::search::launch_app(&app.path) {
                 log::warn!("毕业执行启动 {} 失败: {}", app.path, e);
+                continue;
             }
             let _ = crate::db::app_usage::record_launch(conn, &app.path, &app.name);
         }
@@ -595,6 +597,11 @@ fn match_context_routines(
         if db::has_pattern_suggestion_since(&conn, pattern.id, day_start).unwrap_or(true) {
             continue;
         }
+        // 同一应用今日已推过情境建议（可能来自同 app 的姊妹 pattern——
+        // 同一习惯会被学出多个时间点 pattern）→ 一天只打扰一次，不连发轰炸
+        if db::has_routine_suggestion_for_app_since(&conn, &data.app, day_start).unwrap_or(true) {
+            continue;
+        }
         // 目标应用近期已有活动 → 用户自己开了，不打扰
         let recent_start = now_ts - data.tolerance_minutes as i64 * 60;
         let totals = db::process_totals_between(&conn, recent_start, now_ts).unwrap_or_default();
@@ -651,20 +658,31 @@ fn match_context_routines(
     Ok(())
 }
 
-/// 从 app_usage 解析 exe 名到启动路径（取使用次数最多的匹配）
-fn resolve_app_paths(conn: &Connection, exes: &[String]) -> Vec<db::LaunchAppItem> {
+/// 从 app_usage 解析 exe 名到启动路径（取使用次数最多的现存匹配）。
+/// 同一 exe 可能有多条候选（Edge/Chrome 每个版本目录各落一条记录）：
+/// 旧版本目录随更新被删但 launch_count 历史最高，不按「路径仍存在」过滤
+/// 会稳定选中已失效路径，启动即跳文件管理器。
+pub(crate) fn resolve_app_paths(conn: &Connection, exes: &[String]) -> Vec<db::LaunchAppItem> {
     let mut items = Vec::new();
     for exe in exes {
         let like = format!("%{}", exe);
-        let found = conn
-            .query_row(
-                "SELECT path, name FROM app_usage
-                 WHERE path LIKE ?1
-                 ORDER BY launch_count DESC LIMIT 1",
-                [&like],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-            )
-            .ok();
+        let mut stmt = match conn.prepare(
+            "SELECT path, name FROM app_usage
+             WHERE path LIKE ?1
+             ORDER BY launch_count DESC LIMIT 5",
+        ) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+        let found = stmt
+            .query_map([&like], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .ok()
+            .and_then(|rows| {
+                rows.flatten()
+                    .find(|(path, _)| crate::search::path_launchable(path))
+            });
         if let Some((path, name)) = found {
             items.push(db::LaunchAppItem { path, name });
         }

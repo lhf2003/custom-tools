@@ -9,6 +9,24 @@ fn open_conn(db_state: &DatabaseState) -> Result<Connection, String> {
     Connection::open(&db_state.0).map_err(|e| format!("打开数据库失败: {}", e))
 }
 
+/// 建议创建到用户点击之间应用可能已更新（Edge/Chrome 旧版本目录被删）——
+/// payload 路径失效时按 exe 名从使用记录重解析一条现存的替代路径
+fn resolve_launch_path(conn: &Connection, app: &db::LaunchAppItem) -> String {
+    if crate::search::path_launchable(&app.path) {
+        return app.path.clone();
+    }
+    let exe = std::path::Path::new(&app.path)
+        .file_name()
+        .map(|f| f.to_string_lossy().into_owned());
+    exe.and_then(|e| {
+        crate::companion::analyzer::resolve_app_paths(conn, std::slice::from_ref(&e))
+            .into_iter()
+            .next()
+            .map(|item| item.path)
+    })
+    .unwrap_or_else(|| app.path.clone())
+}
+
 // ── 建议 ─────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -42,10 +60,13 @@ pub async fn act_on_companion_suggestion(
         if let Ok(launch) = serde_json::from_str::<db::LaunchAppsPayload>(payload_str) {
             if launch.action == "launch_apps" {
                 for app in &launch.apps {
-                    if let Err(e) = crate::search::launch_app(&app.path) {
-                        log::warn!("Companion 启动 {} 失败: {}", app.path, e);
+                    let path = resolve_launch_path(&conn, app);
+                    // 启动成功才记 usage——失败计数会把失效路径顶得更高，下次还选它
+                    if let Err(e) = crate::search::launch_app(&path) {
+                        log::warn!("Companion 启动 {} 失败: {}", path, e);
+                        continue;
                     }
-                    let _ = crate::db::app_usage::record_launch(&conn, &app.path, &app.name);
+                    let _ = crate::db::app_usage::record_launch(&conn, &path, &app.name);
                 }
             }
         } else if let Ok(analyze) = serde_json::from_str::<db::AnalyzePayload>(payload_str) {

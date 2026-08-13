@@ -906,6 +906,28 @@ pub fn has_pattern_suggestion_since(
     Ok(count > 0)
 }
 
+/// 今日是否已为该应用（exe 名）推过情境建议。
+/// 同一应用可能被学出多个时间点的 context_routine pattern（如 12:00/12:03/12:04），
+/// 按 pattern 去重挡不住它们连发——同一应用一天只打扰一次。
+/// payload JSON 里的启动路径必含 exe 名，用 LIKE 匹配即可；
+/// exe 名含 _ 时通配符误判方向是「以为推过」→ 少推，方向安全，不做 ESCAPE。
+pub fn has_routine_suggestion_for_app_since(
+    conn: &Connection,
+    exe: &str,
+    since: i64,
+) -> rusqlite::Result<bool> {
+    let like = format!("%{}%", exe);
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM suggestions
+         WHERE suggestion_type = 'context_routine'
+           AND action_payload LIKE ?1
+           AND created_at >= ?2",
+        params![like, since],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
 /// 毕业制投票统计：(接受数, 拒绝数, 忽略数)
 /// 忽略 = pending 且创建超过 1 天（看过没动手）
 pub fn pattern_vote_counts(
