@@ -276,6 +276,11 @@ pub fn save_chat_image(
     bytes: Vec<u8>,
     ext: String,
 ) -> Result<String, String> {
+    // 命令层防御：前端已限 10MB 原图（压缩后远小于此），这里兜底防任意调用
+    const MAX_IMAGE_BYTES: usize = 10 * 1024 * 1024;
+    if bytes.is_empty() || bytes.len() > MAX_IMAGE_BYTES {
+        return Err("图片大小超出限制".to_string());
+    }
     let ext = normalize_image_ext(&ext)?;
     let dir = chat_images_dir(&app_handle, session_id)?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("创建图片目录失败: {}", e))?;

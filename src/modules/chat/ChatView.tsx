@@ -626,6 +626,14 @@ export function ChatView() {
       );
   };
 
+  /** 追加待发附件（updater 内截断：多文件循环里 ref 同步滞后于真实状态，
+   *  数量上限必须以 updater 的 prev 为准，否则一次多选可突破上限） */
+  const pushAttachment = (item: PendingAttachment) => {
+    setAttachments((prev) =>
+      prev.length >= MAX_ATTACHMENTS ? prev : [...prev, item],
+    );
+  };
+
   const addOneFile = async (file: File) => {
     if (attachmentsRef.current.length >= MAX_ATTACHMENTS) {
       setError(`一次最多带 ${MAX_ATTACHMENTS} 个附件`);
@@ -653,10 +661,11 @@ export function ChatView() {
           bytes: compressed.bytes,
           ext: compressed.ext,
         });
-        setAttachments((prev) => [
-          ...prev,
-          { kind: 'image', relPath, dataUrl: compressed.dataUrl },
-        ]);
+        setAttachments((prev) =>
+          prev.length >= MAX_ATTACHMENTS
+            ? prev
+            : [...prev, { kind: 'image', relPath, dataUrl: compressed.dataUrl }],
+        );
       } catch (e) {
         setError(typeof e === 'string' ? e : '图片处理失败');
       }
@@ -668,7 +677,7 @@ export function ChatView() {
     }
     try {
       const content = await readTextFile(file);
-      setAttachments((prev) => [...prev, { kind: 'file', name: file.name, content }]);
+      pushAttachment({ kind: 'file', name: file.name, content });
     } catch {
       setError(`读取文件失败：${file.name}`);
     }
@@ -703,9 +712,21 @@ export function ChatView() {
   /** 文件选择/粘贴统一入口：含图片先过视觉门槛，被拦的文件存进对话框待切换后续传 */
   const addFiles = async (files: File[]) => {
     const hasImage = files.some((f) => classifyFileName(f.name) === 'image');
-    if (hasImage && !currentVisionState().ok) {
-      setVisionGateFiles(files);
-      return;
+    if (hasImage) {
+      // 视觉判定依赖 store 数据：窗口刚开就点发送文件时 chat 场景配置/模型
+      // 列表可能尚未懒加载完，先确保加载再判，否则把视觉模型误判成不支持
+      const store = useLlmProviderStore.getState();
+      if (!store.sceneConfigs.chat) {
+        await store.loadSceneConfigs().catch(() => {});
+      }
+      const cfg = useLlmProviderStore.getState().sceneConfigs.chat;
+      if (cfg && !useLlmProviderStore.getState().models[cfg.provider_id]) {
+        await useLlmProviderStore.getState().loadModels(cfg.provider_id).catch(() => {});
+      }
+      if (!currentVisionState().ok) {
+        setVisionGateFiles(files);
+        return;
+      }
     }
     for (const file of files) {
       await addOneFile(file);

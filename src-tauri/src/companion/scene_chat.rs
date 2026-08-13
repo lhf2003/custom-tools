@@ -68,9 +68,27 @@ fn build_chat_message(
     if rich.images.is_empty() {
         return Ok(json!({ "role": role, "content": text }));
     }
+    // 图片文件可能被清掉（手动删/清理工具）：读取失败不该拖死整条聊天——
+    // 跳过失效图并在文本里留痕，与降级链同一哲学：质量下降而非功能消失
     let mut data_urls = Vec::with_capacity(rich.images.len());
+    let mut missing = 0usize;
     for p in &rich.images {
-        data_urls.push(crate::commands::chat::read_image_data_url(app_handle, p)?);
+        match crate::commands::chat::read_image_data_url(app_handle, p) {
+            Ok(u) => data_urls.push(u),
+            Err(e) => {
+                log::warn!("聊天图片读取失败（跳过）: {} — {}", p, e);
+                missing += 1;
+            }
+        }
+    }
+    if missing > 0 {
+        if !text.is_empty() {
+            text.push_str("\n\n");
+        }
+        text.push_str(&format!("[{} 张图片已失效]", missing));
+    }
+    if data_urls.is_empty() {
+        return Ok(json!({ "role": role, "content": text }));
     }
     if provider_type == "ollama" {
         let images: Vec<&str> = data_urls

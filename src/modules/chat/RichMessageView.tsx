@@ -36,9 +36,7 @@ function ChatImage({ relPath, size }: { relPath: string; size: 'large' | 'grid' 
 
   if (failed) {
     return (
-      <div
-        className={`${boxClass} w-[120px] rounded-lg border border-white/10 bg-white/5 flex flex-col items-center justify-center gap-1 text-zinc-500`}
-      >
+      <div className="w-[120px] h-[120px] rounded-lg border border-white/10 bg-white/5 flex flex-col items-center justify-center gap-1 text-zinc-500">
         <ImageOff className="w-4 h-4" />
         <span className="text-[10px]">图片已失效</span>
       </div>
