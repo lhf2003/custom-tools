@@ -1,5 +1,4 @@
-import { useState, useEffect, useCallback, type CSSProperties } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Bot,
   Plus,
@@ -27,6 +26,7 @@ import { confirmDialog } from '@/stores/confirmStore';
 import { SettingGroup, SettingRow, Toggle } from '../components/SettingsPrimitives';
 import { CustomSelect, type SelectGroup } from '../components/CustomSelect';
 import { LlmObserveSection } from './stats/LlmObserveSection';
+import { MossVoiceSettings } from './MossVoiceSettings';
 
 // Provider type options
 const PROVIDER_TYPES: { value: ProviderType; label: string; baseUrl: string; apiKeyRequired: boolean }[] = [
@@ -72,90 +72,6 @@ const smallInputClass =
 export function ModelSettings() {
   const { addToast } = useToastStore();
 
-  // ── 语音服务(Moss):Key 加密存后端,此处只读写「是否已配置」 ──
-  const [mossKey, setMossKey] = useState('');
-  const [mossConfigured, setMossConfigured] = useState(false);
-  const [showMossKey, setShowMossKey] = useState(false);
-  const [mossSaving, setMossSaving] = useState(false);
-  // 语音播报开关(默认开)与音色 ID(空 = 后端默认音色)
-  const [mossTtsEnabled, setMossTtsEnabled] = useState(true);
-  const [mossVoiceId, setMossVoiceId] = useState('');
-  // 播报语速(0.25~4,默认 1)
-  const [mossSpeed, setMossSpeed] = useState(1);
-
-  useEffect(() => {
-    invoke<boolean>('moss_key_status')
-      .then(setMossConfigured)
-      .catch(() => {});
-    invoke<string | null>('get_setting', { key: 'moss_tts_enabled' })
-      .then((v) => setMossTtsEnabled(v !== 'false'))
-      .catch(() => {});
-    invoke<string | null>('get_setting', { key: 'moss_voice_id' })
-      .then((v) => setMossVoiceId(v ?? ''))
-      .catch(() => {});
-    invoke<string | null>('get_setting', { key: 'moss_tts_speed' })
-      .then((v) => {
-        const n = Number(v);
-        if (v !== null && Number.isFinite(n)) {
-          setMossSpeed(Math.min(4, Math.max(0.25, n)));
-        }
-      })
-      .catch(() => {});
-  }, []);
-
-  const handleToggleMossTts = async (enabled: boolean) => {
-    setMossTtsEnabled(enabled);
-    try {
-      await invoke('set_setting', {
-        key: 'moss_tts_enabled',
-        value: enabled ? 'true' : 'false',
-      });
-    } catch (err) {
-      setMossTtsEnabled(!enabled);
-      addToast({ type: 'error', title: '播报开关保存失败', message: String(err) });
-    }
-  };
-
-  const handleSaveMossVoiceId = async () => {
-    try {
-      await invoke('set_setting', { key: 'moss_voice_id', value: mossVoiceId.trim() });
-      addToast({ type: 'success', title: '音色 ID 已保存' });
-    } catch (err) {
-      addToast({ type: 'error', title: '音色 ID 保存失败', message: String(err) });
-    }
-  };
-
-  // 语速滑杆:跟随透明度滑杆模式,onChange 即写库(Rust 每次播报现读,下一条即生效)
-  const handleMossSpeedChange = (v: number) => {
-    setMossSpeed(v);
-    invoke('set_setting', { key: 'moss_tts_speed', value: String(v) }).catch(() => {});
-  };
-
-  const handleSaveMossKey = async () => {
-    const key = mossKey.trim();
-    if (!key || mossSaving) return;
-    setMossSaving(true);
-    try {
-      await invoke('moss_set_api_key', { key });
-      setMossConfigured(true);
-      setMossKey('');
-      addToast({ type: 'success', title: 'Moss API Key 已保存' });
-    } catch (err) {
-      addToast({ type: 'error', title: '保存失败', message: String(err) });
-    } finally {
-      setMossSaving(false);
-    }
-  };
-
-  const handleClearMossKey = async () => {
-    try {
-      await invoke('moss_set_api_key', { key: '' });
-      setMossConfigured(false);
-      addToast({ type: 'success', title: 'Moss API Key 已清除' });
-    } catch (err) {
-      addToast({ type: 'error', title: '清除失败', message: String(err) });
-    }
-  };
   const {
     providers,
     models,
@@ -173,9 +89,10 @@ export function ModelSettings() {
     loadSceneConfigs,
     setSceneModel,
     setSceneThinkingMode,
-    setSceneReasoningEffort,
   } = useLlmProviderStore();
 
+  // 二级页面：语音服务（Moss 配置迁入独立页）
+  const [subView, setSubView] = useState<'main' | 'voice'>('main');
   const [expandedProvider, setExpandedProvider] = useState<number | null>(null);
   // 展开的提供商模型列表筛选词（切换展开项时清空）
   const [modelListFilter, setModelListFilter] = useState('');
@@ -413,6 +330,11 @@ export function ModelSettings() {
   };
 
   const isFormValid = formData.name && formData.label && formData.baseUrl;
+
+  // 二级页面：语音服务（Moss API Key + 语音播报）
+  if (subView === 'voice') {
+    return <MossVoiceSettings onBack={() => setSubView('main')} />;
+  }
 
   // 提供商添加/编辑表单（弹窗内容，外壳在下方 Modal 里）
   const renderProviderForm = () => (
@@ -831,9 +753,11 @@ export function ModelSettings() {
           const SceneIcon = SCENE_LABELS[scene].icon;
           const sceneProvider = providers.find((p) => p.id === config?.provider_id);
           // 强度档位按提供商能力提供：DeepSeek 官方仅 low/high/max（medium 被映射为 high）；
-          // OpenAI 系原生 low/medium/high；百炼/Ollama 无此参数（空选项 + 禁用）
-          const effortOptions =
-            sceneProvider?.provider_type === 'deepseek'
+          // OpenAI 系原生 low/medium/high；百炼/Ollama 无此参数（下拉只剩「关闭」）。
+          // 「关闭」= 思考模式关；选任一等级即同时打开思考并落库该等级
+          const effortOptions = [
+            { value: '__off__', label: '关闭' },
+            ...(sceneProvider?.provider_type === 'deepseek'
               ? [
                   { value: 'low', label: '低' },
                   { value: 'high', label: '高' },
@@ -846,7 +770,8 @@ export function ModelSettings() {
                     { value: 'medium', label: '中' },
                     { value: 'high', label: '高' },
                   ]
-                : [];
+                : []),
+          ];
 
           return (
             <div key={scene} className="flex items-center gap-3 px-3 py-3">
@@ -914,143 +839,44 @@ export function ModelSettings() {
                 );
               })()}
 
-              <div className="flex items-center gap-2 flex-shrink-0">
-                {/* Thinking Mode（规范开关组件；未选模型时禁用） */}
-                <span className="text-app-text-tertiary text-xs flex-shrink-0">思考</span>
-                <Tooltip content={config?.thinking_mode ? '思考模式已开启' : '思考模式已关闭'} placement="top">
-                  <Toggle
-                    enabled={config?.thinking_mode ?? false}
-                    onToggle={() => setSceneThinkingMode(scene, !config?.thinking_mode)}
-                    disabled={!config?.provider_id}
-                  />
-                </Tooltip>
-
-                {/* 思考强度（按提供商能力提供档位；仅思考开启时可调） */}
-                <CustomSelect
-                  value={config?.reasoning_effort ?? 'medium'}
-                  options={effortOptions}
-                  onChange={(value) => {
-                    try {
-                      setSceneReasoningEffort(scene, value);
-                    } catch (e) {
-                      alert(`设置思考强度失败: ${e}`);
+              {/* 思考强度：「关闭」= 思考关（默认），选等级即开思考；未选模型时禁用 */}
+              <CustomSelect
+                value={config?.thinking_mode ? (config?.reasoning_effort ?? 'medium') : '__off__'}
+                options={effortOptions}
+                onChange={async (value) => {
+                  try {
+                    if (value === '__off__') {
+                      // 关思考保留已选等级，重新打开时恢复
+                      await setSceneThinkingMode(scene, false);
+                    } else if (config?.provider_id && config.model_id) {
+                      await setSceneModel(scene, config.provider_id, config.model_id, true, value);
                     }
-                  }}
-                  disabled={
-                    !config?.provider_id ||
-                    !config?.thinking_mode ||
-                    effortOptions.length === 0
+                  } catch (e) {
+                    alert(`设置思考强度失败: ${e}`);
                   }
-                  placeholder="强度"
-                  className="w-20"
-                  menuClassName="w-24"
-                />
-              </div>
+                }}
+                disabled={!config?.provider_id}
+                placeholder="强度"
+                className="w-20"
+                menuClassName="w-24"
+              />
             </div>
           );
         })}
       </SettingGroup>
 
-      {/* 语音服务:Moss 平台 Key(聊天语音输入转写 moss-transcribe) */}
+      {/* 语音服务：入口行，点击进二级页配置 Moss（API Key / 播报 / 音色 / 语速） */}
       <SettingGroup title="语音服务">
         <SettingRow
-          title="Moss API Key"
-          description={
-            mossConfigured
-              ? '已配置,聊天输入框的麦克风可用了。输入新 Key 可覆盖。'
-              : '用于聊天语音输入(录音转文字)。在 platform.mosi.cn 控制台「API Key 管理平台」创建,加密存储在本地。'
-          }
+          title="Moss 语音"
+          description="语音输入转写与回复自动播报——API Key、音色、语速"
         >
-          <div className="relative">
-            <input
-              type={showMossKey ? 'text' : 'password'}
-              value={mossKey}
-              onChange={(e) => setMossKey(e.target.value)}
-              placeholder={mossConfigured ? '已保存,输入新 Key 覆盖' : '粘贴 Moss API Key'}
-              className="w-56 px-3 py-1.5 pr-8 rounded-lg bg-app-bg-primary border border-app-border text-sm text-app-text-primary placeholder-app-text-placeholder outline-none focus:border-app-status-info transition-colors"
-            />
-            <button
-              type="button"
-              onClick={() => setShowMossKey((v) => !v)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-app-text-tertiary hover:text-app-text-primary cursor-pointer"
-              aria-label={showMossKey ? '隐藏密钥' : '显示密钥'}
-            >
-              {showMossKey ? <EyeOff size={15} /> : <Eye size={15} />}
-            </button>
-          </div>
           <button
-            type="button"
-            onClick={handleSaveMossKey}
-            disabled={!mossKey.trim() || mossSaving}
-            className={`px-3 py-1.5 rounded-lg text-sm transition-colors ${
-              mossKey.trim() && !mossSaving
-                ? 'bg-app-status-info text-white hover:bg-app-status-info-deep cursor-pointer'
-                : 'bg-app-bg-hover text-app-text-tertiary cursor-not-allowed'
-            }`}
+            onClick={() => setSubView('voice')}
+            className="px-2.5 py-1.5 rounded-lg text-app-text-tertiary text-xs hover:bg-white/10 hover:text-app-text-primary transition-colors cursor-pointer"
           >
-            {mossSaving ? '保存中…' : '保存'}
+            打开配置
           </button>
-          {mossConfigured && (
-            <button
-              type="button"
-              onClick={handleClearMossKey}
-              className="px-3 py-1.5 rounded-lg text-sm text-app-text-tertiary hover:text-red-400 hover:bg-app-bg-hover transition-colors cursor-pointer"
-            >
-              清除
-            </button>
-          )}
-        </SettingRow>
-
-        <SettingRow
-          title="自动语音播报"
-          description="陪伴弹窗出现、聊天回复完成时自动朗读；新播报自动打断旧播报。"
-        >
-          <Toggle enabled={mossTtsEnabled} onToggle={handleToggleMossTts} />
-        </SettingRow>
-
-        <SettingRow
-          title="音色 ID"
-          description="Mossland 音色库卡片上点复制图标获取"
-        >
-          <input
-            type="text"
-            value={mossVoiceId}
-            onChange={(e) => setMossVoiceId(e.target.value)}
-            placeholder="91d06f93-c5dc-52a8-92d6-335008306e95"
-            className="w-56 px-3 py-1.5 rounded-lg bg-app-bg-primary border border-app-border text-sm text-app-text-primary placeholder-app-text-placeholder outline-none focus:border-app-status-info transition-colors font-mono"
-          />
-          <button
-            type="button"
-            onClick={handleSaveMossVoiceId}
-            className="px-3 py-1.5 rounded-lg text-sm bg-app-bg-hover text-app-text-secondary hover:text-app-text-primary transition-colors cursor-pointer"
-          >
-            保存
-          </button>
-        </SettingRow>
-
-        <SettingRow
-          title="播报语速"
-          description="支持 0.25x ~ 4x 范围 对下一条播报即时生效"
-        >
-          <div className="flex items-center gap-2">
-            <input
-              type="range"
-              min={0.25}
-              max={4}
-              step={0.25}
-              value={mossSpeed}
-              onChange={(e) => handleMossSpeedChange(Number(e.target.value))}
-              className="w-32"
-              style={
-                { '--range-fill': `${((mossSpeed - 0.25) / 3.75) * 100}%` } as CSSProperties
-              }
-              aria-label="播报语速"
-              aria-valuetext={`${mossSpeed}x`}
-            />
-            <span className="range-readout w-10 text-xs text-app-text-secondary tabular-nums text-right transition-colors duration-150">
-              {Number(mossSpeed.toFixed(2))}x
-            </span>
-          </div>
         </SettingRow>
       </SettingGroup>
 

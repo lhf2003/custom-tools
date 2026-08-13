@@ -107,7 +107,6 @@ interface LlmProviderState {
   loadSceneConfigs: () => Promise<void>;
   setSceneModel: (scene: Scene, providerId: number, modelId: string, thinkingMode?: boolean, reasoningEffort?: string) => Promise<void>;
   setSceneThinkingMode: (scene: Scene, thinkingMode: boolean) => Promise<void>;
-  setSceneReasoningEffort: (scene: Scene, reasoningEffort: string) => Promise<void>;
   getSceneModelInfo: (scene: Scene) => Promise<SceneModelInfo | null>;
 }
 
@@ -308,30 +307,6 @@ export const useLlmProviderStore = create<LlmProviderState>((set, get) => ({
       }));
     } catch (err) {
       console.error('Failed to set scene thinking mode:', err);
-      throw err;
-    }
-  },
-
-  setSceneReasoningEffort: async (scene, reasoningEffort) => {
-    try {
-      const currentConfig = get().sceneConfigs[scene];
-      if (!currentConfig || !currentConfig.provider_id) {
-        throw new Error('请先选择提供商和模型');
-      }
-      const config = await invoke<SceneConfig>('set_scene_model', {
-        req: {
-          scene,
-          providerId: currentConfig.provider_id,
-          modelId: currentConfig.model_id,
-          thinkingMode: currentConfig.thinking_mode,
-          reasoningEffort,
-        },
-      });
-      set((state) => ({
-        sceneConfigs: { ...state.sceneConfigs, [scene]: config },
-      }));
-    } catch (err) {
-      console.error('Failed to set scene reasoning effort:', err);
       throw err;
     }
   },
