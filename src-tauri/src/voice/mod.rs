@@ -13,9 +13,9 @@ const WINDOW_LABEL: &str = "voice-toast";
 /// 录音条尺寸(图1/2 横条,逻辑像素)
 const BAR_WIDTH: f64 = 248.0;
 const BAR_HEIGHT: f64 = 44.0;
-/// 完成卡片尺寸(图3 宽卡,逻辑像素)
+/// 完成卡片尺寸(图3 宽卡,逻辑像素;高度含底部快捷键提示条)
 const CARD_WIDTH: f64 = 540.0;
-const CARD_HEIGHT: f64 = 170.0;
+const CARD_HEIGHT: f64 = 190.0;
 /// 距显示器顶部的间距(逻辑像素)
 const TOP_MARGIN: f64 = 80.0;
 

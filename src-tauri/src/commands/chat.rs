@@ -140,6 +140,25 @@ pub fn list_chat_sessions(
         .map_err(|e| e.to_string())
 }
 
+/// 删除会话中最后一条用户消息之后的所有消息（重试上一轮回服用：
+/// 文字回复与其 tool 循环中途落的 A2UI 卡片行一并清除，回到「待回答」状态）。
+/// 子查询为 NULL（会话里没有用户消息）时 `id > NULL` 不命中任何行，自然空转。
+#[tauri::command]
+pub fn truncate_chat_after_last_user(
+    db_state: State<DatabaseState>,
+    session_id: i64,
+) -> Result<(), String> {
+    let conn = crate::db::open_connection(&db_state.0).map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM chat_messages
+         WHERE session_id = ?1
+           AND id > (SELECT MAX(id) FROM chat_messages WHERE session_id = ?1 AND role = 'user')",
+        params![session_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// 删除会话及其全部消息（连带清理内存里的 A2UI surface 状态与 FIFO 排队消息）
 #[tauri::command]
 pub fn delete_chat_session(

@@ -596,6 +596,7 @@ pub fn run() {
             commands::chat::get_latest_session,
             commands::chat::list_chat_sessions,
             commands::chat::delete_chat_session,
+            commands::chat::truncate_chat_after_last_user,
             // LLM Provider commands
             llm_provider::commands::get_llm_providers,
             llm_provider::commands::create_llm_provider,

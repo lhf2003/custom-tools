@@ -318,7 +318,7 @@ export default function CompanionToast() {
       {/* panel-glass-toast：主题玻璃底色（透明度随全局滑杆）——与划词翻译浮窗同一
           浮窗面板标准；zinc 灰阶在 tailwind 里已重映射为语义 token，不能再作背景，
           且透明窗口下 backdrop-blur 走独立合成路径有渲染风险（TranslateToast 同款无 blur） */}
-      <div className="relative flex-1 m-1 rounded-xl border border-app-border-subtle panel-glass-toast shadow-2xl overflow-hidden flex flex-col">
+      <div className="relative flex-1 m-1 rounded-xl border border-app-border-subtle panel-glass-toast overflow-hidden flex flex-col">
         {/* 标题栏（可拖动） */}
         <div
           data-tauri-drag-region

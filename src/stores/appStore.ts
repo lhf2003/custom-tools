@@ -29,6 +29,8 @@ interface AppState {
   chatPrefill: string | null;
   chatPrefillAutoSend: boolean;
   setChatPrefill: (data: string | null, autoSend?: boolean) => void;
+  /** 原子取走 prefill（取值+清除一步完成），已消费/无 prefill 返回 null */
+  consumeChatPrefill: () => { text: string; autoSend: boolean } | null;
 
   // Loading states
   isLoading: boolean;
@@ -87,6 +89,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   chatPrefillAutoSend: false,
   setChatPrefill: (data, autoSend = false) =>
     set({ chatPrefill: data, chatPrefillAutoSend: data !== null && autoSend }),
+  // 原子消费（与 consumePayload 同模式）：StrictMode 双执行/热重挂载下第二次拿到
+  // null 直接跳过——若先清后读分两步，第二次会用渲染闭包里的旧 chatPrefill +
+  // 已被清空的 autoSend 标记把代发误判成预填（语音直发文本落进输入框）
+  consumeChatPrefill: () => {
+    const { chatPrefill, chatPrefillAutoSend } = get();
+    if (chatPrefill === null) return null;
+    set({ chatPrefill: null, chatPrefillAutoSend: false });
+    return { text: chatPrefill, autoSend: chatPrefillAutoSend };
+  },
 
   // Loading
   isLoading: false,

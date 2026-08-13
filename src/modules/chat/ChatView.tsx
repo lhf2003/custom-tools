@@ -5,9 +5,11 @@ import remarkGfm from 'remark-gfm';
 import {
   ArrowLeft,
   ArrowUp,
+  Copy,
   Loader2,
   Mic,
   Plus,
+  RotateCcw,
   Square,
   Volume2,
   X,
@@ -234,19 +236,19 @@ function AssistantContent({ text }: { text: string }) {
 }
 
 /** 用户消息气泡：界面操作回传渲染为紧凑胶囊（协议 JSON 不上屏，落库原文不变），
- *  其余为普通气泡 */
+ *  其余为普通气泡；均开放文本选择（根容器 select-none，气泡单独放开） */
 function UserMessageBubble({ content }: { content: string }) {
   const action = parseActionMessage(content);
   if (action) {
     return (
-      <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-zinc-700/40 border border-zinc-600/40 text-xs text-zinc-400">
+      <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-zinc-700/40 border border-zinc-600/40 text-xs text-zinc-400 select-text">
         <MousePointerClick className="w-3 h-3 shrink-0" />
         点击了「{action.label}」
       </div>
     );
   }
   return (
-    <div className="max-w-[80%] px-3 py-2 rounded-xl bg-white/10 text-sm text-zinc-100 break-words">
+    <div className="max-w-[80%] px-3 py-2 rounded-xl bg-white/10 text-sm text-zinc-100 break-words select-text">
       {content}
     </div>
   );
@@ -257,7 +259,7 @@ function UserMessageBubble({ content }: { content: string }) {
 // ─────────────────────────────────────────────
 
 export function ChatView() {
-  const { setActiveView, chatPrefill, setChatPrefill } = useAppStore();
+  const { setActiveView, chatPrefill } = useAppStore();
 
   const [mode, setMode] = useState<ChatMode>('chat');
   const [input, setInput] = useState('');
@@ -296,6 +298,19 @@ export function ChatView() {
 
   // 消息重播：正在播报的消息下标（Rust 播完/被打断广播 moss:tts:done 清态）
   const [playingIdx, setPlayingIdx] = useState<number | null>(null);
+  // 复制反馈：成功勾/失败叉，1.5s 自动复位（按钮即反馈，不弹 toast）
+  const [copyFeedback, setCopyFeedback] = useState<{ idx: number; ok: boolean } | null>(null);
+  const copyTimerRef = useRef<number | null>(null);
+
+  /** 复制一条回复原文（markdown 源，含心声标签——与落库口径一致，零解析零失真） */
+  const handleCopyMessage = useCallback((idx: number, content: string) => {
+    navigator.clipboard.writeText(content).then(
+      () => setCopyFeedback({ idx, ok: true }),
+      () => setCopyFeedback({ idx, ok: false }),
+    );
+    if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
+    copyTimerRef.current = window.setTimeout(() => setCopyFeedback(null), 1500);
+  }, []);
 
   /** 朗读/停止一条回复:播报中再点即停;新播报后端自动打断旧的 */
   const handleSpeakMessage = useCallback(
@@ -601,31 +616,33 @@ export function ChatView() {
   }, [input, isLoading, messages, mode]);
 
   // Consume prefill: 原文填入输入框（companion 错误分析 / 剪贴板「发送给AI」共用通道，
-  // 包装文案由发送方组装）;autoSend(语音输入)走代发通道直接发送,不进草稿
+  // 包装文案由发送方组装）;autoSend(语音输入)走代发通道直接发送,不进草稿。
+  // 消费走 consumeChatPrefill 原子取走——本 effect 在 StrictMode/热重挂载下会二次执行,
+  // 第二次拿到 null 直接跳过;若分步「读 getState + setChatPrefill(null)」,第二次会用
+  // 渲染闭包里的旧 chatPrefill + 已被清空的 autoSend 标记把代发误判成预填
   useEffect(() => {
-    if (chatPrefill) {
-      const autoSend = useAppStore.getState().chatPrefillAutoSend;
-      setChatPrefill(null);
-      setMode('chat');
-      if (autoSend) {
-        // 等会话恢复(sessionId 就绪)再代发,否则消息不入库;
-        // 2s 轮询上限兜底(restoreSession 总会 setSessionId,含新建分支)
-        let tries = 0;
-        const trySend = () => {
-          if (sessionIdRef.current !== null) {
-            void handleSend(chatPrefill);
-          } else if (++tries < 20) {
-            setTimeout(trySend, 100);
-          }
-        };
-        trySend();
-        return;
-      }
-      setInput(chatPrefill);
-      // 等视图切换渲染完成后聚焦
-      setTimeout(() => textareaRef.current?.focus(), 100);
+    if (!chatPrefill) return;
+    const claimed = useAppStore.getState().consumeChatPrefill();
+    if (!claimed) return;
+    setMode('chat');
+    if (claimed.autoSend) {
+      // 等会话恢复(sessionId 就绪)再代发,否则消息不入库;
+      // 2s 轮询上限兜底(restoreSession 总会 setSessionId,含新建分支)
+      let tries = 0;
+      const trySend = () => {
+        if (sessionIdRef.current !== null) {
+          void handleSend(claimed.text);
+        } else if (++tries < 20) {
+          setTimeout(trySend, 100);
+        }
+      };
+      trySend();
+      return;
     }
-  }, [chatPrefill, setChatPrefill, handleSend]);
+    setInput(claimed.text);
+    // 等视图切换渲染完成后聚焦
+    setTimeout(() => textareaRef.current?.focus(), 100);
+  }, [chatPrefill, handleSend]);
 
   // ── Restore session when mode changes ────────────────────────────
   useEffect(() => {
@@ -683,6 +700,70 @@ export function ChatView() {
       }
     }
   }, [mode]);
+
+  // ── Retry last turn ───────────────────────────────────────────────
+  // 重试 = 删掉该轮 assistant 落库行（含 A2UI 卡片行），用最后一条用户消息
+  // 原文重走发送流程；不追加 user 消息、不清输入框草稿。
+  // agent 通道接受 claude 侧旧答案残留（裁决：重发即「再问一次」语义）。
+  const handleRetry = useCallback(async () => {
+    if (isLoading) return;
+    const sid = sessionIdRef.current;
+    if (sid === null) {
+      setError('会话未就绪，请稍候再试');
+      return;
+    }
+    // 最后一条用户消息是重试的提示词；其后的所有消息是该轮待删回复
+    let lastUserIdx = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') {
+        lastUserIdx = i;
+        break;
+      }
+    }
+    if (lastUserIdx === -1) return;
+    const text = messages[lastUserIdx].content;
+    const removed = messages.slice(lastUserIdx + 1);
+    if (removed.length === 0) return;
+
+    stopSpeech();
+    setPlayingIdx(null);
+    // 复位取消标记（同 handleSend：清空/取消后置过 true，不复位会丢本轮回复）
+    isCancelledRef.current = false;
+
+    // 先删库再发送：scene 通道发送瞬间就从这个库重建上下文，
+    // 顺序反了旧回复会被重新吃进上下文（agent 通道上下文在 claude 侧，不受 DB 影响）
+    try {
+      await invoke('truncate_chat_after_last_user', { sessionId: sid });
+    } catch (e) {
+      console.error('Failed to truncate last turn:', e);
+      setError('重试失败：清理旧回复失败');
+      return;
+    }
+
+    // 乐观移除该轮气泡；发送同步失败时恢复（DB 行已删，恢复仅补 UI，
+    // 与库的分叉持续到下一条回复落库——冷角案例，error 条如实告知）
+    setMessages(messages.slice(0, lastUserIdx + 1));
+    setStreamText('');
+    streamTextRef.current = '';
+    stickToBottomRef.current = true;
+    setIsLoading(true);
+    setError(null);
+    setCancelled(false);
+    setAgentStatus(null);
+
+    try {
+      const agentAvailable = await invoke<boolean>('jarvis_agent_available');
+      if (agentAvailable) {
+        await invoke('jarvis_chat_send', { text });
+      } else {
+        await invoke('jarvis_chat_send_scene', { sessionId: sid, text });
+      }
+    } catch (err) {
+      setMessages((prev) => [...prev, ...removed]);
+      setIsLoading(false);
+      setError(typeof err === 'string' ? err : '重试失败，请检查 AI 模型设置');
+    }
+  }, [isLoading, messages]);
 
   // ── New session ──────────────────────────────────────────────────
   const handleNewSession = useCallback(async () => {
@@ -915,6 +996,20 @@ export function ChatView() {
   // 空状态：无历史、无加载、无错误、无流式——显示引导而非空白
   const showEmptyState =
     !hasResponse && !isLoading && !error && streamText.length === 0;
+  // 重试按钮挂载点（visibleMessages 下标）：从尾部扫，撞上用户消息说明最后
+  // 一轮尚无回复（出错/取消）不挂；跳过 A2UI 卡片——重试只挂文字气泡，
+  // 删除时该轮卡片随「最后一条用户消息之后的所有行」一并清
+  let retryTargetIdx = -1;
+  if (!isLoading) {
+    for (let i = visibleMessages.length - 1; i >= 0; i--) {
+      const m = visibleMessages[i];
+      if (m.role === 'user') break;
+      if (m.contentType !== 'a2ui') {
+        retryTargetIdx = i;
+        break;
+      }
+    }
+  }
 
   return (
     <div className="w-full h-full flex flex-col select-none panel-glass">
@@ -1024,26 +1119,75 @@ export function ChatView() {
               </div>
             ) : (
               <div className="max-w-[90%] group">
-                <div className="prose prose-invert prose-sm max-w-none prose-p:my-1.5 prose-headings:mt-3 prose-headings:mb-1.5 prose-pre:bg-zinc-800 prose-pre:border prose-pre:border-zinc-700 prose-pre:rounded-lg prose-code:text-emerald-300 prose-code:bg-zinc-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-a:text-blue-400 prose-strong:text-zinc-200">
+                <div className="prose prose-invert prose-sm max-w-none select-text prose-p:my-1.5 prose-headings:mt-3 prose-headings:mb-1.5 prose-pre:bg-zinc-800 prose-pre:border prose-pre:border-zinc-700 prose-pre:rounded-lg prose-code:text-emerald-300 prose-code:bg-zinc-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-a:text-blue-400 prose-strong:text-zinc-200">
                   <AssistantContent text={msg.content} />
                 </div>
-                {/* 重播入口:hover 浮现;播报中常亮方块,再点即停 */}
-                <button
-                  type="button"
-                  onClick={() => handleSpeakMessage(idx, msg.content)}
-                  className={`mt-1 w-6 h-6 rounded-md flex items-center justify-center transition-all cursor-pointer ${
-                    playingIdx === idx
-                      ? 'text-indigo-400 opacity-100'
-                      : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/10 opacity-0 group-hover:opacity-100'
+                {/* 操作行：复制 → 重试（仅最后一轮回服）→ 播报；hover 浮现，
+                    播报中/复制反馈瞬间常亮。重试仅挂最后一条——中间轮次的重试
+                    意味着删掉后续所有消息，破坏性语义不提供 */}
+                <div
+                  className={`mt-1 flex items-center gap-0.5 transition-all ${
+                    playingIdx === idx || copyFeedback?.idx === idx
+                      ? 'opacity-100'
+                      : 'opacity-0 group-hover:opacity-100'
                   }`}
-                  aria-label={playingIdx === idx ? '停止播报' : '朗读这条回复'}
                 >
-                  {playingIdx === idx ? (
-                    <Square className="w-3.5 h-3.5" />
-                  ) : (
-                    <Volume2 className="w-3.5 h-3.5" />
+                  <button
+                    type="button"
+                    onClick={() => handleCopyMessage(idx, msg.content)}
+                    className={`w-6 h-6 rounded-md flex items-center justify-center transition-all cursor-pointer ${
+                      copyFeedback?.idx === idx
+                        ? copyFeedback.ok
+                          ? 'text-emerald-400'
+                          : 'text-red-400'
+                        : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/10'
+                    }`}
+                    aria-label={
+                      copyFeedback?.idx === idx
+                        ? copyFeedback.ok
+                          ? '已复制'
+                          : '复制失败'
+                        : '复制回复'
+                    }
+                  >
+                    {copyFeedback?.idx === idx ? (
+                      copyFeedback.ok ? (
+                        <Check className="w-3.5 h-3.5" />
+                      ) : (
+                        <X className="w-3.5 h-3.5" />
+                      )
+                    ) : (
+                      <Copy className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                  {idx === retryTargetIdx && (
+                    <button
+                      type="button"
+                      onClick={handleRetry}
+                      className="w-6 h-6 rounded-md flex items-center justify-center transition-all cursor-pointer text-zinc-500 hover:text-zinc-300 hover:bg-white/10"
+                      aria-label="重新生成回复"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                    </button>
                   )}
-                </button>
+                  {/* 重播入口:播报中常亮方块,再点即停 */}
+                  <button
+                    type="button"
+                    onClick={() => handleSpeakMessage(idx, msg.content)}
+                    className={`w-6 h-6 rounded-md flex items-center justify-center transition-all cursor-pointer ${
+                      playingIdx === idx
+                        ? 'text-indigo-400'
+                        : 'text-zinc-500 hover:text-zinc-300 hover:bg-white/10'
+                    }`}
+                    aria-label={playingIdx === idx ? '停止播报' : '朗读这条回复'}
+                  >
+                    {playingIdx === idx ? (
+                      <Square className="w-3.5 h-3.5" />
+                    ) : (
+                      <Volume2 className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -1085,7 +1229,7 @@ export function ChatView() {
                   {agentStatus}
                 </div>
               )}
-              <div className="prose prose-invert prose-sm max-w-none prose-p:my-1.5 prose-headings:mt-3 prose-headings:mb-1.5 prose-pre:bg-zinc-800 prose-pre:border prose-pre:border-zinc-700 prose-pre:rounded-lg prose-code:text-emerald-300 prose-code:bg-zinc-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-a:text-blue-400 prose-strong:text-zinc-200">
+              <div className="prose prose-invert prose-sm max-w-none select-text prose-p:my-1.5 prose-headings:mt-3 prose-headings:mb-1.5 prose-pre:bg-zinc-800 prose-pre:border prose-pre:border-zinc-700 prose-pre:rounded-lg prose-code:text-emerald-300 prose-code:bg-zinc-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-a:text-blue-400 prose-strong:text-zinc-200">
                 <AssistantContent text={streamText} />
                 {showCursor && (
                   <span className="inline-block w-0.5 h-4 bg-indigo-400/80 animate-pulse ml-0.5 align-middle" />

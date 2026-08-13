@@ -25,6 +25,23 @@ function formatTime(sec: number): string {
   return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
 }
 
+/** 底部快捷键提示:键帽 + 动作名(键帽视觉同 ActionMenu 的 ShortcutKeys) */
+function HintKeys({ keys, label }: { keys: string[]; label: string }) {
+  return (
+    <span className="flex items-center gap-1">
+      {keys.map((key) => (
+        <kbd
+          key={key}
+          className="min-w-[16px] px-1 py-px text-center rounded border border-white/10 bg-white/5 text-[10px] font-medium text-app-text-tertiary"
+        >
+          {key}
+        </kbd>
+      ))}
+      <span className="text-[10px] text-app-text-tertiary ml-0.5">{label}</span>
+    </span>
+  );
+}
+
 export default function VoiceToast() {
   const [phase, setPhase] = useState<Phase>('idle');
   const [seconds, setSeconds] = useState(0);
@@ -287,11 +304,35 @@ export default function VoiceToast() {
     }
   }, [text, acting, dismiss]);
 
+  // 结果卡片快捷键:Ctrl+Enter 发送 / Ctrl+S 存笔记 / Ctrl+C 复制。
+  // Ctrl+C 有选区时放行原生复制选区,无选区才触发「复制全文并关窗」
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (phaseRef.current !== 'result') return;
+      if (!e.ctrlKey || e.altKey || e.shiftKey) return;
+      const key = e.key.toLowerCase();
+      if (key === 'enter') {
+        e.preventDefault();
+        void handleSendToChat();
+      } else if (key === 's') {
+        e.preventDefault();
+        void handleSaveNote();
+      } else if (key === 'c') {
+        const selection = window.getSelection();
+        if (selection && selection.toString().length > 0) return;
+        e.preventDefault();
+        void handleCopy();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [handleSendToChat, handleSaveNote, handleCopy]);
+
   if (phase === 'idle') return null;
 
   return (
     <div className="w-full h-full flex items-stretch justify-stretch bg-transparent">
-      <div className="relative flex-1 m-1 rounded-xl border border-app-border-subtle panel-glass-toast shadow-2xl overflow-hidden flex flex-col">
+      <div className="relative flex-1 m-1 rounded-xl border border-app-border-subtle panel-glass-toast overflow-hidden flex flex-col">
         {phase === 'result' ? (
           <>
             {/* 完成卡片:操作行 + 可编辑文本(图3) */}
@@ -299,7 +340,7 @@ export default function VoiceToast() {
               data-tauri-drag-region
               className="flex items-center gap-1 px-2.5 pt-2 pb-1 cursor-default"
             >
-              <Tooltip content="发送给 AI 聊天" wrapperClassName="shrink-0">
+              <Tooltip content="发送给 AI 聊天（Ctrl+Enter）" wrapperClassName="shrink-0">
                 <button
                   onClick={handleSendToChat}
                   disabled={!text.trim() || acting}
@@ -309,7 +350,7 @@ export default function VoiceToast() {
                   <Send size={13} />
                 </button>
               </Tooltip>
-              <Tooltip content="存到笔记" wrapperClassName="shrink-0">
+              <Tooltip content="存到笔记（Ctrl+S）" wrapperClassName="shrink-0">
                 <button
                   onClick={handleSaveNote}
                   disabled={!text.trim() || acting}
@@ -319,7 +360,7 @@ export default function VoiceToast() {
                   <BookPlus size={13} />
                 </button>
               </Tooltip>
-              <Tooltip content="复制到剪贴板" wrapperClassName="shrink-0">
+              <Tooltip content="复制到剪贴板（Ctrl+C）" wrapperClassName="shrink-0">
                 <button
                   onClick={handleCopy}
                   disabled={!text.trim() || acting}
@@ -347,8 +388,14 @@ export default function VoiceToast() {
               value={text}
               onChange={(e) => setText(e.target.value)}
               placeholder="转写文本(可直接编辑)"
-              className="flex-1 min-h-0 mx-2.5 mb-2.5 px-2 py-1.5 rounded-lg bg-transparent border-none text-xs text-app-text-primary placeholder-app-text-placeholder outline-none resize-none leading-relaxed"
+              className="flex-1 min-h-0 mx-2.5 mb-1 px-2 py-1.5 rounded-lg bg-transparent border-none text-xs text-app-text-primary placeholder-app-text-placeholder outline-none resize-none leading-relaxed"
             />
+            {/* 底部快捷键提示条:三操作键盘直达 */}
+            <div className="flex items-center justify-center gap-4 px-2.5 pb-2">
+              <HintKeys keys={['Ctrl', 'Enter']} label="发送" />
+              <HintKeys keys={['Ctrl', 'S']} label="存笔记" />
+              <HintKeys keys={['Ctrl', 'C']} label="复制" />
+            </div>
           </>
         ) : (
           /* 录音条:点阵电平 + 计时;hover 浮现 取消/完成(图1→图2)。
