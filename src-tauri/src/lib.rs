@@ -394,6 +394,10 @@ pub fn run() {
                     // Delay to avoid impacting startup performance
                     tokio::time::sleep(Duration::from_secs(5)).await;
 
+                    // 优先完成上次「稍后安装」遗留的已下载更新（不依赖 auto_update：
+                    // 用户已同意安装）。命中安装时进程直接退出，后续检查不再执行。
+                    commands::updater::maybe_install_pending_update(&app_handle).await;
+
                     if settings_for_update.auto_update {
                         check_update_on_startup(app_handle).await;
                     }
@@ -571,7 +575,8 @@ pub fn run() {
             commands::system::save_image_to_path,
             // Updater commands
             commands::updater::check_for_update,
-            commands::updater::download_and_install_update,
+            commands::updater::download_update,
+            commands::updater::install_downloaded_update,
             // Changelog commands
             commands::changelog::add_changelog,
             commands::changelog::mark_all_changelogs_read,

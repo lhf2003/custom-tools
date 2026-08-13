@@ -44,15 +44,15 @@ fn get_db_connection(app: &AppHandle) -> Result<Connection, String> {
     Connection::open(&db_state.0).map_err(|e| format!("Failed to open database: {}", e))
 }
 
-/// Add or update a changelog entry
-#[tauri::command]
-pub fn add_changelog(
-    app: AppHandle,
-    version: String,
+/// 写入/覆盖一条未读 changelog（updater 下载成功路径与 add_changelog 命令共用）。
+/// is_read 固定为 0：重启后的新版本首次启动凭未读标记弹出更新日志。
+pub fn upsert_changelog(
+    app: &AppHandle,
+    version: &str,
     release_date: Option<String>,
-    content: String,
+    content: &str,
 ) -> Result<(), String> {
-    let conn = get_db_connection(&app)?;
+    let conn = get_db_connection(app)?;
 
     conn.execute(
         "INSERT OR REPLACE INTO changelog (version, release_date, content, is_read, created_at)
@@ -62,6 +62,17 @@ pub fn add_changelog(
     .map_err(|e| format!("Failed to add changelog: {}", e))?;
 
     Ok(())
+}
+
+/// Add or update a changelog entry
+#[tauri::command]
+pub fn add_changelog(
+    app: AppHandle,
+    version: String,
+    release_date: Option<String>,
+    content: String,
+) -> Result<(), String> {
+    upsert_changelog(&app, &version, release_date, &content)
 }
 
 /// Mark all changelogs as read

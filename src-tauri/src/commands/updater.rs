@@ -94,11 +94,39 @@ pub async fn check_for_update(app: AppHandle) -> Result<Option<UpdateInfo>, Stri
     }
 }
 
+/// 已下载待安装更新的存放目录（{app_data}/pending-update/{setup.bin,meta.json}）。
+/// 落盘而非内存：用户选「稍后安装」后即使手动退出应用，下次启动仍能完成安装。
+fn pending_update_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?
+        .join("pending-update"))
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct PendingUpdateMeta {
+    pub version: String,
+}
+
+/// 把 Update 放回 PendingUpdate 缓存（下载/安装失败后重试仍需复用同一个实例）。
+fn put_back_update(app: &AppHandle, update: tauri_plugin_updater::Update) {
+    if let Some(state) = app.try_state::<PendingUpdate>() {
+        if let Ok(mut guard) = state.0.lock() {
+            *guard = Some(update);
+        }
+    }
+}
+
+/// 只下载不安装：签名校验通过后安装包落盘 + 预写未读更新日志，前端据此弹「立即/稍后安装」。
+/// PendingUpdate 缓存不消费（install_downloaded_update 与失败重试都要复用）。
+///
+/// 更新日志必须在此时写入：install 会 std::process::exit(0) 退出进程，
+/// 等安装之后再写永远执行不到（重启后新版本凭未读 changelog 弹出更新日志）。
 #[tauri::command]
-pub async fn download_and_install_update(app: AppHandle) -> Result<(), String> {
+pub async fn download_update(app: AppHandle) -> Result<(), String> {
     use tauri::Emitter;
 
-    // Take the cached update — no second HTTP check needed
     let update = {
         let state = app
             .try_state::<PendingUpdate>()
@@ -109,10 +137,7 @@ pub async fn download_and_install_update(app: AppHandle) -> Result<(), String> {
             .ok_or("No cached update, please check for updates first")?
     };
 
-    log::info!(
-        "Starting download: {} (url logged by reqwest on connect)",
-        update.version
-    );
+    log::info!("Starting download: {}", update.version);
 
     let chunk_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let bytes_received = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
@@ -122,14 +147,15 @@ pub async fn download_and_install_update(app: AppHandle) -> Result<(), String> {
     let bytes_received_chunks = bytes_received.clone();
     let chunk_count_finish = chunk_count.clone();
     let bytes_received_finish = bytes_received.clone();
-    update
-        .download_and_install(
+
+    let result = update
+        .download(
             move |chunk_length, content_length| {
                 let n =
                     chunk_count_chunks.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                let bytes =
-                    bytes_received_chunks.fetch_add(chunk_length as u64, std::sync::atomic::Ordering::Relaxed)
-                        + chunk_length as u64;
+                let bytes = bytes_received_chunks
+                    .fetch_add(chunk_length as u64, std::sync::atomic::Ordering::Relaxed)
+                    + chunk_length as u64;
                 if n == 1 || n % 500 == 0 {
                     log::info!(
                         "[download] chunk #{n}, +{chunk_length}B, total {bytes}B, content_length {content_length:?}"
@@ -153,18 +179,157 @@ pub async fn download_and_install_update(app: AppHandle) -> Result<(), String> {
                 let _ = app_for_finish.emit("update-download-progress", DownloadProgress::Finished);
             },
         )
-        .await
-        .map_err(|e| {
+        .await;
+
+    let bytes = match result {
+        Ok(b) => b,
+        Err(e) => {
             log::error!(
                 "[download] failed after {} chunks / {} bytes: {}",
                 chunk_count.load(std::sync::atomic::Ordering::Relaxed),
                 bytes_received.load(std::sync::atomic::Ordering::Relaxed),
                 e
             );
-            format!("Download/install failed: {}", e)
-        })?;
+            put_back_update(&app, update);
+            return Err(format!("Download failed: {}", e));
+        }
+    };
 
+    // 安装包 + 版本元信息落盘（稍后安装/下次启动自动安装都从这里取）
+    let dir = pending_update_dir(&app)?;
+    if let Err(e) = std::fs::create_dir_all(&dir)
+        .and_then(|_| std::fs::write(dir.join("setup.bin"), &bytes))
+        .and_then(|_| {
+            std::fs::write(
+                dir.join("meta.json"),
+                serde_json::to_string(&PendingUpdateMeta {
+                    version: update.version.clone(),
+                })
+                .map_err(std::io::Error::other)?,
+            )
+        })
+    {
+        put_back_update(&app, update);
+        return Err(format!("Failed to persist downloaded update: {}", e));
+    }
+
+    // 预写未读更新日志（新版本首次启动时弹出）；失败不阻塞更新流程
+    if let Some(body) = update.body.clone().filter(|b| !b.trim().is_empty()) {
+        if let Err(e) = crate::commands::changelog::upsert_changelog(
+            &app,
+            &update.version,
+            update.date.as_ref().map(|d| d.to_string()),
+            &body,
+        ) {
+            log::warn!("Failed to save changelog for {}: {}", update.version, e);
+        }
+    }
+
+    put_back_update(&app, update);
     Ok(())
+}
+
+/// 安装已下载的更新：install 启动 NSIS 安装器后进程立即退出（插件行为），
+/// 装完由安装器自动启动新版本。Ok 分支实际不可达。
+#[tauri::command]
+pub async fn install_downloaded_update(app: AppHandle) -> Result<(), String> {
+    let update = {
+        let state = app
+            .try_state::<PendingUpdate>()
+            .ok_or("No pending update state found")?;
+        let mut guard = state.0.lock().map_err(|e| e.to_string())?;
+        guard
+            .take()
+            .ok_or("No downloaded update to install")?
+    };
+
+    let setup_path = pending_update_dir(&app)?.join("setup.bin");
+    let bytes = match std::fs::read(&setup_path) {
+        Ok(b) => b,
+        Err(e) => {
+            put_back_update(&app, update);
+            return Err(format!("No downloaded package found: {}", e));
+        }
+    };
+
+    log::info!("Installing downloaded update: {}", update.version);
+    if let Err(e) = update.install(&bytes) {
+        put_back_update(&app, update);
+        return Err(format!("Install failed: {}", e));
+    }
+    Ok(())
+}
+
+/// 启动时完成上次「稍后安装」遗留的已下载更新。
+/// 版本与服务器一致 → 直接用磁盘安装包安装（免重复下载，进程退出后由安装器重启新版本）；
+/// 服务器已有更新版本或当前已最新 → 清理磁盘包；离线（check 失败）→ 保留待下次启动。
+pub async fn maybe_install_pending_update(app: &AppHandle) {
+    let dir = match pending_update_dir(app) {
+        Ok(d) => d,
+        Err(_) => return,
+    };
+    let meta: PendingUpdateMeta = match std::fs::read_to_string(dir.join("meta.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+    {
+        Some(m) => m,
+        None => return, // 无待安装更新
+    };
+
+    let current = app.package_info().version.to_string();
+    if meta.version == current {
+        // 新版本首次启动（上次安装已成功）：清理遗留安装包
+        let _ = std::fs::remove_dir_all(&dir);
+        return;
+    }
+
+    log::info!(
+        "Pending update found: {} (current: {}), verifying with server...",
+        meta.version,
+        current
+    );
+
+    let updater = match build_updater(app) {
+        Ok(u) => u,
+        Err(e) => {
+            log::warn!("Pending update: failed to build updater (kept): {}", e);
+            return;
+        }
+    };
+
+    match updater.check().await {
+        Ok(Some(update)) if update.version == meta.version => {
+            let bytes = match std::fs::read(dir.join("setup.bin")) {
+                Ok(b) => b,
+                Err(e) => {
+                    log::error!("Pending package unreadable ({}), discarding", e);
+                    let _ = std::fs::remove_dir_all(&dir);
+                    return;
+                }
+            };
+            log::info!("Installing pending update {} from cached package", meta.version);
+            // install 成功即进程退出，此后的启动流程（自动检查更新等）不再执行
+            if let Err(e) = update.install(&bytes) {
+                log::error!("Failed to install pending update: {}", e);
+            }
+        }
+        Ok(Some(other)) => {
+            // 服务器已有更新的版本：磁盘包作废，交给正常检查更新流程弹最新版
+            log::info!(
+                "Server has newer version {} (pending {}), discarding cached package",
+                other.version,
+                meta.version
+            );
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+        Ok(None) => {
+            // 当前版本已不落后于服务器（pending 过期）：清理
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+        Err(e) => {
+            log::warn!("Pending update verify failed (kept for next launch): {}", e);
+        }
+    }
 }
 
 #[cfg(test)]

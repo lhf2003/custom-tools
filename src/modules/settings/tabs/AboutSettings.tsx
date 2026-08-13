@@ -22,11 +22,12 @@ export function AboutSettings() {
   const {
     updateInfo,
     isChecking,
-    isDownloading,
+    downloadState,
     downloadProgress,
     downloadedBytes,
     checkForUpdate,
-    downloadAndInstall,
+    startDownload,
+    installNow,
   } = useUpdater();
 
   useEffect(() => {
@@ -69,18 +70,30 @@ export function AboutSettings() {
           title="应用更新"
           description={version ? `当前版本 v${version}` : '正在读取版本…'}
         >
-          {isDownloading ? (
+          {downloadState === 'downloading' ? (
             <span className="flex items-center gap-1.5 text-xs text-app-text-tertiary">
               <RefreshCw size={12} className="animate-spin" />
               下载中 {formatProgress(downloadProgress, downloadedBytes)}
             </span>
+          ) : downloadState === 'ready' ? (
+            <>
+              <span className="text-xs text-app-status-success">
+                v{updateInfo?.version} 已就绪
+              </span>
+              <button
+                onClick={() => void installNow()}
+                className="px-3 py-1.5 rounded-lg text-xs text-white bg-app-status-info hover:bg-blue-700 transition-colors cursor-pointer"
+              >
+                立即安装
+              </button>
+            </>
           ) : updateInfo ? (
             <>
               <span className="text-xs text-app-status-success">
                 发现新版本 v{updateInfo.version}
               </span>
               <button
-                onClick={downloadAndInstall}
+                onClick={() => void startDownload()}
                 className="px-3 py-1.5 rounded-lg text-xs text-white bg-app-status-info hover:bg-blue-700 transition-colors cursor-pointer"
               >
                 立即更新

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { useUpdater } from '@/hooks/useUpdater';
-import { Download, X, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Download, X, CheckCircle2, AlertCircle } from 'lucide-react';
 import type { UpdateInfo } from '@/hooks/useUpdater';
 
 interface UpdateCheckResult {
@@ -10,15 +10,16 @@ interface UpdateCheckResult {
 
 const RESULT_AUTO_DISMISS_MS = 5000;
 
-// 进度标签：有总大小时显示百分比，否则按 KB/MB 显示已下载量
-function formatProgress(progress: number, bytes: number): string {
-  if (progress > 0) return `${progress}%`;
-  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-  return `${Math.round(bytes / 1024)} KB`;
-}
-
 export function UpdateNotification() {
-  const { updateInfo, isDownloading, downloadProgress, downloadedBytes, setUpdateInfo, downloadAndInstall } = useUpdater();
+  const {
+    updateInfo,
+    downloadState,
+    setUpdateInfo,
+    startDownload,
+    installNow,
+    dismissReady,
+    dismissError,
+  } = useUpdater();
   const [showNotification, setShowNotification] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const [checkResult, setCheckResult] = useState<UpdateCheckResult | null>(null);
@@ -64,18 +65,31 @@ export function UpdateNotification() {
 
   // Show notification when update is found
   useEffect(() => {
-    if (updateInfo && !dismissed && !isDownloading) {
+    if (updateInfo && !dismissed && downloadState === 'idle') {
       setShowNotification(true);
     }
-  }, [updateInfo, dismissed, isDownloading]);
+  }, [updateInfo, dismissed, downloadState]);
 
   const handleDismiss = () => {
     setShowNotification(false);
     setDismissed(true);
   };
 
-  const handleUpdate = async () => {
-    await downloadAndInstall();
+  // 点「立即更新」：弹窗消失，后台静默下载，结果（就绪/失败）再弹窗
+  const handleUpdate = () => {
+    setShowNotification(false);
+    void startDownload();
+  };
+
+  // 稍后安装：安装包已落盘，下次启动自动完成安装；本次会话不再打扰
+  const handleInstallLater = () => {
+    setDismissed(true);
+    dismissReady();
+  };
+
+  const handleCloseError = () => {
+    setDismissed(true);
+    dismissError();
   };
 
   // Check result feedback (latest / failed) — lightweight, auto-dismissing
@@ -112,6 +126,84 @@ export function UpdateNotification() {
     );
   }
 
+  // 下载失败：弹窗提示，可重试（后端缓存的更新不消费，重试直接重新下载）
+  if (downloadState === 'error') {
+    return (
+      <div className="fixed bottom-4 right-4 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
+        <div className="bg-app-bg-tertiary border border-white/10 rounded-xl shadow-2xl p-4 min-w-[320px] max-w-[400px]">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-8 h-8 rounded-lg bg-red-500/20 flex items-center justify-center">
+              <AlertCircle className="w-4 h-4 text-red-400" />
+            </div>
+            <div>
+              <h3 className="text-white text-sm font-medium">更新下载失败</h3>
+              <p className="text-white/50 text-xs">v{updateInfo?.version}</p>
+            </div>
+          </div>
+          <p className="text-white/60 text-xs mb-4">网络连接错误或更新服务不可用，请稍后重试。</p>
+          <div className="flex gap-2">
+            <button
+              onClick={handleCloseError}
+              className="flex-1 px-3 py-2 rounded-lg bg-white/5 text-white/70 text-xs hover:bg-white/10 hover:text-white transition-colors"
+            >
+              关闭
+            </button>
+            <button
+              onClick={() => void startDownload()}
+              className="flex-1 px-3 py-2 rounded-lg bg-blue-600 text-white text-xs hover:bg-blue-700 transition-colors"
+            >
+              重试
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 下载完成：弹窗询问立即安装或稍后安装（稍后 = 下次启动应用时自动完成）
+  if (downloadState === 'ready') {
+    return (
+      <div className="fixed bottom-4 right-4 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
+        <div className="bg-app-bg-tertiary border border-white/10 rounded-xl shadow-2xl p-4 min-w-[320px] max-w-[400px]">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-green-500/20 flex items-center justify-center">
+                <CheckCircle2 className="w-4 h-4 text-green-400" />
+              </div>
+              <div>
+                <h3 className="text-white text-sm font-medium">更新已就绪</h3>
+                <p className="text-white/50 text-xs">v{updateInfo?.version}</p>
+              </div>
+            </div>
+            <button
+              onClick={handleInstallLater}
+              className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <p className="text-white/60 text-xs mb-4">
+            新版本已下载完成。立即安装将自动重启应用；稍后安装会在下次启动时自动完成。
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={handleInstallLater}
+              className="flex-1 px-3 py-2 rounded-lg bg-white/5 text-white/70 text-xs hover:bg-white/10 hover:text-white transition-colors"
+            >
+              稍后安装
+            </button>
+            <button
+              onClick={() => void installNow()}
+              className="flex-1 px-3 py-2 rounded-lg bg-blue-600 text-white text-xs hover:bg-blue-700 transition-colors"
+            >
+              立即安装
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!showNotification || !updateInfo) return null;
 
   return (
@@ -128,60 +220,31 @@ export function UpdateNotification() {
               <p className="text-white/50 text-xs">v{updateInfo.version}</p>
             </div>
           </div>
-          {!isDownloading && (
-            <button
-              onClick={handleDismiss}
-              className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
+          <button
+            onClick={handleDismiss}
+            className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/10 transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
 
-        {/* Body */}
-        <div className="mb-4">
-          {updateInfo.body ? (
-            <p className="text-white/60 text-xs line-clamp-3">{updateInfo.body}</p>
-          ) : (
-            <p className="text-white/60 text-xs">有新版本可用，建议更新以获得最新功能和修复。</p>
-          )}
-        </div>
+        {/* Body：不展示更新日志（更新完成后统一弹出） */}
+        <p className="text-white/60 text-xs mb-4">有新版本可用，建议更新以获得最新功能和修复。</p>
 
-        {/* Progress or Actions */}
-        {isDownloading ? (
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-white/60 flex items-center gap-1.5">
-                <RefreshCw className="w-3 h-3 animate-spin" />
-                正在下载...
-              </span>
-              <span className="text-blue-400">
-                {formatProgress(downloadProgress, downloadedBytes)}
-              </span>
-            </div>
-            <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-blue-500 rounded-full transition-all duration-300"
-                style={{ width: `${downloadProgress}%` }}
-              />
-            </div>
-          </div>
-        ) : (
-          <div className="flex gap-2">
-            <button
-              onClick={handleDismiss}
-              className="flex-1 px-3 py-2 rounded-lg bg-white/5 text-white/70 text-xs hover:bg-white/10 hover:text-white transition-colors"
-            >
-              稍后提醒
-            </button>
-            <button
-              onClick={handleUpdate}
-              className="flex-1 px-3 py-2 rounded-lg bg-blue-600 text-white text-xs hover:bg-blue-700 transition-colors"
-            >
-              立即更新
-            </button>
-          </div>
-        )}
+        <div className="flex gap-2">
+          <button
+            onClick={handleDismiss}
+            className="flex-1 px-3 py-2 rounded-lg bg-white/5 text-white/70 text-xs hover:bg-white/10 hover:text-white transition-colors"
+          >
+            稍后提醒
+          </button>
+          <button
+            onClick={handleUpdate}
+            className="flex-1 px-3 py-2 rounded-lg bg-blue-600 text-white text-xs hover:bg-blue-700 transition-colors"
+          >
+            立即更新
+          </button>
+        </div>
       </div>
     </div>
   );
