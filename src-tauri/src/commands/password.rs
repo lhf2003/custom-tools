@@ -86,7 +86,6 @@ pub fn get_password_entries(
     db_state: State<DatabaseState>,
     crypto_state: State<PasswordManagerState>,
     category_id: Option<i64>,
-    favorite_only: Option<bool>,
     search: Option<String>,
 ) -> Result<Vec<PasswordEntry>, String> {
     let conn = Connection::open(&db_state.0).map_err(|e| e.to_string())?;
@@ -94,7 +93,7 @@ pub fn get_password_entries(
 
     let mut sql = String::from(
         "SELECT id, title, username, encrypted_password, url, encrypted_notes,
-         category_id, favorite, created_at, updated_at
+         category_id, created_at, updated_at
          FROM password_entries WHERE 1=1",
     );
 
@@ -102,15 +101,11 @@ pub fn get_password_entries(
         sql.push_str(" AND category_id = ?1");
     }
 
-    if favorite_only == Some(true) {
-        sql.push_str(" AND favorite = 1");
-    }
-
     if search.is_some() {
         sql.push_str(" AND (title LIKE ?2 OR username LIKE ?2 OR url LIKE ?2)");
     }
 
-    sql.push_str(" ORDER BY favorite DESC, title ASC");
+    sql.push_str(" ORDER BY title ASC");
 
     let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
@@ -155,9 +150,8 @@ pub fn get_password_entries(
                 url: row.get(4)?,
                 notes,
                 category_id: row.get(6)?,
-                favorite: row.get(7)?,
-                created_at: row.get(8)?,
-                updated_at: row.get(9)?,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -348,24 +342,6 @@ pub fn delete_password_category(db_state: State<DatabaseState>, id: i64) -> Resu
     if affected == 0 {
         return Err(format!("分类 {} 不存在", id));
     }
-
-    Ok(())
-}
-
-/// Toggle favorite flag on a password entry
-#[tauri::command]
-pub fn toggle_password_favorite(
-    db_state: State<DatabaseState>,
-    id: i64,
-    favorite: bool,
-) -> Result<(), String> {
-    let conn = Connection::open(&db_state.0).map_err(|e| e.to_string())?;
-
-    conn.execute(
-        "UPDATE password_entries SET favorite = ?1 WHERE id = ?2",
-        params![favorite, id],
-    )
-    .map_err(|e| e.to_string())?;
 
     Ok(())
 }

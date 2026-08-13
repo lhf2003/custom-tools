@@ -533,7 +533,6 @@ pub fn run() {
             commands::password::update_password_entry,
             commands::password::create_password_category,
             commands::password::delete_password_category,
-            commands::password::toggle_password_favorite,
             commands::password::get_decrypted_password,
             commands::password::delete_password_entry,
             commands::password::copy_password_to_clipboard,

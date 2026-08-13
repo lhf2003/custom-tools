@@ -77,7 +77,6 @@ export interface PasswordEntry {
   encryptedNotes?: string;
   url?: string;
   categoryId?: number;
-  favorite: boolean;
   usageCount: number;
   lastUsedAt?: string;
   createdAt: string;

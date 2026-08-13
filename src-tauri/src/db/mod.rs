@@ -91,7 +91,6 @@ impl Database {
                 encrypted_notes TEXT,
                 url TEXT,
                 category_id INTEGER,
-                favorite BOOLEAN DEFAULT 0,
                 usage_count INTEGER DEFAULT 0,
                 last_used_at DATETIME,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -100,6 +99,8 @@ impl Database {
             )",
             [],
         )?;
+
+        drop_legacy_favorite_column(&self.conn)?;
 
         // App usage tracking table (for "recently used" feature)
         self.conn.execute(
@@ -366,6 +367,19 @@ pub fn open_connection(path: &Path) -> rusqlite::Result<Connection> {
     Ok(conn)
 }
 
+/// 幂等迁移：收藏功能已下线，清掉旧库 password_entries 的 favorite 遗留列。
+/// 新库建表即无此列，检测不到直接跳过；需要 SQLite 3.35+（rusqlite bundled 满足）。
+fn drop_legacy_favorite_column(conn: &Connection) -> rusqlite::Result<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(password_entries)")?;
+    let columns = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<rusqlite::Result<Vec<String>>>()?;
+    if columns.iter().any(|c| c == "favorite") {
+        conn.execute("ALTER TABLE password_entries DROP COLUMN favorite", [])?;
+    }
+    Ok(())
+}
+
 fn get_app_dir(app_handle: &tauri::AppHandle) -> PathBuf {
     let path = app_handle
         .path()
@@ -437,6 +451,50 @@ mod tests {
             [],
         );
         assert!(result.is_err(), "向已删除/不存在的会话写消息必须被外键拒绝");
+    }
+
+    #[test]
+    fn legacy_favorite_column_is_dropped() {
+        let conn = Connection::open(Path::new(":memory:")).unwrap();
+        conn.execute(
+            "CREATE TABLE password_entries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                favorite BOOLEAN DEFAULT 0
+            )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO password_entries (title, favorite) VALUES ('旧条目', 1)",
+            [],
+        )
+        .unwrap();
+
+        drop_legacy_favorite_column(&conn).unwrap();
+
+        let mut stmt = conn.prepare("PRAGMA table_info(password_entries)").unwrap();
+        let columns = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<String>>>()
+            .unwrap();
+        assert!(!columns.iter().any(|c| c == "favorite"), "favorite 列应被删除");
+        // 删列不丢数据
+        let title: String = conn
+            .query_row("SELECT title FROM password_entries WHERE id = 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(title, "旧条目");
+    }
+
+    #[test]
+    fn legacy_favorite_migration_is_idempotent() {
+        let conn = Connection::open(Path::new(":memory:")).unwrap();
+        conn.execute("CREATE TABLE password_entries (id INTEGER PRIMARY KEY, title TEXT NOT NULL)", [])
+            .unwrap();
+        // 无 favorite 列时连续调用均不报错
+        drop_legacy_favorite_column(&conn).unwrap();
+        drop_legacy_favorite_column(&conn).unwrap();
     }
 
 }

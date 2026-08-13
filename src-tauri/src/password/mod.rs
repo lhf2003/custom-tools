@@ -14,7 +14,6 @@ pub struct PasswordEntry {
     pub url: Option<String>,
     pub notes: Option<String>,
     pub category_id: Option<i64>,
-    pub favorite: bool,
     pub created_at: String,
     pub updated_at: String,
 }

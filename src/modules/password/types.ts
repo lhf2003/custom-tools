@@ -15,7 +15,6 @@ export interface PasswordEntry {
   url: string | null;
   notes: string | null;
   category_id: number | null;
-  favorite: boolean;
   created_at: string;
   updated_at: string;
 }

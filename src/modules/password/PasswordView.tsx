@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Search, Plus, Copy, Check, Eye, EyeOff, Lock, Trash2, X, Globe, Shield, LayoutGrid, Pencil, ExternalLink, Star, Loader2, User } from 'lucide-react';
+import { Search, Plus, Copy, Check, Eye, EyeOff, Lock, Trash2, X, Globe, Shield, LayoutGrid, Pencil, ExternalLink, Folder, Loader2, User } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { Tooltip } from '@/components/Tooltip';
 import { MenuPanel } from '@/components/ActionMenu';
+import type { MenuItem } from '@/types';
 import { WINDOW_SIZE } from '../../constants/window';
 import { THEME } from '../../constants/theme';
 import { immediateResize } from '@/utils/tauri';
@@ -10,7 +11,7 @@ import { EntryFormModal, CategoryModal, ConfirmDeleteModal } from './EntryModals
 import { EMPTY_FORM } from './types';
 import type { EntryFormData, PasswordCategory, PasswordEntry } from './types';
 
-/** 焦点在输入框/文本域/下拉时不响应单键快捷键（F 收藏 / Del 删除），避免与输入冲突 */
+/** 焦点在输入框/文本域/下拉时不响应单键快捷键（Del 删除），避免与输入冲突 */
 function isTypingTarget(): boolean {
   const el = document.activeElement;
   return (
@@ -74,6 +75,8 @@ export function PasswordView() {
   const [deletingCategory, setDeletingCategory] = useState<PasswordCategory | null>(null);
   // 分类 chip 右键菜单：null 即关闭
   const [categoryMenu, setCategoryMenu] = useState<{ cat: PasswordCategory; x: number; y: number } | null>(null);
+  // 列表区域右键菜单：entry 为 null 表示右键落在空白处（删除项禁用）
+  const [entryMenu, setEntryMenu] = useState<{ entry: PasswordEntry | null; x: number; y: number } | null>(null);
   const [modalError, setModalError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -155,10 +158,11 @@ export function PasswordView() {
 
   const openCreateModal = useCallback(() => {
     setEditingEntry(null);
-    setEditInitialForm(EMPTY_FORM);
+    // 在指定分类下新增：表单分类预填当前筛选的分类（「全部」时不预填）
+    setEditInitialForm(selectedCategory === 'all' ? EMPTY_FORM : { ...EMPTY_FORM, category_id: selectedCategory });
     setModalError(null);
     setShowEntryModal(true);
-  }, []);
+  }, [selectedCategory]);
 
   // Listen for menu actions from navigation bar
   useEffect(() => {
@@ -194,7 +198,6 @@ export function PasswordView() {
     try {
       const ents = await invoke<PasswordEntry[]>('get_password_entries', {
         categoryId: selectedCategory === 'all' ? undefined : selectedCategory,
-        favoriteOnly: false,
         search: searchQuery || undefined,
       });
       setEntries(ents);
@@ -365,16 +368,6 @@ export function PasswordView() {
     }
   };
 
-  const handleToggleFavorite = useCallback(async (entry: PasswordEntry) => {
-    try {
-      await invoke('toggle_password_favorite', { id: entry.id, favorite: !entry.favorite });
-      loadEntries();
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      setListError(`收藏操作失败: ${message}`);
-    }
-  }, [loadEntries]);
-
   const scheduleAutoHide = useCallback((id: number) => {
     const timers = hideTimersRef.current;
     const existing = timers.get(id);
@@ -460,12 +453,12 @@ export function PasswordView() {
     }
   }, [decryptedPasswords, copySensitive]);
 
-  // 键盘导航（对齐 ClipboardView）：↑↓ 选择，Enter 复制密码，F 收藏，Delete 删除
+  // 键盘导航（对齐 ClipboardView）：↑↓ 选择，Enter 复制密码，Delete 删除
   useEffect(() => {
     if (!isUnlocked) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (showEntryModal || showCategoryModal || deletingEntry || deletingCategory || categoryMenu) return;
+      if (showEntryModal || showCategoryModal || deletingEntry || deletingCategory || categoryMenu || entryMenu) return;
       if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && isTypingTarget() && e.key !== 'Enter') return;
       if (entries.length === 0) return;
 
@@ -489,10 +482,6 @@ export function PasswordView() {
         e.preventDefault();
         const entry = entries.find((item) => item.id === selectedEntryId);
         if (entry) copyPassword(entry);
-      } else if (!isTypingTarget() && (e.key === 'f' || e.key === 'F') && selectedEntryId) {
-        e.preventDefault();
-        const entry = entries.find((item) => item.id === selectedEntryId);
-        if (entry) handleToggleFavorite(entry);
       } else if (!isTypingTarget() && e.key === 'Delete' && selectedEntryId) {
         e.preventDefault();
         const entry = entries.find((item) => item.id === selectedEntryId);
@@ -502,7 +491,7 @@ export function PasswordView() {
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isUnlocked, entries, selectedEntryId, showEntryModal, showCategoryModal, deletingEntry, deletingCategory, categoryMenu, copyPassword, handleToggleFavorite]);
+  }, [isUnlocked, entries, selectedEntryId, showEntryModal, showCategoryModal, deletingEntry, deletingCategory, categoryMenu, entryMenu, copyPassword]);
 
   if (isLoading) {
     return (
@@ -665,8 +654,14 @@ export function PasswordView() {
             </div>
           )}
 
-          {/* Password Items */}
-          <div className="flex-1 overflow-y-auto p-2">
+          {/* Password Items（条目右键由 PasswordListItem stopPropagation 接管，这里只兜空白处） */}
+          <div
+            className="flex-1 overflow-y-auto p-2"
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setEntryMenu({ entry: null, x: e.clientX, y: e.clientY });
+            }}
+          >
             {entries.length === 0 ? (
               searchQuery ? (
                 <div className="flex flex-col items-center justify-center h-full text-app-text-tertiary p-6 text-center">
@@ -695,6 +690,13 @@ export function PasswordView() {
                     item={item}
                     isSelected={selectedEntryId === item.id}
                     onClick={() => setSelectedEntryId(item.id)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      // 右键即选中（对齐 ClipboardView），删除等动作作用在该条目上
+                      setSelectedEntryId(item.id);
+                      setEntryMenu({ entry: item, x: e.clientX, y: e.clientY });
+                    }}
                     itemRef={(el) => {
                       if (el) itemRefs.current.set(item.id, el);
                       else itemRefs.current.delete(item.id);
@@ -729,7 +731,6 @@ export function PasswordView() {
             onCopyPassword={() => copyPassword(selectedEntry)}
             onCopyUsername={() => selectedEntry.username && copyPlain(selectedEntry.username, 'username')}
             onCopyUrl={() => selectedEntry.url && copyPlain(selectedEntry.url, 'url')}
-            onToggleFavorite={() => handleToggleFavorite(selectedEntry)}
             onDelete={() => { setModalError(null); setDeletingEntry(selectedEntry); }}
             onEdit={() => openEditModal(selectedEntry)}
           />
@@ -745,35 +746,52 @@ export function PasswordView() {
         </div>
       </div>
 
-      {/* 分类 chip 右键菜单：透明遮罩点击即关，菜单体复用导航栏 MenuPanel 样式 */}
+      {/* 分类 chip 右键菜单 */}
       {categoryMenu && (
-        <div
-          className="fixed inset-0 z-50"
-          onClick={() => setCategoryMenu(null)}
-          onContextMenu={(e) => { e.preventDefault(); setCategoryMenu(null); }}
-        >
-          <div
-            className="absolute min-w-[160px] bg-app-bg-primary/80 border border-app-border rounded-xl shadow-lg animate-in fade-in duration-150"
-            style={{
-              left: Math.min(categoryMenu.x, window.innerWidth - 176),
-              top: Math.min(categoryMenu.y, window.innerHeight - 64),
-              WebkitBackdropFilter: 'blur(20px)',
-              backdropFilter: 'blur(20px)',
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <MenuPanel
-              items={[{
-                id: 'delete-category',
-                label: '删除分类',
-                icon: Trash2,
-                danger: true,
-                onClick: () => { setModalError(null); setDeletingCategory(categoryMenu.cat); },
-              }]}
-              onItemClick={() => setCategoryMenu(null)}
-            />
-          </div>
-        </div>
+        <PasswordContextMenu
+          x={categoryMenu.x}
+          y={categoryMenu.y}
+          items={[{
+            id: 'delete-category',
+            label: '删除分类',
+            icon: Trash2,
+            danger: true,
+            onClick: () => { setModalError(null); setDeletingCategory(categoryMenu.cat); },
+          }]}
+          onClose={() => setCategoryMenu(null)}
+        />
+      )}
+
+      {/* 列表区域右键菜单：新增密码 / 新增分类 / 删除密码（空白处右键时删除项禁用） */}
+      {entryMenu && (
+        <PasswordContextMenu
+          x={entryMenu.x}
+          y={entryMenu.y}
+          items={[
+            { id: 'new-entry', label: '新增密码', icon: Plus, onClick: openCreateModal },
+            {
+              id: 'new-category',
+              label: '新增分类',
+              icon: Folder,
+              onClick: () => { setModalError(null); setShowCategoryModal(true); },
+            },
+            {
+              id: 'delete-entry',
+              label: '删除密码',
+              icon: Trash2,
+              danger: true,
+              separator: true,
+              disabled: !entryMenu.entry,
+              onClick: () => {
+                if (entryMenu.entry) {
+                  setModalError(null);
+                  setDeletingEntry(entryMenu.entry);
+                }
+              },
+            },
+          ]}
+          onClose={() => setEntryMenu(null)}
+        />
       )}
 
       {/* Entry Create/Edit Modal（key 保证切换条目时表单状态重置） */}{showEntryModal && (
@@ -834,10 +852,11 @@ interface PasswordListItemProps {
   item: PasswordEntry;
   isSelected: boolean;
   onClick: () => void;
+  onContextMenu: (e: React.MouseEvent) => void;
   itemRef: (el: HTMLButtonElement | null) => void;
 }
 
-function PasswordListItem({ item, isSelected, onClick, itemRef }: PasswordListItemProps) {
+function PasswordListItem({ item, isSelected, onClick, onContextMenu, itemRef }: PasswordListItemProps) {
   return (
     <button
       ref={itemRef}
@@ -846,6 +865,7 @@ function PasswordListItem({ item, isSelected, onClick, itemRef }: PasswordListIt
       role="option"
       aria-selected={isSelected}
       onClick={onClick}
+      onContextMenu={onContextMenu}
       className={`w-full flex items-center gap-2 px-2 py-2 rounded-lg cursor-pointer transition-colors duration-200 text-left ${
         isSelected
           ? 'bg-white/10'
@@ -854,12 +874,7 @@ function PasswordListItem({ item, isSelected, onClick, itemRef }: PasswordListIt
     >
       {/* Info */}
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-1.5">
-          {item.favorite && (
-            <Star size={12} className="text-app-status-warning flex-shrink-0" fill="currentColor" />
-          )}
-          <span className={`text-sm font-medium truncate ${isSelected ? 'text-app-text-primary' : 'text-app-text-secondary'}`}>{item.title}</span>
-        </div>
+        <span className={`text-sm font-medium truncate block ${isSelected ? 'text-app-text-primary' : 'text-app-text-secondary'}`}>{item.title}</span>
         <span className="text-app-text-tertiary text-xs truncate block">
           {item.username || '无用户名'}
         </span>
@@ -877,7 +892,6 @@ interface PasswordDetailProps {
   onCopyPassword: () => void;
   onCopyUsername: () => void;
   onCopyUrl: () => void;
-  onToggleFavorite: () => void;
   onDelete: () => void;
   onEdit: () => void;
 }
@@ -891,7 +905,6 @@ function PasswordDetail({
   onCopyPassword,
   onCopyUsername,
   onCopyUrl,
-  onToggleFavorite,
   onDelete,
   onEdit,
 }: PasswordDetailProps) {
@@ -932,16 +945,6 @@ function PasswordDetail({
 
           {/* Actions */}
           <div className="flex items-center gap-2 flex-shrink-0">
-            <Tooltip content={entry.favorite ? '取消收藏' : '收藏'} placement="bottom">
-              <button
-                onClick={onToggleFavorite}
-                aria-label={entry.favorite ? '取消收藏' : '收藏'}
-                aria-pressed={entry.favorite}
-                className="p-2.5 rounded-lg bg-white/5 text-app-text-tertiary hover:bg-white/10 hover:text-app-text-primary transition-colors duration-200 cursor-pointer"
-              >
-                <Star size={18} className={entry.favorite ? 'text-app-status-warning' : undefined} fill={entry.favorite ? 'currentColor' : 'none'} />
-              </button>
-            </Tooltip>
             <Tooltip content="编辑" placement="bottom">
               <button
                 onClick={onEdit}
@@ -1072,6 +1075,34 @@ function PasswordDetail({
             </div>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/** 右键菜单浮层：透明遮罩点击/右键即关，菜单体复用 MenuPanel 玻璃风（分类 chip 与密码列表共用）。
+ *  注意 MenuPanel 只转发点击事件，item.onClick 必须在这里调用。 */
+function PasswordContextMenu({ x, y, items, onClose }: { x: number; y: number; items: MenuItem[]; onClose: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-50"
+      onClick={onClose}
+      onContextMenu={(e) => { e.preventDefault(); onClose(); }}
+    >
+      <div
+        className="absolute min-w-[160px] bg-app-bg-primary/80 border border-app-border rounded-xl shadow-lg animate-in fade-in duration-150"
+        style={{
+          left: Math.min(x, window.innerWidth - 176),
+          top: Math.min(y, window.innerHeight - (items.length * 40 + 24)),
+          WebkitBackdropFilter: 'blur(20px)',
+          backdropFilter: 'blur(20px)',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <MenuPanel
+          items={items}
+          onItemClick={(item) => { item.onClick(); onClose(); }}
+        />
       </div>
     </div>
   );
