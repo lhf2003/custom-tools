@@ -658,6 +658,132 @@ fn match_context_routines(
     Ok(())
 }
 
+/// 同 app 情境 pattern 的合并阈值（分钟）：相邻时间差 ≤ 此值视为同一习惯的
+/// 观测漂移，收编为一簇。与 context_routine 默认 tolerance 一致。
+const ROUTINE_MERGE_GAP_MINUTES: u32 = 45;
+
+/// 收编 context_routine 的姊妹 pattern（学习收尾固定环节，持续治理）。
+///
+/// 背景：context_routine 的 signature 精确到分钟（`app@HH:MM`），LLM 多轮分析
+/// 对同一习惯会输出漂移的时间点（12:00/12:03/12:04），各成独立 pattern——
+/// 分裂会分散毕业投票、撑爆模式列表。这里按「同 app + 相邻时间差 ≤ 45 分钟」
+/// 单链聚类，每簇保留一条（confirmed 优先 → 学习天数 → 置信度 → 最早），
+/// 其余行的投票历史重定向后删除。返回收编的条数。
+///
+/// dismissed 行不碰——那是用户拒绝过的墓碑，删了会被重新学出来。
+/// 存量分裂无需 migration：下一个分析 slot 学习完成后自动收编。
+fn compact_context_routines(conn: &mut Connection) -> Result<usize, String> {
+    let routines = db::active_context_routines(conn).map_err(|e| e.to_string())?;
+
+    // 按 app 分组（解析失败的行不参与合并，防误伤）
+    let mut by_app: std::collections::HashMap<String, Vec<(db::HabitPattern, u32, u32)>> =
+        std::collections::HashMap::new();
+    for p in routines {
+        let Ok(data) = serde_json::from_str::<ContextRoutineData>(&p.pattern_data) else {
+            continue;
+        };
+        let Some(t) = parse_hm(&data.time) else { continue };
+        by_app
+            .entry(data.app.to_lowercase())
+            .or_default()
+            .push((p, t, data.tolerance_minutes));
+    }
+
+    let mut merged = 0;
+    for (_app, mut group) in by_app {
+        if group.len() < 2 {
+            continue;
+        }
+        group.sort_by_key(|(_, t, _)| *t);
+        // 单链聚类：相邻差 ≤ 阈值归一簇（链式效应是刻意的——每天漂移几分钟的
+        // 同一习惯，一周后锚点漂出阈值外，仍应收编为一簇）
+        let mut clusters: Vec<Vec<(db::HabitPattern, u32, u32)>> = Vec::new();
+        for item in group {
+            match clusters.last_mut() {
+                Some(c) if item.1 - c.last().unwrap().1 <= ROUTINE_MERGE_GAP_MINUTES => {
+                    c.push(item)
+                }
+                _ => clusters.push(vec![item]),
+            }
+        }
+        for cluster in clusters {
+            if cluster.len() < 2 {
+                continue;
+            }
+            merged += merge_routine_cluster(conn, cluster)?;
+        }
+    }
+    Ok(merged)
+}
+
+/// 合并一个姊妹 pattern 簇，返回收编条数
+fn merge_routine_cluster(
+    conn: &mut Connection,
+    mut cluster: Vec<(db::HabitPattern, u32, u32)>,
+) -> Result<usize, String> {
+    // keeper：confirmed 优先 → 学习天数 → 置信度 → 最早 id（升序排，末尾即 keeper；
+    // id 取负——并列时最早学出的当 keeper，锚点时间保持稳定）
+    cluster.sort_by(|a, b| {
+        let ka = (
+            (a.0.status == "confirmed") as i64,
+            a.0.occurrences,
+            (a.0.confidence * 1000.0) as i64,
+            -a.0.id,
+        );
+        let kb = (
+            (b.0.status == "confirmed") as i64,
+            b.0.occurrences,
+            (b.0.confidence * 1000.0) as i64,
+            -b.0.id,
+        );
+        ka.cmp(&kb)
+    });
+    let absorbed: Vec<&(db::HabitPattern, u32, u32)> = cluster[..cluster.len() - 1].iter().collect();
+    let keeper = &cluster[cluster.len() - 1];
+
+    // 聚合：锚点时间/描述保留 keeper 的；容忍度取簇内最大（宁可宽勿漏）；
+    // 天数/置信度取 max（求和会虚增毕业速度）；首见取最早、末见取最新
+    let tolerance = cluster.iter().map(|(_, _, tol)| *tol).max().unwrap_or(45);
+    let mut data: ContextRoutineData =
+        serde_json::from_str(&keeper.0.pattern_data).map_err(|e| e.to_string())?;
+    data.tolerance_minutes = tolerance;
+    let data_json = serde_json::to_string(&data).map_err(|e| e.to_string())?;
+
+    let absorbed_ids: Vec<i64> = absorbed.iter().map(|(p, _, _)| p.id).collect();
+    let occurrences = cluster.iter().map(|(p, _, _)| p.occurrences).max().unwrap_or(1);
+    let confidence = cluster
+        .iter()
+        .map(|(p, _, _)| p.confidence)
+        .fold(0.0_f64, f64::max);
+    let first_seen = cluster.iter().map(|(p, _, _)| p.first_seen).min().unwrap();
+    let last_seen = cluster.iter().map(|(p, _, _)| p.last_seen).max().unwrap();
+
+    let absorbed_count = absorbed_ids.len();
+    db::merge_pattern_cluster(
+        conn,
+        keeper.0.id,
+        &absorbed_ids,
+        &data_json,
+        confidence,
+        occurrences,
+        first_seen,
+        last_seen,
+    )
+    .map_err(|e| format!("合并 pattern 簇失败: {}", e))?;
+    log::info!(
+        "情境 pattern 收编：{} → 保留 #{}（{}）",
+        absorbed_ids
+            .iter()
+            .map(|id| format!("#{}", id))
+            .collect::<Vec<_>>()
+            .join("、"),
+        keeper.0.id,
+        data.time
+    );
+    Ok(absorbed_count)
+}
+
+
 /// 从 app_usage 解析 exe 名到启动路径（取使用次数最多的现存匹配）。
 /// 同一 exe 可能有多条候选（Edge/Chrome 每个版本目录各落一条记录）：
 /// 旧版本目录随更新被删但 launch_count 历史最高，不按「路径仍存在」过滤
@@ -756,7 +882,7 @@ pub async fn run_daily_analysis(
     app_handle: &AppHandle,
     db_path: &PathBuf,
 ) -> Result<String, String> {
-    let conn = Connection::open(db_path).map_err(|e| format!("打开数据库失败: {}", e))?;
+    let mut conn = Connection::open(db_path).map_err(|e| format!("打开数据库失败: {}", e))?;
 
     let now = chrono::Local::now();
     let now_ts = now.timestamp();
@@ -924,6 +1050,14 @@ pub async fn run_daily_analysis(
             Ok(n) => desc_saved += n,
             Err(e) => log::warn!("应用描述回填失败 {}: {}", d.app, e),
         }
+    }
+
+    // 姊妹 pattern 收编：学习完成后合并同一应用的近时间点 context_routine
+    //（持续治理环节——存量分裂在下一个分析 slot 自动收编，无需 migration）
+    match compact_context_routines(&mut conn) {
+        Ok(n) if n > 0 => log::info!("Companion 情境 pattern 收编 {} 条", n),
+        Ok(_) => {}
+        Err(e) => log::warn!("Companion 情境 pattern 收编失败: {}", e),
     }
 
     // 成功落库后推进水位（失败/数据不足都不推进，下次窗口自动顺延合并）
@@ -1902,6 +2036,139 @@ pub(crate) async fn call_scene_model_llm_stream(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── 情境 pattern 合并压缩（姊妹 pattern 收编）──
+
+    fn insert_routine(
+        conn: &Connection,
+        app: &str,
+        time: &str,
+        tolerance: u32,
+        status: &str,
+        occurrences: i64,
+        confidence: f64,
+    ) -> i64 {
+        let data = ContextRoutineData {
+            app: app.to_string(),
+            time: time.to_string(),
+            tolerance_minutes: tolerance,
+            description: format!("{}@{}", app, time),
+        };
+        let sig = format!("context_routine:{}@{}", app, time);
+        db::upsert_pattern(
+            conn,
+            "context_routine",
+            &sig,
+            &data.description,
+            &serde_json::to_string(&data).unwrap(),
+            confidence,
+            1000,
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE habit_patterns SET status = ?2, occurrences = ?3 WHERE signature = ?1",
+            rusqlite::params![sig, status, occurrences],
+        )
+        .unwrap();
+        conn.query_row(
+            "SELECT id FROM habit_patterns WHERE signature = ?1",
+            [&sig],
+            |r| r.get(0),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn compact_merges_sibling_routines() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        db::init_tables(&conn).unwrap();
+        let keeper = insert_routine(&conn, "msedge.exe", "12:00", 30, "confirmed", 3, 0.9);
+        let s2 = insert_routine(&conn, "msedge.exe", "12:03", 45, "learning", 1, 0.5);
+        let s3 = insert_routine(&conn, "msedge.exe", "12:04", 15, "learning", 2, 0.7);
+        // 三条 pattern 各有投票历史
+        for pid in [keeper, s2, s3] {
+            let s = db::create_suggestion(&conn, "context_routine", "t", None, None, 1000).unwrap();
+            db::link_suggestion_pattern(&conn, s.id, pid).unwrap();
+        }
+
+        assert_eq!(compact_context_routines(&mut conn).unwrap(), 2);
+
+        // 只剩 keeper（confirmed 优先），锚点时间不变
+        let rows = db::active_context_routines(&conn).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, keeper);
+        // occurrences 取 max 而非求和（求和得 6 会虚增毕业速度）
+        assert_eq!(rows[0].occurrences, 3);
+        assert!((rows[0].confidence - 0.9).abs() < f64::EPSILON);
+        let data: ContextRoutineData = serde_json::from_str(&rows[0].pattern_data).unwrap();
+        assert_eq!(data.time, "12:00");
+        // 容忍度取簇内 max（宁可宽勿漏）
+        assert_eq!(data.tolerance_minutes, 45);
+
+        // 投票历史全部重定向到 keeper（毕业进度归并）
+        let cnt: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM suggestions WHERE pattern_id = ?1",
+                [keeper],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(cnt, 3);
+    }
+
+    #[test]
+    fn compact_keeps_distant_times_separate() {
+        // 午休档和晚间档是不同场景，不合并
+        let mut conn = Connection::open_in_memory().unwrap();
+        db::init_tables(&conn).unwrap();
+        insert_routine(&conn, "msedge.exe", "12:00", 30, "learning", 1, 0.5);
+        insert_routine(&conn, "msedge.exe", "18:31", 15, "learning", 1, 0.5);
+        assert_eq!(compact_context_routines(&mut conn).unwrap(), 0);
+        assert_eq!(db::active_context_routines(&conn).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn compact_ignores_different_apps() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        db::init_tables(&conn).unwrap();
+        insert_routine(&conn, "msedge.exe", "12:00", 30, "learning", 1, 0.5);
+        insert_routine(&conn, "cloudmusic.exe", "12:03", 30, "learning", 1, 0.5);
+        assert_eq!(compact_context_routines(&mut conn).unwrap(), 0);
+        assert_eq!(db::active_context_routines(&conn).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn compact_chains_gradual_drift() {
+        // 每天漂移几分钟：相邻差都 ≤ 阈值但首尾跨 50 分钟，单链聚类仍收编一簇；
+        // 全字段并列时最早 id 当 keeper（锚点稳定）
+        let mut conn = Connection::open_in_memory().unwrap();
+        db::init_tables(&conn).unwrap();
+        let first = insert_routine(&conn, "msedge.exe", "12:00", 30, "learning", 1, 0.5);
+        insert_routine(&conn, "msedge.exe", "12:25", 30, "learning", 1, 0.5);
+        insert_routine(&conn, "msedge.exe", "12:50", 30, "learning", 1, 0.5);
+        assert_eq!(compact_context_routines(&mut conn).unwrap(), 2);
+        let rows = db::active_context_routines(&conn).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, first);
+    }
+
+    #[test]
+    fn compact_leaves_dismissed_tombstone() {
+        // dismissed 是用户拒绝的墓碑：不参与合并、不被删除（删了会被重新学出来）
+        let mut conn = Connection::open_in_memory().unwrap();
+        db::init_tables(&conn).unwrap();
+        insert_routine(&conn, "msedge.exe", "12:00", 30, "learning", 1, 0.5);
+        let tomb = insert_routine(&conn, "msedge.exe", "12:10", 30, "dismissed", 5, 0.9);
+        assert_eq!(compact_context_routines(&mut conn).unwrap(), 0);
+        let status: String = conn
+            .query_row(
+                "SELECT status FROM habit_patterns WHERE id = ?1",
+                [tomb],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(status, "dismissed");
+    }
 
     fn local_dt(s: &str) -> chrono::DateTime<chrono::Local> {
         let ts = parse_flexible_datetime(s, false).unwrap();

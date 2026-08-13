@@ -1157,6 +1157,43 @@ pub fn set_pattern_status(conn: &Connection, id: i64, status: &str) -> rusqlite:
     Ok(())
 }
 
+/// 合并一个 pattern 簇（姊妹 pattern 收编）：
+/// 被吸收行的投票历史（suggestions.pattern_id）重定向到 keeper——
+/// 用户对小时间点 pattern 的投票本来就是投给「同一个习惯」的，合并后
+/// 毕业/停用进度随之归并；随后聚合 keeper 字段并删除被吸收行（事务）。
+/// occurrences 取簇内 max 而非求和：同一天多个姊妹 pattern 各计一次，
+/// 求和会虚增确认/毕业速度。
+#[allow(clippy::too_many_arguments)]
+pub fn merge_pattern_cluster(
+    conn: &mut Connection,
+    keeper_id: i64,
+    absorbed_ids: &[i64],
+    pattern_data: &str,
+    confidence: f64,
+    occurrences: i64,
+    first_seen: i64,
+    last_seen: i64,
+) -> rusqlite::Result<()> {
+    let tx = conn.transaction()?;
+    for id in absorbed_ids {
+        tx.execute(
+            "UPDATE suggestions SET pattern_id = ?1 WHERE pattern_id = ?2",
+            params![keeper_id, id],
+        )?;
+    }
+    tx.execute(
+        "UPDATE habit_patterns
+         SET pattern_data = ?2, confidence = ?3, occurrences = ?4,
+             first_seen = ?5, last_seen = ?6
+         WHERE id = ?1",
+        params![keeper_id, pattern_data, confidence, occurrences, first_seen, last_seen],
+    )?;
+    for id in absorbed_ids {
+        tx.execute("DELETE FROM habit_patterns WHERE id = ?1", params![id])?;
+    }
+    tx.commit()
+}
+
 /// 未被忽略的情境习惯模式（B3 情境联动匹配用）
 pub fn active_context_routines(conn: &Connection) -> rusqlite::Result<Vec<HabitPattern>> {
     let mut stmt = conn.prepare(
