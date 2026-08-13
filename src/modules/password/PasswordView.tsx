@@ -910,35 +910,41 @@ function PasswordDetail({
 }: PasswordDetailProps) {
   return (
     <div className="h-full flex flex-col">
-      {/* Header */}
+      {/* Header：标题/网址/备注纵排，备注多行展示，间距宽松 */}
       <div className="p-6 border-b border-app-border">
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-4 min-w-0">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-start gap-4 min-w-0">
             {/* Large Icon */}
             <div className="w-12 h-12 rounded-xl flex items-center justify-center text-app-text-secondary font-semibold text-sm flex-shrink-0"
                  style={{ backgroundColor: THEME.BG_ELEVATED }}>
               {firstChar(entry.title)}
             </div>
 
-            <div className="min-w-0">
-              <div className="flex items-center gap-3">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 min-w-0">
                 <h2 className="text-sm font-semibold text-app-text-primary truncate">{entry.title}</h2>
+                {entry.url && (
+                  <button
+                    onClick={async () => {
+                      const url = entry.url?.startsWith('http') ? entry.url : `https://${entry.url}`;
+                      try {
+                        await invoke('open_external_url', { url });
+                      } catch (err: unknown) {
+                        console.error('Failed to open external URL:', err);
+                      }
+                    }}
+                    className="text-app-text-tertiary hover:text-blue-400 text-xs flex items-center gap-1 transition-colors cursor-pointer truncate"
+                  >
+                    {entry.url}
+                    <ExternalLink size={12} />
+                  </button>
+                )}
               </div>
-              {entry.url && (
-                <button
-                  onClick={async () => {
-                    const url = entry.url?.startsWith('http') ? entry.url : `https://${entry.url}`;
-                    try {
-                      await invoke('open_external_url', { url });
-                    } catch (err: unknown) {
-                      console.error('Failed to open external URL:', err);
-                    }
-                  }}
-                  className="text-app-text-tertiary hover:text-blue-400 text-xs flex items-center gap-1 mt-1 transition-colors cursor-pointer truncate"
-                >
-                  {entry.url}
-                  <ExternalLink size={12} />
-                </button>
+              {entry.notes && (
+                <p className="text-app-text-secondary text-xs leading-relaxed mt-2"
+                   style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                  {entry.notes}
+                </p>
               )}
             </div>
           </div>
@@ -967,9 +973,9 @@ function PasswordDetail({
         </div>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto p-6">
-        <div className="max-w-lg space-y-6">
+      {/* Content：仅三个字段（用户名/密码/网址），无滚动，始终完整可见 */}
+      <div className="flex-1 p-6 overflow-hidden">
+        <div className="max-w-lg space-y-4">
           {/* Username Field */}
           <div className="space-y-2">
             <label className="text-xs text-app-text-tertiary">用户名 / 邮箱</label>
@@ -1029,15 +1035,15 @@ function PasswordDetail({
             </div>
           </div>
 
-          {/* URL Field */}
-          {entry.url && (
-            <div className="space-y-2">
-              <label className="text-xs text-app-text-tertiary">网站地址</label>
-              <div className="rounded-xl p-4 flex items-center gap-3 border border-app-border bg-white/5">
-                <div className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0">
-                  <Globe size={18} className="text-app-text-tertiary" />
-                </div>
-                <code className="flex-1 text-app-text-primary text-xs truncate">{entry.url}</code>
+          {/* URL Field：始终显示，空值占位 */}
+          <div className="space-y-2">
+            <label className="text-xs text-app-text-tertiary">网站地址</label>
+            <div className="rounded-xl p-4 flex items-center gap-3 border border-app-border bg-white/5">
+              <div className="w-10 h-10 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0">
+                <Globe size={18} className="text-app-text-tertiary" />
+              </div>
+              <code className="flex-1 text-app-text-primary text-xs truncate">{entry.url || '-'}</code>
+              {entry.url && (
                 <Tooltip content={copiedField === 'url' ? '已复制' : '复制网址'} placement="top">
                   <button
                     onClick={onCopyUrl}
@@ -1049,30 +1055,22 @@ function PasswordDetail({
                       : <Copy size={16} />}
                   </button>
                 </Tooltip>
-              </div>
+              )}
             </div>
-          )}
+          </div>
+        </div>
+      </div>
 
-          {/* Notes Field */}
-          {entry.notes && (
-            <div className="space-y-2">
-              <label className="text-xs text-app-text-tertiary">备注</label>
-              <div className="rounded-xl p-4 border border-app-border bg-white/5">
-                <p className="text-app-text-secondary text-xs whitespace-pre-wrap break-words">{entry.notes}</p>
-              </div>
-            </div>
-          )}
-
-          {/* Metadata */}
-          <div className="pt-6 border-t border-app-border space-y-2">
-            <div className="flex items-center justify-between text-xs text-app-text-tertiary">
-              <span>创建时间</span>
-              <span>{formatTime(entry.created_at)}</span>
-            </div>
-            <div className="flex items-center justify-between text-xs text-app-text-tertiary">
-              <span>最后更新</span>
-              <span>{formatTime(entry.updated_at)}</span>
-            </div>
+      {/* Metadata：固定底部，高度与左侧「锁定保险库」按钮区对齐（约 56px） */}
+      <div className="flex-shrink-0 border-t border-app-border px-6 py-2.5">
+        <div className="max-w-lg space-y-1">
+          <div className="flex items-center justify-between text-xs text-app-text-tertiary">
+            <span>创建时间</span>
+            <span>{formatTime(entry.created_at)}</span>
+          </div>
+          <div className="flex items-center justify-between text-xs text-app-text-tertiary">
+            <span>最后更新</span>
+            <span>{formatTime(entry.updated_at)}</span>
           </div>
         </div>
       </div>
