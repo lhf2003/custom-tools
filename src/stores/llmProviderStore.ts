@@ -32,6 +32,8 @@ export interface Model {
   /** 缓存命中输入单价（人民币/百万 token），null = 未配置（缓存命中按 input_price 计） */
   cached_input_price_per_m: number | null;
   output_price_per_m: number | null;
+  /** 视觉能力标记：聊天发图片的门槛，手动开启 */
+  supports_vision: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -102,6 +104,7 @@ interface LlmProviderState {
   loadModels: (providerId: number) => Promise<Model[]>;
   setModelActive: (modelId: number, isActive: boolean) => Promise<void>;
   setModelPrice: (modelId: number, inputPrice: number | null, outputPrice: number | null, cachedInputPrice: number | null) => Promise<void>;
+  setModelSupportsVision: (modelId: number, supports: boolean) => Promise<void>;
 
   // Scene actions
   loadSceneConfigs: () => Promise<void>;
@@ -255,6 +258,26 @@ export const useLlmProviderStore = create<LlmProviderState>((set, get) => ({
       }));
     } catch (err) {
       console.error('Failed to set model price:', err);
+      throw err;
+    }
+  },
+
+  setModelSupportsVision: async (modelId, supports) => {
+    try {
+      const model = await invoke<Model>('set_llm_model_supports_vision', {
+        modelId,
+        supports,
+      });
+      set((state) => ({
+        models: {
+          ...state.models,
+          [model.provider_id]: state.models[model.provider_id]?.map((m) =>
+            m.id === model.id ? model : m
+          ) || [model],
+        },
+      }));
+    } catch (err) {
+      console.error('Failed to set model vision flag:', err);
       throw err;
     }
   },

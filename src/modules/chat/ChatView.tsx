@@ -26,6 +26,27 @@ import { parseActionMessage } from './a2ui/action';
 import { ModelSelector } from './ModelSelector';
 import { useVoiceInput } from './useVoiceInput';
 import { speakMarkdown, stopSpeech } from '@/utils/speech';
+import {
+  buildRichContent,
+  classifyFileName,
+  compressImage,
+  IMAGE_EXTS,
+  MAX_ATTACHMENTS,
+  MAX_IMAGE_BYTES,
+  MAX_TEXT_BYTES,
+  readTextFile,
+  richDisplayText,
+  TEXT_EXTS,
+  type PendingAttachment,
+} from './attachments';
+import {
+  PendingChips,
+  UserRichBubble,
+  VisionGateDialog,
+  type VisionCandidate,
+} from './RichMessageView';
+import { useLlmProviderStore } from '@/stores/llmProviderStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 
 // ─────────────────────────────────────────────
 // Types
@@ -36,8 +57,9 @@ type ChatMode = 'chat';
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
-  /** a2ui = A2UI 界面卡片（content 为 SurfacePayload JSON）；缺省 markdown */
-  contentType?: 'markdown' | 'a2ui';
+  /** a2ui = A2UI 界面卡片（content 为 SurfacePayload JSON）；
+   *  rich = 附件消息（content 为附件 JSON，协议见 attachments.ts）；缺省 markdown */
+  contentType?: 'markdown' | 'a2ui' | 'rich';
 }
 
 interface ChatHistoryMessage {
@@ -53,9 +75,10 @@ interface ChatSessionSummary {
   updated_at: string;
 }
 
-/** 摘要单行化并截断（历史列表条目用） */
+/** 摘要单行化并截断（历史列表条目用）；rich 会话的首条消息是附件 JSON，降级为引用标签 */
 function previewText(text: string): string {
-  const oneLine = text.replace(/\s+/g, ' ').trim();
+  const richText = richDisplayText(text);
+  const oneLine = (richText ?? text).replace(/\s+/g, ' ').trim();
   return oneLine.length > 60 ? oneLine.slice(0, 60) + '…' : oneLine;
 }
 
@@ -65,7 +88,8 @@ function sessionTitleOf(messages: ChatMessage[]): string {
   const first = messages.find((m) => m.role === 'user');
   if (!first) return '新会话';
   const action = parseActionMessage(first.content);
-  const raw = action ? `点击了「${action.label}」` : first.content;
+  const richText = first.contentType === 'rich' ? richDisplayText(first.content) : null;
+  const raw = action ? `点击了「${action.label}」` : (richText ?? first.content);
   const oneLine = raw.replace(/\s+/g, ' ').trim();
   return oneLine.length > 24 ? oneLine.slice(0, 24) + '…' : oneLine;
 }
@@ -101,12 +125,14 @@ function mergeA2uiRow(list: ChatMessage[], content: string): ChatMessage[] {
   return list.map((m, i) => (i === idx ? { ...m, content: merged } : m));
 }
 
-/** 历史行 → 渲染消息：a2ui 行按 surfaceId 合并，其余原样 */
+/** 历史行 → 渲染消息：a2ui 行按 surfaceId 合并，rich 行带类型分发附件渲染，其余原样 */
 function historyRowsToMessages(rows: ChatHistoryMessage[]): ChatMessage[] {
   let out: ChatMessage[] = [];
   for (const m of rows) {
     if (m.content_type === 'a2ui') {
       out = mergeA2uiRow(out, m.content);
+    } else if (m.content_type === 'rich') {
+      out.push({ role: m.role, content: m.content, contentType: 'rich' });
     } else {
       out.push({ role: m.role, content: m.content });
     }
@@ -236,8 +262,15 @@ function AssistantContent({ text }: { text: string }) {
 }
 
 /** 用户消息气泡：界面操作回传渲染为紧凑胶囊（协议 JSON 不上屏，落库原文不变），
- *  其余为普通气泡；均开放文本选择（根容器 select-none，气泡单独放开） */
-function UserMessageBubble({ content }: { content: string }) {
+ *  rich 附件消息走图片网格 + 文件卡片，其余为普通气泡；
+ *  均开放文本选择（根容器 select-none，气泡单独放开） */
+function UserMessageBubble({
+  content,
+  contentType,
+}: {
+  content: string;
+  contentType?: ChatMessage['contentType'];
+}) {
   const action = parseActionMessage(content);
   if (action) {
     return (
@@ -246,6 +279,9 @@ function UserMessageBubble({ content }: { content: string }) {
         点击了「{action.label}」
       </div>
     );
+  }
+  if (contentType === 'rich') {
+    return <UserRichBubble content={content} />;
   }
   return (
     <div className="max-w-[80%] px-3 py-2 rounded-xl bg-white/10 text-sm text-zinc-100 break-words select-text">
@@ -264,6 +300,10 @@ export function ChatView() {
   const [mode, setMode] = useState<ChatMode>('chat');
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  // 待发附件（rich 消息）：图片已压缩落盘持相对路径，文本文件 inline 持内容
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  // 视觉门槛对话框：非空 = 待处理文件被拦截（含图片但当前模型未标视觉）
+  const [visionGateFiles, setVisionGateFiles] = useState<File[] | null>(null);
   const [streamText, setStreamText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [hasResponse, setHasResponse] = useState(false);
@@ -286,6 +326,15 @@ export function ChatView() {
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const streamTextRef = useRef('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  // 系统文件选择器进行中标记：选择器打开会夺走主窗口焦点，
+  // 期间必须用 set_blur_hold 顶住 hide-on-blur，否则窗口在选择中途消失
+  const pickingFileRef = useRef(false);
+  // attachments 的同步镜像：文件处理循环里闭包旧值会让数量上限失真
+  const attachmentsRef = useRef<PendingAttachment[]>([]);
+  useEffect(() => {
+    attachmentsRef.current = attachments;
+  }, [attachments]);
 
   // 语音输入：转写文本追加进草稿（待确认后手动发送），错误走统一 error 条
   const voiceInput = useVoiceInput({
@@ -549,17 +598,159 @@ export function ChatView() {
 
   // ── Send message ──────────────────────────────────────────────────
   // overrideText：A2UI 卡片 action 回传时直接代发的文本（不经过输入框）
+  // ── 附件（发送文件）─────────────────────────────────────────────
+  // 视觉门槛：附件含图片时要求当前 chat 场景模型已标 supports_vision，
+  // 未标立即拦截（附件不进待发区），弹窗给「一键切换 / 去设置标记」两条路。
+  // 文本文件无此门槛（读内容拼进消息，任何模型都能看）。
+  const currentVisionState = (): { ok: boolean; modelName: string | null } => {
+    const { sceneConfigs, models } = useLlmProviderStore.getState();
+    const cfg = sceneConfigs.chat;
+    if (!cfg) return { ok: false, modelName: null };
+    const m = (models[cfg.provider_id] ?? []).find((x) => x.model_id === cfg.model_id);
+    return { ok: m?.supports_vision === true, modelName: m?.name ?? cfg.model_id };
+  };
+
+  const collectVisionCandidates = (): VisionCandidate[] => {
+    const { providers, models } = useLlmProviderStore.getState();
+    return providers
+      .filter((p) => p.is_active)
+      .flatMap((p) =>
+        (models[p.id] ?? [])
+          .filter((m) => m.is_active && m.supports_vision)
+          .map((m) => ({
+            providerId: p.id,
+            modelId: m.model_id,
+            name: m.name,
+            providerLabel: p.label,
+          })),
+      );
+  };
+
+  const addOneFile = async (file: File) => {
+    if (attachmentsRef.current.length >= MAX_ATTACHMENTS) {
+      setError(`一次最多带 ${MAX_ATTACHMENTS} 个附件`);
+      return;
+    }
+    const cls = classifyFileName(file.name);
+    if (cls === 'unsupported') {
+      setError(`不支持的文件类型：${file.name}`);
+      return;
+    }
+    const sid = sessionIdRef.current;
+    if (sid === null) {
+      setError('会话未就绪，请稍候再试');
+      return;
+    }
+    if (cls === 'image') {
+      if (file.size > MAX_IMAGE_BYTES) {
+        setError(`图片过大（上限 10MB）：${file.name}`);
+        return;
+      }
+      try {
+        const compressed = await compressImage(file);
+        const relPath = await invoke<string>('save_chat_image', {
+          sessionId: sid,
+          bytes: compressed.bytes,
+          ext: compressed.ext,
+        });
+        setAttachments((prev) => [
+          ...prev,
+          { kind: 'image', relPath, dataUrl: compressed.dataUrl },
+        ]);
+      } catch (e) {
+        setError(typeof e === 'string' ? e : '图片处理失败');
+      }
+      return;
+    }
+    if (file.size > MAX_TEXT_BYTES) {
+      setError(`文件过大（上限 64KB）：${file.name}`);
+      return;
+    }
+    try {
+      const content = await readTextFile(file);
+      setAttachments((prev) => [...prev, { kind: 'file', name: file.name, content }]);
+    } catch {
+      setError(`读取文件失败：${file.name}`);
+    }
+  };
+
+  /** 打开文件选择器：先挂失焦挂起（选择器会抢焦点触发 hide-on-blur），
+   *  选择器关闭（选中/取消）后焦点回主窗口，focus 监听里统一释放 */
+  const openFilePicker = async () => {
+    pickingFileRef.current = true;
+    await invoke('set_blur_hold', { hold: true }).catch(() => {});
+    // 兜底：极端情况 focus 事件丢失时，hide-on-blur 不应被永久挂起
+    setTimeout(() => {
+      if (pickingFileRef.current) {
+        pickingFileRef.current = false;
+        invoke('set_blur_hold', { hold: false }).catch(() => {});
+      }
+    }, 5 * 60 * 1000);
+    fileInputRef.current?.click();
+  };
+
+  // 焦点回主窗口 = 选择器已关闭：释放失焦挂起（选中与取消都会走到）
+  useEffect(() => {
+    const onFocus = () => {
+      if (!pickingFileRef.current) return;
+      pickingFileRef.current = false;
+      invoke('set_blur_hold', { hold: false }).catch(() => {});
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, []);
+
+  /** 文件选择/粘贴统一入口：含图片先过视觉门槛，被拦的文件存进对话框待切换后续传 */
+  const addFiles = async (files: File[]) => {
+    const hasImage = files.some((f) => classifyFileName(f.name) === 'image');
+    if (hasImage && !currentVisionState().ok) {
+      setVisionGateFiles(files);
+      return;
+    }
+    for (const file of files) {
+      await addOneFile(file);
+    }
+  };
+
+  const handleVisionSwitch = async (c: VisionCandidate) => {
+    const store = useLlmProviderStore.getState();
+    const cfg = store.sceneConfigs.chat;
+    await store.setSceneModel(
+      'chat',
+      c.providerId,
+      c.modelId,
+      cfg?.thinking_mode ?? false,
+      cfg?.reasoning_effort ?? 'medium',
+    );
+    const pending = visionGateFiles ?? [];
+    setVisionGateFiles(null);
+    await addFiles(pending);
+  };
+
+  const handleVisionGoSettings = () => {
+    useSettingsStore.getState().setPendingTab('model');
+    setActiveView('settings');
+    setVisionGateFiles(null);
+  };
+
   const handleSend = useCallback(async (overrideText?: string) => {
     const content = (typeof overrideText === 'string' ? overrideText : input).trim();
+    // 代发（预填/A2UI 回传）不携带待发附件；手动发送允许纯附件消息
+    const withAttachments = typeof overrideText !== 'string' && attachments.length > 0;
     // 贾维斯通道在飞时允许继续发送（后端 FIFO 排队）；工具型模式保持单飞拦截
-    if (!content || (isLoading && mode !== 'chat')) return;
+    if ((!content && !withAttachments) || (isLoading && mode !== 'chat')) return;
     // 复位取消标记：清空/取消/切换会话会置 true，若不复位，
     // 本轮回复的 chunk 会被监听器全部丢弃，最终消息既不回显也不入库
     isCancelledRef.current = false;
     // 发新消息打断上一条播报（接着念旧回复会很怪）
     stopSpeech();
 
-    const userMessage: ChatMessage = { role: 'user', content };
+    // 带附件时 content 统一为 rich JSON——入库与发送用同一串，
+    // 后端按 content 比对定位当轮消息（content_type 从库里读）
+    const wireContent = withAttachments ? buildRichContent(content, attachments) : content;
+    const userMessage: ChatMessage = withAttachments
+      ? { role: 'user', content: wireContent, contentType: 'rich' }
+      : { role: 'user', content };
     const systemMessage: ChatMessage = {
       role: 'system',
       content: MODES[mode].system,
@@ -587,7 +778,8 @@ export function ChatView() {
         await invoke('save_chat_message', {
           sessionId: sid,
           role: 'user',
-          content,
+          content: userMessage.content,
+          contentType: userMessage.contentType ?? null,
         });
       } catch (e) {
         console.error('Failed to save user message:', e);
@@ -598,7 +790,10 @@ export function ChatView() {
 
     try {
       setAgentStatus(null);
-      const agentAvailable = await invoke<boolean>('jarvis_agent_available');
+      // 带附件强制走场景通道：agent 通道的 CLI 没有读图工具（ALLOWED_TOOLS
+      // 仅 MCP），且视觉门槛校验的是场景模型——两通道附件语义才能统一
+      const agentAvailable =
+        !withAttachments && (await invoke<boolean>('jarvis_agent_available'));
       if (agentAvailable) {
         // 贾维斯 agent 通道：claude CLI + MCP 数据工具，流式事件 jarvis:*
         await invoke('jarvis_chat_send', { text: userMessage.content });
@@ -609,11 +804,13 @@ export function ChatView() {
         if (sid === null) throw new Error('会话未就绪，请稍候再试');
         await invoke('jarvis_chat_send_scene', { sessionId: sid, text: userMessage.content });
       }
+      // 发送已被后端接管，清空待发附件（失败保留，用户可重发）
+      setAttachments([]);
     } catch (err) {
       setIsLoading(false);
       setError(typeof err === 'string' ? err : '发送失败，请检查 AI 模型设置');
     }
-  }, [input, isLoading, messages, mode]);
+  }, [input, isLoading, messages, mode, attachments]);
 
   // Consume prefill: 原文填入输入框（companion 错误分析 / 剪贴板「发送给AI」共用通道，
   // 包装文案由发送方组装）;autoSend(语音输入)走代发通道直接发送,不进草稿。
@@ -752,7 +949,9 @@ export function ChatView() {
     setAgentStatus(null);
 
     try {
-      const agentAvailable = await invoke<boolean>('jarvis_agent_available');
+      // 与 handleSend 同规则：附件消息强制场景通道（agent CLI 看不了图）
+      const isRich = messages[lastUserIdx].contentType === 'rich';
+      const agentAvailable = !isRich && (await invoke<boolean>('jarvis_agent_available'));
       if (agentAvailable) {
         await invoke('jarvis_chat_send', { text });
       } else {
@@ -1109,7 +1308,7 @@ export function ChatView() {
             className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
           >
             {msg.role === 'user' ? (
-              <UserMessageBubble content={msg.content} />
+              <UserMessageBubble content={msg.content} contentType={msg.contentType} />
             ) : msg.contentType === 'a2ui' ? (
               <div className="max-w-[90%] w-full">
                 <A2uiSurface
@@ -1247,12 +1446,32 @@ export function ChatView() {
 
       {/* ── Input area (bottom) ────────────────────────────────────── */}
       <div className="px-3 py-2.5 shrink-0 border-t border-app-border">
+        {/* 待发附件 chips：图片缩略图 / 文件卡片，hover 出 × 逐个移除 */}
+        {attachments.length > 0 && (
+          <PendingChips
+            attachments={attachments}
+            onRemove={(i) => setAttachments((prev) => prev.filter((_, j) => j !== i))}
+          />
+        )}
         <div className="flex items-center gap-2 px-3 py-1.5">
-          {/* TODO: 附件/上下文入口占位，逻辑后续加 */}
+          {/* 发送文件入口：隐藏 input 承载系统选择器（File 对象与粘贴管线统一） */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept={[...IMAGE_EXTS, ...TEXT_EXTS].map((e) => `.${e}`).join(',')}
+            className="hidden"
+            onChange={(e) => {
+              const files = Array.from(e.target.files ?? []);
+              e.target.value = '';
+              if (files.length > 0) void addFiles(files);
+            }}
+          />
           <button
             type="button"
+            onClick={() => void openFilePicker()}
             className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center text-zinc-400 hover:text-zinc-200 hover:bg-white/10 transition-all cursor-pointer"
-            aria-label="更多功能"
+            aria-label="发送文件"
           >
             <Plus className="w-4 h-4" />
           </button>
@@ -1265,6 +1484,13 @@ export function ChatView() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={(e) => {
+              // 粘贴截图/文件与选择器共用同一条附件管线；纯文本粘贴走默认行为
+              const files = Array.from(e.clipboardData?.files ?? []);
+              if (files.length === 0) return;
+              e.preventDefault();
+              void addFiles(files);
+            }}
             placeholder={modeConfig.placeholder}
             rows={1}
             className="flex-1 resize-none bg-transparent text-sm text-zinc-200 placeholder-app-text-placeholder outline-none leading-relaxed self-center disabled:opacity-60"
@@ -1309,12 +1535,12 @@ export function ChatView() {
             )}
           </button>
 
-          {/* Send button（贾维斯通道在飞时可排队发送） */}
+          {/* Send button（贾维斯通道在飞时可排队发送；纯附件消息也可发） */}
           <button
             onClick={() => handleSend()}
-            disabled={!input.trim() || (isLoading && mode !== 'chat')}
+            disabled={(!input.trim() && attachments.length === 0) || (isLoading && mode !== 'chat')}
             className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-all ${
-              input.trim() && (!isLoading || mode === 'chat')
+              (input.trim() || attachments.length > 0) && (!isLoading || mode === 'chat')
                 ? 'text-zinc-200 hover:bg-white/10 cursor-pointer'
                 : 'text-zinc-600 cursor-not-allowed'
             }`}
@@ -1324,6 +1550,17 @@ export function ChatView() {
           </button>
         </div>
       </div>
+
+      {/* 视觉门槛对话框：含图片但当前模型未标视觉时拦截，给一键切换/去设置 */}
+      {visionGateFiles !== null && (
+        <VisionGateDialog
+          candidates={collectVisionCandidates()}
+          currentModelName={currentVisionState().modelName}
+          onSwitch={(c) => void handleVisionSwitch(c)}
+          onGoSettings={handleVisionGoSettings}
+          onClose={() => setVisionGateFiles(null)}
+        />
+      )}
 
       {/* ── Session history dropdown (fixed 定位，不受布局裁剪影响) ── */}
       {historyOpen && (

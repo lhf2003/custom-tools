@@ -90,15 +90,15 @@ pub async fn run_recall(app_handle: &AppHandle, db_path: &PathBuf) -> Result<Str
 
     let mut stmt = conn
         .prepare(
-            "SELECT m.id, m.content FROM chat_messages m
+            "SELECT m.id, m.content, m.content_type FROM chat_messages m
              JOIN chat_sessions s ON s.id = m.session_id
              WHERE m.id > ?1 AND m.role = 'user' AND s.mode = 'chat'
              ORDER BY m.id ASC LIMIT ?2",
         )
         .map_err(|e| format!("查询消息失败: {}", e))?;
-    let msgs: Vec<(i64, String)> = stmt
+    let msgs: Vec<(i64, String, String)> = stmt
         .query_map(params![watermark, RECALL_MSG_LIMIT], |row| {
-            Ok((row.get(0)?, row.get(1)?))
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
         })
         .map_err(|e| format!("查询消息失败: {}", e))?
         .collect::<Result<Vec<_>, _>>()
@@ -107,7 +107,7 @@ pub async fn run_recall(app_handle: &AppHandle, db_path: &PathBuf) -> Result<Str
     if msgs.is_empty() {
         return Ok("无待提取消息".to_string());
     }
-    let max_id = msgs.last().map(|(id, _)| *id).unwrap_or(watermark);
+    let max_id = msgs.last().map(|(id, _, _)| *id).unwrap_or(watermark);
 
     let app_data = app_handle
         .path()
@@ -120,8 +120,15 @@ pub async fn run_recall(app_handle: &AppHandle, db_path: &PathBuf) -> Result<Str
     let facts_text = format_facts_with_ids(&facts);
     let msgs_text = msgs
         .iter()
-        .map(|(id, c)| {
-            let preview: String = c.chars().take(MSG_PREVIEW_CAP).collect();
+        .map(|(id, c, content_type)| {
+            // rich 附件消息先降级为引用标签——附件 JSON 原文进提取 prompt
+            // 只会得到「他喜欢发 JSON」这类幻觉事实
+            let text = if content_type == "rich" {
+                crate::commands::chat::degrade_rich_to_text(c)
+            } else {
+                c.clone()
+            };
+            let preview: String = text.chars().take(MSG_PREVIEW_CAP).collect();
             format!("- [msg:{}] {}", id, preview)
         })
         .collect::<Vec<_>>()

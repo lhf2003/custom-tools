@@ -265,25 +265,33 @@ fn user_messages_on(conn: &Connection, date: &str, limit: usize) -> Vec<String> 
         return Vec::new();
     };
     let result = conn.prepare(
-        "SELECT m.content FROM chat_messages m
+        "SELECT m.content, m.content_type FROM chat_messages m
          JOIN chat_sessions s ON s.id = m.session_id
          WHERE m.role = 'user' AND s.mode = 'chat'
            AND m.created_at >= ?1 AND m.created_at < ?2
          ORDER BY m.id DESC LIMIT ?3",
     );
-    let mut messages: Vec<String> = result
+    let mut messages: Vec<(String, String)> = result
         .and_then(|mut stmt| {
             let rows = stmt.query_map(rusqlite::params![date, next_day, limit as i64], |row| {
-                row.get::<_, String>(0)
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             })?;
             Ok(rows.filter_map(|r| r.ok()).collect())
         })
         .unwrap_or_default();
     messages.reverse();
-    // 单条截断，防某条长消息挤爆日记素材
+    // 单条截断，防某条长消息挤爆日记素材；
+    // rich 附件消息先降级为引用标签，附件 JSON 原文不当日记素材
     messages
         .into_iter()
-        .map(|m| m.chars().take(100).collect())
+        .map(|(content, content_type)| {
+            let text = if content_type == "rich" {
+                crate::commands::chat::degrade_rich_to_text(&content)
+            } else {
+                content
+            };
+            text.chars().take(100).collect()
+        })
         .collect()
 }
 

@@ -292,7 +292,7 @@ impl LlmProviderDb {
             let model = conn
                 .query_row(
                     "SELECT id, provider_id, model_id, name, description, is_active,
-                        input_price_per_m, cached_input_price_per_m, output_price_per_m, created_at, updated_at
+                        input_price_per_m, cached_input_price_per_m, output_price_per_m, supports_vision, created_at, updated_at
                  FROM llm_models WHERE provider_id = ?1 AND model_id = ?2",
                     [&provider_id.to_string(), &model_info.id],
                     |row| {
@@ -306,8 +306,9 @@ impl LlmProviderDb {
                             input_price_per_m: row.get(6)?,
                             cached_input_price_per_m: row.get(7)?,
                             output_price_per_m: row.get(8)?,
-                            created_at: row.get(9)?,
-                            updated_at: row.get(10)?,
+                            supports_vision: row.get(9)?,
+                            created_at: row.get(10)?,
+                            updated_at: row.get(11)?,
                         })
                     },
                 )
@@ -327,7 +328,7 @@ impl LlmProviderDb {
         let mut stmt = conn
             .prepare(
                 "SELECT id, provider_id, model_id, name, description, is_active,
-                        input_price_per_m, cached_input_price_per_m, output_price_per_m, created_at, updated_at
+                        input_price_per_m, cached_input_price_per_m, output_price_per_m, supports_vision, created_at, updated_at
                  FROM llm_models WHERE provider_id = ?1 ORDER BY name",
             )
             .map_err(|e| format!("准备查询失败: {}", e))?;
@@ -344,8 +345,9 @@ impl LlmProviderDb {
                     input_price_per_m: row.get(6)?,
                     cached_input_price_per_m: row.get(7)?,
                     output_price_per_m: row.get(8)?,
-                    created_at: row.get(9)?,
-                    updated_at: row.get(10)?,
+                    supports_vision: row.get(9)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
                 })
             })
             .map_err(|e| format!("查询模型列表失败: {}", e))?
@@ -363,7 +365,7 @@ impl LlmProviderDb {
         let mut stmt = conn
             .prepare(
                 "SELECT id, provider_id, model_id, name, description, is_active,
-                        input_price_per_m, cached_input_price_per_m, output_price_per_m, created_at, updated_at
+                        input_price_per_m, cached_input_price_per_m, output_price_per_m, supports_vision, created_at, updated_at
                  FROM llm_models WHERE id = ?1",
             )
             .map_err(|e| format!("准备查询失败: {}", e))?;
@@ -380,8 +382,9 @@ impl LlmProviderDb {
                     input_price_per_m: row.get(6)?,
                     cached_input_price_per_m: row.get(7)?,
                     output_price_per_m: row.get(8)?,
-                    created_at: row.get(9)?,
-                    updated_at: row.get(10)?,
+                    supports_vision: row.get(9)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
                 })
             })
             .optional()
@@ -433,6 +436,22 @@ impl LlmProviderDb {
             )
             .map_err(|e| format!("停用模型失败: {}", e))?;
 
+        Ok(rows_affected > 0)
+    }
+
+    /// 视觉能力标记（聊天发图片的门槛）：默认 0，设置页手动开关，与 is_active 正交
+    pub fn set_model_supports_vision(
+        &self,
+        conn: &Connection,
+        model_id: i64,
+        supports: bool,
+    ) -> Result<bool, String> {
+        let rows_affected = conn
+            .execute(
+                "UPDATE llm_models SET supports_vision = ?1, updated_at = ?2 WHERE id = ?3",
+                rusqlite::params![supports, chrono::Local::now().to_rfc3339(), model_id],
+            )
+            .map_err(|e| format!("更新视觉标记失败: {}", e))?;
         Ok(rows_affected > 0)
     }
 
@@ -552,7 +571,7 @@ impl LlmProviderDb {
                 p.id, p.name, p.label, p.base_url, p.api_key_encrypted, p.provider_type,
                 p.is_active, p.connection_status, p.last_connected_at, p.created_at, p.updated_at,
                 m.id, m.provider_id, m.model_id, m.name, m.description, m.is_active,
-                m.input_price_per_m, m.cached_input_price_per_m, m.output_price_per_m, m.created_at, m.updated_at
+                m.input_price_per_m, m.cached_input_price_per_m, m.output_price_per_m, m.supports_vision, m.created_at, m.updated_at
              FROM llm_scene_configs sc
              JOIN llm_providers p ON sc.provider_id = p.id
              JOIN llm_models m ON sc.provider_id = m.provider_id AND sc.model_id = m.model_id
@@ -586,8 +605,9 @@ impl LlmProviderDb {
                         input_price_per_m: row.get(17)?,
                         cached_input_price_per_m: row.get(18)?,
                         output_price_per_m: row.get(19)?,
-                        created_at: row.get(20)?,
-                        updated_at: row.get(21)?,
+                        supports_vision: row.get(20)?,
+                        created_at: row.get(21)?,
+                        updated_at: row.get(22)?,
                     };
 
                     Ok((provider, model))

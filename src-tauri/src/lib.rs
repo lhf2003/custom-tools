@@ -601,6 +601,8 @@ pub fn run() {
             commands::chat::list_chat_sessions,
             commands::chat::delete_chat_session,
             commands::chat::truncate_chat_after_last_user,
+            commands::chat::save_chat_image,
+            commands::chat::read_chat_image,
             // LLM Provider commands
             llm_provider::commands::get_llm_providers,
             llm_provider::commands::create_llm_provider,
@@ -612,6 +614,7 @@ pub fn run() {
             llm_provider::commands::activate_llm_model,
             llm_provider::commands::deactivate_llm_model,
             llm_provider::commands::set_llm_model_price,
+            llm_provider::commands::set_llm_model_supports_vision,
             llm_provider::commands::get_scene_configs,
             llm_provider::commands::set_scene_model,
             llm_provider::commands::get_scene_model,

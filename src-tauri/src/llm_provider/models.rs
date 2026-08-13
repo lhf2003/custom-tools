@@ -103,6 +103,8 @@ pub struct Model {
     /// 缓存命中输入单价（人民币/百万 token）：null = 未配置（缓存命中按 input_price 计）
     pub cached_input_price_per_m: Option<f64>,
     pub output_price_per_m: Option<f64>,
+    /// 视觉能力标记：默认 false，用户在设置页手动开启（聊天发图片的前置门槛）
+    pub supports_vision: bool,
     pub created_at: String,
     pub updated_at: String,
 }

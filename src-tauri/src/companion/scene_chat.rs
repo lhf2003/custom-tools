@@ -28,11 +28,66 @@ const RECENT_KEEP: usize = 12;
 /// A2UI surface 状态表：surface_id → 校验器累积状态（组件 id 集等）
 type SurfaceMap = HashMap<String, super::a2ui::SurfaceState>;
 
-/// 未摘要消息行：(消息 id, 角色, 内容)
-type UnsummarizedRows = Vec<(i64, String, String)>;
+/// 未摘要消息行：(消息 id, 角色, 内容, content_type)
+type UnsummarizedRows = Vec<(i64, String, String, String)>;
 
 /// read_unsummarized 的返回：(旧摘要, 摘要水位, 未摘要消息)
 type RawContext = (String, i64, UnsummarizedRows);
+
+// ── 附件消息（rich）协议 ─────────────────────────────────────────────
+// DB content JSON 协议定义与 degrade_rich_to_text 在 commands/chat.rs
+//（recall/diary 复用同一份降级）；这里只保留消息重建。
+
+use crate::commands::chat::degrade_rich_to_text;
+
+/// 组进 LLM 请求的消息：rich 内容重建成多模态——
+/// OpenAI 系 content 数组（仅带图时数组化；纯文本/纯文件保持字符串，
+/// 各家兼容网关对数组 content 的支持参差，能字符串就字符串）；
+/// Ollama 走 images 字段（裸 base64，去掉 data URL 前缀）。
+/// 非 rich 消息原样返回。
+fn build_chat_message(
+    app_handle: &AppHandle,
+    provider_type: &str,
+    role: &str,
+    content: &str,
+    content_type: &str,
+) -> Result<Value, String> {
+    if content_type != "rich" {
+        return Ok(json!({ "role": role, "content": content }));
+    }
+    let rich: crate::commands::chat::RichContent = serde_json::from_str(content)
+        .map_err(|e| format!("解析附件消息失败: {}", e))?;
+    // 文本部分：用户的话 + 各文件全文（图片走多模态字段，不拼进文本）
+    let mut text = rich.text.clone();
+    for f in &rich.files {
+        if !text.is_empty() {
+            text.push_str("\n\n");
+        }
+        text.push_str(&format!("[文件: {}]\n{}", f.name, f.content));
+    }
+    if rich.images.is_empty() {
+        return Ok(json!({ "role": role, "content": text }));
+    }
+    let mut data_urls = Vec::with_capacity(rich.images.len());
+    for p in &rich.images {
+        data_urls.push(crate::commands::chat::read_image_data_url(app_handle, p)?);
+    }
+    if provider_type == "ollama" {
+        let images: Vec<&str> = data_urls
+            .iter()
+            .map(|u| u.split_once(',').map(|(_, b)| b).unwrap_or(u.as_str()))
+            .collect();
+        return Ok(json!({ "role": role, "content": text, "images": images }));
+    }
+    let mut parts: Vec<Value> = data_urls
+        .iter()
+        .map(|u| json!({ "type": "image_url", "image_url": { "url": u } }))
+        .collect();
+    if !text.is_empty() {
+        parts.push(json!({ "type": "text", "text": text }));
+    }
+    Ok(json!({ "role": role, "content": parts }))
+}
 
 /// 回退通道在飞状态：FIFO 排队（与 agent 通道同一语义——
 /// 在飞时新消息入队不打断，答完自动发下一条）
@@ -196,12 +251,36 @@ async fn run_scene_chat(
     }
     crate::llm::log_prompt("chat_scene", &system_prompt);
 
-    // 组装消息：system + 近期历史 + 本轮用户消息
+    // 组装消息：system + 近期历史 + 本轮用户消息。
+    // 当轮消息前端已先落库，load_context 会把它读进 recent 末尾——
+    // 弹出与 text 同内容的末尾 user 消息当权威源（content_type 在手才
+    // 知道是不是 rich），否则当轮会重复两遍；rich 消息重复还会把
+    // 图片 base64 带两份进请求体。
+    let mut recent = context.recent;
+    let current = match recent.last() {
+        Some((role, content, _)) if role == "user" && *content == text => recent.pop(),
+        _ => None,
+    };
     let mut messages = vec![json!({ "role": "system", "content": system_prompt })];
-    for (role, content) in context.recent {
-        messages.push(json!({ "role": role, "content": content }));
+    for (role, content, content_type) in recent {
+        messages.push(build_chat_message(
+            app_handle,
+            &provider_type,
+            &role,
+            &content,
+            &content_type,
+        )?);
     }
-    messages.push(json!({ "role": "user", "content": text }));
+    match current {
+        Some((_, content, content_type)) => messages.push(build_chat_message(
+            app_handle,
+            &provider_type,
+            "user",
+            &content,
+            &content_type,
+        )?),
+        None => messages.push(json!({ "role": "user", "content": text })),
+    }
 
     // 工具清单：核心工具全开 + 用户未关闭的扩展工具（shell/web_search）
     let disabled_tools = tools::disabled_tools(app_handle);
@@ -715,21 +794,40 @@ async fn plain_fallback(
         system_prompt.push_str(&format!("\n\n---\n\n# 此前聊天的摘要\n{}", context.summary));
     }
     crate::llm::log_prompt("chat_scene_notools", &system_prompt);
+    // 当轮去重（同 run_scene_chat：前端先落库，recent 末尾即当轮消息）；
+    // 兜底通道结构上传不了图——rich 一律降级为引用文本，失忆但活着
+    let mut recent = context.recent;
+    let current = match recent.last() {
+        Some((role, content, _)) if role == "user" && *content == text => recent.pop(),
+        _ => None,
+    };
     let mut msgs = vec![crate::llm::ChatMessage {
         role: "system".to_string(),
         content: system_prompt,
         images: None,
     }];
-    for (role, content) in context.recent {
+    for (role, content, content_type) in recent {
+        let content = if content_type == "rich" {
+            degrade_rich_to_text(&content)
+        } else {
+            content
+        };
         msgs.push(crate::llm::ChatMessage {
             role,
             content,
             images: None,
         });
     }
+    let current_text = match current {
+        Some((_, content, content_type)) if content_type == "rich" => {
+            degrade_rich_to_text(&content)
+        }
+        Some((_, content, _)) => content,
+        None => text.to_string(),
+    };
     msgs.push(crate::llm::ChatMessage {
         role: "user".to_string(),
-        content: text.to_string(),
+        content: current_text,
         images: None,
     });
 
@@ -801,7 +899,8 @@ async fn plain_fallback(
 /// 会话上下文：滚动摘要 + 最近原文（组装进系统提示与消息列表）
 struct ChatContext {
     summary: String,
-    recent: Vec<(String, String)>,
+    /// (role, content, content_type)：rich 消息在组装请求时按通道重建/降级
+    recent: Vec<(String, String, String)>,
 }
 
 /// 读会话上下文；未摘要消息超过阈值时先做增量摘要（rolling summary）。
@@ -825,7 +924,7 @@ async fn load_context(
         let chunk = &unsummarized[..cut];
         match summarize_chunk(app_handle, db_path, &summary, chunk).await {
             Ok(new_summary) => {
-                let new_watermark = chunk.last().map(|(id, _, _)| *id).unwrap_or(watermark);
+                let new_watermark = chunk.last().map(|(id, _, _, _)| *id).unwrap_or(watermark);
                 save_summary(db_path, session_id, &new_summary, new_watermark).await;
                 summary = new_summary;
                 summarized_count = cut;
@@ -836,7 +935,9 @@ async fn load_context(
 
     let recent = unsummarized[summarized_count..]
         .iter()
-        .map(|(_, role, content)| (role.clone(), content.clone()))
+        .map(|(_, role, content, content_type)| {
+            (role.clone(), content.clone(), content_type.clone())
+        })
         .collect();
     Ok(ChatContext { summary, recent })
 }
@@ -910,10 +1011,10 @@ fn read_unsummarized(db_path: &Path, session_id: i64) -> Result<RawContext, Stri
             entry.1 = idx;
         }
     }
-    let mut unsummarized: Vec<(i64, String, String)> = Vec::new();
+    let mut unsummarized: UnsummarizedRows = Vec::new();
     for (idx, (id, role, content, content_type)) in raw.into_iter().enumerate() {
         if content_type != "a2ui" {
-            unsummarized.push((id, role, content));
+            unsummarized.push((id, role, content, content_type));
             continue;
         }
         let sid = serde_json::from_str::<Value>(&content).ok().and_then(|p| {
@@ -925,11 +1026,16 @@ fn read_unsummarized(db_path: &Path, session_id: i64) -> Result<RawContext, Stri
             // 同 surface 的较早行已并入摘要，丢弃；最后一行位置放摘要
             Some(s) if surface_acc.get(&s).map(|e| e.1) == Some(idx) => {
                 let summary = super::a2ui::summarize_surface(&surface_acc[&s].0);
-                unsummarized.push((id, role, summary));
+                unsummarized.push((id, role, summary, "markdown".to_string()));
             }
             Some(_) => {}
             // 解析失败的 a2ui 行：回退空占位，不带原始 JSON
-            None => unsummarized.push((id, role, "（向用户展示了一张界面卡片）".to_string())),
+            None => unsummarized.push((
+                id,
+                role,
+                "（向用户展示了一张界面卡片）".to_string(),
+                "markdown".to_string(),
+            )),
         }
     }
     Ok((summary, watermark, unsummarized))
@@ -941,12 +1047,19 @@ async fn summarize_chunk(
     app_handle: &AppHandle,
     db_path: &PathBuf,
     old_summary: &str,
-    chunk: &[(i64, String, String)],
+    chunk: &[(i64, String, String, String)],
 ) -> Result<String, String> {
     let mut dialog = String::new();
-    for (_, role, content) in chunk {
+    for (_, role, content, content_type) in chunk {
         let who = if role == "user" { "他" } else { "你" };
-        dialog.push_str(&format!("{}：{}\n", who, content));
+        // rich 附件消息只留引用进摘要（图片记数量、文件记名字），
+        // 文件全文/图片进摘要会把摘要器上下文烧爆
+        let text = if content_type == "rich" {
+            degrade_rich_to_text(content)
+        } else {
+            content.clone()
+        };
+        dialog.push_str(&format!("{}：{}\n", who, text));
     }
     let prompt = format!(
         "把一段聊天记录压缩成摘要，留给未来的自己做上下文。\n\
@@ -987,4 +1100,36 @@ fn openai_tools_json(disabled: &[String]) -> serde_json::Value {
         })
         .collect();
     json!(arr)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::degrade_rich_to_text;
+
+    #[test]
+    fn degrade_rich_keeps_text_with_tags() {
+        let json = r#"{"text":"看这个报错","images":["chat_images/1/a.png","chat_images/1/b.png"],"files":[{"name":"a.log","content":"..."}]}"#;
+        assert_eq!(
+            degrade_rich_to_text(json),
+            "看这个报错\n[图片×2] [文件: a.log]"
+        );
+    }
+
+    #[test]
+    fn degrade_rich_without_text_keeps_only_tags() {
+        let json = r#"{"text":"","images":["chat_images/1/a.png"],"files":[]}"#;
+        assert_eq!(degrade_rich_to_text(json), "[图片×1]");
+    }
+
+    #[test]
+    fn degrade_rich_plain_text_passthrough_when_no_tags() {
+        let json = r#"{"text":"纯文本内容","images":[],"files":[]}"#;
+        assert_eq!(degrade_rich_to_text(json), "纯文本内容");
+    }
+
+    #[test]
+    fn degrade_rich_invalid_json_returns_raw() {
+        let raw = "不是 JSON 的普通消息";
+        assert_eq!(degrade_rich_to_text(raw), raw);
+    }
 }

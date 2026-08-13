@@ -99,6 +99,8 @@ export function SettingsView() {
   const refreshExternal = useExternalPluginsStore((s) => s.refresh);
   // 未知应用提醒深链：store 里有待处理的搜索预填 → 切到「应用」tab（AppsSettings 挂载时消费）
   const appsTabQuery = useSettingsStore((s) => s.appsTabQuery);
+  // 通用深链：外部模块（聊天视觉门槛等）请求直达某个 tab，消费后清除
+  const pendingTab = useSettingsStore((s) => s.pendingTab);
 
   useEffect(() => {
     immediateResize(WINDOW_SIZE.SETTINGS.height, WINDOW_SIZE.SETTINGS.width);
@@ -109,6 +111,13 @@ export function SettingsView() {
       setActiveTab('apps');
     }
   }, [appsTabQuery]);
+
+  useEffect(() => {
+    if (pendingTab) {
+      setActiveTab(pendingTab);
+      useSettingsStore.getState().setPendingTab(null);
+    }
+  }, [pendingTab]);
 
   // 打开设置即扫描外部插件（侧边导航的数据源；市场页的启用/安装/卸载经同一 store 回流）
   useEffect(() => {

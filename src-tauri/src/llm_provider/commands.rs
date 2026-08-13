@@ -186,6 +186,23 @@ pub async fn set_llm_model_price(
         .ok_or_else(|| "模型不存在".to_string())
 }
 
+/// 视觉能力标记开关（聊天发图片的门槛，用户在设置页手动标）
+#[tauri::command]
+pub async fn set_llm_model_supports_vision(
+    db: State<'_, DatabaseState>,
+    model_id: i64,
+    supports: bool,
+) -> Result<Model, String> {
+    let conn = Connection::open(&db.0).map_err(|e| format!("打开数据库失败: {}", e))?;
+    let db_ops = LlmProviderDb;
+    if !db_ops.set_model_supports_vision(&conn, model_id, supports)? {
+        return Err("模型不存在".to_string());
+    }
+    db_ops
+        .get_model_by_id(&conn, model_id)?
+        .ok_or_else(|| "模型不存在".to_string())
+}
+
 #[tauri::command]
 pub async fn get_scene_configs(db: State<'_, DatabaseState>) -> Result<Vec<SceneConfig>, String> {
     let conn = Connection::open(&db.0).map_err(|e| format!("打开数据库失败: {}", e))?;

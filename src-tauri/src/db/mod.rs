@@ -241,10 +241,14 @@ impl Database {
                 input_price_per_m REAL,
                 output_price_per_m REAL,
                 cached_input_price_per_m REAL,
+                supports_vision BOOLEAN DEFAULT 0,
                 UNIQUE(provider_id, model_id)
             )",
             [],
         )?;
+
+        // 旧库补列（CREATE TABLE IF NOT EXISTS 不会给已存在的表加列）
+        add_supports_vision_column(&self.conn)?;
 
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_llm_models_provider ON llm_models(provider_id)",
@@ -380,6 +384,22 @@ fn drop_legacy_favorite_column(conn: &Connection) -> rusqlite::Result<()> {
     Ok(())
 }
 
+/// 幂等迁移：聊天附件（图片）需要按模型标记视觉能力，旧库 llm_models 补
+/// supports_vision 列。默认 0 = 不带视觉，用户在设置页手动开启（不做关键词猜测）。
+fn add_supports_vision_column(conn: &Connection) -> rusqlite::Result<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(llm_models)")?;
+    let columns = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<rusqlite::Result<Vec<String>>>()?;
+    if !columns.iter().any(|c| c == "supports_vision") {
+        conn.execute(
+            "ALTER TABLE llm_models ADD COLUMN supports_vision BOOLEAN DEFAULT 0",
+            [],
+        )?;
+    }
+    Ok(())
+}
+
 fn get_app_dir(app_handle: &tauri::AppHandle) -> PathBuf {
     let path = app_handle
         .path()
@@ -495,6 +515,38 @@ mod tests {
         // 无 favorite 列时连续调用均不报错
         drop_legacy_favorite_column(&conn).unwrap();
         drop_legacy_favorite_column(&conn).unwrap();
+    }
+
+    #[test]
+    fn supports_vision_migration_adds_column_and_is_idempotent() {
+        let conn = Connection::open(Path::new(":memory:")).unwrap();
+        // 模拟旧库：llm_models 无 supports_vision 列
+        conn.execute(
+            "CREATE TABLE llm_models (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider_id INTEGER NOT NULL,
+                model_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                is_active BOOLEAN DEFAULT 0
+            )",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO llm_models (provider_id, model_id, name) VALUES (1, 'qwen-vl-max', '通义千问VL')",
+            [],
+        )
+        .unwrap();
+
+        add_supports_vision_column(&conn).unwrap();
+
+        // 存量行默认 0（不带视觉，手动标记策略）
+        let supports: bool = conn
+            .query_row("SELECT supports_vision FROM llm_models WHERE id = 1", [], |r| r.get(0))
+            .unwrap();
+        assert!(!supports, "迁移后存量模型应默认不带视觉");
+        // 幂等：重复调用不报错
+        add_supports_vision_column(&conn).unwrap();
     }
 
 }

@@ -86,6 +86,7 @@ export function ModelSettings() {
     loadModels,
     setModelActive,
     setModelPrice,
+    setModelSupportsVision,
     loadSceneConfigs,
     setSceneModel,
     setSceneThinkingMode,
@@ -291,6 +292,11 @@ export function ModelSettings() {
   // Toggle model active state
   const handleToggleModelActive = async (model: Model) => {
     await setModelActive(model.id, !model.is_active);
+  };
+
+  // 视觉能力标记（聊天发图片的门槛，手动标——不做模型名关键词猜测）
+  const handleToggleModelVision = async (model: Model) => {
+    await setModelSupportsVision(model.id, !model.supports_vision);
   };
 
   // 单价输入（非受控 defaultValue + 失焦提交；空串 = 清除，非法输入不落库）
@@ -719,6 +725,17 @@ export function ModelSettings() {
                                   className={`w-14 ${smallInputClass}`}
                                 />
                                 </div>
+                              </Tooltip>
+                              <Tooltip content="视觉能力：开启后聊天里可向该模型发送图片" wrapperClassName="flex items-center flex-shrink-0">
+                                <label className="flex items-center gap-2 cursor-pointer flex-shrink-0">
+                                  <input
+                                    type="checkbox"
+                                    checked={model.supports_vision}
+                                    onChange={() => handleToggleModelVision(model)}
+                                    className="w-4 h-4 rounded accent-[var(--app-brand-primary)]"
+                                  />
+                                  <span className="text-app-text-tertiary text-xs">视觉</span>
+                                </label>
                               </Tooltip>
                               <label className="flex items-center gap-2 cursor-pointer flex-shrink-0">
                                 <input
