@@ -63,7 +63,7 @@ const EXCLUDED_PATH_PREFIXES: &[&str] = &[
 /// 非 ASCII 路径前缀切到多字节字符中间而 panic。
 fn path_has_prefix(path: &str, prefix: &str) -> bool {
     path.get(..prefix.len())
-        .map_or(false, |head| head.eq_ignore_ascii_case(prefix))
+        .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
 }
 
 /// Find es.exe: checks app's own Everything directory first, then system-wide paths.

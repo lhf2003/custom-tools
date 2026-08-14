@@ -211,7 +211,7 @@ pub fn tool_definitions() -> Vec<ToolDef> {
             group: ToolGroup::Growth,
             core: true,
             external: true,
-            description: "把一条关于用户的事实立即写入长期记忆。\n\n适用场景：用户明确说「记住…」「以后…」「我喜欢/我不喜欢…」等值得长期记住的信息，以及纠正旧记忆（「不是X是Y」——会覆盖更新同主题旧条目，不会并存矛盾条目）。\n不适用：可从电脑使用数据直接查到的、临时任务状态、隐私细节（密码/密钥）。\n\ncategory 五选一：person（他是谁/他认识的人）| project（项目/技术栈）| workflow（做事方式/作息节奏）| voice（表达偏好/语言风格）| expectation（他希望贾维斯怎么做）。".to_string(),
+            description: "把一条关于用户的事实立即写入长期记忆。\n\n适用场景：用户明确说「记住…」「以后…」「我喜欢/我不喜欢…」等值得长期记住的信息，以及纠正旧记忆（「不是X是Y」——会覆盖更新同主题旧条目，不会并存矛盾条目）。\n不适用：可从电脑使用数据直接查到的、临时任务状态、隐私细节（密码/密钥）。\n\ncategory 五选一：person（他是谁、他身边的人）| project（他的项目与技术栈）| workflow（他怎么做事、作息节奏）| voice（他怎么表达、措辞偏好）| expectation（他希望你（贾维斯）怎么做——汇报详略、提醒频率、称呼方式、什么别打扰他）。".to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -505,7 +505,7 @@ fn shell_tool_def() -> ToolDef {
         group: ToolGroup::System,
         core: false,
         external: false,
-        description: "在这台 Windows 电脑上执行一条命令（cmd /c 语义）。\n\n适用：用户明确让你操作系统——查文件、看进程、跑脚本、装东西。\n不适用：读本应用自己的数据（用专用数据工具）；读文件内容（用 read_file，可编辑/无打扰模式下免确认，别用 type/more）；用户没让你动系统时主动动。\n\n规则：\n- 只读查询、组合探测、运行脚本、启动程序通常免确认直接执行；删除/覆盖文件、写注册表、装包、git 写操作、内联代码（python -c、PowerShell 等）会弹窗请用户确认——被拒绝就换思路或问用户，不要换着花样重试同一件事\n- 启动程序用 start \"\" \"程序路径\" 或 start 程序名，不要用 PowerShell（必弹确认）\n- 多个只读探测用 & 串联成一条（dir a & dir b），报错噪声加 2>nul，均免确认\n- 命令尽量只读、可逆；写操作执行前先想好怎么向用户解释\n- 输出会被截断，需要精确结果时用更窄的命令（findstr、定向文件）".to_string(),
+        description: "在这台 Windows 电脑上执行一条命令（cmd /c 语义）。\n\n适用：用户明确让你操作系统——查文件、看进程、跑脚本、装东西。\n不适用：读本应用自己的数据（用专用数据工具）；读文件内容（用 read_file，可编辑/无打扰模式下免确认，别用 type/more）；用户没让你动系统时主动动。\n\n规则：\n- 只读查询、组合探测、运行脚本、启动程序通常免确认直接执行；删除/覆盖文件、写注册表、装包、git 写操作、内联代码（python -c、PowerShell 等）会弹窗请用户确认（出现在命令任何位置都会拦，别用 & 拼接或 start 包装绕）——被拒绝就换思路或问用户，不要换着花样重试同一件事\n- 启动程序用 start \"\" \"程序路径\" 或 start 程序名，不要用 PowerShell（必弹确认）\n- 多个只读探测用 & 串联成一条（dir a & dir b），报错噪声加 2>nul，均免确认\n- 命令尽量只读、可逆；写操作执行前先想好怎么向用户解释\n- 输出会被截断，需要精确结果时用更窄的命令（findstr、定向文件）".to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {

@@ -481,7 +481,7 @@ async fn run_scene_chat(
                             .unwrap_or("")
                             .to_string();
                         let surf_sid = plugin_surface_id(&plugin_id, "layout");
-                        let with_create = !surface_exists(&surfaces, session_id, &surf_sid);
+                        let with_create = !surface_exists(surfaces, session_id, &surf_sid);
                         match super::plugin_gen_tool::tool_layout_ui(
                             app_handle,
                             &provider.base_url,
@@ -498,7 +498,7 @@ async fn run_scene_chat(
                                 let card_text = emit_tool_card(
                                     app_handle,
                                     db_path,
-                                    &surfaces,
+                                    surfaces,
                                     session_id,
                                     &surf_sid,
                                     super::plugin_gen_tool::build_layout_card_messages(
@@ -520,7 +520,7 @@ async fn run_scene_chat(
                             .unwrap_or("")
                             .to_string();
                         let surf_sid = plugin_surface_id(&plugin_id, "preview");
-                        let with_create = !surface_exists(&surfaces, session_id, &surf_sid);
+                        let with_create = !surface_exists(surfaces, session_id, &surf_sid);
                         match super::plugin_gen_tool::tool_generate_plugin_chat(
                             app_handle,
                             &provider.base_url,
