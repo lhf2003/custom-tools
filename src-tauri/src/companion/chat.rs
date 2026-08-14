@@ -269,9 +269,11 @@ pub(crate) fn monologue_enabled(app_handle: &AppHandle) -> bool {
         .unwrap_or(true)
 }
 
-/// 聊天系统提示（前端场景模型回退时取用，with_tools=false）
+/// 聊天系统提示（前端场景模型回退时取用，with_tools=false）。
+/// async command：环境感知补刷直接 await，不占 IPC 线程（同步 command 里
+/// block_on 会把 locate+weather 串行 ~16s 的等待冻结在启动器消息泵上）
 #[tauri::command]
-pub fn jarvis_chat_system(
+pub async fn jarvis_chat_system(
     app_handle: AppHandle,
     db_state: State<'_, crate::db::DatabaseState>,
     with_tools: bool,
@@ -282,8 +284,8 @@ pub fn jarvis_chat_system(
         .path()
         .app_data_dir()
         .map_err(|e| e.to_string())?;
-    // 环境感知补刷：command 是同步上下文，block_on 包 async（过期才网络阻塞 ≤8s）
-    tauri::async_runtime::block_on(super::envsense::refresh_if_stale(&db_state.0));
+    // 环境感知补刷：过期才网络请求，失败有 5 分钟背压（断网时不会每条消息都重试）
+    super::envsense::refresh_if_stale(&db_state.0).await;
     Ok(compose_chat_system(
         &app_data,
         &db_state.0,

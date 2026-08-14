@@ -6,11 +6,26 @@ use tauri_plugin_autostart::ManagerExt;
 pub struct SettingsState(pub Mutex<SettingsManager>);
 pub struct ShortcutManagerState(pub Mutex<ShortcutManager>);
 
-/// Get all settings
+/// Get all settings（敏感字段脱敏——CASE-001 裁决 4「token 不出后端」）：
+/// 第三方 MCP token 只经 list_external_mcp_servers 的 has_token 通道进前端，
+/// 此处整串置空；llm_api_key 留尾 4 位掩码（设置页写回走 set_setting 专用命令）
 #[tauri::command]
 pub fn get_settings(state: State<'_, SettingsState>) -> Result<AppSettings, String> {
     let manager = state.0.lock().map_err(|e| e.to_string())?;
-    Ok(manager.get_settings())
+    let mut settings = manager.get_settings();
+    settings.mcp_external_servers.clear();
+    settings.llm_api_key = mask_secret(&settings.llm_api_key);
+    Ok(settings)
+}
+
+/// 密钥掩码：空串原样；非空只留尾 4 位（不足 4 位整体隐藏）
+fn mask_secret(secret: &str) -> String {
+    let chars: Vec<char> = secret.chars().collect();
+    match chars.len() {
+        0 => String::new(),
+        1..=4 => "••••••".to_string(),
+        _ => format!("••••••{}", chars[chars.len() - 4..].iter().collect::<String>()),
+    }
 }
 
 /// Get a single KV setting by key（插件启用状态等通用键）

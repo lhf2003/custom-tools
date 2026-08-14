@@ -14,6 +14,7 @@
 //!   SK 存在才带 sn（dev 未注入 SK 时依赖控制台未开 SN 强制校验）
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicI64, Ordering};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -401,7 +402,9 @@ pub async fn refresh(db_path: &Path) -> Result<(), String> {
 
     let now = chrono::Local::now().timestamp();
     let mut cache = load_cache(db_path).unwrap_or_default();
-    if !cache.city.is_empty() && cache.city != located.city {
+    // 本轮城市是否变化——天气失败时旧 weather 对新城市是错误数据（张冠李戴）
+    let city_changed = !cache.city.is_empty() && cache.city != located.city;
+    if city_changed {
         // 出差/旅行：记上一个城市 + 变化时间（3 天注入提示窗），facts 同模板覆盖
         cache.prev_city = Some(cache.city.clone());
         cache.city_changed_at = now;
@@ -446,6 +449,12 @@ pub async fn refresh(db_path: &Path) -> Result<(), String> {
             Ok(())
         }
         Err(e) => {
+            // 城市已更新但天气失败：旧 weather 配新城市会张冠李戴（注入句
+            // 「他现在在济南……此刻外面：晴 35°C」实为武汉数据）——清掉，
+            // 宁缺勿错；出差 fact 已由 remember_env_fact 单独记录，不依赖天气
+            if city_changed {
+                cache.weather = None;
+            }
             save_cache(db_path, &cache);
             Err(e)
         }
@@ -459,13 +468,27 @@ pub async fn refresh_and_log(db_path: &Path) {
     }
 }
 
-/// 触点补刷：缓存超过 STALE_SECS 才重新采集
+/// 采集失败背压（进程内）：上次失败后 REFRESH_BACKOFF_SECS 内跳过触点补刷——
+/// 断网时天气失败不推进 fetched_at，每轮聊天都会命中 stale，不背压的话
+/// locate + weather 串行 ~16s 的等待会挨在每条消息上（启动器高频冻结）
+static LAST_REFRESH_FAILED_AT: AtomicI64 = AtomicI64::new(0);
+const REFRESH_BACKOFF_SECS: i64 = 5 * 60;
+
+/// 触点补刷：缓存超过 STALE_SECS 才重新采集；失败进入背压
 pub async fn refresh_if_stale(db_path: &Path) {
+    let now = chrono::Local::now().timestamp();
+    if now - LAST_REFRESH_FAILED_AT.load(Ordering::Relaxed) < REFRESH_BACKOFF_SECS {
+        return;
+    }
     let stale = load_cache(db_path)
-        .map(|c| chrono::Local::now().timestamp() - c.fetched_at >= STALE_SECS)
+        .map(|c| now - c.fetched_at >= STALE_SECS)
         .unwrap_or(true);
-    if stale {
-        refresh_and_log(db_path).await;
+    if !stale {
+        return;
+    }
+    if let Err(e) = refresh(db_path).await {
+        log::warn!("环境感知采集失败（隐身降级，{}s 内不再重试）: {}", REFRESH_BACKOFF_SECS, e);
+        LAST_REFRESH_FAILED_AT.store(now, Ordering::Relaxed);
     }
 }
 
