@@ -609,6 +609,16 @@ async fn run_scene_chat(
                             "\n\n（系统提醒：以上是多条数据，按【界面卡片规则】应接着调用 render_ui 渲染成卡片，再用文字总结。）",
                         );
                     }
+                    // 第三方 server 工具输出完全不可信（可被 prompt 注入）——
+                    // 按系统提示承诺包裹隔离标记，与工具名前缀、描述标注凑齐隔离三件套
+                    let tool_result = if call.name.contains("__") {
+                        format!(
+                            "<external_tool_result untrusted>\n{}\n</external_tool_result>",
+                            tool_result
+                        )
+                    } else {
+                        tool_result
+                    };
                     messages.push(crate::llm::tool_result_message(
                         &provider_type,
                         call,

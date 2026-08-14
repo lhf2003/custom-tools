@@ -2,8 +2,10 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { Search, FileText, Folder, HardDrive, ExternalLink, ChevronDown, RefreshCw, Power, Clock } from 'lucide-react';
 import { safeInvoke, immediateResize } from '@/utils/tauri';
+import { usePluginPayload } from '@/plugins/usePluginPayload';
 import { THEME } from '../../constants/theme';
 import { WINDOW_SIZE } from '../../constants/window';
+import everythingPlugin from './plugin';
 
 type EverythingStatus = 'available' | 'not_installed' | 'service_not_running' | null;
 
@@ -226,6 +228,13 @@ export function EverythingView() {
     setFrequentFiles(data ?? []);
   }, []);
 
+  // @everything 触发词投递的搜索词（启动器承诺「将 xx 发送给 文件搜索」，
+  // 不消费参数就是静默丢弃——回填查询框后防抖搜索自动生效）
+  usePluginPayload(everythingPlugin.id, useCallback((payload: unknown) => {
+    if (typeof payload !== 'string' || !payload.trim()) return;
+    setQuery(payload);
+  }, []));
+
   useEffect(() => {
     checkEverything();
     loadFrequentFiles();
@@ -244,10 +253,19 @@ export function EverythingView() {
   // Search files
   const searchFiles = useCallback(async (searchQuery: string, category: FileCategory, silent = false) => {
     if (everythingStatus !== 'available') {
+      // 状态未就绪的早退不消费 firstRun——等 available 后的第一次真正搜索仍是首次
       return;
     }
 
-    if (!silent) setIsLoading(true);
+    // 真正的首次搜索：有缓存则静默重搜（不闪「搜索中...」）；
+    // 消费必须在 early return 之后，否则状态检查慢时会被烧掉退化成闪帧
+    let effectiveSilent = silent;
+    if (firstRunRef.current) {
+      firstRunRef.current = false;
+      effectiveSilent = effectiveSilent || cachedInitialFiles !== null;
+    }
+
+    if (!effectiveSilent) setIsLoading(true);
 
     try {
       // Build query with category filter
@@ -272,10 +290,12 @@ export function EverythingView() {
         query: finalQuery,
         limit: 100
       }) as FileResult[];
-      setFiles(results || []);
+      // is_dir 缺字段归一（后端字段变更时前端静默显示错误图标不如按文件处理）
+      const normalized = (results || []).map((r) => ({ ...r, is_dir: r.is_dir ?? false }));
+      setFiles(normalized);
       // 仅初始态（空查询 + 全部分类）写缓存（搜索/筛选态不污染缓存）
       if (!searchQuery.trim() && category === 'all') {
-        cachedInitialFiles = results || [];
+        cachedInitialFiles = normalized;
       }
       setSelectedIndex(0);
     } catch (err) {
@@ -283,17 +303,15 @@ export function EverythingView() {
       setFiles([]);
       setSelectedIndex(0);
     } finally {
-      if (!silent) setIsLoading(false);
+      if (!effectiveSilent) setIsLoading(false);
     }
   }, [everythingStatus]);
 
-  // Debounced search（挂载首跑且有缓存时静默重搜，不闪「搜索中...」；之后输入/筛选照常带 loading）
+  // Debounced search（首次搜索的静默判定在 searchFiles 内消费，防早退烧掉）
   const firstRunRef = useRef(true);
   useEffect(() => {
     const timer = setTimeout(() => {
-      const silent = firstRunRef.current && cachedInitialFiles !== null;
-      firstRunRef.current = false;
-      searchFiles(query, selectedCategory, silent);
+      searchFiles(query, selectedCategory);
     }, 200);
     return () => clearTimeout(timer);
   }, [query, selectedCategory, searchFiles]);
@@ -355,6 +373,9 @@ export function EverythingView() {
 
   // 键盘导航：方向键移动选中、回车打开、Esc 清空
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // 中文输入法组合态：确认候选字的回车/Esc 是输入法行为，不能当快捷键（否则
+    // 打拼音回车会误打开选中文件、Esc 取消候选会清空查询）
+    if (e.nativeEvent.isComposing) return;
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       setSelectedIndex((i) => Math.min(i + 1, sortedFiles.length - 1));
@@ -473,6 +494,30 @@ export function EverythingView() {
   // 常用文件仅在空查询 + 全部分类时展示
   const showFrequent = !query.trim() && selectedCategory === 'all' && frequentFiles.length > 0;
 
+  // 常用文件区块（空结果与有结果分支共用，避免两处 JSX 漂移）
+  const frequentSection = showFrequent && (
+    <>
+      <div className="flex items-center gap-1.5 px-3 pt-1.5 pb-1 text-xs text-app-text-tertiary">
+        <Clock className="w-3.5 h-3.5" />
+        <span>常用文件</span>
+      </div>
+      {frequentFiles.map((f) => (
+        <button
+          key={`freq-${f.path}`}
+          onClick={() => handleOpenFile(f.path)}
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors hover:bg-white/5"
+          title="打开文件"
+        >
+          {getFileIcon(f.name)}
+          <div className="flex-1 min-w-0">
+            <p className="text-sm truncate text-app-text-primary">{f.name}</p>
+            <p className="text-xs text-app-text-tertiary truncate">{f.path}</p>
+          </div>
+        </button>
+      ))}
+    </>
+  );
+
   const currentCategoryName = categories.find(c => c.id === selectedCategory)?.name ?? '全部';
 
   return (
@@ -487,6 +532,7 @@ export function EverythingView() {
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="搜索文件...（↑↓ 选择 · 回车/双击打开 · Esc 清空）"
+          aria-label="搜索文件"
           className="flex-1 bg-transparent text-base text-app-text-primary placeholder-app-text-placeholder outline-none"
         />
         {/* 分类选择（原左侧栏，移到输入框右侧） */}
@@ -557,37 +603,21 @@ export function EverythingView() {
                 <div className="animate-pulse">搜索中...</div>
               </div>
             ) : sortedFiles.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-zinc-500">
-                <Search className="w-12 h-12 mb-3 opacity-30" />
-                <p className="text-sm">未找到匹配的文件</p>
+              // 空结果也渲染常用文件（冷启动/索引空时常用文件是唯一的可用内容）
+              <div className="flex flex-col gap-0.5">
+                {frequentSection}
+                <div className="flex flex-col items-center justify-center flex-1 py-16 text-zinc-500">
+                  <Search className="w-12 h-12 mb-3 opacity-30" />
+                  <p className="text-sm">未找到匹配的文件</p>
+                </div>
               </div>
             ) : (
               <div className="flex flex-col gap-0.5">
-                {/* 常用文件（空查询 + 全部分类时置顶展示） */}
+                {frequentSection}
                 {showFrequent && (
-                  <>
-                    <div className="flex items-center gap-1.5 px-3 pt-1.5 pb-1 text-xs text-app-text-tertiary">
-                      <Clock className="w-3.5 h-3.5" />
-                      <span>常用文件</span>
-                    </div>
-                    {frequentFiles.map((f) => (
-                      <button
-                        key={`freq-${f.path}`}
-                        onClick={() => handleOpenFile(f.path)}
-                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors hover:bg-white/5"
-                        title="打开文件"
-                      >
-                        {getFileIcon(f.name)}
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm truncate text-app-text-primary">{f.name}</p>
-                          <p className="text-xs text-app-text-tertiary truncate">{f.path}</p>
-                        </div>
-                      </button>
-                    ))}
-                    <div className="flex items-center gap-1.5 px-3 pt-3 pb-1 text-xs text-app-text-tertiary">
-                      <span>全部结果</span>
-                    </div>
-                  </>
+                  <div className="flex items-center gap-1.5 px-3 pt-3 pb-1 text-xs text-app-text-tertiary">
+                    <span>全部结果</span>
+                  </div>
                 )}
                 {sortedFiles.map((file, index) => (
                   <button
