@@ -57,6 +57,8 @@ jobs:
         with:
           tagName: ${{ github.event.release.tag_name }}
           releaseName: ${{ github.event.release.tag_name }}
+          # 每个资产上传重试 3 次，兜底 GitHub 资产接口的瞬时异常响应
+          retryAttempts: 3
 
       - name: Generate and upload latest.json
         shell: pwsh
@@ -109,4 +111,20 @@ jobs:
           Write-Host "latest.json generated with notes for $tag"
 
           # --clobber 覆盖 tauri-action 可能上传的同名 asset，保证 notes 生效
-          gh release upload $tag "latest.json" --clobber
+          # uploads.github.com 偶发瞬时 404（v0.5.7 曾因此发布失败），重试 3 次兜底；
+          # $PSNativeCommandUseErrorActionPreference 下 gh 失败会抛异常，必须 try/catch
+          $uploaded = $false
+          for ($i = 1; $i -le 3; $i++) {
+            try {
+              gh release upload $tag "latest.json" --clobber
+              $uploaded = $true
+              break
+            } catch {
+              Write-Host "latest.json upload attempt $i failed: $($_.Exception.Message)"
+              if ($i -lt 3) { Start-Sleep -Seconds 20 }
+            }
+          }
+          if (-not $uploaded) {
+            Write-Error "latest.json upload failed after 3 attempts"
+            exit 1
+          }
