@@ -69,8 +69,16 @@ pub async fn run_diary(
         last_attitude.trim().to_string()
     };
 
+    // 当日天气背景（环境感知缓存：0 点链路拿到的是睡前窗外最后一次采集，
+    // 采集时刻已标在素材行里；没有数据则整节消失——隐身原则，不给模型编的机会）
+    let weather_section = match super::envsense::diary_material(db_path) {
+        Some(t) => format!("## 当日天气背景\n{}\n\n", t),
+        None => String::new(),
+    };
+
     let prompt = format!(
         "{persona}\n\n---\n\n{manual}\n\n---\n\n# 今天的素材（{date}，{weekday}）\n\n\
+         {weather}\
          ## 他的电脑使用\n{aggregate}\n\n\
          ## 今天他对你说的话\n{chats}\n\n\
          ## 今天你记住/修改的关于他的事\n{events}\n\n\
@@ -80,6 +88,7 @@ pub async fn run_diary(
         manual = super::skills::load_skill_body(&app_data, "diary"),
         date = date,
         weekday = weekday_cn(date),
+        weather = weather_section,
         aggregate = aggregate,
         chats = chats_text,
         events = events_text,

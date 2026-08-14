@@ -628,6 +628,59 @@ pub fn get_mcp_server_info() -> crate::companion::mcp::McpServerInfo {
     crate::companion::mcp::server_info()
 }
 
+// ── 第三方 MCP server（二期：能调 + 能装 + 能管）──────────────────
+
+/// 全部第三方 server（MCP tab 列表；token 不下发，只有 has_token）
+#[tauri::command]
+pub fn list_external_mcp_servers(
+    settings_state: State<SettingsState>,
+) -> Result<Vec<crate::companion::mcp_servers::ExternalMcpServerInfo>, String> {
+    Ok(crate::companion::mcp_servers::list_infos(&settings_state.0))
+}
+
+/// 导入第三方 server：slug/URL 校验 → 强制连通验证（initialize + tools/list 快照）。
+/// 验证失败且 force=false 时报错；前端确认「仍然保存」后以 force=true 重调（存为未连接）。
+#[tauri::command]
+pub async fn import_external_mcp_server(
+    settings_state: State<'_, SettingsState>,
+    name: String,
+    display_name: String,
+    url: String,
+    token: String,
+    force: bool,
+) -> Result<crate::companion::mcp_servers::ExternalMcpServerInfo, String> {
+    crate::companion::mcp_servers::import(&settings_state.0, name, display_name, url, token, force)
+        .await
+}
+
+/// 删除第三方 server（连带清理其工具开关残留）
+#[tauri::command]
+pub fn delete_external_mcp_server(
+    settings_state: State<SettingsState>,
+    name: String,
+) -> Result<(), String> {
+    crate::companion::mcp_servers::delete(&settings_state.0, &name)
+}
+
+/// server 总开关（关闭 = 其下工具全部不进聊天循环）
+#[tauri::command]
+pub fn set_external_mcp_server_enabled(
+    settings_state: State<SettingsState>,
+    name: String,
+    enabled: bool,
+) -> Result<(), String> {
+    crate::companion::mcp_servers::set_enabled(&settings_state.0, &name, enabled)
+}
+
+/// 刷新：重连 + 重抓 tools/list 快照（失败保留旧快照，只更新连接状态）
+#[tauri::command]
+pub async fn refresh_external_mcp_server(
+    settings_state: State<'_, SettingsState>,
+    name: String,
+) -> Result<crate::companion::mcp_servers::ExternalMcpServerInfo, String> {
+    crate::companion::mcp_servers::refresh(&settings_state.0, &name).await
+}
+
 /// 读手册完整原文（含 frontmatter——编辑器里 schedule/enabled 也可改）
 #[tauri::command]
 pub fn get_manual(app_handle: AppHandle, name: String) -> Result<String, String> {
@@ -770,7 +823,7 @@ pub struct CompanionToolInfo {
     pub enabled: bool,
 }
 
-/// 全部工具（核心 + 扩展）及其开关状态
+/// 全部工具（核心 + 扩展 + 第三方 MCP server 工具）及其开关状态
 #[tauri::command]
 pub fn list_companion_tools(
     settings_state: State<SettingsState>,
@@ -780,7 +833,7 @@ pub fn list_companion_tools(
         serde_json::from_str(&manager.get_settings().disabled_companion_tools).unwrap_or_default()
     };
 
-    let infos = crate::companion::tools::all_tool_definitions()
+    let mut infos = crate::companion::tools::all_tool_definitions()
         .into_iter()
         .map(|d| {
             let enabled = d.core || !disabled.iter().any(|n| n == d.name);
@@ -797,11 +850,41 @@ pub fn list_companion_tools(
                 enabled,
             }
         })
-        .collect();
+        .collect::<Vec<_>>();
+
+    // 第三方 MCP server 工具：按 server 分组追加（group id = "external:{server}"），
+    // 工具 tab 渲染为「外部服务」区；开关存 disabled_companion_tools（带前缀全名）。
+    // server 总开关关闭时整组仍列出但全部标 disabled——用户能看到「关了什么」
+    for server in crate::companion::mcp_servers::load(&settings_state.0) {
+        let display = if server.display_name.is_empty() {
+            server.name.clone()
+        } else {
+            server.display_name.clone()
+        };
+        for tool in &server.tools {
+            let full_name =
+                crate::companion::mcp_servers::prefixed_tool_name(&server.name, &tool.name);
+            infos.push(CompanionToolInfo {
+                name: full_name.clone(),
+                display_name: tool.name.clone(),
+                description: tool.description.lines().next().unwrap_or("").to_string(),
+                group: format!("external:{}", server.name),
+                group_label: format!("外部服务 · {}", display),
+                group_description: if server.enabled {
+                    server.url.clone()
+                } else {
+                    format!("{}（server 已在 MCP 页关闭）", server.url)
+                },
+                core: false,
+                external: false,
+                enabled: server.enabled && !disabled.iter().any(|n| n == &full_name),
+            });
+        }
+    }
     Ok(infos)
 }
 
-/// 开关一个非核心工具（核心工具调用直接报错）
+/// 开关一个非核心工具（核心工具调用直接报错；外部工具按前缀解析存在性）
 #[tauri::command]
 pub fn set_companion_tool_enabled(
     settings_state: State<'_, SettingsState>,
@@ -809,12 +892,23 @@ pub fn set_companion_tool_enabled(
     enabled: bool,
 ) -> Result<(), String> {
     let defs = crate::companion::tools::all_tool_definitions();
-    let def = defs
-        .iter()
-        .find(|d| d.name == name)
-        .ok_or_else(|| format!("未知工具「{}」", name))?;
-    if def.core {
-        return Err(format!("「{}」是核心能力，不允许关闭", def.display_name));
+    match defs.iter().find(|d| d.name == name) {
+        Some(def) => {
+            if def.core {
+                return Err(format!("「{}」是核心能力，不允许关闭", def.display_name));
+            }
+        }
+        None => {
+            // 内置清单没有 → 按外部工具前缀路由校验（server 存在且快照含该工具）
+            let servers = crate::companion::mcp_servers::load(&settings_state.0);
+            let resolved = crate::companion::mcp_servers::resolve_prefixed(&servers, &name);
+            let valid = resolved
+                .map(|(s, tool)| s.tools.iter().any(|t| t.name == tool))
+                .unwrap_or(false);
+            if !valid {
+                return Err(format!("未知工具「{}」", name));
+            }
+        }
     }
 
     let manager = settings_state.0.lock().map_err(|e| e.to_string())?;

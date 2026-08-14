@@ -1656,12 +1656,18 @@ pub(crate) async fn run_scene_report(
     } else {
         format!("\n\n---\n\n# 你此刻的心情\n{}", emotion)
     };
+    // 环境感知补刷 + 窗外句（与聊天同注入句；缓存缺失/过期 → 空段，隐身硬切）
+    super::envsense::refresh_if_stale(db_path).await;
+    let env_section = match super::envsense::inject_sentence(db_path) {
+        Some(t) => format!("\n\n---\n\n# 你的窗外\n{}", t),
+        None => String::new(),
+    };
     let prompt = format!(
         "{persona}\n\n---\n\n{evolution}\n\n---\n\n{role}\n\n---\n\n\
          以上是贾维斯的身份设定、经验本与日报工作手册。\n\
          注意：你现在没有数据工具——他昨天的电脑使用聚合已直接给你（见末尾），\n\
          跳过流程中的工具调用步骤，直接完成「写日报」那一步。\n\
-         如果内容显示没有活动记录，只回复「当日无数据」。\n\n{aggregate}{ve_section}\n\n---\n\n# 当下状态\n{state_text}{emotion_section}"
+         如果内容显示没有活动记录，只回复「当日无数据」。\n\n{aggregate}{ve_section}\n\n---\n\n# 当下状态\n{state_text}{emotion_section}{env_section}"
     );
 
     let report = call_companion_llm(app_handle, db_path, prompt, "report").await?;

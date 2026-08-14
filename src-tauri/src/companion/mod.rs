@@ -5,8 +5,11 @@ pub mod chat;
 pub mod db;
 pub mod diary;
 pub mod emotion;
+pub mod envsense;
 pub mod mcp;
+pub mod mcp_client;
 pub mod mcp_register;
+pub mod mcp_servers;
 pub mod persona;
 pub mod plugin_gen_tool;
 pub mod recall;
@@ -89,8 +92,22 @@ pub fn start(
 
     let scheduler_app = app_handle.clone();
     let scheduler_flags = Arc::clone(&flags);
+    let env_db_path = db_path.clone();
     std::thread::spawn(move || {
         analyzer::run_scheduler(scheduler_app, db_path, scheduler_flags);
+    });
+
+    // 环境感知采集：启动立即一轮（首启无缓存场景）+ 30 分钟周期。
+    // 隐身降级：失败只记日志；未注入 AK 时 refresh 直接空转
+    let env_db = env_db_path;
+    tauri::async_runtime::spawn(async move {
+        envsense::refresh_and_log(&env_db).await;
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(1800));
+        tick.tick().await; // interval 首次立即触发，吞掉（上面刚采过）
+        loop {
+            tick.tick().await;
+            envsense::refresh_and_log(&env_db).await;
+        }
     });
 
     log::info!("Companion module started");
@@ -412,16 +429,22 @@ fn check_morning_digest(
         String::new()
     };
     // 今日关注（昨夜预规划）有效时，晨间卡从纯备忘清单升级为「关注+备忘」
+    // 天气行（环境感知缓存，2h 硬切）：纯客观一行，Toast 零小剧场；没有就不带
+    let weather_line = envsense::morning_line(db_path)
+        .map(|l| format!("{}\n\n", l))
+        .unwrap_or_default();
     let body = match diary::today_focus(conn) {
         Some(focus) => format!(
-            "今日关注：\n{}\n\n备忘待办 {} 条：\n{}{}",
+            "{}今日关注：\n{}\n\n备忘待办 {} 条：\n{}{}",
+            weather_line,
             focus,
             active.len(),
             titles.join("\n"),
             suffix
         ),
         None => format!(
-            "今天有 {} 条备忘待办：\n{}{}",
+            "{}今天有 {} 条备忘待办：\n{}{}",
+            weather_line,
             active.len(),
             titles.join("\n"),
             suffix

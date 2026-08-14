@@ -208,6 +208,16 @@ pub async fn search_everything(query: String, limit: usize) -> Vec<everything::F
         .unwrap_or_default()
 }
 
+/// 返回常用文件（按打开次数 + 最近打开排序），供文件搜索空查询时展示。
+#[tauri::command]
+pub fn get_frequent_files(
+    limit: Option<usize>,
+    db_state: tauri::State<'_, DatabaseState>,
+) -> Result<Vec<crate::db::file_usage::FileUsage>, String> {
+    let conn = get_db_conn(&db_state)?;
+    crate::db::file_usage::get_frequent(&conn, limit.unwrap_or(10)).map_err(|e| e.to_string())
+}
+
 /// Download and install Everything client and/or es.exe into the app's own
 /// `<exe_dir>/Everything/` directory using a PowerShell script.
 ///
@@ -311,7 +321,19 @@ function Fetch-AndExtract($url, $tmp, $d, $expect) {
 }
 
 #[tauri::command]
-pub fn open_file(path: String) -> Result<(), String> {
+pub fn open_file(path: String, db_state: tauri::State<'_, DatabaseState>) -> Result<(), String> {
+    // 记录常用文件（仅文件进入统计，打开目录不计入「常用文件」列表）
+    let is_dir = Path::new(&path).is_dir();
+    if !is_dir {
+        if let Some(name) = Path::new(&path).file_name() {
+            if let Ok(conn) = get_db_conn(&db_state) {
+                if let Err(e) = crate::db::file_usage::record_open(&conn, &path, &name.to_string_lossy()) {
+                    log::warn!("Failed to record file open for {}: {}", path, e);
+                }
+            }
+        }
+    }
+
     // Open file with default application
     if let Err(e) = open::that(&path) {
         log::warn!(

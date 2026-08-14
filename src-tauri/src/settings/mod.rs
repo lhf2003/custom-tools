@@ -37,6 +37,8 @@ pub struct AppSettings {
     pub system_proxy_enabled: bool,
     /// 被手动关闭的陪伴工具名列表（JSON 数组字符串，只含可开关的非核心工具）
     pub disabled_companion_tools: String,
+    /// 第三方 MCP server 配置（JSON 数组字符串，结构见 companion/mcp_servers.rs）
+    pub mcp_external_servers: String,
     /// Shell 工具权限模式：confirm_all（每次确认）| accept_edits（预留，同 confirm_all）| unattended（安全命令自动放行）
     pub shell_permission_mode: String,
 }
@@ -67,6 +69,7 @@ impl Default for AppSettings {
             game_mode_mute: true,
             system_proxy_enabled: false,
             disabled_companion_tools: "[]".to_string(),
+            mcp_external_servers: "[]".to_string(),
             shell_permission_mode: "confirm_all".to_string(),
         }
     }
@@ -75,7 +78,7 @@ impl Default for AppSettings {
 /// SettingsManager 管辖的全部键。settings 表与陪伴模块状态、
 /// custom_scan_dirs / notes_directory 共享，reset 只能按此白名单删键——
 /// 全表 DELETE 会误删陪伴调度水位和扫描目录配置
-const KNOWN_KEYS: [&str; 24] = [
+const KNOWN_KEYS: [&str; 25] = [
     "always_on_top",
     "hide_on_blur",
     "startup_launch",
@@ -99,6 +102,7 @@ const KNOWN_KEYS: [&str; 24] = [
     "game_mode_mute",
     "system_proxy_enabled",
     "disabled_companion_tools",
+    "mcp_external_servers",
     "shell_permission_mode",
 ];
 
@@ -236,6 +240,12 @@ impl SettingsManager {
                     // 只接受合法 JSON 数组，坏数据回退空列表（全工具开启）
                     if serde_json::from_str::<Vec<String>>(&value).is_ok() {
                         settings.disabled_companion_tools = value;
+                    }
+                }
+                "mcp_external_servers" => {
+                    // 只接受合法 JSON 数组，坏数据回退空列表（无外部 server）
+                    if serde_json::from_str::<Vec<serde_json::Value>>(&value).is_ok() {
+                        settings.mcp_external_servers = value;
                     }
                 }
                 "shell_permission_mode" => {
@@ -395,6 +405,11 @@ impl SettingsManager {
                 "disabled_companion_tools" => {
                     if serde_json::from_str::<Vec<String>>(value).is_ok() {
                         cache.disabled_companion_tools = value.to_string();
+                    }
+                }
+                "mcp_external_servers" => {
+                    if serde_json::from_str::<Vec<serde_json::Value>>(value).is_ok() {
+                        cache.mcp_external_servers = value.to_string();
                     }
                 }
                 "shell_permission_mode" => {

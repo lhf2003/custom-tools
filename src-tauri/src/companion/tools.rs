@@ -155,6 +155,27 @@ pub fn tool_definitions() -> Vec<ToolDef> {
             input_schema: json!({ "type": "object", "properties": {} }),
         },
         ToolDef {
+            name: "get_weather_forecast",
+            display_name: "天气预报",
+            group: ToolGroup::Perception,
+            core: false,
+            external: false,
+            description: "查询未来 7 天天气预报（日期/昼夜天气/温度区间/风向风力）。\
+                此刻的天气你本来就知道（见「你的窗外」），他不问未来就不用这个工具——\
+                只用于「明天/周末/下周会下雨吗」这类问题。city 不填默认他当前所在城市。\
+                能力边界：只有 7 天预报，没有逐小时、气象预警和生活指数，别承诺这些。"
+                .to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "city": {
+                        "type": "string",
+                        "description": "城市名（如「济南」），不填默认他当前所在城市"
+                    }
+                }
+            }),
+        },
+        ToolDef {
             name: "get_memory_facts",
             display_name: "读取记忆",
             group: ToolGroup::Perception,
@@ -786,11 +807,15 @@ const TEMPLATE_BIGRAMS: [&str; 18] = [
     "进行", "可以", "能够", "用户", "是否", "一直",
 ];
 
+/// 同分类查重覆盖阈值：实测标定——纠正「安娜→安然」≈0.155、同主题外甥 ≈0.25、
+/// 仅模板前缀重合 ≈0.045、无关 ≈0（envsense 的出差 facts 同模板复用此阈值）
+pub(crate) const MERGE_THRESHOLD: f64 = 0.12;
+
 /// 字符 bigram Jaccard 相似度（跳过 ASCII 符号，保留汉字/全角标点与字母数字）。
 /// 用于 remember_fact 的语义查重：纠正「安娜→安然」这类同主题改写时,
 /// 公共实体双字词（守望/先锋/英雄/安娜）足以命中；交集剔除模板双字词后,
 /// 仅靠「他希望贾维斯」这类句首模板重合的无关条目会被打回 ~0。
-fn char_bigram_jaccard(a: &str, b: &str) -> f64 {
+pub(crate) fn char_bigram_jaccard(a: &str, b: &str) -> f64 {
     fn bigrams(s: &str) -> std::collections::HashSet<(char, char)> {
         let chars: Vec<char> = s
             .chars()
@@ -840,8 +865,7 @@ fn tool_remember_fact(db_path: &Path, args: &Value) -> Result<String, String> {
         ));
     }
 
-    // 实测标定：纠正「安娜→安然」≈0.155、同主题外甥 ≈0.25、仅模板前缀重合 ≈0.045、无关 ≈0
-    const MERGE_THRESHOLD: f64 = 0.12;
+    // 查重阈值标定见 MERGE_THRESHOLD 定义处注释
     let conn = open_db(db_path)?;
     let now = chrono::Local::now().timestamp();
 

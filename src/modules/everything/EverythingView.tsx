@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Search, FileText, Folder, HardDrive, ExternalLink, ChevronDown, RefreshCw, Power } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { Search, FileText, Folder, HardDrive, ExternalLink, ChevronDown, RefreshCw, Power, Clock } from 'lucide-react';
 import { safeInvoke, immediateResize } from '@/utils/tauri';
 import { THEME } from '../../constants/theme';
 import { WINDOW_SIZE } from '../../constants/window';
@@ -11,6 +12,14 @@ interface FileResult {
   path: string;
   size: number;
   modified: number;
+  is_dir: boolean;
+}
+
+interface FrequentFile {
+  path: string;
+  name: string;
+  open_count: number;
+  last_opened: number | null;
 }
 
 type FileCategory = 'all' | 'folder' | 'excel' | 'word' | 'ppt' | 'pdf' | 'image' | 'video' | 'audio' | 'archive';
@@ -162,17 +171,43 @@ function EverythingInstallPage({ onInstalled }: { onInstalled: () => void }) {
 // 模块级缓存：初始空查询结果，跨组件重挂载存活；进入即渲染，后台静默重搜（消灭「搜索中...」闪帧）
 let cachedInitialFiles: FileResult[] | null = null;
 
+// 高亮 query 的第一个关键词（Everything 为子串匹配，命中词即文件名子串）。
+function highlightText(text: string, query: string): ReactNode {
+  const term = query.trim().split(/\s+/)[0];
+  if (!term) return text;
+  const lower = text.toLowerCase();
+  const t = term.toLowerCase();
+  const out: ReactNode[] = [];
+  let i = 0;
+  let j: number;
+  while ((j = lower.indexOf(t, i)) !== -1) {
+    if (j > i) out.push(text.slice(i, j));
+    out.push(
+      <mark key={j} className="bg-yellow-400/40 text-inherit rounded-sm px-0.5">
+        {text.slice(j, j + t.length)}
+      </mark>
+    );
+    i = j + t.length;
+  }
+  if (i === 0) return text;
+  out.push(text.slice(i));
+  return out;
+}
+
 export function EverythingView() {
   const [query, setQuery] = useState('');
   const [files, setFiles] = useState<FileResult[]>(cachedInitialFiles ?? []);
   const [isLoading, setIsLoading] = useState(false);
   const [everythingStatus, setEverythingStatus] = useState<EverythingStatus>(null);
   const [selectedCategory, setSelectedCategory] = useState<FileCategory>('all');
-  const [selectedFile, setSelectedFile] = useState<FileResult | null>(null);
-  const [sortBy] = useState<'modified' | 'size' | 'name'>('modified');
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [sortBy, setSortBy] = useState<'modified' | 'size' | 'name'>('modified');
   const [sortDesc, setSortDesc] = useState(true);
+  const [frequentFiles, setFrequentFiles] = useState<FrequentFile[]>([]);
   const [isOpenFolderHovered, setIsOpenFolderHovered] = useState(false);
+  const [categoryOpen, setCategoryOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   // Check Everything availability (also called on retry)
   const checkEverything = useCallback(async () => {
@@ -185,9 +220,16 @@ export function EverythingView() {
     }
   }, []);
 
+  // 加载常用文件（空查询时展示，独立于 Everything 可用性）
+  const loadFrequentFiles = useCallback(async () => {
+    const data = await safeInvoke<FrequentFile[]>('get_frequent_files', { limit: 10 });
+    setFrequentFiles(data ?? []);
+  }, []);
+
   useEffect(() => {
     checkEverything();
-  }, [checkEverything]);
+    loadFrequentFiles();
+  }, [checkEverything, loadFrequentFiles]);
 
   // Resize window when view mounts
   useEffect(() => {
@@ -217,10 +259,8 @@ export function EverythingView() {
           finalQuery = finalQuery ? `folder: ${finalQuery}` : 'folder:';
         } else {
           // Everything CLI: ext: uses semicolon ; for OR (ext:xls;xlsx means xls OR xlsx)
-          // No parentheses needed - Everything evaluates left to right
           const extFilter = `ext:${cat.ext.join(';')}`;
           if (finalQuery) {
-            // Keyword first, then ext filter
             finalQuery = `${finalQuery} ${extFilter}`;
           } else {
             finalQuery = extFilter;
@@ -237,11 +277,11 @@ export function EverythingView() {
       if (!searchQuery.trim() && category === 'all') {
         cachedInitialFiles = results || [];
       }
-      setSelectedFile(results?.[0] || null);
+      setSelectedIndex(0);
     } catch (err) {
       console.error('Search failed:', err);
       setFiles([]);
-      setSelectedFile(null);
+      setSelectedIndex(0);
     } finally {
       if (!silent) setIsLoading(false);
     }
@@ -279,6 +319,10 @@ export function EverythingView() {
     return sorted;
   }, [files, sortBy, sortDesc]);
 
+  const selectedFile = selectedIndex >= 0 && selectedIndex < sortedFiles.length
+    ? sortedFiles[selectedIndex]
+    : null;
+
   const handleOpenFile = async (path: string) => {
     try {
       await safeInvoke('open_file', { path });
@@ -295,6 +339,42 @@ export function EverythingView() {
       console.error('Failed to open folder:', err);
     }
   };
+
+  // 排序字段循环：modified → size → name；切换时重置为直觉方向（时间/大小降序，名称升序）
+  const cycleSort = () => {
+    if (sortBy === 'modified') {
+      setSortBy('size'); setSortDesc(true);
+    } else if (sortBy === 'size') {
+      setSortBy('name'); setSortDesc(false);
+    } else {
+      setSortBy('modified'); setSortDesc(true);
+    }
+  };
+
+  const sortLabel = sortBy === 'modified' ? '按修改时间' : sortBy === 'size' ? '按大小' : '按名称';
+
+  // 键盘导航：方向键移动选中、回车打开、Esc 清空
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSelectedIndex((i) => Math.min(i + 1, sortedFiles.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSelectedIndex((i) => Math.max(i - 1, 0));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (selectedFile) handleOpenFile(selectedFile.path);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setQuery('');
+    }
+  };
+
+  // 选中项变化时滚动到可视区域
+  useEffect(() => {
+    const el = listRef.current?.querySelector(`[data-index="${selectedIndex}"]`);
+    el?.scrollIntoView({ block: 'nearest' });
+  }, [selectedIndex]);
 
   // Format file size
   const formatSize = (bytes: number): string => {
@@ -341,8 +421,8 @@ export function EverythingView() {
   };
 
   // Get file icon component
-  const getFileIcon = (filename: string, isFolder?: boolean) => {
-    if (isFolder) return <Folder className="w-10 h-10 text-blue-400" />;
+  const getFileIcon = (filename: string, isDir?: boolean) => {
+    if (isDir) return <Folder className="w-10 h-10 text-blue-400" />;
 
     const ext = filename.split('.').pop()?.toLowerCase() ?? '';
 
@@ -390,58 +470,88 @@ export function EverythingView() {
     );
   }
 
+  // 常用文件仅在空查询 + 全部分类时展示
+  const showFrequent = !query.trim() && selectedCategory === 'all' && frequentFiles.length > 0;
+
+  const currentCategoryName = categories.find(c => c.id === selectedCategory)?.name ?? '全部';
+
   return (
     <div className="w-full h-full flex flex-col panel-glass">
       {/* Search Bar */}
-      <div className="flex items-center px-4 py-3 border-b border-white/5">
+      <div className="relative flex items-center px-4 py-3 border-b border-white/5">
         <Search className="w-4 h-4 text-zinc-500 mr-3" />
         <input
           ref={inputRef}
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="搜索文件..."
+          onKeyDown={handleKeyDown}
+          placeholder="搜索文件...（↑↓ 选择 · 回车/双击打开 · Esc 清空）"
           className="flex-1 bg-transparent text-sm text-zinc-200 placeholder-zinc-500 outline-none"
         />
+        {/* 分类选择（原左侧栏，移到输入框右侧） */}
+        <button
+          onClick={() => setCategoryOpen((o) => !o)}
+          className="ml-3 shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 text-sm text-zinc-300 hover:bg-white/5 transition-colors"
+        >
+          <span>{currentCategoryName}</span>
+          <ChevronDown className={`w-3.5 h-3.5 transition-transform ${categoryOpen ? 'rotate-180' : ''}`} />
+        </button>
+        {categoryOpen && (
+          <>
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-label="关闭分类菜单"
+              className="fixed inset-0 z-10 w-full h-full cursor-default bg-transparent border-0 p-0 outline-none"
+              onClick={() => setCategoryOpen(false)}
+            />
+            <div className="absolute right-4 top-full mt-1 z-20 w-40 py-1 rounded-lg border border-white/10 bg-zinc-800 shadow-xl max-h-72 overflow-y-auto">
+              {categories.map((cat) => (
+                <button
+                  key={cat.id}
+                  onClick={() => { setSelectedCategory(cat.id); setCategoryOpen(false); }}
+                  className={`w-full px-3 py-1.5 text-left text-sm transition-colors ${
+                    selectedCategory === cat.id
+                      ? 'text-blue-400 bg-blue-500/10'
+                      : 'text-zinc-300 hover:bg-white/5'
+                  }`}
+                >
+                  {cat.name}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
       </div>
 
       {/* Main Content - Three Column Layout */}
       <div className="flex-1 flex overflow-hidden min-h-0">
-        {/* Left Sidebar - Categories */}
-        <div className="w-24 border-r border-white/5 h-full overflow-y-auto">
-          {categories.map((cat) => (
-            <button
-              key={cat.id}
-              onClick={() => setSelectedCategory(cat.id)}
-              className={`w-full px-3 py-2 text-left text-sm transition-colors ${
-                selectedCategory === cat.id
-                  ? 'text-blue-400 bg-blue-500/10'
-                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/5'
-              }`}
-            >
-              {cat.name}
-            </button>
-          ))}
-        </div>
-
         {/* Middle - File List */}
         <div className="flex-1 flex flex-col min-w-0 min-h-0">
           {/* File List Header */}
           <div className="flex items-center justify-between px-4 py-2 border-b border-white/5 text-xs text-zinc-500">
             <span>共 {files.length} 条结果</span>
-            <button
-              onClick={() => setSortDesc(!sortDesc)}
-              className="flex items-center gap-1 hover:text-zinc-300"
-            >
-              {sortBy === 'modified' && '按修改时间'}
-              {sortBy === 'size' && '按大小'}
-              {sortBy === 'name' && '按名称'}
-              <ChevronDown className={`w-3 h-3 transition-transform ${sortDesc ? '' : 'rotate-180'}`} />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={cycleSort}
+                className="hover:text-zinc-300 transition-colors"
+                title="点击切换排序字段"
+              >
+                {sortLabel}
+              </button>
+              <button
+                onClick={() => setSortDesc(!sortDesc)}
+                className="flex items-center gap-0.5 hover:text-zinc-300 transition-colors"
+                title="切换升/降序"
+              >
+                <ChevronDown className={`w-3 h-3 transition-transform ${sortDesc ? '' : 'rotate-180'}`} />
+              </button>
+            </div>
           </div>
 
           {/* File Items */}
-          <div className="flex-1 overflow-y-auto">
+          <div ref={listRef} className="flex-1 overflow-y-auto">
             {isLoading ? (
               <div className="flex items-center justify-center h-full text-zinc-500">
                 <div className="animate-pulse">搜索中...</div>
@@ -453,25 +563,53 @@ export function EverythingView() {
               </div>
             ) : (
               <div className="divide-y divide-white/5">
-                {sortedFiles.map((file) => (
+                {/* 常用文件（空查询 + 全部分类时置顶展示） */}
+                {showFrequent && (
+                  <>
+                    <div className="flex items-center gap-1.5 px-4 py-2 text-xs text-zinc-500 bg-white/[0.02] sticky top-0">
+                      <Clock className="w-3 h-3" />
+                      <span>常用文件</span>
+                    </div>
+                    {frequentFiles.map((f) => (
+                      <button
+                        key={`freq-${f.path}`}
+                        onClick={() => handleOpenFile(f.path)}
+                        className="w-full flex items-center gap-3 px-4 py-2 text-left transition-colors hover:bg-white/5"
+                        title="打开文件"
+                      >
+                        {getFileIcon(f.name)}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm truncate text-zinc-200">{f.name}</p>
+                          <p className="text-xs text-zinc-500 truncate">{f.path}</p>
+                        </div>
+                      </button>
+                    ))}
+                    <div className="flex items-center gap-1.5 px-4 py-2 text-xs text-zinc-600 bg-white/[0.02]">
+                      <span>全部结果</span>
+                    </div>
+                  </>
+                )}
+                {sortedFiles.map((file, index) => (
                   <button
                     key={file.path}
-                    onClick={() => setSelectedFile(file)}
+                    data-index={index}
+                    onClick={() => setSelectedIndex(index)}
+                    onDoubleClick={() => handleOpenFile(file.path)}
                     className={`w-full flex items-center gap-3 px-4 py-2 text-left transition-colors ${
-                      selectedFile?.path === file.path
+                      selectedIndex === index
                         ? 'bg-blue-500/20'
                         : 'hover:bg-white/5'
                     }`}
                   >
-                    {getFileIcon(file.name)}
+                    {getFileIcon(file.name, file.is_dir)}
                     <div className="flex-1 min-w-0">
                       <p className={`text-sm truncate ${
-                        selectedFile?.path === file.path ? 'text-blue-300' : 'text-zinc-200'
+                        selectedIndex === index ? 'text-blue-300' : 'text-zinc-200'
                       }`}>
-                        {file.name}
+                        {highlightText(file.name, query)}
                       </p>
                       <p className="text-xs text-zinc-500 truncate">
-                        {file.path}
+                        {highlightText(file.path, query)}
                       </p>
                     </div>
                   </button>
@@ -482,31 +620,33 @@ export function EverythingView() {
         </div>
 
         {/* Right - File Details */}
-        <div className="w-72 border-l border-white/5 p-4 overflow-y-auto">
+        <div className="w-72 shrink-0 border-l border-white/5 p-4 overflow-y-auto">
           {selectedFile ? (
             <div className="flex flex-col items-center">
               {/* File Icon */}
               <div className="w-24 h-24 mb-4 flex items-center justify-center">
-                {getFileIcon(selectedFile.name)}
+                {getFileIcon(selectedFile.name, selectedFile.is_dir)}
               </div>
 
               {/* File Name */}
               <h3 className="text-base font-medium text-zinc-100 text-center mb-6 break-all">
-                {selectedFile.name}
+                {highlightText(selectedFile.name, query)}
               </h3>
 
               {/* File Details */}
               <div className="w-full space-y-4 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-zinc-500">大小</span>
-                  <span className="text-zinc-200">{formatSize(selectedFile.size)}</span>
-                </div>
+                {!selectedFile.is_dir && (
+                  <div className="flex justify-between">
+                    <span className="text-zinc-500">大小</span>
+                    <span className="text-zinc-200">{formatSize(selectedFile.size)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between">
                   <span className="text-zinc-500">修改时间</span>
                   <span className="text-zinc-200">{formatTime(selectedFile.modified)}</span>
                 </div>
                 <div className="flex flex-col gap-1">
-                  <span className="text-zinc-500">所在路径</span>
+                  <span className="text-zinc-500">{selectedFile.is_dir ? '所在位置' : '所在路径'}</span>
                   <p className="text-zinc-300 text-xs break-all">
                     {selectedFile.path.substring(0, selectedFile.path.lastIndexOf('\\')) || selectedFile.path}
                   </p>
@@ -521,15 +661,17 @@ export function EverythingView() {
                 >
                   打开
                 </button>
-                <button
-                  onClick={() => handleOpenFolder(selectedFile.path)}
-                  className="flex-1 px-3 py-2 rounded text-zinc-200 text-sm"
-                  style={{ backgroundColor: isOpenFolderHovered ? THEME.BTN_BG_HOVER : THEME.BTN_BG }}
-                  onMouseEnter={() => setIsOpenFolderHovered(true)}
-                  onMouseLeave={() => setIsOpenFolderHovered(false)}
-                >
-                  打开目录
-                </button>
+                {!selectedFile.is_dir && (
+                  <button
+                    onClick={() => handleOpenFolder(selectedFile.path)}
+                    className="flex-1 px-3 py-2 rounded text-zinc-200 text-sm"
+                    style={{ backgroundColor: isOpenFolderHovered ? THEME.BTN_BG_HOVER : THEME.BTN_BG }}
+                    onMouseEnter={() => setIsOpenFolderHovered(true)}
+                    onMouseLeave={() => setIsOpenFolderHovered(false)}
+                  >
+                    打开目录
+                  </button>
+                )}
               </div>
             </div>
           ) : (

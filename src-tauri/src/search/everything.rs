@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[cfg(windows)]
@@ -13,6 +13,7 @@ pub struct FileResult {
     pub path: String,
     pub size: u64,
     pub modified: u64,
+    pub is_dir: bool,
 }
 
 /// Everything availability status
@@ -33,6 +34,36 @@ fn make_cmd(path: &PathBuf) -> Command {
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
     cmd
+}
+
+/// Decode es.exe output. es.exe writes stdout/stderr in the system ANSI code
+/// page (GBK on Chinese Windows), not UTF-8 — decoding it as UTF-8 garbles
+/// Chinese filenames into replacement/mojibake text. Try strict UTF-8 first
+/// (pure-ASCII output passes through unchanged), then fall back to GBK.
+fn decode_es_output(bytes: &[u8]) -> String {
+    match std::str::from_utf8(bytes) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            let (cow, _, _) = encoding_rs::GBK.decode(bytes);
+            cow.into_owned()
+        }
+    }
+}
+
+/// 默认排除的系统目录前缀（这些目录几乎全是系统内部/临时文件，
+/// 普通文件搜索场景下只会产生噪音，如 WinSxS 组件存储、Windows Update
+/// 下载缓存）。前缀以反斜杠结尾，保证按目录边界精确匹配。
+const EXCLUDED_PATH_PREFIXES: &[&str] = &[
+    r"C:\Windows\WinSxS\",
+    r"C:\Windows\Temp\",
+    r"C:\Windows\SoftwareDistribution\Download\",
+];
+
+/// Windows 路径大小写不敏感；用 `get(..n)` 保证切在 char 边界上，避免
+/// 非 ASCII 路径前缀切到多字节字符中间而 panic。
+fn path_has_prefix(path: &str, prefix: &str) -> bool {
+    path.get(..prefix.len())
+        .map_or(false, |head| head.eq_ignore_ascii_case(prefix))
 }
 
 /// Find es.exe: checks app's own Everything directory first, then system-wide paths.
@@ -139,14 +170,24 @@ pub fn search_files(query: &str, limit: usize) -> Vec<FileResult> {
     if !output.status.success() {
         log::warn!(
             "es.exe returned error: {}",
-            String::from_utf8_lossy(&output.stderr)
+            decode_es_output(&output.stderr)
         );
         return Vec::new();
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let results = parse_csv_results(&stdout);
-    log::info!("Everything found {} results", results.len());
+    let stdout = decode_es_output(&output.stdout);
+    let mut results = parse_csv_results(&stdout);
+    // 过滤系统噪音目录（WinSxS / 系统临时 / 更新缓存）
+    let before = results.len();
+    results.retain(|r| !EXCLUDED_PATH_PREFIXES.iter().any(|p| path_has_prefix(&r.path, p)));
+    if results.len() != before {
+        log::info!(
+            "Everything filtered {} system-noise results ({} -> {})",
+            before - results.len(),
+            before,
+            results.len()
+        );
+    }
     results
 }
 
@@ -177,12 +218,18 @@ fn parse_csv_line(line: &str) -> Option<FileResult> {
     let name = path.file_name()?.to_string_lossy().to_string();
     let size = fields[1].trim().parse::<u64>().unwrap_or(0);
     let modified = parse_date_to_unix(fields[2].trim());
+    // One stat per result (≤100) to distinguish folders from files — drives the
+    // folder icon and the "open containing folder vs open the folder itself"
+    // behaviour. Size/mtime still come from the index; this is the only metadata
+    // Everything's CSV does not expose directly.
+    let is_dir = Path::new(&path_str).is_dir();
 
     Some(FileResult {
         name,
         path: path_str,
         size,
         modified,
+        is_dir,
     })
 }
 

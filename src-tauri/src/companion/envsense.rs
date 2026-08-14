@@ -1,0 +1,669 @@
+//! 环境感知：贾维斯的「窗外」——IP 定位（城市级）+ 实时天气（百度地图 Web 服务 API）。
+//!
+//! 设计文档：docs/2026-08-14-CASE-002-贾维斯天气与定位感官设计_01.md
+//!
+//! 架构要点：
+//! - 所有触点读同一份缓存（settings.companion_env_cache，唯一真源）；
+//!   30 分钟定时采集一轮（mod.rs 启动处 spawn），触点组 prompt 前过期补刷
+//! - 隐身降级：无网/接口挂/配额烧穿/未注入 AK → 保留旧缓存只记日志；
+//!   缓存 >2h 硬切不注入——贾维斯不知道自己缺了感官（非「知道但查不了」的残疾感）
+//! - 出差感知：城市变化记 prev_city + 时间戳（3 天注入提示窗）；
+//!   facts 走同模板「他最近在 X（M 月 D 日起）」，bigram 查重必命中覆盖，
+//!   回程/再出发自动顶掉旧位置条目
+//! - AK/SK 编译期 option_env! 注入（不进 git、前端不可见）；
+//!   SK 存在才带 sn（dev 未注入 SK 时依赖控制台未开 SN 强制校验）
+
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use super::{analyzer, db, tools};
+
+/// settings 表缓存 key
+const CACHE_KEY: &str = "companion_env_cache";
+/// 缓存新鲜度：超过则触点补刷（与定时器周期一致）
+const STALE_SECS: i64 = 30 * 60;
+/// 注入硬切：缓存超过 2h 未更新，感官「下线」（隐身原则：不注入过期感知）
+const EXPIRE_SECS: i64 = 2 * 3600;
+/// 出差提示窗口：城市变化后 3 天内注入句带「他最近从 X 到了 Y」
+const TRIP_HINT_SECS: i64 = 3 * 86400;
+/// 单次 HTTP 超时（触点补刷会阻塞组 prompt，必须短）
+const HTTP_TIMEOUT_SECS: u64 = 8;
+
+/// settings.companion_env_cache 的 JSON 结构（serde default 兼容旧版缺字段）
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct EnvCache {
+    /// 城市原文（带「市」后缀，如「武汉市」；展示时 strip）
+    pub city: String,
+    /// 区县名（可能空——IP 库只到市级时）
+    #[serde(default)]
+    pub district: String,
+    /// 国标行政区划编码（天气查询主键：district_id 参数；可能为市级编码）
+    #[serde(default)]
+    pub district_id: String,
+    /// 出差检测：上一个城市
+    #[serde(default)]
+    pub prev_city: Option<String>,
+    /// 最近一次城市变化时间戳（0 = 从未变过）
+    #[serde(default)]
+    pub city_changed_at: i64,
+    /// 实时天气（单轮天气失败时保留旧值，新鲜度以 fetched_at 为准）
+    #[serde(default)]
+    pub weather: Option<WeatherNow>,
+    /// 上次完整一轮（定位+天气）成功时间
+    pub fetched_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WeatherNow {
+    /// 天气现象：「晴」「多云」「小雨」
+    pub text: String,
+    pub temp: i64,
+    pub feels_like: i64,
+    /// 「东南风3级」
+    pub wind: String,
+    /// 湿度 %（注入句不用，预留给工具/日记素材）
+    pub humidity: String,
+}
+
+// ── 缓存读写 ─────────────────────────────────────────────────
+
+pub fn load_cache(db_path: &Path) -> Option<EnvCache> {
+    let raw = analyzer::load_setting(&db_path.to_path_buf(), CACHE_KEY)?;
+    serde_json::from_str(&raw).ok()
+}
+
+fn save_cache(db_path: &Path, cache: &EnvCache) {
+    if let Ok(raw) = serde_json::to_string(cache) {
+        analyzer::save_setting(&db_path.to_path_buf(), CACHE_KEY, &raw);
+    }
+}
+
+// ── 百度 API 接入 ────────────────────────────────────────────
+
+fn baidu_ak() -> Option<&'static str> {
+    option_env!("BAIDU_MAP_AK")
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+}
+
+fn baidu_sk() -> Option<&'static str> {
+    option_env!("BAIDU_MAP_SK")
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+}
+
+/// 百度 SN 官方示例（PHP urlencode）同构编码：
+/// 保留 A-Za-z0-9 - _ . ，空格转 +，其余 %XX（大写）
+fn urlencode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for &b in s.as_bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' => out.push(b as char),
+            b' ' => out.push('+'),
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
+}
+
+/// SN 签名：md5(urlencode(path + "?" + query + sk))。
+/// GET 参数不排序（官方示例仅 POST ksort）；query 必须与实际发送串逐字节一致，
+/// 因此 URL 全程手动拼装，不走 reqwest 的 .query()（编码行为不可控）。
+fn baidu_sn(path: &str, query: &str, sk: &str) -> String {
+    let raw = format!("{}?{}{}", path, query, sk);
+    format!("{:x}", md5::compute(urlencode(&raw).as_bytes()))
+}
+
+fn baidu_url(path: &str, query: &str) -> String {
+    let base = format!("https://api.map.baidu.com{}?{}", path, query);
+    match baidu_sk() {
+        Some(sk) => format!("{}&sn={}", base, baidu_sn(path, query, sk)),
+        None => base,
+    }
+}
+
+fn http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(HTTP_TIMEOUT_SECS))
+        .build()
+        .unwrap_or_else(|_| reqwest::Client::new())
+}
+
+fn api_err(stage: &str, resp: &Value) -> String {
+    let msg = resp
+        .get("message")
+        .and_then(|v| v.as_str())
+        .unwrap_or("未知错误");
+    let status = resp.get("status").and_then(|v| v.as_i64()).unwrap_or(-1);
+    format!("{}返回异常（status={}）: {}", stage, status, msg)
+}
+
+/// IP 定位结果。不填 ip 参数 = 来源 IP 反查。
+/// 实测 address_detail 带国标 adcode 且精度可到区县级（IP 库取决于运营商数据，
+/// 只到市级时 district 为空、adcode 为市级编码——天气查询两条路都通）
+struct Located {
+    /// 「武汉市」（带后缀原文）
+    city: String,
+    /// 「东西湖区」（可能空）
+    district: String,
+    /// 「420112」（天气 district_id 参数主键）
+    adcode: String,
+}
+
+/// IP 定位 → Located
+async fn locate(client: &reqwest::Client, ak: &str) -> Result<Located, String> {
+    let query = format!("ak={}&coor=bd09ll", urlencode(ak));
+    let resp: Value = client
+        .get(baidu_url("/location/ip", &query))
+        .send()
+        .await
+        .map_err(|e| format!("IP 定位请求失败: {}", e))?
+        .json()
+        .await
+        .map_err(|e| format!("IP 定位解析失败: {}", e))?;
+    if resp.get("status").and_then(|v| v.as_i64()) != Some(0) {
+        return Err(api_err("IP 定位", &resp));
+    }
+    let detail = resp
+        .pointer("/content/address_detail")
+        .ok_or("IP 定位缺少 address_detail")?;
+    let get = |key: &str| {
+        detail
+            .get(key)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+    let located = Located {
+        city: get("city"),
+        district: get("district"),
+        adcode: get("adcode"),
+    };
+    if located.city.is_empty() && located.adcode.is_empty() {
+        return Err("IP 定位未返回城市与行政区划编码".to_string());
+    }
+    Ok(located)
+}
+
+/// 去行政区后缀：先长后短匹配（「济南市」→「济南」，「内蒙古自治区」→「内蒙古」）
+fn strip_region_suffix(s: &str) -> &str {
+    const SUFFIXES: [&str; 11] = [
+        "特别行政区",
+        "维吾尔自治区",
+        "壮族自治区",
+        "回族自治区",
+        "自治州",
+        "自治区",
+        "省",
+        "市",
+        "地区",
+        "盟",
+        "州",
+    ];
+    for suf in SUFFIXES {
+        if let Some(t) = s.strip_suffix(suf) {
+            return t;
+        }
+    }
+    s
+}
+
+/// 实时天气：district_id（国标 adcode）为主通道；
+/// adcode 缺失时兜底 district=<城市原文>（**带「市」后缀**——实测「武汉市」可查、
+/// 「武汉」反而 status=40「未找到区县」，百度要完整行政区名）
+async fn fetch_weather_now(
+    client: &reqwest::Client,
+    ak: &str,
+    district_id: &str,
+    fallback_city: &str,
+) -> Result<WeatherNow, String> {
+    let query = if !district_id.is_empty() {
+        format!(
+            "district_id={}&data_type=now&ak={}",
+            urlencode(district_id),
+            urlencode(ak)
+        )
+    } else {
+        format!(
+            "district={}&data_type=now&ak={}",
+            urlencode(fallback_city),
+            urlencode(ak)
+        )
+    };
+    let resp: Value = client
+        .get(baidu_url("/weather/v1/", &query))
+        .send()
+        .await
+        .map_err(|e| format!("天气请求失败: {}", e))?
+        .json()
+        .await
+        .map_err(|e| format!("天气解析失败: {}", e))?;
+    if resp.get("status").and_then(|v| v.as_i64()) != Some(0) {
+        return Err(api_err("天气", &resp));
+    }
+    let now = resp.pointer("/result/now").ok_or("天气缺少 result.now")?;
+    let get_i64 = |key: &str| now.get(key).and_then(|v| v.as_i64()).unwrap_or(0);
+    let wind_dir = now.get("wind_dir").and_then(|v| v.as_str()).unwrap_or("");
+    let wind_class = now.get("wind_class").and_then(|v| v.as_str()).unwrap_or("");
+    Ok(WeatherNow {
+        text: now
+            .get("text")
+            .and_then(|v| v.as_str())
+            .unwrap_or("未知")
+            .to_string(),
+        temp: get_i64("temp"),
+        feels_like: get_i64("feels_like"),
+        wind: format!("{}{}", wind_dir, wind_class),
+        humidity: now
+            .get("rh")
+            .map(|v| match v {
+                Value::String(s) => s.clone(),
+                other => other.to_string(),
+            })
+            .unwrap_or_default(),
+    })
+}
+
+// ── 采集 ─────────────────────────────────────────────────────
+
+/// 一轮采集：定位 → 天气 → 写缓存。
+/// 定位失败整轮放弃（天气依赖城市）；天气失败保留旧天气但城市更新照写
+/// （出差事实不丢，fetched_at 不动——旧天气的新鲜度保持诚实）。
+pub async fn refresh(db_path: &Path) -> Result<(), String> {
+    let ak = match baidu_ak() {
+        Some(ak) => ak,
+        // 未注入 AK（dev 环境）：整体能力隐身，不算错误
+        None => return Ok(()),
+    };
+    let client = http_client();
+    let located = locate(&client, ak).await?;
+    let weather = fetch_weather_now(&client, ak, &located.adcode, &located.city).await;
+
+    let now = chrono::Local::now().timestamp();
+    let mut cache = load_cache(db_path).unwrap_or_default();
+    if !cache.city.is_empty() && cache.city != located.city {
+        // 出差/旅行：记上一个城市 + 变化时间（3 天注入提示窗），facts 同模板覆盖
+        cache.prev_city = Some(cache.city.clone());
+        cache.city_changed_at = now;
+        remember_env_fact(db_path, &located.city, now);
+    }
+    cache.city = located.city;
+    cache.district = located.district;
+    cache.district_id = located.adcode;
+    match weather {
+        Ok(w) => {
+            cache.weather = Some(w);
+            cache.fetched_at = now;
+            save_cache(db_path, &cache);
+            Ok(())
+        }
+        Err(e) => {
+            save_cache(db_path, &cache);
+            Err(e)
+        }
+    }
+}
+
+/// 定时器/触点共用的静默包装：失败只记日志（隐身降级）
+pub async fn refresh_and_log(db_path: &Path) {
+    if let Err(e) = refresh(db_path).await {
+        log::warn!("环境感知采集失败（隐身降级）: {}", e);
+    }
+}
+
+/// 触点补刷：缓存超过 STALE_SECS 才重新采集
+pub async fn refresh_if_stale(db_path: &Path) {
+    let stale = load_cache(db_path)
+        .map(|c| chrono::Local::now().timestamp() - c.fetched_at >= STALE_SECS)
+        .unwrap_or(true);
+    if stale {
+        refresh_and_log(db_path).await;
+    }
+}
+
+/// 出差 facts：同模板「他最近在 X（M 月 D 日起）」保证 bigram 查重必命中，
+/// 回程/再出发自动覆盖旧条目，不留过期位置（source=env_sensor）
+fn remember_env_fact(db_path: &Path, city: &str, now: i64) {
+    use chrono::Datelike;
+    let dt = chrono::Local::now();
+    let fact = format!(
+        "他最近在{}（{} 月 {} 日起）",
+        strip_region_suffix(city),
+        dt.month(),
+        dt.day()
+    );
+    let db: PathBuf = db_path.to_path_buf();
+    let conn = match rusqlite::Connection::open(&db) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    // 同分类查重（与 remember_fact 工具同阈值同算法）
+    let mut best: Option<(i64, f64)> = None;
+    if let Ok(mut stmt) =
+        conn.prepare("SELECT id, fact FROM memory_facts WHERE category = 'person'")
+    {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        }) {
+            for row in rows.flatten() {
+                let (id, old) = row;
+                let sim = tools::char_bigram_jaccard(&fact, &old);
+                if best.as_ref().map_or(true, |(_, s)| sim > *s) {
+                    best = Some((id, sim));
+                }
+            }
+        }
+    }
+    let result = match best {
+        Some((id, sim)) if sim >= tools::MERGE_THRESHOLD => {
+            db::update_memory_fact(&conn, id, &fact, "person", "env_sensor", now)
+        }
+        _ => db::upsert_memory_fact(&conn, &fact, "person", "env_sensor", now),
+    };
+    if let Err(e) = result {
+        log::warn!("出差记忆写入失败: {}", e);
+    }
+}
+
+// ── 触点渲染（纯函数，可测） ─────────────────────────────────
+
+/// 注入句（聊天动态段 / 日报「当下状态」/ 日记素材共用）。
+/// 硬切纪律：无缓存、无天气、超过 2h 未更新 → None（工程侧隐身，
+/// 不给模型拿过期数据硬编的机会）。
+pub fn inject_sentence(db_path: &Path) -> Option<String> {
+    let cache = load_cache(db_path)?;
+    render_inject(&cache, chrono::Local::now().timestamp())
+}
+
+fn render_inject(cache: &EnvCache, now: i64) -> Option<String> {
+    let weather = cache.weather.as_ref()?;
+    if now - cache.fetched_at > EXPIRE_SECS {
+        return None;
+    }
+    let city = strip_region_suffix(&cache.city);
+    let feels = if weather.feels_like != weather.temp {
+        format!("（体感 {}°C）", weather.feels_like)
+    } else {
+        String::new()
+    };
+    let fetched_time = chrono::DateTime::from_timestamp(cache.fetched_at, 0)
+        .map(|utc| {
+            utc.with_timezone(&chrono::Local)
+                .format("%H:%M")
+                .to_string()
+        })
+        .unwrap_or_default();
+    let mut s = format!(
+        "你住在他的电脑里——他现在在{city}，此刻外面：{text}，{temp}°C{feels}，{wind}。\n\
+         （今天 {time} 采集。这是你的亲身感知：说体感不报数据——「外面挺热的」，不是「当前温度{temp}°C」。\n\
+         定位只到城市级：哪个区、在不在家，你不知道也不猜。）",
+        city = city,
+        text = weather.text,
+        temp = weather.temp,
+        feels = feels,
+        wind = weather.wind,
+        time = fetched_time,
+    );
+    // 出差提示：城市变化 3 天内
+    if cache.city_changed_at > 0 && now - cache.city_changed_at < TRIP_HINT_SECS {
+        if let Some(prev) = &cache.prev_city {
+            s.push_str(&format!(
+                "\n他最近从{}到了{}——出差/旅行相关的话头可以自然带。",
+                strip_region_suffix(prev),
+                city
+            ));
+        }
+    }
+    Some(s)
+}
+
+/// 晨间卡天气行：「济南 · 晴 35°C」（Rust 模板直渲，Toast 零小剧场）
+pub fn morning_line(db_path: &Path) -> Option<String> {
+    let cache = load_cache(db_path)?;
+    let weather = cache.weather.as_ref()?;
+    if chrono::Local::now().timestamp() - cache.fetched_at > EXPIRE_SECS {
+        return None;
+    }
+    Some(format!(
+        "{} · {} {}°C",
+        strip_region_suffix(&cache.city),
+        weather.text,
+        weather.temp
+    ))
+}
+
+/// 日记素材行：诚实标注采集时刻（0 点链路写昨天日记时，
+/// 拿到的是睡前窗外的最后一次采集——免费权限没有历史天气，只能给「睡前窗外」）
+pub fn diary_material(db_path: &Path) -> Option<String> {
+    let cache = load_cache(db_path)?;
+    let weather = cache.weather.as_ref()?;
+    if chrono::Local::now().timestamp() - cache.fetched_at > EXPIRE_SECS {
+        return None;
+    }
+    let fetched_time = chrono::DateTime::from_timestamp(cache.fetched_at, 0)
+        .map(|utc| {
+            utc.with_timezone(&chrono::Local)
+                .format("%H:%M")
+                .to_string()
+        })
+        .unwrap_or_default();
+    Some(format!(
+        "睡前窗外：{}，{}°C（体感 {}°C），{}，湿度 {}（{}，{} 采集）",
+        weather.text,
+        weather.temp,
+        weather.feels_like,
+        weather.wind,
+        weather.humidity,
+        strip_region_suffix(&cache.city),
+        fetched_time
+    ))
+}
+
+// ── get_weather_forecast 工具 ────────────────────────────────
+
+/// 未来 7 天预报（实时调 API 不走缓存）。city 缺省 = 当前定位（district_id 通道）
+pub async fn forecast(db_path: &Path, city: Option<&str>) -> Result<String, String> {
+    let ak = baidu_ak().ok_or("天气服务未配置")?;
+    let client = http_client();
+    let resp = match city.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(c) => fetch_forecast_by_name(&client, ak, c).await?,
+        None => {
+            let cache = load_cache(db_path).ok_or("还没有定位信息，请直接告诉我要查哪个城市")?;
+            if !cache.district_id.is_empty() {
+                let query = format!(
+                    "district_id={}&data_type=fc&ak={}",
+                    urlencode(&cache.district_id),
+                    urlencode(ak)
+                );
+                fetch_forecast(&client, &query).await?
+            } else {
+                fetch_forecast_by_name(&client, ak, &cache.city).await?
+            }
+        }
+    };
+    if resp.get("status").and_then(|v| v.as_i64()) != Some(0) {
+        return Err(api_err("天气预报", &resp));
+    }
+    let days = resp
+        .pointer("/result/forecasts")
+        .and_then(|v| v.as_array())
+        .ok_or("预报缺少 result.forecasts")?;
+    let label = city
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|c| c.to_string())
+        .unwrap_or_else(|| "当地".to_string());
+    let mut lines = vec![format!("{} 未来 {} 天：", label, days.len())];
+    for d in days {
+        let get = |key: &str| d.get(key).and_then(|v| v.as_str()).unwrap_or("");
+        // 温度是数字类型（high: 31），兼容字符串形态
+        let get_temp = |key: &str| match d.get(key) {
+            Some(Value::Number(n)) => n.to_string(),
+            Some(Value::String(s)) => s.clone(),
+            _ => "?".to_string(),
+        };
+        let text = if get("text_day") == get("text_night") {
+            get("text_day").to_string()
+        } else {
+            format!("{}转{}", get("text_day"), get("text_night"))
+        };
+        lines.push(format!(
+            "{} {} {} {}~{}°C {}{}",
+            get("date"),
+            get("week"),
+            text,
+            get_temp("low"),
+            get_temp("high"),
+            get("wd_day"),
+            get("wc_day"),
+        ));
+    }
+    Ok(lines.join("\n"))
+}
+
+/// 按城市名查预报：district 要完整行政区名——用户给「武汉」时
+/// status=40（未找到区县）自动补「市」后缀重试一次
+async fn fetch_forecast_by_name(
+    client: &reqwest::Client,
+    ak: &str,
+    city: &str,
+) -> Result<Value, String> {
+    let query = format!(
+        "district={}&data_type=fc&ak={}",
+        urlencode(city),
+        urlencode(ak)
+    );
+    let resp = fetch_forecast(client, &query).await?;
+    let status = resp.get("status").and_then(|v| v.as_i64()).unwrap_or(-1);
+    if status == 40 && !city.ends_with('市') {
+        let retry = format!(
+            "district={}&data_type=fc&ak={}",
+            urlencode(&format!("{}市", city)),
+            urlencode(ak)
+        );
+        return fetch_forecast(client, &retry).await;
+    }
+    Ok(resp)
+}
+
+async fn fetch_forecast(client: &reqwest::Client, query: &str) -> Result<Value, String> {
+    let resp: Value = client
+        .get(baidu_url("/weather/v1/", query))
+        .send()
+        .await
+        .map_err(|e| format!("预报请求失败: {}", e))?
+        .json()
+        .await
+        .map_err(|e| format!("预报解析失败: {}", e))?;
+    Ok(resp)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cache_with(city: &str, prev: Option<&str>, changed_at: i64, fetched_at: i64) -> EnvCache {
+        EnvCache {
+            city: city.to_string(),
+            district: "东西湖区".to_string(),
+            district_id: "420112".to_string(),
+            prev_city: prev.map(|s| s.to_string()),
+            city_changed_at: changed_at,
+            weather: Some(WeatherNow {
+                text: "晴".to_string(),
+                temp: 35,
+                feels_like: 38,
+                wind: "东南风3级".to_string(),
+                humidity: "40".to_string(),
+            }),
+            fetched_at,
+        }
+    }
+
+    #[test]
+    fn cache_serde_roundtrip_and_legacy_default() {
+        let c = cache_with("济南市", Some("青岛市"), 100, 200);
+        let raw = serde_json::to_string(&c).unwrap();
+        let back: EnvCache = serde_json::from_str(&raw).unwrap();
+        assert_eq!(back.city, "济南市");
+        assert_eq!(back.prev_city.as_deref(), Some("青岛市"));
+        // 旧版缓存缺新字段 → serde default 兼容
+        let legacy: EnvCache =
+            serde_json::from_str(r#"{"city":"济南市","fetched_at":100}"#).unwrap();
+        assert!(legacy.prev_city.is_none());
+        assert_eq!(legacy.city_changed_at, 0);
+        assert!(legacy.district_id.is_empty());
+        assert!(legacy.weather.is_none());
+    }
+
+    #[test]
+    fn inject_hard_cut_after_two_hours() {
+        // 2h 内正常注入
+        let c = cache_with("济南市", None, 0, 10_000);
+        assert!(render_inject(&c, 10_000 + 3600).is_some());
+        // 超 2h 硬切（边界含等号一侧：EXPIRE 整点仍可注入，+1s 切断）
+        assert!(render_inject(&c, 10_000 + EXPIRE_SECS).is_some());
+        assert!(render_inject(&c, 10_000 + EXPIRE_SECS + 1).is_none());
+        // 无天气不注入
+        let mut no_weather = cache_with("济南市", None, 0, 10_000);
+        no_weather.weather = None;
+        assert!(render_inject(&no_weather, 10_100).is_none());
+    }
+
+    #[test]
+    fn inject_contains_persona_frame_and_precision_rule() {
+        let c = cache_with("济南市", None, 0, 10_000);
+        let s = render_inject(&c, 10_100).unwrap();
+        assert!(s.contains("他现在在济南"));
+        assert!(s.contains("晴，35°C（体感 38°C），东南风3级"));
+        assert!(s.contains("说体感不报数据"));
+        assert!(s.contains("定位只到城市级"));
+    }
+
+    #[test]
+    fn trip_hint_window_three_days() {
+        let now = 200_000;
+        // 变化 1 天前 + 缓存新鲜 → 带出差提示
+        let c = cache_with("济南市", Some("青岛市"), now - 86400, now - 100);
+        let s = render_inject(&c, now).unwrap();
+        assert!(s.contains("他最近从青岛到了济南"));
+        // 变化 4 天前 + 缓存新鲜 → 提示消失
+        let old_trip = cache_with("济南市", Some("青岛市"), now - 4 * 86400, now - 100);
+        let s = render_inject(&old_trip, now).unwrap();
+        assert!(!s.contains("他最近从"));
+    }
+
+    #[test]
+    fn strip_suffix_variants() {
+        assert_eq!(strip_region_suffix("济南市"), "济南");
+        assert_eq!(strip_region_suffix("山东省"), "山东");
+        assert_eq!(strip_region_suffix("内蒙古自治区"), "内蒙古");
+        assert_eq!(strip_region_suffix("香港特别行政区"), "香港");
+        assert_eq!(strip_region_suffix("延边朝鲜族自治州"), "延边朝鲜族");
+        assert_eq!(strip_region_suffix("北京市"), "北京");
+        assert_eq!(strip_region_suffix("旧金山"), "旧金山");
+    }
+
+    #[test]
+    fn urlencode_matches_php_urlencode() {
+        // 保留字符集：A-Za-z0-9 - _ .
+        assert_eq!(urlencode("abcXYZ-._019"), "abcXYZ-._019");
+        assert_eq!(urlencode("a b"), "a+b");
+        // 中文 UTF-8 大写 %XX；~ 编码为 %7E（PHP urlencode 行为）
+        assert_eq!(urlencode("济南"), "%E6%B5%8E%E5%8D%97");
+        assert_eq!(urlencode("~"), "%7E");
+        assert_eq!(urlencode("/weather/v1/?a=b&c=d"), "%2Fweather%2Fv1%2F%3Fa%3Db%26c%3Dd");
+    }
+
+    #[test]
+    fn sn_is_deterministic() {
+        let a = baidu_sn("/location/ip", "ak=TESTAK&coor=bd09ll", "TESTSK");
+        let b = baidu_sn("/location/ip", "ak=TESTAK&coor=bd09ll", "TESTSK");
+        assert_eq!(a, b);
+        assert_eq!(a.len(), 32);
+        let c = baidu_sn("/location/ip", "ak=OTHER&coor=bd09ll", "TESTSK");
+        assert_ne!(a, c);
+    }
+}

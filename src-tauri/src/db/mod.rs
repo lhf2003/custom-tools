@@ -5,6 +5,7 @@ use tauri::Manager;
 
 pub mod app_cache;
 pub mod app_usage;
+pub mod file_usage;
 
 pub struct Database {
     conn: Connection,
@@ -122,6 +123,28 @@ impl Database {
         )?;
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_app_usage_launch_count ON app_usage(launch_count DESC)",
+            [],
+        )?;
+
+        // File usage tracking table (for the "frequent files" list in file search)
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS file_usage (
+                path TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                open_count INTEGER DEFAULT 0,
+                last_opened INTEGER,  -- unix timestamp
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )",
+            [],
+        )?;
+
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_file_usage_open_count ON file_usage(open_count DESC)",
+            [],
+        )?;
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_file_usage_last_opened ON file_usage(last_opened DESC)",
             [],
         )?;
 

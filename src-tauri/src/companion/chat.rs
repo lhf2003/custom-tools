@@ -140,14 +140,20 @@ pub(crate) fn compose_chat_system(
     } else {
         format!("\n\n---\n\n# 你此刻的心情\n{}", emotion_text)
     };
+    // 环境感知「你的窗外」：定位+此刻天气（他的窗外，不是系统数据——名分/体感措辞/
+    // 精度纪律全在注入句模板里，persona 不动）；缓存缺失或 >2h 未更新 → 空段（隐身硬切）
+    let env_section = match super::envsense::inject_sentence(db_path) {
+        Some(t) => format!("\n\n---\n\n# 你的窗外\n{}", t),
+        None => String::new(),
+    };
     // 拼装顺序（LHF 2026-08-03 定版）：
     //   静态前缀：persona → tool(工具编排+手册元数据+界面卡片) → evolution → 场合/独白
-    //   动态后缀：你记住的他 → 关注 → 心境 → 心情 → 时间
+    //   动态后缀：你记住的他 → 关注 → 心境 → 心情 → 窗外 → 时间
     //   （facts 归动态段——记忆更新不再让中间段缓存失效；时间在尾部，动态段全在末尾）
     format!(
         "{persona}\n\n---\n\n{tool}\n\n---\n\n{evolution}\n\n---\n\n\
          现在是「聊天」场合：完整的你，能干活也能接梗。\n{monologue}\n\n---\n\n\
-         # 你记住的他\n{facts}{focus}{attitude}{emotion}\n\n---\n\n# 当下状态\n{state}",
+         # 你记住的他\n{facts}{focus}{attitude}{emotion}{env}\n\n---\n\n# 当下状态\n{state}",
         persona = persona_text,
         tool = tool_section,
         evolution = evolution,
@@ -156,6 +162,7 @@ pub(crate) fn compose_chat_system(
         focus = focus_section,
         attitude = attitude_section,
         emotion = emotion_section,
+        env = env_section,
         state = state_text
     )
 }
@@ -275,6 +282,8 @@ pub fn jarvis_chat_system(
         .path()
         .app_data_dir()
         .map_err(|e| e.to_string())?;
+    // 环境感知补刷：command 是同步上下文，block_on 包 async（过期才网络阻塞 ≤8s）
+    tauri::async_runtime::block_on(super::envsense::refresh_if_stale(&db_state.0));
     Ok(compose_chat_system(
         &app_data,
         &db_state.0,

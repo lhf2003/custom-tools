@@ -89,7 +89,7 @@ export function ToolsSettings() {
       list.push(t);
       byGroup.set(t.group, list);
     }
-    return GROUP_ORDER.filter((g) => byGroup.has(g)).map((g) => {
+    const toGroup = (g: string) => {
       const items = byGroup.get(g)!;
       return {
         id: g,
@@ -99,7 +99,13 @@ export function ToolsSettings() {
         allCore: items.every((t) => t.core),
         enabledCount: items.filter((t) => t.enabled).length,
       };
-    });
+    };
+    // 内置组按固定顺序；外部服务组（external:{server}）按 server 追加在后
+    const builtin = GROUP_ORDER.filter((g) => byGroup.has(g)).map(toGroup);
+    const external = [...byGroup.keys()]
+      .filter((g) => g.startsWith('external:'))
+      .map(toGroup);
+    return [...builtin, ...external];
   }, [filtered]);
 
   const handleGroupToggle = async (groupTools: CompanionToolInfo[], enable: boolean) => {
