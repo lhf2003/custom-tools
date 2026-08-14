@@ -9,6 +9,37 @@ fn open_conn(db_state: &DatabaseState) -> Result<Connection, String> {
     Connection::open(&db_state.0).map_err(|e| format!("打开数据库失败: {}", e))
 }
 
+// ── 场所管理（CASE-003：设置页只读列表 + 删除） ────────────────
+
+#[derive(serde::Serialize)]
+pub struct CompanionPlaceInfo {
+    pub fingerprint: String,
+    pub name: String,
+    pub created_at: i64,
+}
+
+#[tauri::command]
+pub fn list_companion_places(
+    db_state: State<'_, DatabaseState>,
+) -> Result<Vec<CompanionPlaceInfo>, String> {
+    Ok(crate::companion::envsense::load_places(&db_state.0)
+        .into_iter()
+        .map(|p| CompanionPlaceInfo {
+            fingerprint: p.fingerprint,
+            name: p.name,
+            created_at: p.created_at,
+        })
+        .collect())
+}
+
+#[tauri::command]
+pub fn delete_companion_place(
+    db_state: State<'_, DatabaseState>,
+    fingerprint: String,
+) -> Result<(), String> {
+    crate::companion::envsense::remove_place(&db_state.0, &fingerprint)
+}
+
 // ── MCP 注册自愈 ─────────────────────────────────────────────
 
 /// 检测 ~/.claude.json 的 companion MCP 注册状态（MCP 设置页轮询）

@@ -176,6 +176,27 @@ pub fn tool_definitions() -> Vec<ToolDef> {
             }),
         },
         ToolDef {
+            name: "name_current_place",
+            display_name: "记住场所",
+            group: ToolGroup::Perception,
+            core: false,
+            external: false,
+            description: "把他当前所在的地方记下来（家/公司/他给的任何称呼）。\
+                时机：他说「我到家了」「我在公司」，或你问过「这是哪儿」他回答之后——\
+                不要无缘无故主动记。同名场所换了网络环境（搬家/换路由器）会更新映射。"
+                .to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "场所名（如「家」「公司」），不超过 10 字"
+                    }
+                },
+                "required": ["name"]
+            }),
+        },
+        ToolDef {
             name: "get_memory_facts",
             display_name: "读取记忆",
             group: ToolGroup::Perception,
@@ -484,7 +505,7 @@ fn shell_tool_def() -> ToolDef {
         group: ToolGroup::System,
         core: false,
         external: false,
-        description: "在这台 Windows 电脑上执行一条命令（cmd /c 语义）。\n\n适用：用户明确让你操作系统——查文件、看进程、跑脚本、装东西。\n不适用：读本应用自己的数据（用专用数据工具）；读文件内容（用 read_file，可编辑/无打扰模式下免确认，别用 type/more）；用户没让你动系统时主动动。\n\n规则：\n- 执行默认要用户点头确认；被拒绝就换思路或问用户，不要换着花样重试同一件事\n- 命令尽量只读、可逆；写操作执行前先想好怎么向用户解释\n- 输出会被截断，需要精确结果时用更窄的命令（findstr、定向文件）".to_string(),
+        description: "在这台 Windows 电脑上执行一条命令（cmd /c 语义）。\n\n适用：用户明确让你操作系统——查文件、看进程、跑脚本、装东西。\n不适用：读本应用自己的数据（用专用数据工具）；读文件内容（用 read_file，可编辑/无打扰模式下免确认，别用 type/more）；用户没让你动系统时主动动。\n\n规则：\n- 只读查询、组合探测、运行脚本、启动程序通常免确认直接执行；删除/覆盖文件、写注册表、装包、git 写操作、内联代码（python -c、PowerShell 等）会弹窗请用户确认——被拒绝就换思路或问用户，不要换着花样重试同一件事\n- 启动程序用 start \"\" \"程序路径\" 或 start 程序名，不要用 PowerShell（必弹确认）\n- 多个只读探测用 & 串联成一条（dir a & dir b），报错噪声加 2>nul，均免确认\n- 命令尽量只读、可逆；写操作执行前先想好怎么向用户解释\n- 输出会被截断，需要精确结果时用更窄的命令（findstr、定向文件）".to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -646,6 +667,7 @@ pub fn execute_tool(
         "append_evolution" => tool_append_evolution(db_path, args),
         "load_manual" => tool_load_manual(db_path, args),
         "record_mood" => tool_record_mood(db_path, args),
+        "name_current_place" => tool_name_current_place(db_path, args),
         "propose_manual_edit" => tool_propose_manual_edit(db_path, args),
         _ => Err(format!("未知工具: {}", name)),
     }
@@ -1120,6 +1142,26 @@ fn tool_load_manual(db_path: &Path, args: &Value) -> Result<String, String> {
 }
 
 /// 记录心情：类别六枚举校验 + 诱因长度限制，写入情绪状态机（source=agent）
+/// 记住当前场所：当前网络指纹 → 名称（家/公司/他给的称呼）。
+/// 指纹从 envsense 缓存读（30min 周期刷新）——模型不需要也不能指定指纹原文。
+fn tool_name_current_place(db_path: &Path, args: &Value) -> Result<String, String> {
+    let name = args
+        .get("name")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or("缺少参数 name")?;
+    if name.chars().count() > 10 {
+        return Err("场所名过长（不超过 10 字）".to_string());
+    }
+    let cache = super::envsense::load_cache(db_path).ok_or("还没有环境信息")?;
+    if cache.fingerprint.is_empty() {
+        return Err("当前网络指纹不可用（可能刚换网络，稍后再试）".to_string());
+    }
+    super::envsense::save_place(db_path, &cache.fingerprint, name)?;
+    Ok(format!("记住了：这里是{}", name))
+}
+
 fn tool_record_mood(db_path: &Path, args: &Value) -> Result<String, String> {
     let category = args
         .get("category")

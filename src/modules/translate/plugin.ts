@@ -10,6 +10,7 @@ const translatePlugin: ViewPlugin = {
   description:
     '任意应用中选中文本按 Ctrl+Shift+T 即译，或粘贴长文本翻译；自动检测源语言，支持中英日韩等目标语言，流式输出。',
   order: 2,
+  triggers: [{ keyword: '@translate', argHint: '要翻译的文本' }],
   load: () => import('./TranslateView').then((m) => ({ default: m.TranslateView })),
   nav: {
     title: '划词翻译',

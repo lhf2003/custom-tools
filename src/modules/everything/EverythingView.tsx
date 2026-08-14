@@ -121,7 +121,7 @@ function EverythingInstallPage({ onInstalled }: { onInstalled: () => void }) {
               type="checkbox"
               checked={selected[opt.key]}
               onChange={(e) => setSelected((s) => ({ ...s, [opt.key]: e.target.checked }))}
-              className="mt-0.5 accent-blue-500"
+              className="mt-0.5 accent-app-brand-primary"
             />
             <div className="text-left">
               <p className="text-sm font-medium text-zinc-200">{opt.label}</p>
@@ -141,7 +141,7 @@ function EverythingInstallPage({ onInstalled }: { onInstalled: () => void }) {
         <button
           onClick={handleInstall}
           disabled={noneSelected || isInstalling}
-          className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-zinc-600 disabled:cursor-not-allowed rounded-lg text-white text-sm font-medium transition-colors"
+          className="flex items-center gap-2 px-5 py-2.5 bg-app-status-info hover:bg-app-status-info-deep disabled:bg-zinc-600 disabled:cursor-not-allowed rounded-lg text-white text-sm font-medium transition-colors"
         >
           {isInstalling ? (
             <>
@@ -479,7 +479,7 @@ export function EverythingView() {
     <div className="w-full h-full flex flex-col panel-glass">
       {/* Search Bar */}
       <div className="relative flex items-center px-4 py-3 border-b border-white/5">
-        <Search className="w-4 h-4 text-zinc-500 mr-3" />
+        <Search className="w-4 h-4 text-app-text-tertiary mr-3" />
         <input
           ref={inputRef}
           type="text"
@@ -487,12 +487,12 @@ export function EverythingView() {
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="搜索文件...（↑↓ 选择 · 回车/双击打开 · Esc 清空）"
-          className="flex-1 bg-transparent text-sm text-zinc-200 placeholder-zinc-500 outline-none"
+          className="flex-1 bg-transparent text-base text-app-text-primary placeholder-app-text-placeholder outline-none"
         />
         {/* 分类选择（原左侧栏，移到输入框右侧） */}
         <button
           onClick={() => setCategoryOpen((o) => !o)}
-          className="ml-3 shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 text-sm text-zinc-300 hover:bg-white/5 transition-colors"
+          className="ml-3 shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-white/10 text-sm text-app-text-secondary hover:bg-white/5 transition-colors"
         >
           <span>{currentCategoryName}</span>
           <ChevronDown className={`w-3.5 h-3.5 transition-transform ${categoryOpen ? 'rotate-180' : ''}`} />
@@ -506,15 +506,15 @@ export function EverythingView() {
               className="fixed inset-0 z-10 w-full h-full cursor-default bg-transparent border-0 p-0 outline-none"
               onClick={() => setCategoryOpen(false)}
             />
-            <div className="absolute right-4 top-full mt-1 z-20 w-40 py-1 rounded-lg border border-white/10 bg-zinc-800 shadow-xl max-h-72 overflow-y-auto">
+            <div className="absolute right-4 top-full mt-1 z-20 w-40 py-1 rounded-lg border border-white/10 bg-app-bg-elevated shadow-xl max-h-72 overflow-y-auto">
               {categories.map((cat) => (
                 <button
                   key={cat.id}
                   onClick={() => { setSelectedCategory(cat.id); setCategoryOpen(false); }}
                   className={`w-full px-3 py-1.5 text-left text-sm transition-colors ${
                     selectedCategory === cat.id
-                      ? 'text-blue-400 bg-blue-500/10'
-                      : 'text-zinc-300 hover:bg-white/5'
+                      ? 'text-app-brand-primary-light bg-white/10'
+                      : 'text-app-text-secondary hover:bg-white/5'
                   }`}
                 >
                   {cat.name}
@@ -551,7 +551,7 @@ export function EverythingView() {
           </div>
 
           {/* File Items */}
-          <div ref={listRef} className="flex-1 overflow-y-auto">
+          <div ref={listRef} className="flex-1 overflow-y-auto px-2 py-2">
             {isLoading ? (
               <div className="flex items-center justify-center h-full text-zinc-500">
                 <div className="animate-pulse">搜索中...</div>
@@ -562,29 +562,29 @@ export function EverythingView() {
                 <p className="text-sm">未找到匹配的文件</p>
               </div>
             ) : (
-              <div className="divide-y divide-white/5">
+              <div className="flex flex-col gap-0.5">
                 {/* 常用文件（空查询 + 全部分类时置顶展示） */}
                 {showFrequent && (
                   <>
-                    <div className="flex items-center gap-1.5 px-4 py-2 text-xs text-zinc-500 bg-white/[0.02] sticky top-0">
-                      <Clock className="w-3 h-3" />
+                    <div className="flex items-center gap-1.5 px-3 pt-1.5 pb-1 text-xs text-app-text-tertiary">
+                      <Clock className="w-3.5 h-3.5" />
                       <span>常用文件</span>
                     </div>
                     {frequentFiles.map((f) => (
                       <button
                         key={`freq-${f.path}`}
                         onClick={() => handleOpenFile(f.path)}
-                        className="w-full flex items-center gap-3 px-4 py-2 text-left transition-colors hover:bg-white/5"
+                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors hover:bg-white/5"
                         title="打开文件"
                       >
                         {getFileIcon(f.name)}
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm truncate text-zinc-200">{f.name}</p>
-                          <p className="text-xs text-zinc-500 truncate">{f.path}</p>
+                          <p className="text-sm truncate text-app-text-primary">{f.name}</p>
+                          <p className="text-xs text-app-text-tertiary truncate">{f.path}</p>
                         </div>
                       </button>
                     ))}
-                    <div className="flex items-center gap-1.5 px-4 py-2 text-xs text-zinc-600 bg-white/[0.02]">
+                    <div className="flex items-center gap-1.5 px-3 pt-3 pb-1 text-xs text-app-text-tertiary">
                       <span>全部结果</span>
                     </div>
                   </>
@@ -595,20 +595,20 @@ export function EverythingView() {
                     data-index={index}
                     onClick={() => setSelectedIndex(index)}
                     onDoubleClick={() => handleOpenFile(file.path)}
-                    className={`w-full flex items-center gap-3 px-4 py-2 text-left transition-colors ${
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors ${
                       selectedIndex === index
-                        ? 'bg-blue-500/20'
+                        ? 'bg-white/10'
                         : 'hover:bg-white/5'
                     }`}
                   >
                     {getFileIcon(file.name, file.is_dir)}
                     <div className="flex-1 min-w-0">
                       <p className={`text-sm truncate ${
-                        selectedIndex === index ? 'text-blue-300' : 'text-zinc-200'
+                        selectedIndex === index ? 'text-app-brand-primary-light' : 'text-app-text-primary'
                       }`}>
                         {highlightText(file.name, query)}
                       </p>
-                      <p className="text-xs text-zinc-500 truncate">
+                      <p className="text-xs text-app-text-tertiary truncate">
                         {highlightText(file.path, query)}
                       </p>
                     </div>
@@ -657,7 +657,7 @@ export function EverythingView() {
               <div className="flex gap-2 mt-6 w-full">
                 <button
                   onClick={() => handleOpenFile(selectedFile.path)}
-                  className="flex-1 px-3 py-2 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm"
+                  className="flex-1 px-3 py-2 bg-app-status-info hover:bg-app-status-info-deep rounded text-white text-sm transition-colors"
                 >
                   打开
                 </button>

@@ -640,6 +640,8 @@ pub fn run() {
             commands::companion::list_manuals,
             commands::companion::get_manual,
             commands::companion::save_manual,
+            commands::companion::list_companion_places,
+            commands::companion::delete_companion_place,
             commands::companion::list_evolution_backups,
             commands::companion::rollback_evolution_backup,
             commands::companion::get_evolution_size,

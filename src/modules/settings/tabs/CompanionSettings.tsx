@@ -7,6 +7,10 @@ import {
   RefreshCw,
   Activity,
   Eraser,
+  MapPin,
+  Wifi,
+  Network,
+  X,
 } from 'lucide-react';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useToastStore } from '@/stores/toastStore';
@@ -31,6 +35,13 @@ interface HabitPattern {
   status: string;
   first_seen: number;
   last_seen: number;
+}
+
+/** 贾维斯认下的场所（CASE-003：fingerprint 原文只在本机展示，不进 LLM 上下文） */
+interface CompanionPlace {
+  fingerprint: string;
+  name: string;
+  created_at: number;
 }
 
 const STATUS_LABEL: Record<string, { text: string; color: string }> = {
@@ -69,6 +80,7 @@ export function CompanionSettings() {
 
   const [todaySummary, setTodaySummary] = useState<[string, number][]>([]);
   const [patterns, setPatterns] = useState<HabitPattern[]>([]);
+  const [places, setPlaces] = useState<CompanionPlace[]>([]);
   const [analyzing, setAnalyzing] = useState(false);
   const [agentRunning, setAgentRunning] = useState(false);
   const [expandPatterns, setExpandPatterns] = useState(false);
@@ -76,12 +88,14 @@ export function CompanionSettings() {
 
   const loadData = useCallback(async () => {
     try {
-      const [summary, patternList] = await Promise.all([
+      const [summary, patternList, placeList] = await Promise.all([
         invoke<[string, number][]>('get_companion_today_summary'),
         invoke<HabitPattern[]>('get_companion_patterns'),
+        invoke<CompanionPlace[]>('list_companion_places'),
       ]);
       setTodaySummary(summary);
       setPatterns(patternList);
+      setPlaces(placeList);
     } catch (err) {
       console.error('Failed to load companion data:', err);
     }
@@ -155,6 +169,27 @@ export function CompanionSettings() {
       await loadData();
     } catch (err) {
       console.error('Failed to dismiss pattern:', err);
+    }
+  };
+
+  const handleDeletePlace = async (place: CompanionPlace) => {
+    const ok = await confirmDialog({
+      title: `删除场所「${place.name}」`,
+      message: '删除后贾维斯将不再认识这个地方（下次你常去，他会重新学习）。',
+      danger: true,
+      confirmLabel: '删除',
+    });
+    if (!ok) return;
+    try {
+      await invoke('delete_companion_place', { fingerprint: place.fingerprint });
+      setPlaces((prev) => prev.filter((p) => p.fingerprint !== place.fingerprint));
+      addToast({ type: 'success', title: `已删除场所「${place.name}」` });
+    } catch (err) {
+      addToast({
+        type: 'error',
+        title: '删除失败',
+        message: err instanceof Error ? err.message : String(err),
+      });
     }
   };
 
@@ -303,6 +338,56 @@ export function CompanionSettings() {
           </button>
         </SettingRow>
       </SettingGroup>
+
+      {/* 场所感知：贾维斯认下的地方（添加全靠聊天/主动询问，这里只能看和删） */}
+      {companion_enabled && (
+        <div className="mb-8">
+          <h3 className="text-xs font-semibold text-app-text-tertiary px-3 mb-1.5">场所感知</h3>
+          <div className="px-3">
+            <section>
+              <div className="flex items-center gap-2 mb-2">
+                <MapPin size={13} className="text-app-text-tertiary" />
+                <span className="text-app-text-tertiary text-xs font-medium">他认识的场所</span>
+              </div>
+              {places.length === 0 ? (
+                <p className="text-app-text-disabled text-xs">
+                  还没有认下的场所——聊天时告诉他「我到家了」，他就会记住；
+                  同一个地方待上几天，他也会自己开口问
+                </p>
+              ) : (
+                <div className="space-y-1.5">
+                  {places.map((p) => (
+                    <div key={p.fingerprint} className="flex items-center gap-2 text-xs">
+                      {p.fingerprint.startsWith('ssid:') ? (
+                        <Wifi size={12} className="text-app-text-tertiary shrink-0" />
+                      ) : (
+                        <Network size={12} className="text-app-text-tertiary shrink-0" />
+                      )}
+                      <span className="text-app-text-secondary font-medium">{p.name}</span>
+                      <span className="text-app-text-disabled flex-1 truncate">
+                        {p.fingerprint.replace(/^(ssid|gwmac):/, '')}
+                      </span>
+                      <span className="text-app-text-tertiary tabular-nums">
+                        {new Date(p.created_at * 1000).toLocaleDateString('zh-CN', {
+                          month: 'numeric',
+                          day: 'numeric',
+                        })}
+                      </span>
+                      <button
+                        onClick={() => handleDeletePlace(p)}
+                        className="p-1 rounded text-app-text-tertiary hover:bg-white/10 hover:text-app-text-primary transition-colors cursor-pointer"
+                        title="删除场所"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
+        </div>
+      )}
 
       {/* 学习概览：未启用陪伴时隐藏（没有数据可学） */}
       {companion_enabled && (

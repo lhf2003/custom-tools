@@ -25,7 +25,7 @@ const GROUP_ORDER = ['perception', 'growth', 'interface', 'system', 'network'];
 const SHELL_MODE_OPTIONS = [
   { value: 'confirm_all', label: '默认模式 — 每条命令都需系统弹窗确认' },
   { value: 'accept_edits', label: '可编辑模式 — 文件读取自动放行，Bash 需系统弹窗确认' },
-  { value: 'unattended', label: '无打扰模式 — 文件读取与只读安全命令自动放行' },
+  { value: 'unattended', label: '无打扰模式 — 黑名单之外的命令自动放行' },
 ];
 
 export function ToolsSettings() {
@@ -232,9 +232,13 @@ export function ToolsSettings() {
                           <p className="text-app-text-disabled text-xs mt-2 leading-relaxed">
                             需要确认时以系统原生弹窗形式弹出（在应用窗口之外），内容可见，
                             每次确认或拒绝都会写入本地审计记录。可编辑模式自动放行文件读取
-                            （read_file），命令仍需确认；无打扰模式再放宽到只读命令
-                            （dir、ipconfig、git status、npm list 等）。敏感文件（私钥、
-                            凭证、浏览器数据等）在自动模式下直接拒绝，仅默认模式可确认放行；
+                            （read_file），命令仍需确认；无打扰模式为黑名单制——仅以下命令弹窗：
+                            删除/覆盖文件（del、copy、move 等）、写文件重定向（&gt;）、装包
+                            （npm install 等）、git 写操作（commit、push 等）、reg add、
+                            taskkill、解释器内联代码（python -c、PowerShell）、下载写文件；
+                            只读查询、组合探测（&amp; 串联、2&gt;nul）、运行脚本/构建、
+                            start 启动程序均自动放行。敏感文件（私钥、凭证、浏览器数据等）
+                            在自动模式下直接拒绝，仅默认模式可确认放行；
                             灾难命令（格式化、删库、关机等）任何模式都直接拒绝。
                           </p>
                         </div>

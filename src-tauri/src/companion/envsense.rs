@@ -18,10 +18,14 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{analyzer, db, tools};
+use super::{analyzer, db, fingerprint, tools};
 
 /// settings 表缓存 key
 const CACHE_KEY: &str = "companion_env_cache";
+/// 已知场所映射 key（Vec<Place>）
+const PLACES_KEY: &str = "companion_places";
+/// 陌生指纹观察 key（fingerprint → 出现日期列表）
+const SIGHTINGS_KEY: &str = "companion_place_sightings";
 /// 缓存新鲜度：超过则触点补刷（与定时器周期一致）
 const STALE_SECS: i64 = 30 * 60;
 /// 注入硬切：缓存超过 2h 未更新，感官「下线」（隐身原则：不注入过期感知）
@@ -30,6 +34,11 @@ const EXPIRE_SECS: i64 = 2 * 3600;
 const TRIP_HINT_SECS: i64 = 3 * 86400;
 /// 单次 HTTP 超时（触点补刷会阻塞组 prompt，必须短）
 const HTTP_TIMEOUT_SECS: u64 = 8;
+/// 陌生场所询问窗口：见到 3~7 个不同日期才提示模型去问（<3 过滤偶发，
+/// >7 视为「他不想说/没机会说」，不烦他）；观察记录滚动 14 天
+const PLACE_ASK_MIN_DAYS: u32 = 3;
+const PLACE_ASK_MAX_DAYS: u32 = 7;
+const SIGHTING_RETENTION_DAYS: i64 = 14;
 
 /// settings.companion_env_cache 的 JSON 结构（serde default 兼容旧版缺字段）
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -53,6 +62,15 @@ pub struct EnvCache {
     pub weather: Option<WeatherNow>,
     /// 上次完整一轮（定位+天气）成功时间
     pub fetched_at: i64,
+    /// 当前网络指纹原文（ssid:/gwmac:；只进缓存不进 LLM 上下文——D3 隐私裁决）
+    #[serde(default)]
+    pub fingerprint: String,
+    /// 当前场所名（已知：「家」「公司」…；None=陌生或无指纹）
+    #[serde(default)]
+    pub place: Option<String>,
+    /// 陌生指纹已见的不同日期数（渲染询问提示用；已知/无指纹时为 0）
+    #[serde(default)]
+    pub place_unknown_days: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,6 +96,106 @@ fn save_cache(db_path: &Path, cache: &EnvCache) {
     if let Ok(raw) = serde_json::to_string(cache) {
         analyzer::save_setting(&db_path.to_path_buf(), CACHE_KEY, &raw);
     }
+}
+
+// ── 场所映射与陌生观察（settings kv；指纹原文不出本地） ──────
+
+/// 已知场所：指纹 → 名称
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Place {
+    pub fingerprint: String,
+    pub name: String,
+    pub created_at: i64,
+}
+
+pub fn load_places(db_path: &Path) -> Vec<Place> {
+    analyzer::load_setting(&db_path.to_path_buf(), PLACES_KEY)
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
+}
+
+fn save_places(db_path: &Path, places: &[Place]) {
+    if let Ok(raw) = serde_json::to_string(places) {
+        analyzer::save_setting(&db_path.to_path_buf(), PLACES_KEY, &raw);
+    }
+}
+
+/// 陌生指纹观察史：fingerprint → 出现过的日期（YYYY-MM-DD，去重）
+type Sightings = std::collections::HashMap<String, Vec<String>>;
+
+fn load_sightings(db_path: &Path) -> Sightings {
+    analyzer::load_setting(&db_path.to_path_buf(), SIGHTINGS_KEY)
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
+}
+
+/// 记录当日观察（按日期去重 + 滚动 14 天清理），返回该指纹已见的不同日期数
+fn record_sighting(db_path: &Path, fingerprint: &str, today: &str) -> u32 {
+    let mut sightings = load_sightings(db_path);
+    let cutoff = (chrono::Local::now() - chrono::Duration::days(SIGHTING_RETENTION_DAYS))
+        .format("%Y-%m-%d")
+        .to_string();
+    // 滚动清理：整个观察窗外的指纹连记录一起丢（路过一次的咖啡馆不该留痕）
+    sightings.retain(|_, dates| dates.iter().any(|d| d.as_str() >= cutoff.as_str()));
+    let dates = sightings.entry(fingerprint.to_string()).or_default();
+    dates.retain(|d| d.as_str() >= cutoff.as_str());
+    if !dates.iter().any(|d| d == today) {
+        dates.push(today.to_string());
+    }
+    let days = dates.len() as u32;
+    if let Ok(raw) = serde_json::to_string(&sightings) {
+        analyzer::save_setting(&db_path.to_path_buf(), SIGHTINGS_KEY, &raw);
+    }
+    days
+}
+
+/// 标注当前场所（name_current_place 工具 / 设置页共用）：
+/// 同指纹覆盖、同名场所换指纹也覆盖（搬家/换路由器）；认下后不再是陌生（清观察记录），
+/// 并同步当前缓存的 place——下一轮注入立即生效
+pub fn save_place(db_path: &Path, fingerprint: &str, name: &str) -> Result<(), String> {
+    let now = chrono::Local::now().timestamp();
+    let mut places = load_places(db_path);
+    places.retain(|p| p.fingerprint != fingerprint && p.name != name);
+    places.push(Place {
+        fingerprint: fingerprint.to_string(),
+        name: name.to_string(),
+        created_at: now,
+    });
+    save_places(db_path, &places);
+
+    let mut sightings = load_sightings(db_path);
+    if sightings.remove(fingerprint).is_some() {
+        if let Ok(raw) = serde_json::to_string(&sightings) {
+            analyzer::save_setting(&db_path.to_path_buf(), SIGHTINGS_KEY, &raw);
+        }
+    }
+    if let Some(mut cache) = load_cache(db_path) {
+        if cache.fingerprint == fingerprint {
+            cache.place = Some(name.to_string());
+            cache.place_unknown_days = 0;
+            save_cache(db_path, &cache);
+        }
+    }
+    Ok(())
+}
+
+/// 删除场所（设置页管理入口）
+pub fn remove_place(db_path: &Path, fingerprint: &str) -> Result<(), String> {
+    let mut places = load_places(db_path);
+    let before = places.len();
+    places.retain(|p| p.fingerprint != fingerprint);
+    if places.len() == before {
+        return Err("场所不存在".to_string());
+    }
+    save_places(db_path, &places);
+    // 当前正处在这个场所时，缓存同步退回陌生（指纹会重新累积观察）
+    if let Some(mut cache) = load_cache(db_path) {
+        if cache.fingerprint == fingerprint {
+            cache.place = None;
+            save_cache(db_path, &cache);
+        }
+    }
+    Ok(())
 }
 
 // ── 百度 API 接入 ────────────────────────────────────────────
@@ -292,6 +410,34 @@ pub async fn refresh(db_path: &Path) -> Result<(), String> {
     cache.city = located.city;
     cache.district = located.district;
     cache.district_id = located.adcode;
+
+    // 场所感知（CASE-003）：纯本地指纹采集，与天气成败无关；
+    // 拿不到指纹 → 场所字段清空（本轮隐身，天气/城市不受影响）
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    match fingerprint::current_fingerprint() {
+        Some(fp) => {
+            let known = load_places(db_path)
+                .into_iter()
+                .find(|p| p.fingerprint == fp)
+                .map(|p| p.name);
+            match known {
+                Some(name) => {
+                    cache.place = Some(name);
+                    cache.place_unknown_days = 0;
+                }
+                None => {
+                    cache.place = None;
+                    cache.place_unknown_days = record_sighting(db_path, &fp, &today);
+                }
+            }
+            cache.fingerprint = fp;
+        }
+        None => {
+            cache.fingerprint.clear();
+            cache.place = None;
+            cache.place_unknown_days = 0;
+        }
+    }
     match weather {
         Ok(w) => {
             cache.weather = Some(w);
@@ -383,6 +529,11 @@ fn render_inject(cache: &EnvCache, now: i64) -> Option<String> {
         return None;
     }
     let city = strip_region_suffix(&cache.city);
+    // 场所语义优先于城市（「在家」比「在武汉」像人话）；陌生/无指纹只有城市，不重复括号
+    let whereabouts = match &cache.place {
+        Some(name) => format!("在{}（{}）", name, city),
+        None => format!("在{}", city),
+    };
     let feels = if weather.feels_like != weather.temp {
         format!("（体感 {}°C）", weather.feels_like)
     } else {
@@ -396,16 +547,34 @@ fn render_inject(cache: &EnvCache, now: i64) -> Option<String> {
         })
         .unwrap_or_default();
     let mut s = format!(
-        "你住在他的电脑里——他现在在{city}，此刻外面：{text}，{temp}°C{feels}，{wind}。\n\
+        "你住在他的电脑里——他现在{whereabouts}，此刻外面：{text}，{temp}°C{feels}，{wind}。\n\
          （今天 {time} 采集。这是你的亲身感知：说体感不报数据——「外面挺热的」，不是「当前温度{temp}°C」。\n\
          定位只到城市级：哪个区、在不在家，你不知道也不猜。）",
-        city = city,
+        whereabouts = whereabouts,
         text = weather.text,
         temp = weather.temp,
         feels = feels,
         wind = weather.wind,
         time = fetched_time,
     );
+    // 场所已知时，「哪个区、在不在家不猜」的纪律不再适用——他知道（就是这里）
+    if cache.place.is_some() {
+        s = s.replace(
+            "定位只到城市级：哪个区、在不在家，你不知道也不猜。",
+            "场所名是他亲口认下的，自然用，别报网络指纹原文。",
+        );
+    }
+    // 陌生场所询问提示：3~7 天窗口内提示模型自然地问；窗外偶发与抗拒都不打扰
+    if cache.place.is_none()
+        && (PLACE_ASK_MIN_DAYS..=PLACE_ASK_MAX_DAYS).contains(&cache.place_unknown_days)
+    {
+        s.push_str(&format!(
+            "\n这个地方你已经在 {} 个不同的日子里见过他了，还不知道是哪儿——\
+             可以自然问问他（比如「这儿是家还是公司？」），他答了就用 name_current_place 记住；\
+             话题不合适就改天再问，别硬问。",
+            cache.place_unknown_days
+        ));
+    }
     // 出差提示：城市变化 3 天内
     if cache.city_changed_at > 0 && now - cache.city_changed_at < TRIP_HINT_SECS {
         if let Some(prev) = &cache.prev_city {
@@ -579,7 +748,25 @@ mod tests {
                 humidity: "40".to_string(),
             }),
             fetched_at,
+            fingerprint: String::new(),
+            place: None,
+            place_unknown_days: 0,
         }
+    }
+
+    /// 临时 settings 库（save_setting/load_setting 走 db_path，要求表已存在）
+    fn temp_db(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join("envsense_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join(format!("{}_{}.db", name, std::process::id()));
+        let _ = std::fs::remove_file(&p);
+        let conn = rusqlite::Connection::open(&p).unwrap();
+        conn.execute(
+            "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)",
+            [],
+        )
+        .unwrap();
+        p
     }
 
     #[test]
@@ -620,6 +807,108 @@ mod tests {
         assert!(s.contains("晴，35°C（体感 38°C），东南风3级"));
         assert!(s.contains("说体感不报数据"));
         assert!(s.contains("定位只到城市级"));
+    }
+
+    #[test]
+    fn inject_known_place_overrides_city_and_rule() {
+        let mut c = cache_with("武汉市", None, 0, 10_000);
+        c.place = Some("家".to_string());
+        let s = render_inject(&c, 10_100).unwrap();
+        assert!(s.contains("他现在在家（武汉）"));
+        // 场所已知：「在不在家不猜」纪律换成「指纹不出门」纪律
+        assert!(!s.contains("在不在家"));
+        assert!(s.contains("别报网络指纹原文"));
+    }
+
+    #[test]
+    fn inject_unknown_place_prompt_window() {
+        let now = 10_000;
+        // 2 天：静默观察不提示
+        let mut c = cache_with("武汉市", None, 0, now - 100);
+        c.place_unknown_days = 2;
+        assert!(!render_inject(&c, now).unwrap().contains("name_current_place"));
+        // 3 天：提示问
+        c.place_unknown_days = 3;
+        let s = render_inject(&c, now).unwrap();
+        assert!(s.contains("3 个不同的日子"));
+        assert!(s.contains("name_current_place"));
+        // 7 天：仍提示
+        c.place_unknown_days = 7;
+        assert!(render_inject(&c, now).unwrap().contains("7 个不同的日子"));
+        // 8 天：放弃不烦
+        c.place_unknown_days = 8;
+        assert!(!render_inject(&c, now).unwrap().contains("name_current_place"));
+        // 已知场所永不提示
+        c.place = Some("公司".to_string());
+        c.place_unknown_days = 5;
+        assert!(!render_inject(&c, now).unwrap().contains("name_current_place"));
+    }
+
+    #[test]
+    fn sighting_dedup_and_rolling_cleanup() {
+        let db = temp_db("sighting");
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let yesterday = (chrono::Local::now() - chrono::Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string();
+        // 同一天重复记录只算一次
+        assert_eq!(record_sighting(&db, "ssid:A", &today), 1);
+        assert_eq!(record_sighting(&db, "ssid:A", &today), 1);
+        assert_eq!(record_sighting(&db, "ssid:A", &yesterday), 2);
+        // 15 天前的旧指纹记录被滚动清理
+        let old = (chrono::Local::now() - chrono::Duration::days(15))
+            .format("%Y-%m-%d")
+            .to_string();
+        let mut sightings = load_sightings(&db);
+        sightings.insert("ssid:OLD".to_string(), vec![old]);
+        analyzer::save_setting(
+            &db,
+            SIGHTINGS_KEY,
+            &serde_json::to_string(&sightings).unwrap(),
+        );
+        record_sighting(&db, "ssid:A", &today);
+        assert!(!load_sightings(&db).contains_key("ssid:OLD"));
+        assert_eq!(load_sightings(&db)["ssid:A"].len(), 2);
+    }
+
+    #[test]
+    fn save_place_overwrites_and_syncs_cache() {
+        let db = temp_db("places");
+        // 先攒两天观察（认下后应清零）
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        record_sighting(&db, "ssid:Home", &today);
+        record_sighting(&db, "ssid:Home", "2026-08-13");
+        // 当前缓存里的指纹一致 → save_place 应同步 place 并清观察
+        let mut cache = cache_with("武汉市", None, 0, 10_000);
+        cache.fingerprint = "ssid:Home".to_string();
+        cache.place_unknown_days = 2;
+        save_cache(&db, &cache);
+
+        save_place(&db, "ssid:Home", "家").unwrap();
+        let places = load_places(&db);
+        assert_eq!(places.len(), 1);
+        assert_eq!(places[0].name, "家");
+        assert!(load_sightings(&db).is_empty());
+        let cache = load_cache(&db).unwrap();
+        assert_eq!(cache.place.as_deref(), Some("家"));
+        assert_eq!(cache.place_unknown_days, 0);
+
+        // 同名换指纹（搬家/换路由器）：覆盖旧映射，不并存
+        save_place(&db, "ssid:NewRouter", "家").unwrap();
+        let places = load_places(&db);
+        assert_eq!(places.len(), 1);
+        assert_eq!(places[0].fingerprint, "ssid:NewRouter");
+
+        // 同指纹换名（改口）：覆盖
+        save_place(&db, "ssid:NewRouter", "工作室").unwrap();
+        let places = load_places(&db);
+        assert_eq!(places.len(), 1);
+        assert_eq!(places[0].name, "工作室");
+
+        // 删除 + 不存在报错
+        remove_place(&db, "ssid:NewRouter").unwrap();
+        assert!(load_places(&db).is_empty());
+        assert!(remove_place(&db, "ssid:NewRouter").is_err());
     }
 
     #[test]

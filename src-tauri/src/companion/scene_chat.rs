@@ -18,8 +18,9 @@ use super::{analyzer, chat, tools};
 use crate::llm_provider::models::Scene;
 
 /// tool-use 循环上限（每轮都是一次付费调用，防失控；
-/// 接入 web_search/shell 后多步任务（搜→看→再搜→答）需要更大余量）
-const MAX_TOOL_ROUNDS: usize = 10;
+/// 黑名单化后多步任务（探测→定位→操作）链路变长，放宽到 50 轮；
+/// 到顶强制收尾：不带 tools 再问一次，模型基于已获信息直接回答）
+const MAX_TOOL_ROUNDS: usize = 50;
 /// 未摘要消息超过该阈值时触发增量摘要（约 12 轮对话攒一次）
 const SUMMARY_THRESHOLD: usize = 24;
 /// 摘要后保留的最近原文条数（约 6 轮对话原样进上下文）
@@ -206,7 +207,7 @@ pub fn jarvis_chat_cancel_scene(
     Ok(())
 }
 
-/// 执行一条回退聊天：tool-use 循环（上限 4 轮，每轮登记 llm_call_logs）。
+/// 执行一条回退聊天：tool-use 循环（上限 MAX_TOOL_ROUNDS 轮，每轮登记 llm_call_logs）。
 /// 流式（与 agent 通道一致）：每轮调用经 on_text 逐 chunk emit jarvis:chunk，
 /// 工具轮文字照常送出，最终回答结束由 jarvis:done 收尾。
 /// render_ui 使用规则：只挂场景通道（agent 通道经 MCP 没有 render_ui），

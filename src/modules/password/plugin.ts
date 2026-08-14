@@ -42,6 +42,7 @@ const passwordPlugin: ViewPlugin = {
     '安全存储账号密码，使用AES-GCM加密保护。支持分类管理、快速复制，一键填充网站登录信息。',
   order: 5,
   shortcutModuleId: 'passwords',
+  triggers: [{ keyword: '@password' }],
   load: () => import('./PasswordView').then((m) => ({ default: m.PasswordView })),
   nav: {
     title: '密码保险库',

@@ -6,6 +6,7 @@ pub mod db;
 pub mod diary;
 pub mod emotion;
 pub mod envsense;
+pub mod fingerprint;
 pub mod mcp;
 pub mod mcp_client;
 pub mod mcp_register;

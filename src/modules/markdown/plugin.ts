@@ -33,6 +33,7 @@ const markdownPlugin: ViewPlugin = {
     '轻量级Markdown编辑器，支持实时预览。适合快速记录想法、待办事项或撰写文档。',
   order: 4,
   shortcutModuleId: 'notes',
+  triggers: [{ keyword: '@markdown' }],
   load: () => import('./MarkdownView').then((m) => ({ default: m.MarkdownView })),
   nav: {
     title: 'Markdown 笔记',
