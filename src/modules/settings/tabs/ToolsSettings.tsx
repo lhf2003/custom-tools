@@ -14,6 +14,8 @@ interface CompanionToolInfo {
   group_label: string;
   group_description: string;
   core: boolean;
+  /** 对外数据面工具：经 MCP 通道暴露给外部客户端（见「MCP」页签） */
+  external: boolean;
   enabled: boolean;
 }
 
@@ -178,6 +180,14 @@ export function ToolsSettings() {
                               {t.display_name}
                             </span>
                             <code className="text-app-text-disabled text-xs">{t.name}</code>
+                            {t.external && (
+                              <span
+                                title="经 MCP 通道暴露给外部客户端（见「MCP」页签）"
+                                className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-app-brand-primary-light"
+                              >
+                                MCP 开放
+                              </span>
+                            )}
                           </div>
                           <p className="text-app-text-tertiary text-xs mt-0.5 leading-relaxed">
                             {t.description}

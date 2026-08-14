@@ -13,6 +13,8 @@ import {
   SlidersHorizontal,
   AppWindow,
   Clipboard,
+  Plug,
+  GraduationCap,
 } from 'lucide-react';
 import { immediateResize } from '@/utils/tauri';
 import { WINDOW_SIZE } from '@/constants/window';
@@ -26,6 +28,8 @@ import { ShortcutsSettings } from './tabs/ShortcutsSettings';
 import { ModelSettings } from './tabs/ModelSettings';
 import { CompanionSettings } from './tabs/CompanionSettings';
 import { ToolsSettings } from './tabs/ToolsSettings';
+import { McpSettings } from './tabs/McpSettings';
+import { SkillSettings } from './tabs/SkillSettings';
 import { StatsSettings } from './tabs/StatsSettings';
 import { AdvancedSettings } from './tabs/AdvancedSettings';
 import { ManualSettings } from './tabs/ManualSettings';
@@ -67,6 +71,8 @@ const AI_NAV_GROUP: NavGroup = {
   items: [
     { id: 'model', name: '模型', icon: Bot },
     { id: 'tools', name: '工具', icon: Wrench },
+    { id: 'mcp', name: 'MCP', icon: Plug },
+    { id: 'skill', name: 'SKILL', icon: GraduationCap },
     { id: 'companion', name: '陪伴', icon: Sparkles },
   ],
 };
@@ -87,6 +93,8 @@ const STATIC_TAB_CONTENT: Record<string, React.ReactNode> = {
   shortcuts: <ShortcutsSettings />,
   model: <ModelSettings />,
   tools: <ToolsSettings />,
+  mcp: <McpSettings />,
+  skill: <SkillSettings />,
   companion: <CompanionSettings />,
   stats: <StatsSettings />,
   advanced: <AdvancedSettings />,

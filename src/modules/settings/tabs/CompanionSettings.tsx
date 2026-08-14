@@ -234,7 +234,7 @@ export function CompanionSettings() {
 
         <SettingRow
           title="日报"
-          description="每晚 21 点生成昨日工作日报写入笔记；AI 模型开启 Claude Code 后用它生成，否则用「场景模型」配置"
+          description="每晚 21 点生成昨日工作日报写入笔记，由「场景模型」配置生成"
         >
           <button
             onClick={handleRunAgent}

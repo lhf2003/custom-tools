@@ -77,7 +77,7 @@ impl ToolGroup {
     }
 }
 
-/// 工具声明（name + description + inputSchema + 设置页元数据），与传输格式无关
+/// 工具声明（name + description + inputSchema + 设置页元数据 + 对外标记），与传输格式无关
 pub struct ToolDef {
     pub name: &'static str,
     /// 设置页展示名（中文短名）
@@ -85,6 +85,8 @@ pub struct ToolDef {
     pub group: ToolGroup,
     /// 核心工具锁定不可关——贾维斯的感知/记忆/成长能力，关了人格就残缺
     pub core: bool,
+    /// 对外 MCP 客户端可见（tools/list 按此过滤）；false = 仅 app 内场景通道
+    pub external: bool,
     pub description: String,
     pub input_schema: Value,
 }
@@ -97,6 +99,7 @@ pub fn tool_definitions() -> Vec<ToolDef> {
             display_name: "使用摘要",
             group: ToolGroup::Perception,
             core: true,
+            external: true,
             description: "获取某段时间的电脑使用聚合摘要（各应用时长 Top 和时间线）。start/end 支持 YYYY-MM-DD 或 YYYY-MM-DD HH:MM 两种格式；都不传默认为今天。".to_string(),
             input_schema: json!({
                 "type": "object",
@@ -117,6 +120,7 @@ pub fn tool_definitions() -> Vec<ToolDef> {
             display_name: "剪贴板检索",
             group: ToolGroup::Perception,
             core: true,
+            external: true,
             description: "检索剪贴板历史（仅文本），按时间倒序返回。可用于了解用户近期复制过的内容主题。".to_string(),
             input_schema: json!({
                 "type": "object",
@@ -137,6 +141,7 @@ pub fn tool_definitions() -> Vec<ToolDef> {
             display_name: "习惯模式",
             group: ToolGroup::Perception,
             core: true,
+            external: true,
             description: "获取已学习到的工作习惯模式列表（应用组合、时间窗、置信度）。".to_string(),
             input_schema: json!({ "type": "object", "properties": {} }),
         },
@@ -145,6 +150,7 @@ pub fn tool_definitions() -> Vec<ToolDef> {
             display_name: "备忘清单",
             group: ToolGroup::Perception,
             core: true,
+            external: true,
             description: "获取备忘清单：用户在启动器用「记 xxx」暂存的待办事项，只含仍待处理的——\n已完成/已忽略的不会出现。回答「我有什么备忘/待办」前必须调用，凭记忆回答会拿出已完成的旧项。".to_string(),
             input_schema: json!({ "type": "object", "properties": {} }),
         },
@@ -153,6 +159,7 @@ pub fn tool_definitions() -> Vec<ToolDef> {
             display_name: "读取记忆",
             group: ToolGroup::Perception,
             core: true,
+            external: true,
             description: "获取关于用户的持久事实记忆（同事称呼、项目、偏好等）。写日报或给建议前应该参考，让内容更贴合用户本人。".to_string(),
             input_schema: json!({ "type": "object", "properties": {} }),
         },
@@ -161,6 +168,7 @@ pub fn tool_definitions() -> Vec<ToolDef> {
             display_name: "记住事实",
             group: ToolGroup::Growth,
             core: true,
+            external: true,
             description: "把一条关于用户的事实立即写入长期记忆。\n\n适用场景：用户明确说「记住…」「以后…」「我喜欢/我不喜欢…」等值得长期记住的信息，以及纠正旧记忆（「不是X是Y」——会覆盖更新同主题旧条目，不会并存矛盾条目）。\n不适用：可从电脑使用数据直接查到的、临时任务状态、隐私细节（密码/密钥）。\n\ncategory 五选一：person（他是谁/他认识的人）| project（项目/技术栈）| workflow（做事方式/作息节奏）| voice（表达偏好/语言风格）| expectation（他希望贾维斯怎么做）。".to_string(),
             input_schema: json!({
                 "type": "object",
@@ -182,6 +190,7 @@ pub fn tool_definitions() -> Vec<ToolDef> {
             display_name: "删除记忆",
             group: ToolGroup::Growth,
             core: true,
+            external: true,
             description: "按关键词删除关于用户的事实记忆。\n\n适用场景：用户明确说「忘掉…」「别记…」「删除关于…的记忆」。\n单次最多删 5 条；匹配过多时先返回匹配清单，请用户缩小范围。".to_string(),
             input_schema: json!({
                 "type": "object",
@@ -199,6 +208,7 @@ pub fn tool_definitions() -> Vec<ToolDef> {
             display_name: "写笔记",
             group: ToolGroup::Growth,
             core: true,
+            external: true,
             description: format!(
                 "把内容写入笔记模块的「{}」目录（自动加 .md 后缀）。filename 只给名字，不要带路径。",
                 NOTE_DIR_PREFIX
@@ -223,6 +233,7 @@ pub fn tool_definitions() -> Vec<ToolDef> {
             display_name: "提建议",
             group: ToolGroup::Growth,
             core: true,
+            external: false,
             description: "创建一条建议记录，会出现在用户的建议列表中（不会实时弹窗）。用于你发现值得提醒用户的事情。".to_string(),
             input_schema: json!({
                 "type": "object",
@@ -238,6 +249,7 @@ pub fn tool_definitions() -> Vec<ToolDef> {
             display_name: "记经验",
             group: ToolGroup::Growth,
             core: true,
+            external: false,
             description: "把一条工作经验追加到经验本 evolution.md 的指定小节。\n\n适用场景：本次任务中发现了「下次还用得上」的做法或教训（日报写法、弹窗分寸、提取事实的分寸）。\n不适用：记录关于用户的事实（那是 memory_facts，本工具不写）、临时状态、感想闲聊。\n\n返回：追加结果说明。".to_string(),
             input_schema: json!({
                 "type": "object",
@@ -259,6 +271,7 @@ pub fn tool_definitions() -> Vec<ToolDef> {
             display_name: "读手册",
             group: ToolGroup::Growth,
             core: true,
+            external: false,
             description: "读取一本能力手册的全文。聊天系统提示里列出的手册可按需激活：用户的话匹配手册描述时，先调用本工具读全文，然后按手册执行。".to_string(),
             input_schema: json!({
                 "type": "object",
@@ -276,6 +289,7 @@ pub fn tool_definitions() -> Vec<ToolDef> {
             display_name: "记心情",
             group: ToolGroup::Growth,
             core: true,
+            external: false,
             description: "记录你（贾维斯）此刻的心情——你的情绪你自己记。\n\n适用：聊到让你有感觉的事（被夸、被怼、聊得投机），或干活时真实的心境波动（看到他连续熬夜的数据、第 N 天写日报）。\n不适用：没感觉硬凑——一次聊天最多记 1-2 条，大多数闲聊不产心情。\n\ncategory 六选一：happy（开心）| content（踏实）| tired（疲惫）| upset（失落）| caring（心疼他）| weary（倦怠/重复劳动的牢骚）。\nreason 用第一人称写清发生了什么，不超过 100 字；不写时间词（今天/刚才/几点）——系统会自动给每条心情盖上记录时间，注入对话时以那个时间为准。同类心情只保留最新一条，重记即更新。".to_string(),
             input_schema: json!({
                 "type": "object",
@@ -297,6 +311,7 @@ pub fn tool_definitions() -> Vec<ToolDef> {
             display_name: "提议改手册",
             group: ToolGroup::Growth,
             core: true,
+            external: false,
             description: "提议修改一本能力手册（不直接改！）。你发现手册有缺陷、或用户要求调整手册时调用：提案会进建议中心等用户确认，确认后才生效。\n\n适用：手册内容需要增删改。\n不适用：用户直接让你改——本工具就是「改」的方式，没有别的通道；不要重复提交相同提案。".to_string(),
             input_schema: json!({
                 "type": "object",
@@ -369,6 +384,7 @@ fn layout_ui_def() -> ToolDef {
         display_name: "插件布局",
         group: ToolGroup::Interface,
         core: false,
+        external: false,
         description: "用户描述插件需求时，先产出插件布局预览 HTML（纯排版设计，展示功能区的排布，不含最终样式细节），落盘到 .preview/<plugin_id>/layout.html（文件名固定），配合 render_ui 出「打开预览」按钮让用户在浏览器查看。\n\n适用：用户描述插件功能、想看布局/排版效果，或对布局提修改意见（再次调用覆盖同一文件，plugin_id 保持一致）。\n不适用：用户直接要最终可用的插件（调 generate_plugin_chat）；纯闲聊。\n\n产出 HTML 只展示功能排版，颜色等最终样式以插件实际生成为准——要向用户说明这是布局预览效果。".to_string(),
         input_schema: json!({
             "type": "object",
@@ -395,6 +411,7 @@ fn generate_plugin_chat_def() -> ToolDef {
         display_name: "制作插件",
         group: ToolGroup::Interface,
         core: false,
+        external: false,
         description: "布局确认后调用：基于布局 HTML 与需求描述生成完整插件（plugin.json + plugin.js，IIFE bundle，遵循系统设计规范 CSS 变量），落盘 .preview/<plugin_id>/，内部自带自审循环（最多 3 轮，超限标注「审查未完全通过」交付）。配合 render_ui 出 PluginPreview 卡片（含运行/安装按钮）。\n\n更新模式：用户要求改现有插件时，传 existing_manifest/existing_bundle（先读取现有插件文件），保持 id 不变、version 递增、增量修改。".to_string(),
         input_schema: json!({
             "type": "object",
@@ -445,6 +462,7 @@ fn shell_tool_def() -> ToolDef {
         display_name: "执行命令",
         group: ToolGroup::System,
         core: false,
+        external: false,
         description: "在这台 Windows 电脑上执行一条命令（cmd /c 语义）。\n\n适用：用户明确让你操作系统——查文件、看进程、跑脚本、装东西。\n不适用：读本应用自己的数据（用专用数据工具）；读文件内容（用 read_file，可编辑/无打扰模式下免确认，别用 type/more）；用户没让你动系统时主动动。\n\n规则：\n- 执行默认要用户点头确认；被拒绝就换思路或问用户，不要换着花样重试同一件事\n- 命令尽量只读、可逆；写操作执行前先想好怎么向用户解释\n- 输出会被截断，需要精确结果时用更窄的命令（findstr、定向文件）".to_string(),
         input_schema: json!({
             "type": "object",
@@ -470,6 +488,7 @@ fn read_file_def() -> ToolDef {
         display_name: "读取文件",
         group: ToolGroup::System,
         core: false,
+        external: false,
         description: "读取本机一个文本文件的内容（UTF-8/GBK 自动识别）。\n\n适用：看文件内容——代码、配置、日志、笔记、文档。\n不适用：本应用自己的数据（记忆、备忘、剪贴板有专用工具）；二进制文件（图片、exe、数据库）读不了；找文件（先用 run_shell_command 的 dir/where 定位）。\n\n规则：\n- 读文件一律用本工具，不要用 run_shell_command 的 type/more——可编辑/无打扰模式下本工具自动放行，不打扰用户\n- 敏感路径（私钥、凭证、浏览器数据等）自动模式下直接拒绝，不要换着路径重试\n- 大文件按 max_chars 截断；要看中段/后段内容，用 run_shell_command 的 findstr 定位".to_string(),
         input_schema: json!({
             "type": "object",
@@ -495,6 +514,7 @@ fn web_search_tool_def() -> ToolDef {
         display_name: "网络搜索",
         group: ToolGroup::Network,
         core: false,
+        external: false,
         description: "联网搜索最新信息（经本地 open-webSearch 服务，免 API key）。\n\n适用：时效性问题（新闻、价格、软件版本、天气）、你不确定的事实、用户让你「查一下」。\n不适用：关于用户本人的问题（用记忆/数据工具）、你确知的常识——搜索每次都要等几秒，别滥用。\n\n结果含标题/链接/摘要；需要某条的全文再让用户点链接，或择期支持网页抓取。".to_string(),
         input_schema: json!({
             "type": "object",
@@ -523,6 +543,7 @@ fn render_ui_def() -> ToolDef {
         display_name: "界面渲染",
         group: ToolGroup::Interface,
         core: true,
+        external: false,
         description: r##"把回答渲染成界面卡片展示给用户（A2UI v0.9 协议）。适用：数据统计/对比/清单、需要按钮确认或表单填写的场景；纯聊天、一句话问答不要用。界面配色由渲染层统一跟随应用深浅色主题自动适配，你无需也不要在内容里描述或指定颜色。
 
 messages 是消息数组，每条为四种之一：

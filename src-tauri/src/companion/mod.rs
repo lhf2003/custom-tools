@@ -1,5 +1,4 @@
 pub mod a2ui;
-pub mod agent;
 pub mod analyzer;
 pub mod backup;
 pub mod chat;
@@ -7,6 +6,7 @@ pub mod db;
 pub mod diary;
 pub mod emotion;
 pub mod mcp;
+pub mod mcp_register;
 pub mod persona;
 pub mod plugin_gen_tool;
 pub mod recall;
@@ -102,57 +102,6 @@ fn read_flags(flags: &Arc<RwLock<CompanionFlags>>) -> CompanionFlags {
         .read()
         .map(|f| f.clone())
         .unwrap_or_else(|_| CompanionFlags::default())
-}
-
-/// 全局 Claude Code 开关（「设置 → AI 模型」中配置）。
-/// 门控陪伴的日报 agent、LLM 路由与缺报补跑。
-pub fn claude_code_enabled(app_handle: &AppHandle) -> bool {
-    use tauri::Manager;
-
-    app_handle
-        .try_state::<crate::commands::settings::SettingsState>()
-        .and_then(|s| {
-            s.0.lock()
-                .ok()
-                .map(|m| m.get_settings().claude_code_enabled)
-        })
-        .unwrap_or(false)
-}
-
-/// 解析 agent 运行配置并启动日报 agent。
-/// `date` 为日报目标日期（YYYY-MM-DD）。
-/// bin 路径复用设置中的 Claude Code 配置；
-/// 工作区使用独立空目录（不继承其他工作区——那里的 CLAUDE.md、
-/// .claude hooks 会注入 agent 上下文，且可能含敏感信息）。
-pub fn run_agent_with_settings(
-    app_handle: &AppHandle,
-    db_path: &std::path::Path,
-    date: &str,
-) -> Result<String, String> {
-    use tauri::Manager;
-
-    let settings_state = app_handle
-        .try_state::<crate::commands::settings::SettingsState>()
-        .ok_or("设置模块未初始化")?;
-    let settings = settings_state
-        .0
-        .lock()
-        .map_err(|e| e.to_string())?
-        .get_settings();
-
-    let notes_dir =
-        crate::notes::get_default_notes_dir().map_err(|e| format!("获取笔记目录失败: {}", e))?;
-
-    let work_dir = agent::resolve_work_dir(app_handle, &settings.claude_code_work_dir)?;
-
-    agent::run_daily_report_agent(
-        app_handle,
-        db_path,
-        &notes_dir,
-        &settings.claude_code_bin_path,
-        &work_dir,
-        date,
-    )
 }
 
 /// 空闲超过该值视为离开（AFK），当前活动段闭合到最后一次活跃时刻

@@ -181,11 +181,6 @@ pub(crate) struct RichFile {
     pub(crate) content: String,
 }
 
-/// 解析 rich content JSON；非 rich/结构不符返回 None
-pub(crate) fn parse_rich_content(content: &str) -> Option<RichContent> {
-    serde_json::from_str::<RichContent>(content).ok()
-}
-
 /// rich 消息压扁成纯文本（滚动摘要 / 兜底通道 / 记忆提取 / 日记素材用）：
 /// 附件只留引用——图片记数量、文件记名字；全文进摘要会把下游上下文烧爆。
 /// 非 JSON 输入原样返回（调用方无需先判 content_type 也安全）。

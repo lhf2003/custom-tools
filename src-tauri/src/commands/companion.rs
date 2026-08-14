@@ -9,6 +9,20 @@ fn open_conn(db_state: &DatabaseState) -> Result<Connection, String> {
     Connection::open(&db_state.0).map_err(|e| format!("打开数据库失败: {}", e))
 }
 
+// ── MCP 注册自愈 ─────────────────────────────────────────────
+
+/// 检测 ~/.claude.json 的 companion MCP 注册状态（MCP 设置页轮询）
+#[tauri::command]
+pub fn check_mcp_registration() -> crate::companion::mcp_register::McpRegistrationStatus {
+    crate::companion::mcp_register::check()
+}
+
+/// 一键修复 companion MCP 注册（备份原配置后写入期望条目）
+#[tauri::command]
+pub fn fix_mcp_registration() -> Result<String, String> {
+    crate::companion::mcp_register::fix()
+}
+
 /// 建议创建到用户点击之间应用可能已更新（Edge/Chrome 旧版本目录被删）——
 /// payload 路径失效时按 exe 名从使用记录重解析一条现存的替代路径
 fn resolve_launch_path(conn: &Connection, app: &db::LaunchAppItem) -> String {
@@ -256,9 +270,8 @@ pub async fn analyze_companion_now(
     analyzer::run_daily_analysis(&app_handle, &db_path).await
 }
 
-/// 手动触发一次日报 agent（阻塞执行，可能耗时几分钟，返回人话结果）
+/// 手动触发一次日报（场景模型版，阻塞执行可能耗时几分钟，返回人话结果）
 /// 归属与 0 点调度一致：生成「昨天」的日报
-/// 需要先在「设置 → AI 模型」中开启全局 Claude Code
 #[tauri::command]
 pub async fn run_companion_agent_now(
     db_state: State<'_, DatabaseState>,
@@ -268,30 +281,20 @@ pub async fn run_companion_agent_now(
     let yesterday = (chrono::Local::now() - chrono::Duration::days(1))
         .format("%Y-%m-%d")
         .to_string();
-    let cc_off = !crate::companion::claude_code_enabled(&app_handle);
     let db_for_task = db_path.clone();
     let date = yesterday.clone();
-    let result = if cc_off {
-        // Claude Code 未开启：回退场景模型版日报（陪伴绑定模型）
-        tauri::async_runtime::spawn_blocking(move || {
-            let notes_dir = crate::notes::get_default_notes_dir()
-                .map_err(|e| format!("获取笔记目录失败: {}", e))?;
-            tauri::async_runtime::block_on(crate::companion::analyzer::run_scene_report(
-                &app_handle,
-                &db_for_task,
-                &notes_dir,
-                &date,
-            ))
-        })
-        .await
-        .map_err(|e| format!("agent 线程异常: {}", e))?
-    } else {
-        tauri::async_runtime::spawn_blocking(move || {
-            crate::companion::run_agent_with_settings(&app_handle, &db_for_task, &date)
-        })
-        .await
-        .map_err(|e| format!("agent 线程异常: {}", e))?
-    };
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let notes_dir = crate::notes::get_default_notes_dir()
+            .map_err(|e| format!("获取笔记目录失败: {}", e))?;
+        tauri::async_runtime::block_on(crate::companion::analyzer::run_scene_report(
+            &app_handle,
+            &db_for_task,
+            &notes_dir,
+            &date,
+        ))
+    })
+    .await
+    .map_err(|e| format!("日报线程异常: {}", e))?;
     // 手动生成成功且笔记落盘 → 标记昨日日报完成，避免 0 点调度重复生成
     if result.is_ok() {
         let note_written = crate::notes::get_default_notes_dir()
@@ -496,6 +499,10 @@ pub struct ManualInfo {
     pub trigger_description: String,
     pub schedule: Option<String>,
     pub enabled: bool,
+    /// 依赖工具名清单（SKILL 能力页「能力→工具」映射展示）
+    pub tools: Vec<String>,
+    /// 内置（随应用播种，不可删不可开关）或导入（custom/，可删可开关）
+    pub builtin: bool,
 }
 
 fn format_schedule(s: &crate::companion::skills::Schedule) -> String {
@@ -536,8 +543,89 @@ pub fn list_manuals(app_handle: AppHandle) -> Result<Vec<ManualInfo>, String> {
             trigger_description: s.trigger_description,
             schedule: s.schedule.as_ref().map(format_schedule),
             enabled: s.enabled,
+            tools: s.tools,
+            builtin: s.builtin,
         })
         .collect())
+}
+
+/// 导入外部 SKILL 手册：写入 custom/ 子目录（frontmatter 规范化、强制 trigger_description、
+/// 同名拒绝——细则见 skills::import_skill）。返回导入后的条目。
+#[tauri::command]
+pub fn import_skill(app_handle: AppHandle, content: String) -> Result<ManualInfo, String> {
+    let app_data = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+    let s = crate::companion::skills::import_skill(&app_data, &content)?;
+    log::info!("导入手册「{}」到 custom/", s.name);
+    Ok(ManualInfo {
+        name: s.name,
+        description: s.description,
+        trigger_description: s.trigger_description,
+        schedule: s.schedule.as_ref().map(format_schedule),
+        enabled: s.enabled,
+        tools: s.tools,
+        builtin: s.builtin,
+    })
+}
+
+/// 删除导入的手册（内置不可删；删除前快照，可在备份列表回滚）
+#[tauri::command]
+pub fn delete_skill(app_handle: AppHandle, name: String) -> Result<(), String> {
+    let app_data = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+    crate::companion::skills::delete_skill(&app_data, &name)?;
+    log::info!("已删除导入手册「{}」", name);
+    Ok(())
+}
+
+/// 开关导入的手册（内置不可开关）
+#[tauri::command]
+pub fn set_skill_enabled(app_handle: AppHandle, name: String, enabled: bool) -> Result<(), String> {
+    let app_data = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+    crate::companion::skills::set_skill_enabled(&app_data, &name, enabled)?;
+    Ok(())
+}
+
+/// AI 起草触发场景描述：导入确认步「让 AI 起草」按钮用。
+/// 给手册名/简介/正文，场景模型写一句 trigger_description（source=skill_trigger_draft）。
+#[tauri::command]
+pub async fn draft_skill_trigger(
+    app_handle: AppHandle,
+    db_state: State<'_, DatabaseState>,
+    name: String,
+    description: String,
+    body: String,
+) -> Result<String, String> {
+    let excerpt: String = body.chars().take(800).collect();
+    let prompt = format!(
+        "为一本 agent 能力手册起草「触发场景描述」。\n手册名：{}\n手册简介：{}\n手册正文（节选）：\n{}\n\n\
+         要求：一句话（不超过 60 字），说明用户什么样的意图或说法时应该激活这本手册；\
+         如有明显的反例边界，用「；」接一句「……时不要激活」。\
+         只输出这句描述本身，不要前后缀、不要引号。",
+        name, description, excerpt
+    );
+    let draft = crate::companion::analyzer::call_scene_model_llm(
+        &app_handle,
+        &db_state.0,
+        prompt,
+        crate::llm_provider::models::Scene::Companion,
+        "skill_trigger_draft",
+    )
+    .await?;
+    Ok(draft.trim().trim_matches('"').trim_matches('"').to_string())
+}
+
+/// MCP 设置页的 server 卡片信息（协议/版本/对外工具名清单）
+#[tauri::command]
+pub fn get_mcp_server_info() -> crate::companion::mcp::McpServerInfo {
+    crate::companion::mcp::server_info()
 }
 
 /// 读手册完整原文（含 frontmatter——编辑器里 schedule/enabled 也可改）
@@ -677,6 +765,8 @@ pub struct CompanionToolInfo {
     pub group_description: String,
     /// 核心工具锁定不可关
     pub core: bool,
+    /// 对外数据面工具（MCP 通道暴露给外部客户端）
+    pub external: bool,
     pub enabled: bool,
 }
 
@@ -703,6 +793,7 @@ pub fn list_companion_tools(
                 group_label: d.group.label().to_string(),
                 group_description: d.group.description().to_string(),
                 core: d.core,
+                external: d.external,
                 enabled,
             }
         })

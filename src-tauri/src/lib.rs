@@ -470,7 +470,6 @@ pub fn run() {
                 let companion_state = companion::start(app.handle(), companion_db_path, flags);
                 app.manage(companion_state);
                 app.manage(companion::suggester::PendingToastState::default());
-                app.manage(companion::chat::JarvisChatChild::default());
                 app.manage(companion::scene_chat::JarvisSceneChatState::default());
                 app.manage(companion::websearch::WebSearchState::default());
             }
@@ -568,7 +567,6 @@ pub fn run() {
             commands::settings::toggle_auto_update,
             commands::settings::toggle_debug_mode,
             commands::settings::toggle_game_mode_mute,
-            commands::settings::validate_claude_cli,
             commands::settings::get_custom_scan_dirs,
             commands::settings::set_custom_scan_dirs,
             commands::system::open_external_url,
@@ -665,14 +663,18 @@ pub fn run() {
             commands::companion::set_companion_monologue,
             commands::companion::set_companion_retention_days,
             commands::companion::set_companion_long_work_minutes,
-            companion::chat::jarvis_chat_send,
             companion::scene_chat::jarvis_chat_send_scene,
-            companion::chat::jarvis_chat_cancel,
-            companion::chat::jarvis_chat_reset,
-            companion::chat::jarvis_agent_available,
+            companion::scene_chat::jarvis_chat_cancel_scene,
             companion::chat::jarvis_chat_system,
             commands::companion::list_companion_tools,
             commands::companion::set_companion_tool_enabled,
+            commands::companion::check_mcp_registration,
+            commands::companion::fix_mcp_registration,
+            commands::companion::get_mcp_server_info,
+            commands::companion::import_skill,
+            commands::companion::delete_skill,
+            commands::companion::set_skill_enabled,
+            commands::companion::draft_skill_trigger,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

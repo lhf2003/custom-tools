@@ -3,6 +3,7 @@ name: error-analysis
 description: 分析错误堆栈定位根因
 trigger_description: 他粘贴报错、异常堆栈、崩溃日志时激活；他只是口头说「有个 bug」但没贴具体内容时不要激活，先跟他要堆栈
 enabled: true
+tools: create_suggestion
 ---
 
 # 错误分析手册

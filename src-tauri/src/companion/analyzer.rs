@@ -335,8 +335,7 @@ fn run_report_and_mark(app: &AppHandle, db: &PathBuf, date: &str) {
         "companion_last_report_attempt",
         &chrono::Local::now().timestamp().to_string(),
     );
-    let cc_enabled = super::claude_code_enabled(app);
-    match run_report_with_fallback(app, db, date, cc_enabled) {
+    match run_report(app, db, date) {
         Ok(msg) => {
             let note_written = crate::notes::get_default_notes_dir()
                 .map(|d| {
@@ -1619,22 +1618,8 @@ struct ParsedMemoJson {
     triggers: db::IntentTriggers,
 }
 
-/// 日报执行（含降级）：CC 开启走 agent，agent 失败就地回退场景模型版——
-/// 降级 = 质量下降（无工具、单次成文），不是当天缺报（#4）。
-fn run_report_with_fallback(
-    app: &AppHandle,
-    db: &PathBuf,
-    date: &str,
-    cc_enabled: bool,
-) -> Result<String, String> {
-    if cc_enabled {
-        match super::run_agent_with_settings(app, db, date) {
-            Ok(msg) => return Ok(msg),
-            Err(agent_err) => {
-                log::warn!("日报 agent 失败，回退场景模型版: {}", agent_err);
-            }
-        }
-    }
+/// 日报执行：场景模型版单次成文（数据本地预聚合后内联给模型，不经 agent/MCP）。
+fn run_report(app: &AppHandle, db: &PathBuf, date: &str) -> Result<String, String> {
     match crate::notes::get_default_notes_dir() {
         Ok(notes_dir) => {
             tauri::async_runtime::block_on(run_scene_report(app, db, &notes_dir, date))
@@ -1704,8 +1689,7 @@ pub(crate) async fn run_scene_report(
     Ok(format!("日报已生成（场景模型）: {}", relative))
 }
 
-/// 陪伴统一 LLM 路由（陪伴场景）:全局 Claude Code 开启 → claude CLI 单次问答
-/// （失败自动回退场景模型）；未开启 → 直接用场景模型。
+/// 陪伴统一 LLM 路由（陪伴场景）：场景模型单次问答。
 /// `source` 为观测来源标记（analysis/report/recall/diary/intent_parse…），
 /// 所有调用统一登记 llm_call_logs（原则：新增调用点必须带着观测出生）。
 pub(crate) async fn call_companion_llm(
@@ -1726,91 +1710,7 @@ pub(crate) async fn call_llm_with_scene(
     source: &str,
 ) -> Result<String, String> {
     crate::llm::log_prompt(source, &prompt);
-    if super::claude_code_enabled(app_handle) {
-        let started = std::time::Instant::now();
-        let cc_result = run_claude_code_oneshot(app_handle, &prompt).await;
-        let duration_ms = started.elapsed().as_millis() as u64;
-        match cc_result {
-            Ok(reply) => {
-                // CC 通道（订阅制）不记成本，只统计 token
-                crate::llm::observe::log_call(
-                    db_path,
-                    &crate::llm::observe::LlmCallEntry {
-                        source,
-                        channel: "claude_code",
-                        scene: None,
-                        model: None,
-                        input_tokens: reply.input_tokens,
-                        cached_input_tokens: reply.cached_input_tokens,
-                        output_tokens: reply.output_tokens,
-                        cost_cny: 0.0,
-                        duration_ms,
-                        tool_call_count: 0,
-                        status: "ok",
-                        error: None,
-                    },
-                );
-                return Ok(reply.text);
-            }
-            Err(cc_err) => {
-                // CC 失败也登记——「Claude Code 挂了多少次」在面板可见
-                crate::llm::observe::log_call(
-                    db_path,
-                    &crate::llm::observe::LlmCallEntry {
-                        source,
-                        channel: "claude_code",
-                        scene: None,
-                        model: None,
-                        input_tokens: 0,
-                        cached_input_tokens: 0,
-                        output_tokens: 0,
-                        cost_cny: 0.0,
-                        duration_ms,
-                        tool_call_count: 0,
-                        status: "error",
-                        error: Some(&cc_err),
-                    },
-                );
-                log::warn!("Claude Code 调用失败，回退场景模型: {}", cc_err);
-                return call_scene_model_llm(app_handle, db_path, prompt, scene, source)
-                    .await
-                    .map_err(|scene_err| {
-                        format!(
-                            "Claude Code 失败（{}）；场景模型也不可用（{}）",
-                            cc_err, scene_err
-                        )
-                    });
-            }
-        }
-    }
-
     call_scene_model_llm(app_handle, db_path, prompt, scene, source).await
-}
-
-/// 在 blocking 线程里跑 claude CLI 单次问答（子进程是阻塞 IO，不能占 async runtime）
-async fn run_claude_code_oneshot(
-    app_handle: &AppHandle,
-    prompt: &str,
-) -> Result<super::agent::OneshotReply, String> {
-    use tauri::Manager;
-
-    let settings = app_handle
-        .try_state::<crate::commands::settings::SettingsState>()
-        .ok_or("设置模块未初始化")?
-        .0
-        .lock()
-        .map_err(|e| e.to_string())?
-        .get_settings();
-
-    let work_dir = super::agent::resolve_work_dir(app_handle, &settings.claude_code_work_dir)?;
-    let bin = settings.claude_code_bin_path.clone();
-    let prompt_owned = prompt.to_string();
-
-    tauri::async_runtime::spawn_blocking(move || {
-        super::agent::run_oneshot(&bin, &work_dir, &prompt_owned)
-    })
-    .await
-    .map_err(|e| format!("claude 线程异常: {}", e))?
 }
 
 /// 解析场景模型配置：provider + model + thinking_mode + 解密后的 api_key + 实际场景。

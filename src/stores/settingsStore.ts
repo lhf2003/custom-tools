@@ -21,9 +21,6 @@ export interface AppSettings {
   llm_api_key: string;
   llm_model: string;
   llm_thinking_mode: boolean;
-  claude_code_enabled: boolean;
-  claude_code_bin_path: string;
-  claude_code_work_dir: string;
   companion_enabled: boolean;
   companion_paused: boolean;
   companion_retention_days: number;
@@ -84,10 +81,6 @@ interface SettingsState extends AppSettings {
   toggleLlmThinkingMode: () => Promise<boolean>;
   testLlmConnection: () => Promise<string>;
 
-  setClaudeCodeEnabled: (enabled: boolean) => Promise<void>;
-  setClaudeCodeBinPath: (path: string) => Promise<string | undefined>;
-  setClaudeCodeWorkDir: (dir: string) => Promise<void>;
-
   // Companion Actions
   setCompanionEnabled: (enabled: boolean) => Promise<void>;
   setCompanionPaused: (paused: boolean) => Promise<void>;
@@ -125,9 +118,6 @@ const defaultSettings: AppSettings = {
   llm_api_key: '',
   llm_model: 'gpt-4o-mini',
   llm_thinking_mode: false,
-  claude_code_enabled: false,
-  claude_code_bin_path: 'claude',
-  claude_code_work_dir: '',
   companion_enabled: true,
   companion_paused: false,
   companion_retention_days: 30,
@@ -390,41 +380,6 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     } catch (err) {
       console.error('Failed to toggle llm_thinking_mode:', err);
       return get().llm_thinking_mode;
-    }
-  },
-
-  setClaudeCodeEnabled: async (enabled: boolean) => {
-    try {
-      await invoke('set_setting', { key: 'claude_code_enabled', value: enabled.toString() });
-      set({ claude_code_enabled: enabled });
-    } catch (err) {
-      console.error('Failed to set claude_code_enabled:', err);
-    }
-  },
-
-  setClaudeCodeBinPath: async (path: string) => {
-    // 保存时校验可执行（四期加固）：失败仅警告不阻断
-    let warning: string | undefined;
-    try {
-      await invoke<string>('validate_claude_cli', { path });
-    } catch (err) {
-      warning = String(err);
-    }
-    try {
-      await invoke('set_setting', { key: 'claude_code_bin_path', value: path });
-      set({ claude_code_bin_path: path });
-    } catch (err) {
-      console.error('Failed to set claude_code_bin_path:', err);
-    }
-    return warning;
-  },
-
-  setClaudeCodeWorkDir: async (dir: string) => {
-    try {
-      await invoke('set_setting', { key: 'claude_code_work_dir', value: dir });
-      set({ claude_code_work_dir: dir });
-    } catch (err) {
-      console.error('Failed to set claude_code_work_dir:', err);
     }
   },
 

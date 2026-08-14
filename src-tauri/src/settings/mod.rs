@@ -24,9 +24,6 @@ pub struct AppSettings {
     pub llm_api_key: String,
     pub llm_model: String,
     pub llm_thinking_mode: bool,
-    pub claude_code_enabled: bool,
-    pub claude_code_bin_path: String,
-    pub claude_code_work_dir: String,
     pub companion_enabled: bool,
     pub companion_paused: bool,
     pub companion_retention_days: i32,
@@ -60,9 +57,6 @@ impl Default for AppSettings {
             llm_api_key: String::new(),
             llm_model: "gpt-4o-mini".to_string(),
             llm_thinking_mode: false,
-            claude_code_enabled: false,
-            claude_code_bin_path: "claude".to_string(),
-            claude_code_work_dir: String::new(),
             companion_enabled: true,
             companion_paused: false,
             companion_retention_days: 30,
@@ -81,7 +75,7 @@ impl Default for AppSettings {
 /// SettingsManager 管辖的全部键。settings 表与陪伴模块状态、
 /// custom_scan_dirs / notes_directory 共享，reset 只能按此白名单删键——
 /// 全表 DELETE 会误删陪伴调度水位和扫描目录配置
-const KNOWN_KEYS: [&str; 27] = [
+const KNOWN_KEYS: [&str; 24] = [
     "always_on_top",
     "hide_on_blur",
     "startup_launch",
@@ -95,9 +89,6 @@ const KNOWN_KEYS: [&str; 27] = [
     "llm_api_key",
     "llm_model",
     "llm_thinking_mode",
-    "claude_code_enabled",
-    "claude_code_bin_path",
-    "claude_code_work_dir",
     "companion_enabled",
     "companion_paused",
     "companion_retention_days",
@@ -196,13 +187,6 @@ impl SettingsManager {
                         settings.llm_thinking_mode = v;
                     }
                 }
-                "claude_code_enabled" => {
-                    if let Ok(v) = value.parse::<bool>() {
-                        settings.claude_code_enabled = v;
-                    }
-                }
-                "claude_code_bin_path" => settings.claude_code_bin_path = value,
-                "claude_code_work_dir" => settings.claude_code_work_dir = value,
                 "companion_enabled" => {
                     if let Ok(v) = value.parse::<bool>() {
                         settings.companion_enabled = v;
@@ -363,13 +347,6 @@ impl SettingsManager {
                         cache.llm_thinking_mode = v;
                     }
                 }
-                "claude_code_enabled" => {
-                    if let Ok(v) = value.parse::<bool>() {
-                        cache.claude_code_enabled = v;
-                    }
-                }
-                "claude_code_bin_path" => cache.claude_code_bin_path = value.to_string(),
-                "claude_code_work_dir" => cache.claude_code_work_dir = value.to_string(),
                 "companion_enabled" => {
                     if let Ok(v) = value.parse::<bool>() {
                         cache.companion_enabled = v;

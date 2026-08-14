@@ -14,16 +14,13 @@ import {
   Languages,
   Brain,
   BookHeart,
-  FolderOpen,
-  RotateCcw,
   X,
 } from 'lucide-react';
 import { Tooltip } from '@/components/Tooltip';
 import { useLlmProviderStore, type Provider, type ProviderType, type Model, type Scene } from '@/stores/llmProviderStore';
-import { useSettingsStore } from '@/stores/settingsStore';
 import { useToastStore } from '@/stores/toastStore';
 import { confirmDialog } from '@/stores/confirmStore';
-import { SettingGroup, SettingRow, Toggle } from '../components/SettingsPrimitives';
+import { SettingGroup, SettingRow } from '../components/SettingsPrimitives';
 import { CustomSelect, type SelectGroup } from '../components/CustomSelect';
 import { LlmObserveSection } from './stats/LlmObserveSection';
 import { MossVoiceSettings } from './MossVoiceSettings';
@@ -102,33 +99,6 @@ export function ModelSettings() {
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
   const [testingProvider, setTestingProvider] = useState<number | null>(null);
   const [refreshingProvider, setRefreshingProvider] = useState<number | null>(null);
-
-  // Claude Code 全局配置（文本输入本地编辑，onBlur 提交）
-  const {
-    claude_code_enabled,
-    claude_code_bin_path,
-    claude_code_work_dir,
-    setClaudeCodeEnabled,
-    setClaudeCodeBinPath,
-    setClaudeCodeWorkDir,
-  } = useSettingsStore();
-  const [binPathInput, setBinPathInput] = useState(claude_code_bin_path);
-  const [binPathWarning, setBinPathWarning] = useState<string | null>(null);
-  const [workDirInput, setWorkDirInput] = useState(claude_code_work_dir);
-  useEffect(() => setBinPathInput(claude_code_bin_path), [claude_code_bin_path]);
-  useEffect(() => setWorkDirInput(claude_code_work_dir), [claude_code_work_dir]);
-
-  const browseWorkDir = async () => {
-    try {
-      const { open } = await import('@tauri-apps/plugin-dialog');
-      const selected = await open({ directory: true, multiple: false });
-      if (typeof selected === 'string') {
-        await setClaudeCodeWorkDir(selected);
-      }
-    } catch (e) {
-      console.error('Failed to open directory picker:', e);
-    }
-  };
 
   // Form state for new/edit provider
   const [formData, setFormData] = useState({
@@ -454,71 +424,6 @@ export function ModelSettings() {
 
   return (
     <>
-      {/* Harness 工具：Claude Code 开关 + 展开配置 */}
-      <SettingGroup title="Harness 工具">
-        <SettingRow
-          title="Claude Code"
-          description="开启后，支持 Claude Code 的功能（如陪伴）将由本地 Claude Code 执行"
-        >
-          <Toggle enabled={claude_code_enabled} onToggle={setClaudeCodeEnabled} />
-        </SettingRow>
-
-        {claude_code_enabled && (
-          <>
-            <SettingRow
-              title="CLI 路径"
-              description={
-                binPathWarning ? (
-                  <span className="text-app-status-warning-text">
-                    ⚠ {binPathWarning}（路径已保存，但 Claude Code 功能可能不可用）
-                  </span>
-                ) : (
-                  'claude CLI 可执行文件路径，默认从 PATH 查找'
-                )
-              }
-            >
-              <input
-                type="text"
-                value={binPathInput}
-                onChange={(e) => setBinPathInput(e.target.value)}
-                onBlur={async () => {
-                  const warning = await setClaudeCodeBinPath(binPathInput.trim() || 'claude');
-                  setBinPathWarning(warning ?? null);
-                }}
-                placeholder="claude"
-                className={`w-72 ${inputClass}`}
-              />
-            </SettingRow>
-
-            <SettingRow title="工作目录" description="">
-              <input
-                type="text"
-                value={workDirInput}
-                onChange={(e) => setWorkDirInput(e.target.value)}
-                onBlur={() => setClaudeCodeWorkDir(workDirInput.trim())}
-                placeholder={`%APPDATA%\\com.flowhub.app\\companion-agent`}
-                className={`w-72 ${inputClass}`}
-              />
-              <button
-                onClick={browseWorkDir}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-app-alpha-white-5 text-app-text-tertiary text-xs border border-app-border-subtle hover:bg-app-alpha-white-10 hover:text-app-text-primary transition-colors cursor-pointer"
-              >
-                <FolderOpen size={14} />
-                <span>浏览</span>
-              </button>
-              <Tooltip content="恢复默认" placement="top">
-                <button
-                  onClick={() => setClaudeCodeWorkDir('')}
-                  className="p-2 rounded-lg text-app-text-tertiary hover:text-app-text-primary hover:bg-app-bg-hover transition-colors cursor-pointer"
-                >
-                  <RotateCcw size={14} />
-                </button>
-              </Tooltip>
-            </SettingRow>
-          </>
-        )}
-      </SettingGroup>
-
       {/* Provider List */}
       <SettingGroup
         title="提供商列表"

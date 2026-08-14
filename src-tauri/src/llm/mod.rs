@@ -364,6 +364,8 @@ pub async fn call_llm_with_tools(
 /// 带工具的流式调用：文字内容经 on_text 回调逐段送出（调用方转发为前端事件），
 /// 工具调用增量聚合后随 ToolReply 返回。OpenAI SSE 与 Ollama NDJSON 双格式。
 /// 场景模型聊天通道专用——tool-use 循环能力保留的同时获得逐字流式体验。
+/// cancelled：Some 时每到一个 chunk 检查一次，已取消则断流返回已累积内容
+/// （调用方据此走「用户主动停」收尾，不报 error）。
 /// 错误字符串与 call_llm_with_tools 逐字一致（"API 错误 4" 前缀是降级链判据）。
 #[allow(clippy::too_many_arguments)]
 pub async fn call_llm_stream_with_tools(
@@ -376,6 +378,7 @@ pub async fn call_llm_stream_with_tools(
     thinking_mode: bool,
     reasoning_effort: &str,
     on_text: &(dyn Fn(&str) + Send + Sync),
+    cancelled: Option<&std::sync::atomic::AtomicBool>,
 ) -> Result<ToolReply, String> {
     if model.is_empty() {
         return Err("模型名称未配置".to_string());
@@ -464,6 +467,10 @@ pub async fn call_llm_stream_with_tools(
     let mut ollama_usage: (Option<u64>, Option<u64>) = (None, None);
 
     'stream: while let Some(chunk_result) = stream.next().await {
+        // 用户取消：断流（连接随 stream drop 断开），已累积内容照常返回
+        if cancelled.map_or(false, |c| c.load(std::sync::atomic::Ordering::Relaxed)) {
+            break 'stream;
+        }
         let chunk = chunk_result.map_err(|e| format!("读取流失败: {}", e))?;
 
         for byte in chunk {

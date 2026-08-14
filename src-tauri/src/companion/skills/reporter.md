@@ -1,8 +1,10 @@
 ---
 name: reporter
 description: 每天 0 点把他前一天的电脑使用盘成一份陪伴日报
+trigger_description: 他让你写日报、盘点某一天、总结今天干了什么时激活；只是随口问「我今天干了啥」时不要激活——那是数据查询，调 get_activity_summary 直接答
 schedule: daily 00:00
 enabled: true
+tools: get_activity_summary, get_habit_patterns, list_memos, get_memory_facts, write_note
 ---
 
 # 日报工作手册

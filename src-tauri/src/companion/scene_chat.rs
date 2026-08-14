@@ -107,12 +107,14 @@ fn build_chat_message(
     Ok(json!({ "role": role, "content": parts }))
 }
 
-/// 回退通道在飞状态：FIFO 排队（与 agent 通道同一语义——
-/// 在飞时新消息入队不打断，答完自动发下一条）
+/// 场景通道在飞状态：FIFO 排队（在飞时新消息入队不打断，答完自动发下一条）
 #[derive(Clone, Default)]
 pub struct JarvisSceneChatState {
     pub in_flight: Arc<Mutex<bool>>,
     pub queue: Arc<Mutex<VecDeque<(i64, String)>>>,
+    /// 用户主动取消标记：流式读取每 chunk 检查，工具循环每轮检查——
+    /// 取消 = 断流停答（不误报 error），同时清空排队消息
+    pub cancelled: Arc<std::sync::atomic::AtomicBool>,
     /// A2UI surface 状态按会话保持（session_id → surface 表）：
     /// 跨消息增量更新的前提——用户点击按钮回传后，模型用同一 surface_id
     /// 发增量消息（updateComponents/updateDataModel）才不会被校验器拒
@@ -170,11 +172,13 @@ pub async fn jarvis_chat_send_scene(
     tauri::async_runtime::spawn(async move {
         // 守卫在任务结束（含 panic 展开）时统一复位 in_flight
         let _flight_reset = FlightReset(state.in_flight.clone());
+        // 新一轮发送复位取消标记（FIFO 续发在同一任务内，取消会清队列终止循环）
+        state
+            .cancelled
+            .store(false, std::sync::atomic::Ordering::SeqCst);
         let mut current = (session_id, text);
         loop {
-            if let Err(e) =
-                run_scene_chat(&app, &db_path, &state.surfaces, current.0, current.1).await
-            {
+            if let Err(e) = run_scene_chat(&app, &db_path, &state, current.0, current.1).await {
                 log::warn!("场景模型聊天失败: {}", e);
             }
             let next = state.queue.lock().ok().and_then(|mut q| q.pop_front());
@@ -184,6 +188,21 @@ pub async fn jarvis_chat_send_scene(
             }
         }
     });
+    Ok(())
+}
+
+/// 取消当前在飞的场景聊天回复（同时清空排队消息）。
+/// 流式读取下个 chunk 即断流；工具循环在当前轮结束后停，不发起新一轮调用。
+#[tauri::command]
+pub fn jarvis_chat_cancel_scene(
+    scene_state: State<'_, JarvisSceneChatState>,
+) -> Result<(), String> {
+    scene_state
+        .cancelled
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    if let Ok(mut q) = scene_state.queue.lock() {
+        q.clear();
+    }
     Ok(())
 }
 
@@ -222,11 +241,13 @@ const UI_RULES: &str = "\
 async fn run_scene_chat(
     app_handle: &AppHandle,
     db_path: &PathBuf,
-    surfaces: &Arc<Mutex<HashMap<i64, SurfaceMap>>>,
+    state: &JarvisSceneChatState,
     session_id: i64,
     text: String,
 ) -> Result<(), String> {
     let _ = app_handle.emit("jarvis:start", ());
+    // state 内继续沿用 surfaces 短名（函数体引用点不变）
+    let surfaces = &state.surfaces;
 
     let app_data = app_handle
         .path()
@@ -318,6 +339,13 @@ async fn run_scene_chat(
     // 注意：loop 必须绑值（let _），不能写裸 `loop {...};`——rustfmt 会把语句位置
     // loop 尾部分号当冗余删掉，而 break 带值时无分号形式直接 E0308（实测 rustfmt 1.8）
     let _ = loop {
+        // 用户取消：不发起新一轮调用（流式中的取消由 call_llm_stream_with_tools 断流）
+        if state
+            .cancelled
+            .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            break String::new();
+        }
         rounds += 1;
         let started = std::time::Instant::now();
         let result = crate::llm::call_llm_stream_with_tools(
@@ -330,6 +358,7 @@ async fn run_scene_chat(
             thinking_mode,
             &reasoning_effort,
             on_text,
+            Some(&state.cancelled),
         )
         .await;
         let duration_ms = started.elapsed().as_millis() as u64;
@@ -564,6 +593,7 @@ async fn run_scene_chat(
                         thinking_mode,
                         &reasoning_effort,
                         on_text,
+                        Some(&state.cancelled),
                     )
                     .await;
                     let duration_ms = started.elapsed().as_millis() as u64;

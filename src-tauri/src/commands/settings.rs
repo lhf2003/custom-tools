@@ -293,33 +293,6 @@ pub fn check_shortcut_conflict(
 }
 
 /// Toggle auto update setting
-/// 校验 Claude Code CLI 路径可执行：试跑 --version，返回版本字符串。
-/// 保存路径时前端先调它；失败给警告但不阻断保存（四期裁决）。
-#[tauri::command]
-pub fn validate_claude_cli(path: String) -> Result<String, String> {
-    let work = std::env::temp_dir();
-    let output = crate::companion::agent::cli_command(&path, &work)
-        .arg("--version")
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .output()
-        .map_err(|e| format!("无法执行「{}」: {}", path, e))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!(
-            "「{}」执行失败: {}",
-            path,
-            stderr.chars().take(200).collect::<String>()
-        ));
-    }
-    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    Ok(if version.is_empty() {
-        "可执行（无版本输出）".to_string()
-    } else {
-        version
-    })
-}
-
 #[tauri::command]
 pub fn toggle_auto_update(state: State<'_, SettingsState>) -> Result<bool, String> {
     let manager = state.0.lock().map_err(|e| e.to_string())?;

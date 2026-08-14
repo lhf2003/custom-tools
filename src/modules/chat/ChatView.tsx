@@ -169,7 +169,7 @@ const MODES: Record<
   chat: {
     label: '贾维斯',
     placeholder: '聊点什么？你的数据他也知道…',
-    // 闲聊走贾维斯 agent 通道（claude CLI + MCP 数据工具），系统提示由后端 persona 体系组装
+    // 闲聊走贾维斯场景模型通道（tool-use 循环 + 数据工具），系统提示由后端 persona 体系组装
     system: '',
   },
 };
@@ -451,6 +451,18 @@ export function ChatView() {
     invoke('jarvis_recall_poke').catch(() => {});
   };
 
+  // 失败兜底回复：请求出错时追加一条不占库的占位 assistant 消息——
+  // 没有它，消息流停在用户气泡上，重试按钮（挂最后一条非卡片回复）无处显示。
+  // 占位不入库：重试的 truncate 对它空转，重发后由真实回复顶替；
+  // 用户不重试直接继续聊，它留在本次屏幕会话里做失败痕迹，恢复历史即消失。
+  const appendFailurePlaceholder = (err: string) => {
+    const brief = err.length > 200 ? err.slice(0, 200) + '…' : err;
+    setMessages((prev) => [
+      ...prev,
+      { role: 'assistant' as const, content: `⚠️ 请求失败：${brief}\n\n可点下方重试按钮重新发送。` },
+    ]);
+  };
+
   useEffect(() => {
     let active = true;
     let unlistenFns: Array<() => void> = [];
@@ -497,15 +509,18 @@ export function ChatView() {
         pokeRecall();
       });
       const u3 = await listen<string>('llm:error', (event) => {
+        // 先读后复位：用户主动取消后姗姗来迟的 error 不该出兜底占位
+        const wasCancelled = isCancelledRef.current;
         isCancelledRef.current = false;
         setError(event.payload);
         setCancelled(false);
         setIsLoading(false);
         setStreamText('');
         streamTextRef.current = '';
+        if (!wasCancelled) appendFailurePlaceholder(event.payload);
       });
 
-      // 贾维斯 agent 通道（claude CLI 流式协议）
+      // 贾维斯场景通道（流式事件契约 jarvis:start/status/chunk/done/error）
       const u4 = await listen<string>('jarvis:chunk', (event) => {
         if (isCancelledRef.current) return;
         // 同 llm:chunk：ref 必须同步累加，否则 done 读不到（场景回退通道
@@ -547,6 +562,8 @@ export function ChatView() {
         pokeRecall();
       });
       const u6 = await listen<string>('jarvis:error', (event) => {
+        // 先读后复位：用户主动取消后姗姗来迟的 error 不该出兜底占位
+        const wasCancelled = isCancelledRef.current;
         isCancelledRef.current = false;
         setAgentStatus(null);
         setError(event.payload);
@@ -554,6 +571,7 @@ export function ChatView() {
         setIsLoading(false);
         setStreamText('');
         streamTextRef.current = '';
+        if (!wasCancelled) appendFailurePlaceholder(event.payload);
       });
       const u7 = await listen<string>('jarvis:status', (event) => {
         if (!isCancelledRef.current) setAgentStatus(event.payload);
@@ -811,20 +829,10 @@ export function ChatView() {
 
     try {
       setAgentStatus(null);
-      // 带附件强制走场景通道：agent 通道的 CLI 没有读图工具（ALLOWED_TOOLS
-      // 仅 MCP），且视觉门槛校验的是场景模型——两通道附件语义才能统一
-      const agentAvailable =
-        !withAttachments && (await invoke<boolean>('jarvis_agent_available'));
-      if (agentAvailable) {
-        // 贾维斯 agent 通道：claude CLI + MCP 数据工具，流式事件 jarvis:*
-        await invoke('jarvis_chat_send', { text: userMessage.content });
-      } else {
-        // Claude Code 未开启：场景模型回退通道（tool-use 循环在后端，
-        // 事件契约与 agent 通道一致：jarvis:status / chunk / done / error）
-        const sid = sessionIdRef.current;
-        if (sid === null) throw new Error('会话未就绪，请稍候再试');
-        await invoke('jarvis_chat_send_scene', { sessionId: sid, text: userMessage.content });
-      }
+      // 场景模型通道：tool-use 循环在后端，流式事件 jarvis:status / chunk / done / error
+      const sid = sessionIdRef.current;
+      if (sid === null) throw new Error('会话未就绪，请稍候再试');
+      await invoke('jarvis_chat_send_scene', { sessionId: sid, text: userMessage.content });
       // 发送已被后端接管，清空待发附件（失败保留，用户可重发）
       setAttachments([]);
     } catch (err) {
@@ -912,7 +920,7 @@ export function ChatView() {
     setAgentStatus(null);
     if (mode === 'chat') {
       try {
-        await invoke('jarvis_chat_cancel');
+        await invoke('jarvis_chat_cancel_scene');
       } catch (e) {
         console.error('Failed to cancel jarvis chat:', e);
       }
@@ -922,7 +930,6 @@ export function ChatView() {
   // ── Retry last turn ───────────────────────────────────────────────
   // 重试 = 删掉该轮 assistant 落库行（含 A2UI 卡片行），用最后一条用户消息
   // 原文重走发送流程；不追加 user 消息、不清输入框草稿。
-  // agent 通道接受 claude 侧旧答案残留（裁决：重发即「再问一次」语义）。
   const handleRetry = useCallback(async () => {
     if (isLoading) return;
     const sid = sessionIdRef.current;
@@ -948,8 +955,8 @@ export function ChatView() {
     // 复位取消标记（同 handleSend：清空/取消后置过 true，不复位会丢本轮回复）
     isCancelledRef.current = false;
 
-    // 先删库再发送：scene 通道发送瞬间就从这个库重建上下文，
-    // 顺序反了旧回复会被重新吃进上下文（agent 通道上下文在 claude 侧，不受 DB 影响）
+    // 先删库再发送：场景通道发送瞬间就从这个库重建上下文，
+    // 顺序反了旧回复会被重新吃进上下文
     try {
       await invoke('truncate_chat_after_last_user', { sessionId: sid });
     } catch (e) {
@@ -970,14 +977,7 @@ export function ChatView() {
     setAgentStatus(null);
 
     try {
-      // 与 handleSend 同规则：附件消息强制场景通道（agent CLI 看不了图）
-      const isRich = messages[lastUserIdx].contentType === 'rich';
-      const agentAvailable = !isRich && (await invoke<boolean>('jarvis_agent_available'));
-      if (agentAvailable) {
-        await invoke('jarvis_chat_send', { text });
-      } else {
-        await invoke('jarvis_chat_send_scene', { sessionId: sid, text });
-      }
+      await invoke('jarvis_chat_send_scene', { sessionId: sid, text });
     } catch (err) {
       setMessages((prev) => [...prev, ...removed]);
       setIsLoading(false);
@@ -989,7 +989,7 @@ export function ChatView() {
   const handleNewSession = useCallback(async () => {
     setHistoryOpen(false);
     // 先取消后端在飞流式，避免旧会话回调继续改状态
-    invoke('jarvis_chat_cancel').catch(() => {});
+    invoke('jarvis_chat_cancel_scene').catch(() => {});
     stopSpeech();
     isCancelledRef.current = true;
     setMessages([]);
@@ -1003,15 +1003,6 @@ export function ChatView() {
     setAgentStatus(null);
     // 新会话同样展开显示空状态引导（与挂载行为一致）
     debouncedResize(WINDOW_SIZE.CHAT.expanded, WINDOW_SIZE.CHAT.width);
-
-    // 贾维斯通道：同时清掉 claude 侧会话上下文
-    if (mode === 'chat') {
-      try {
-        await invoke('jarvis_chat_reset');
-      } catch (e) {
-        console.error('Failed to reset jarvis session:', e);
-      }
-    }
 
     try {
       const id = await invoke<number>('create_chat_session', { mode });
@@ -1056,7 +1047,7 @@ export function ChatView() {
       }
       setHistoryOpen(false);
       // 先取消后端在飞流式，避免旧会话回调继续改状态
-      invoke('jarvis_chat_cancel').catch(() => {});
+      invoke('jarvis_chat_cancel_scene').catch(() => {});
       // 停掉在飞流式，整体替换内容
       isCancelledRef.current = true;
       setIsLoading(false);
@@ -1074,10 +1065,6 @@ export function ChatView() {
         setMessages([systemMsg, ...historyRowsToMessages(msgs)]);
         setHasResponse(msgs.length > 0);
         setSessionId(id);
-        // 贾维斯 agent 上下文无法随历史会话复原，按新话题重置
-        if (mode === 'chat') {
-          await invoke('jarvis_chat_reset').catch(() => {});
-        }
       } catch (e) {
         console.error('Failed to switch session:', e);
         setError('切换会话失败');

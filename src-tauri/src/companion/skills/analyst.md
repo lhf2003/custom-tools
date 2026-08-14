@@ -1,8 +1,10 @@
 ---
 name: analyst
 description: 每天分四个时段从窗口活动流水里挖行为模式与关于他的事实
+trigger_description: 他让你分析近期的使用习惯、工作模式或行为规律时激活；只是问「今天用了多久电脑」这类一次性数据查询时不要激活——调 get_activity_summary 直接回答
 schedule: daily 09:00,14:00,18:00,00:00
 enabled: true
+tools: get_activity_summary, get_habit_patterns, get_memory_facts, remember_fact, forget_fact
 ---
 
 # 分析工作手册
