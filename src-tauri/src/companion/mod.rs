@@ -11,6 +11,7 @@ pub mod mcp;
 pub mod mcp_client;
 pub mod mcp_register;
 pub mod mcp_servers;
+pub mod mcp_stdio;
 pub mod persona;
 pub mod plugin_gen_tool;
 pub mod recall;

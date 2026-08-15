@@ -207,6 +207,16 @@ pub fn jarvis_chat_cancel_scene(
     Ok(())
 }
 
+/// 查询场景聊天是否在飞（含排队中）。前端视图切换会卸载 ChatView，
+/// 本地 isLoading 丢失——重挂载时靠本命令恢复「取消按钮可见」状态，
+/// 否则生成仍在跑却无取消入口。
+#[tauri::command]
+pub fn jarvis_chat_is_generating(
+    scene_state: State<'_, JarvisSceneChatState>,
+) -> Result<bool, String> {
+    Ok(*scene_state.in_flight.lock().map_err(|e| e.to_string())?)
+}
+
 /// 执行一条回退聊天：tool-use 循环（上限 MAX_TOOL_ROUNDS 轮，每轮登记 llm_call_logs）。
 /// 流式（与 agent 通道一致）：每轮调用经 on_text 逐 chunk emit jarvis:chunk，
 /// 工具轮文字照常送出，最终回答结束由 jarvis:done 收尾。

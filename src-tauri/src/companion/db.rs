@@ -247,6 +247,25 @@ pub fn init_tables(conn: &Connection) -> rusqlite::Result<()> {
         [],
     )?;
 
+    // 第三方 MCP 工具调用日志（MCP 设置页 per-server 日志弹窗）
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS mcp_tool_calls (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            server_name TEXT NOT NULL,
+            tool_name TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'ok',
+            duration_ms INTEGER NOT NULL DEFAULT 0,
+            result_len INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_mcp_tool_calls_server
+         ON mcp_tool_calls(server_name, id DESC)",
+        [],
+    )?;
+
     Ok(())
 }
 
@@ -1254,6 +1273,68 @@ pub fn last_assistant_chat_at(conn: &Connection) -> Option<i64> {
     chrono::TimeZone::from_local_datetime(&chrono::Local, &ndt)
         .single()
         .map(|dt| dt.timestamp())
+}
+
+// ── 第三方 MCP 工具调用日志 ───────────────────────────────────
+
+/// 一条外部工具调用记录（MCP 设置页日志弹窗）
+#[derive(Debug, serde::Serialize)]
+pub struct McpToolCallLog {
+    pub id: i64,
+    pub tool_name: String,
+    /// ok | error（连接失败/server 报错/路由失败等）
+    pub status: String,
+    pub duration_ms: i64,
+    pub result_len: i64,
+    pub created_at: i64,
+}
+
+/// 写入一条调用记录（成功与失败都记——日志的本职是反映真实调用流）
+pub fn insert_mcp_tool_call(
+    conn: &Connection,
+    server_name: &str,
+    tool_name: &str,
+    status: &str,
+    duration_ms: i64,
+    result_len: usize,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO mcp_tool_calls (server_name, tool_name, status, duration_ms, result_len, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![
+            server_name,
+            tool_name,
+            status,
+            duration_ms,
+            result_len as i64,
+            chrono::Local::now().timestamp()
+        ],
+    )?;
+    Ok(())
+}
+
+/// 某 server 的最近调用记录（新在前，最多 limit 条）
+pub fn list_mcp_tool_calls(
+    conn: &Connection,
+    server_name: &str,
+    limit: i64,
+) -> rusqlite::Result<Vec<McpToolCallLog>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, tool_name, status, duration_ms, result_len, created_at
+         FROM mcp_tool_calls WHERE server_name = ?1
+         ORDER BY id DESC LIMIT ?2",
+    )?;
+    let rows = stmt.query_map(rusqlite::params![server_name, limit], |r| {
+        Ok(McpToolCallLog {
+            id: r.get(0)?,
+            tool_name: r.get(1)?,
+            status: r.get(2)?,
+            duration_ms: r.get(3)?,
+            result_len: r.get(4)?,
+            created_at: r.get(5)?,
+        })
+    })?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
 }
 
 #[cfg(test)]

@@ -668,6 +668,7 @@ pub fn run() {
             commands::companion::set_companion_long_work_minutes,
             companion::scene_chat::jarvis_chat_send_scene,
             companion::scene_chat::jarvis_chat_cancel_scene,
+            companion::scene_chat::jarvis_chat_is_generating,
             companion::chat::jarvis_chat_system,
             commands::companion::list_companion_tools,
             commands::companion::set_companion_tool_enabled,
@@ -676,9 +677,12 @@ pub fn run() {
             commands::companion::get_mcp_server_info,
             commands::companion::list_external_mcp_servers,
             commands::companion::import_external_mcp_server,
+            commands::companion::import_external_mcp_server_json,
             commands::companion::delete_external_mcp_server,
             commands::companion::set_external_mcp_server_enabled,
             commands::companion::refresh_external_mcp_server,
+            commands::companion::list_mcp_tool_calls,
+            commands::companion::update_external_mcp_server,
             commands::companion::import_skill,
             commands::companion::delete_skill,
             commands::companion::set_skill_enabled,
@@ -687,9 +691,10 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| {
-            // 退出时整树清理搜索 daemon（cmd→npx→node，不杀会留孤儿进程）
+            // 退出时整树清理搜索 daemon 与 stdio MCP server（cmd→npx→node，不杀会留孤儿进程）
             if matches!(event, tauri::RunEvent::Exit) {
                 companion::websearch::shutdown_daemon(app_handle);
+                companion::mcp_stdio::shutdown_all();
             }
         });
 }

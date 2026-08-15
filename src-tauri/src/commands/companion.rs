@@ -669,19 +669,30 @@ pub fn list_external_mcp_servers(
     Ok(crate::companion::mcp_servers::list_infos(&settings_state.0))
 }
 
-/// 导入第三方 server：slug/URL 校验 → 强制连通验证（initialize + tools/list 快照）。
+/// 导入第三方 server（手动配置）：config 为完整 server 配置 JSON（前端表单组装）。
+/// slug/传输校验 → 强制连通验证（initialize + tools/list 快照）。
 /// 验证失败且 force=false 时报错；前端确认「仍然保存」后以 force=true 重调（存为未连接）。
 #[tauri::command]
 pub async fn import_external_mcp_server(
     settings_state: State<'_, SettingsState>,
-    name: String,
-    display_name: String,
-    url: String,
-    token: String,
+    config: String,
     force: bool,
 ) -> Result<crate::companion::mcp_servers::ExternalMcpServerInfo, String> {
-    crate::companion::mcp_servers::import(&settings_state.0, name, display_name, url, token, force)
-        .await
+    let server: crate::companion::mcp_servers::ExternalMcpServer =
+        serde_json::from_str(&config).map_err(|e| format!("配置解析失败: {}", e))?;
+    crate::companion::mcp_servers::import(&settings_state.0, server, force).await
+}
+
+/// 导入第三方 server（JSON 粘贴）：raw 为 Claude Desktop mcpServers 单条目
+/// `{"name": {"command"/"url": ...}}`。解析后走同一导入通道（校验 + 验证 + 降级保存）。
+#[tauri::command]
+pub async fn import_external_mcp_server_json(
+    settings_state: State<'_, SettingsState>,
+    raw: String,
+    force: bool,
+) -> Result<crate::companion::mcp_servers::ExternalMcpServerInfo, String> {
+    let server = crate::companion::mcp_servers::parse_server_entry(&raw)?;
+    crate::companion::mcp_servers::import(&settings_state.0, server, force).await
 }
 
 /// 删除第三方 server（连带清理其工具开关残留）
@@ -710,6 +721,31 @@ pub async fn refresh_external_mcp_server(
     name: String,
 ) -> Result<crate::companion::mcp_servers::ExternalMcpServerInfo, String> {
     crate::companion::mcp_servers::refresh(&settings_state.0, &name).await
+}
+
+/// 更新第三方 server 配置（slug 不可改；凭据留空=保持原值、删行=清除）。
+/// 保存后重探测刷新快照；验证失败且 force=false 时报错，前端确认后 force 重调。
+#[tauri::command]
+pub async fn update_external_mcp_server(
+    settings_state: State<'_, SettingsState>,
+    name: String,
+    config: String,
+    force: bool,
+) -> Result<crate::companion::mcp_servers::ExternalMcpServerInfo, String> {
+    let incoming: crate::companion::mcp_servers::ExternalMcpServer =
+        serde_json::from_str(&config).map_err(|e| format!("配置解析失败: {}", e))?;
+    crate::companion::mcp_servers::update(&settings_state.0, &name, incoming, force).await
+}
+
+/// 某 server 的最近调用日志（MCP 设置页日志弹窗，新在前）
+#[tauri::command]
+pub fn list_mcp_tool_calls(
+    db_state: State<DatabaseState>,
+    server_name: String,
+) -> Result<Vec<crate::companion::db::McpToolCallLog>, String> {
+    let conn = Connection::open(&db_state.0).map_err(|e| e.to_string())?;
+    crate::companion::db::list_mcp_tool_calls(&conn, &server_name, 50)
+        .map_err(|e| e.to_string())
 }
 
 /// 读手册完整原文（含 frontmatter——编辑器里 schedule/enabled 也可改）

@@ -59,9 +59,18 @@ interface ToggleProps {
   onClick?: (e: React.MouseEvent<HTMLButtonElement>) => void;
   /** 禁用态：不响应点击，视觉降低存在感（如未选模型时的思考开关） */
   disabled?: boolean;
+  /** mini 尺寸：卡片行等紧凑场景（默认 normal 与设置行同规格） */
+  size?: 'normal' | 'mini';
 }
 
-export function Toggle({ enabled = false, onToggle, onClick, disabled = false }: ToggleProps) {
+export function Toggle({
+  enabled = false,
+  onToggle,
+  onClick,
+  disabled = false,
+  size = 'normal',
+}: ToggleProps) {
+  const mini = size === 'mini';
   return (
     <button
       type="button"
@@ -73,18 +82,20 @@ export function Toggle({ enabled = false, onToggle, onClick, disabled = false }:
         onClick?.(e);
         onToggle?.(!enabled);
       }}
-      className={`relative w-12 h-7 rounded-full overflow-hidden transition-all duration-200 ${
-        disabled ? 'cursor-not-allowed opacity-30' : 'cursor-pointer'
-      } ${
+      className={`relative rounded-full overflow-hidden transition-all duration-200 ${
+        mini ? 'w-8 h-[18px]' : 'w-12 h-7'
+      } ${disabled ? 'cursor-not-allowed opacity-30' : 'cursor-pointer'} ${
         enabled
           ? 'bg-app-status-info hover:bg-app-status-info-deep'
           : 'bg-app-bg-pressed hover:brightness-110'
       }`}
     >
       <span
-        className={`absolute top-1 left-0 w-5 h-5 rounded-full bg-white transition-transform duration-200 ${
-          enabled ? 'translate-x-6' : 'translate-x-1'
-        }`}
+        className={`absolute rounded-full bg-white transition-transform duration-200 ${
+          mini
+            ? 'top-[2px] left-0 w-[14px] h-[14px]'
+            : 'top-1 left-0 w-5 h-5'
+        } ${mini ? (enabled ? 'translate-x-[14px]' : 'translate-x-[3px]') : enabled ? 'translate-x-6' : 'translate-x-1'}`}
       />
     </button>
   );

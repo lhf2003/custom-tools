@@ -44,7 +44,7 @@ impl From<RpcError> for String {
 
 pub struct McpHttpClient {
     url: String,
-    token: Option<String>,
+    headers: Vec<(String, String)>,
     http: reqwest::Client,
     session_id: Option<String>,
     next_id: u64,
@@ -52,7 +52,7 @@ pub struct McpHttpClient {
 
 impl McpHttpClient {
     /// 构造并做入口校验：仅 http/https；/sse 结尾的老式端点明确拒绝
-    pub fn new(url: &str, token: Option<String>) -> Result<Self, String> {
+    pub fn new(url: &str, headers: Vec<(String, String)>) -> Result<Self, String> {
         if !url.starts_with("http://") && !url.starts_with("https://") {
             return Err("仅支持 http/https 地址".to_string());
         }
@@ -67,7 +67,7 @@ impl McpHttpClient {
         let http = crate::http::build_client(TIMEOUT)?;
         Ok(Self {
             url: url.to_string(),
-            token,
+            headers,
             http,
             session_id: None,
             next_id: 1,
@@ -190,9 +190,9 @@ impl McpHttpClient {
                 "application/json, text/event-stream",
             )
             .json(&body);
-        if let Some(token) = &self.token {
-            if !token.is_empty() {
-                req = req.bearer_auth(token);
+        for (k, v) in &self.headers {
+            if !k.is_empty() {
+                req = req.header(k.as_str(), v.as_str());
             }
         }
         if let Some(sid) = &self.session_id {
@@ -218,7 +218,7 @@ impl McpHttpClient {
 
 /// 提取 tools/call 结果文本：content 数组的 text 段拼接；
 /// content 为空但有 structuredContent 时序列化兜底
-fn extract_result_text(result: &Value) -> String {
+pub(crate) fn extract_result_text(result: &Value) -> String {
     let mut parts: Vec<&str> = Vec::new();
     if let Some(content) = result.get("content").and_then(|c| c.as_array()) {
         for item in content {
@@ -239,7 +239,7 @@ fn extract_result_text(result: &Value) -> String {
 }
 
 /// 截断工具结果到 16KB（按 char boundary 截，标注原始大小）
-fn truncate_tool_result(text: &str) -> String {
+pub(crate) fn truncate_tool_result(text: &str) -> String {
     if text.len() <= MAX_RESULT_BYTES {
         return text.to_string();
     }
@@ -298,7 +298,7 @@ fn sse_data_frames(body: &str) -> Vec<String> {
 }
 
 /// 解 JSON-RPC 信封：error 字段转人话错误，否则取 result
-fn unwrap_rpc_envelope(msg: Value) -> Result<Value, String> {
+pub(crate) fn unwrap_rpc_envelope(msg: Value) -> Result<Value, String> {
     if let Some(err) = msg.get("error") {
         let code = err.get("code").and_then(|c| c.as_i64()).unwrap_or(0);
         let message = err
@@ -372,8 +372,8 @@ mod tests {
 
     #[test]
     fn rejects_sse_suffix_and_non_http() {
-        assert!(McpHttpClient::new("https://x.com/abc/sse", None).is_err());
-        assert!(McpHttpClient::new("ftp://x.com/mcp", None).is_err());
-        assert!(McpHttpClient::new("https://x.com/abc/mcp", None).is_ok());
+        assert!(McpHttpClient::new("https://x.com/abc/sse", vec![]).is_err());
+        assert!(McpHttpClient::new("ftp://x.com/mcp", vec![]).is_err());
+        assert!(McpHttpClient::new("https://x.com/abc/mcp", vec![]).is_ok());
     }
 }
