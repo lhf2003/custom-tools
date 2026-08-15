@@ -63,8 +63,10 @@ impl McpHttpClient {
                     .to_string(),
             );
         }
-        // 统一走 http 工厂：系统代理开关对所有对外请求一致生效
-        let http = crate::http::build_client(TIMEOUT)?;
+        // 本地 MCP server 常跑在 127.0.0.1（Ollama 类服务）：走 loopback-safe
+        // 工厂防系统代理劫持（reqwest 0.13 默认读系统代理且不尊重 ProxyOverride
+        // 绕过列表，开关关闭时 build_client 不附加 bypass，loopback 会挂死）
+        let http = crate::http::build_client_loopback_safe(TIMEOUT)?;
         Ok(Self {
             url: url.to_string(),
             headers,

@@ -10,10 +10,12 @@
 //! - 只读 HKCU，不读 HKLM 企业策略代理
 //!
 //! 生效范围：LLM 调用、模型列表、插件 AI 生成（经 build_client），
-//! 以及自动更新检查/下载（commands/updater.rs 经 apply_system_proxy 注入）。
-//! 例外：websearch 本地 daemon（companion/websearch.rs）必须显式 .no_proxy()——
-//! reqwest 0.13 默认读 Windows 系统代理且不尊重 ProxyOverride 绕过列表，
-//! 不 no_proxy 的话 loopback 请求会被送进代理挂死。
+//! 自动更新检查/下载（commands/updater.rs 经 apply_system_proxy 注入），
+//! 以及 HTTP 类型第三方 MCP server（经 build_client_loopback_safe）。
+//! loopback 兜底两处：websearch 本地 daemon（companion/websearch.rs）显式
+//! .no_proxy() 全直连；MCP client 走 loopback-safe 工厂补 bypass——reqwest 0.13
+//! 默认读 Windows 系统代理且不尊重 ProxyOverride 的 127.* 绕过列表，
+//! 不处理的话 loopback 请求会被送进代理挂死。
 
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
@@ -242,6 +244,25 @@ pub fn build_client(timeout: Duration) -> Result<reqwest::Client, String> {
     }
 
     Ok(client)
+}
+
+/// 本地服务专用客户端工厂（HTTP 类型第三方 MCP server 等可能指向 loopback）。
+/// 背景：reqwest 0.13 默认读 Windows 系统代理且不尊重 ProxyOverride 的 127.*
+/// 绕过列表——应用内开关关闭时 build_client 不附加显式代理，loopback 请求
+/// 会被送进代理挂死（websearch daemon 实测）。本工厂只要注册表里系统代理开着
+/// 就附加「带 loopback 绕过」的显式代理：非 loopback 流量与开关关闭时现状一致
+/// （仍走系统代理），loopback 固定直连。不挂连接池缓存（每个调用方各持一个，
+/// 构建一次长期复用）。
+pub fn build_client_loopback_safe(timeout: Duration) -> Result<reqwest::Client, String> {
+    let mut builder = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(timeout);
+    if let Some(server) = read_system_proxy() {
+        builder = apply_proxy(builder, &server);
+    }
+    builder
+        .build()
+        .map_err(|e| format!("构建 HTTP 客户端失败: {e}"))
 }
 
 #[cfg(test)]
