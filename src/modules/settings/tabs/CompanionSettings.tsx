@@ -1,11 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
-  Brain,
   Clock,
-  Trash2,
-  RefreshCw,
-  Activity,
   Eraser,
   MapPin,
   Wifi,
@@ -15,7 +11,6 @@ import {
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useToastStore } from '@/stores/toastStore';
 import { confirmDialog } from '@/stores/confirmStore';
-import { Tooltip } from '@/components/Tooltip';
 import { SettingGroup, SettingRow, Toggle } from '../components/SettingsPrimitives';
 import { CustomSelect } from '../components/CustomSelect';
 import { MemoryCenter } from './MemoryCenter';
@@ -24,40 +19,12 @@ import { EvolutionGovernance } from './EvolutionGovernance';
 import { MEMO_VIEW_PATH } from '../../markdown/components/MemosView';
 import type { OpenViewDetail } from '@/types';
 
-interface HabitPattern {
-  id: number;
-  pattern_type: string;
-  signature: string;
-  description: string;
-  pattern_data: string;
-  confidence: number;
-  occurrences: number;
-  status: string;
-  first_seen: number;
-  last_seen: number;
-}
-
 /** 贾维斯认下的场所（CASE-003：fingerprint 原文只在本机展示，不进 LLM 上下文） */
 interface CompanionPlace {
   fingerprint: string;
   name: string;
   created_at: number;
 }
-
-const STATUS_LABEL: Record<string, { text: string; color: string }> = {
-  dismissed: { text: '已忽略', color: 'text-white/30' },
-  learning: { text: '学习中', color: 'text-amber-400' },
-  confirmed: { text: '已确认', color: 'text-emerald-400' },
-};
-
-function formatDuration(secs: number): string {
-  if (secs < 60) return `${secs}s`;
-  if (secs < 3600) return `${Math.round(secs / 60)}min`;
-  return `${(secs / 3600).toFixed(1)}h`;
-}
-
-/** 学习概览各子区默认展示条数，超出「查看全部」inline 展开 */
-const PREVIEW_COUNT = 3;
 
 /** 备忘笔记的相对路径（与后端 commands/companion.rs 的 INTENT_NOTE_RELATIVE 对应） */
 
@@ -78,23 +45,13 @@ export function CompanionSettings() {
   } = useSettingsStore();
   const { addToast } = useToastStore();
 
-  const [todaySummary, setTodaySummary] = useState<[string, number][]>([]);
-  const [patterns, setPatterns] = useState<HabitPattern[]>([]);
   const [places, setPlaces] = useState<CompanionPlace[]>([]);
-  const [analyzing, setAnalyzing] = useState(false);
   const [agentRunning, setAgentRunning] = useState(false);
-  const [expandPatterns, setExpandPatterns] = useState(false);
   const [subView, setSubView] = useState<'main' | 'memory' | 'suggestions' | 'governance'>('main');
 
   const loadData = useCallback(async () => {
     try {
-      const [summary, patternList, placeList] = await Promise.all([
-        invoke<[string, number][]>('get_companion_today_summary'),
-        invoke<HabitPattern[]>('get_companion_patterns'),
-        invoke<CompanionPlace[]>('list_companion_places'),
-      ]);
-      setTodaySummary(summary);
-      setPatterns(patternList);
+      const placeList = await invoke<CompanionPlace[]>('list_companion_places');
       setPlaces(placeList);
     } catch (err) {
       console.error('Failed to load companion data:', err);
@@ -104,24 +61,6 @@ export function CompanionSettings() {
   useEffect(() => {
     loadData();
   }, [loadData]);
-
-  const handleAnalyzeNow = async () => {
-    setAnalyzing(true);
-    try {
-      const result = await invoke<string>('analyze_companion_now');
-      addToast({ type: 'success', title: '分析完成', message: result, duration: 5000 });
-      await loadData();
-    } catch (err) {
-      addToast({
-        type: 'error',
-        title: '分析失败',
-        message: err instanceof Error ? err.message : String(err),
-        duration: 5000,
-      });
-    } finally {
-      setAnalyzing(false);
-    }
-  };
 
   const handleRunAgent = async () => {
     setAgentRunning(true);
@@ -160,15 +99,6 @@ export function CompanionSettings() {
         title: '清空失败',
         message: err instanceof Error ? err.message : String(err),
       });
-    }
-  };
-
-  const handleDismissPattern = async (id: number) => {
-    try {
-      await invoke('set_companion_pattern_status', { id, status: 'dismissed' });
-      await loadData();
-    } catch (err) {
-      console.error('Failed to dismiss pattern:', err);
     }
   };
 
@@ -216,9 +146,6 @@ export function CompanionSettings() {
     { value: '120', label: '2 小时' },
     { value: '180', label: '3 小时' },
   ];
-
-  const maxTotal = todaySummary.length > 0 ? todaySummary[0][1] : 1;
-  const visiblePatterns = expandPatterns ? patterns : patterns.slice(0, PREVIEW_COUNT);
 
   // 二级视图：记忆中心 / 建议中心 / 进化治理
   if (subView === 'memory') {
@@ -304,7 +231,7 @@ export function CompanionSettings() {
 
         <SettingRow
           title="记忆中心"
-          description="贾维斯记住的事——五维分组查看、编辑、删除，变更有审计"
+          description="贾维斯记住的事与学到的习惯模式——分组查看、编辑、删除，变更有审计"
         >
           <button
             onClick={() => setSubView('memory')}
@@ -382,107 +309,6 @@ export function CompanionSettings() {
                       </button>
                     </div>
                   ))}
-                </div>
-              )}
-            </section>
-          </div>
-        </div>
-      )}
-
-      {/* 学习概览：未启用陪伴时隐藏（没有数据可学） */}
-      {companion_enabled && (
-        <div className="mb-8">
-          <h3 className="text-xs font-semibold text-app-text-tertiary px-3 mb-1.5">学习概览</h3>
-          <div className="px-3 space-y-5">
-            {/* 今日使用 */}
-            <section>
-              <div className="flex items-center gap-2 mb-2">
-                <Activity size={13} className="text-app-text-tertiary" />
-                <span className="text-app-text-tertiary text-xs font-medium">今日使用</span>
-              </div>
-              {todaySummary.length === 0 ? (
-                <p className="text-app-text-disabled text-xs">今天还没有采集到数据</p>
-              ) : (
-                <div className="space-y-1.5">
-                  {todaySummary.slice(0, PREVIEW_COUNT).map(([proc, secs]) => (
-                    <div key={proc} className="flex items-center gap-2 text-xs">
-                      <span className="text-app-text-secondary w-32 truncate">{proc}</span>
-                      <div className="flex-1 h-1.5 rounded-full bg-white/10 overflow-hidden">
-                        <div
-                          className="h-full rounded-full bg-app-brand-primary/70"
-                          style={{ width: `${Math.max(2, (secs / maxTotal) * 100)}%` }}
-                        />
-                      </div>
-                      <span className="text-app-text-tertiary w-14 text-right tabular-nums">
-                        {formatDuration(secs)}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-
-            {/* 习惯模式 */}
-            <section>
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center gap-2">
-                  <Brain size={13} className="text-app-text-tertiary" />
-                  <span className="text-app-text-tertiary text-xs font-medium">学到的习惯模式</span>
-                </div>
-                <button
-                  onClick={handleAnalyzeNow}
-                  disabled={analyzing}
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-app-text-tertiary text-xs hover:bg-white/10 hover:text-app-text-primary transition-colors cursor-pointer disabled:opacity-50 disabled:hover:bg-transparent"
-                >
-                  <RefreshCw size={12} className={analyzing ? 'animate-spin' : ''} />
-                  {analyzing ? '分析中…' : '立即分析'}
-                </button>
-              </div>
-              {patterns.length === 0 ? (
-                <p className="text-app-text-disabled text-xs">
-                  还没有学到模式——积累一天数据后每晚 21 点自动分析，也可点「立即分析」
-                </p>
-              ) : (
-                <div>
-                  {visiblePatterns.map((p) => {
-                    const status = STATUS_LABEL[p.status] ?? STATUS_LABEL.learning;
-                    return (
-                      <div
-                        key={p.id}
-                        className="flex items-center gap-2 rounded-lg px-2 py-1.5 -mx-2 hover:bg-white/5 transition-colors"
-                      >
-                        <div className="flex-1 min-w-0">
-                          <Tooltip content={p.description} wrapperClassName="w-full truncate">
-                            <div className="text-app-text-secondary text-xs">
-                              {p.description}
-                            </div>
-                          </Tooltip>
-                          <div className="text-app-text-disabled text-xs mt-0.5">
-                            置信度 {Math.round(p.confidence * 100)}% · 观察到 {p.occurrences} 次 ·{' '}
-                            <span className={status.color}>{status.text}</span>
-                          </div>
-                        </div>
-                        {p.status !== 'dismissed' && (
-                          <Tooltip content="不再使用此模式" wrapperClassName="shrink-0">
-                            <button
-                              onClick={() => handleDismissPattern(p.id)}
-                              className="text-app-text-disabled hover:text-app-status-error-text transition-colors cursor-pointer shrink-0"
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          </Tooltip>
-                        )}
-                      </div>
-                    );
-                  })}
-                  {patterns.length > PREVIEW_COUNT && (
-                    <button
-                      onClick={() => setExpandPatterns(!expandPatterns)}
-                      className="mt-1 px-2 text-app-text-tertiary hover:text-app-text-primary text-xs transition-colors cursor-pointer"
-                    >
-                      {expandPatterns ? '收起' : `查看全部 (${patterns.length})`}
-                    </button>
-                  )}
                 </div>
               )}
             </section>

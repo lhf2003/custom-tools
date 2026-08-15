@@ -376,8 +376,7 @@ export function LlmObserveSection() {
             </div>
           )}
           <p className="text-app-text-disabled text-xs mt-2.5">
-            成本 = token × 模型单价（人民币，在本页模型单价中配置）；Claude Code 通道为订阅制，
-            不计成本；流式调用（翻译/问答）暂不计 token；Claude Code 通道的工具调用数不可观测，记 0。
+            成本 = token × 模型单价；流式调用（翻译）暂不计 token
           </p>
         </div>
       </div>

@@ -19,11 +19,13 @@ tools: get_activity_summary, get_habit_patterns, get_memory_facts, remember_fact
 2. **startup_sequence**：一天开始工作时的固定启动序列（开机后最先打开的一串应用）
 3. **context_routine**：每天大约同一时间会做的小事（如下午打开音乐、午饭后刷视频）
 
-## 任务二：沉淀关于他的事实（三维）
+## 任务二：沉淀关于他的事实（五个分类）
 
-- **identity**：他是谁（职业、项目、技术栈、常用工具、兴趣爱好）
-- **workflow**：他怎么做事（作息规律、工作节奏、行为链）
-- **voice**：他怎么表达（语言风格、喜欢怎么被回应）——只管表达层面；爱看什么、爱玩什么归 identity
+- **person**：他是谁、他身边的人（职业、同事称呼、家人朋友；爱看什么、爱玩什么也归这里）
+- **project**：他的项目与技术栈（在做什么项目、用什么框架/语言/工具链、常用工具）
+- **workflow**：他怎么做事（作息规律、工作节奏、协作习惯、行为链）
+- **voice**：他怎么表达（语言风格、措辞偏好、格式禁忌）——只管表达层面
+- **expectation**：他希望你（贾维斯）怎么做（汇报详略、提醒频率、称呼方式、什么别打扰他）——这一维来自聊天里的显式表达，流水挖不出，别硬造
 
 素材里附有「已有记忆」清单（带 id）。流水里的大多数行为，都是已知事实的又一次实例——
 第一反应应该是「这对应清单里哪条」，而不是「这是什么新事实」：
@@ -33,7 +35,7 @@ tools: get_activity_summary, get_habit_patterns, get_memory_facts, remember_fact
 - 判断尺子：把时间、文件名、具体对象抹掉后说的是同一件事，就必须合并成一条
 - 确实是新事实才 add
 
-每条一句话，最多 3 条；没有新事实就返回空数组——一天没有新事实很正常，宁缺毋滥。
+每条一句话，最多 3 条；没有新事实就返回空数组，没有新事实很正常，宁缺毋滥。
 不确定的不要写（带「可能/也许」的推测也不写）；一律用「他」，禁用「用户」。
 落笔前过一次保质期测试：一个月后这条还成立、还重要吗？过不了就不写。
 
@@ -86,6 +88,6 @@ tools: get_activity_summary, get_habit_patterns, get_memory_facts, remember_fact
 
 1. apps/app 必须使用摘要中的进程名原文；time/time_window 必须是 HH:MM / HH:MM-HH:MM
 2. 只保留置信度 >= 0.5 的；每种 type 最多 2 个；没有可靠模式就返回空数组
-3. facts 的 category 从 person/project/workflow/voice/expectation 中选；三维映射：identity→person 或 project、workflow→workflow、voice→voice
+3. facts 的 category 五选一：person/project/workflow/voice/expectation（定义见任务二）；流水基本只能挖出 person/project/workflow 三维，voice/expectation 别硬造
 4. update 的 target_id 必须来自「已有记忆」清单里的 id；对不上 id 就用 add
 5. app_descriptions 只填摘要中没带「（描述）」的进程；本身就认识的常见软件务必填，冷僻进程不确定不填

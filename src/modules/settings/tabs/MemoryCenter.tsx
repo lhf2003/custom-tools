@@ -38,6 +38,19 @@ interface MemoryFactEvent {
   created_at: number;
 }
 
+interface HabitPattern {
+  id: number;
+  pattern_type: string;
+  signature: string;
+  description: string;
+  pattern_data: string;
+  confidence: number;
+  occurrences: number;
+  status: string;
+  first_seen: number;
+  last_seen: number;
+}
+
 const CATEGORIES: { key: string; label: string }[] = [
   { key: 'person', label: '他是谁' },
   { key: 'project', label: '他的项目' },
@@ -61,6 +74,12 @@ const SOURCE_LABEL: Record<string, string> = {
   analysis: '每日分析',
 };
 
+const STATUS_LABEL: Record<string, { text: string; color: string }> = {
+  dismissed: { text: '已忽略', color: 'text-white/30' },
+  learning: { text: '学习中', color: 'text-amber-400' },
+  confirmed: { text: '已确认', color: 'text-emerald-400' },
+};
+
 function formatTime(ts: number): string {
   return new Date(ts * 1000).toLocaleString('zh-CN', {
     month: 'numeric',
@@ -74,26 +93,30 @@ interface MemoryCenterProps {
   onBack: () => void;
 }
 
-/** 记忆中心：贾维斯记住的事——五维分组、搜索、编辑、删除、变更审计 */
+/** 记忆中心：贾维斯记住的事（五维分组）+ 学到的习惯模式——分组折叠、搜索、编辑、删除、变更审计 */
 export function MemoryCenter({ onBack }: MemoryCenterProps) {
   const { addToast } = useToastStore();
   const [facts, setFacts] = useState<MemoryFact[]>([]);
   const [events, setEvents] = useState<MemoryFactEvent[]>([]);
+  const [patterns, setPatterns] = useState<HabitPattern[]>([]);
   const [keyword, setKeyword] = useState('');
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editText, setEditText] = useState('');
   const [editCategory, setEditCategory] = useState('person');
   const [historyFor, setHistoryFor] = useState<number | null>(null);
   const [historyEvents, setHistoryEvents] = useState<MemoryFactEvent[]>([]);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const loadData = useCallback(async () => {
     try {
-      const [factList, recentEvents] = await Promise.all([
+      const [factList, recentEvents, patternList] = await Promise.all([
         invoke<MemoryFact[]>('get_companion_memory_facts'),
         invoke<MemoryFactEvent[]>('get_companion_memory_fact_events', { limit: 20 }),
+        invoke<HabitPattern[]>('get_companion_patterns'),
       ]);
       setFacts(factList);
       setEvents(recentEvents);
+      setPatterns(patternList);
     } catch (err) {
       console.error('Failed to load memory center:', err);
     }
@@ -102,6 +125,8 @@ export function MemoryCenter({ onBack }: MemoryCenterProps) {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  const searching = keyword.trim().length > 0;
 
   const filtered = useMemo(() => {
     const kw = keyword.trim();
@@ -113,10 +138,28 @@ export function MemoryCenter({ onBack }: MemoryCenterProps) {
     const known = CATEGORIES.map((c) => ({
       ...c,
       items: filtered.filter((f) => f.category === c.key),
-    })).filter((g) => g.items.length > 0);
-    const others = filtered.filter((f) => !CATEGORIES.some((c) => c.key === f.category));
+    }));
+    const others = {
+      key: 'others',
+      label: '其他',
+      items: filtered.filter((f) => !CATEGORIES.some((c) => c.key === f.category)),
+    };
     return { known, others };
   }, [filtered]);
+
+  const toggleGroup = (key: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  const isOpen = (key: string) => (searching ? true : expanded.has(key));
 
   const handleStartEdit = (fact: MemoryFact) => {
     setEditingId(fact.id);
@@ -163,6 +206,15 @@ export function MemoryCenter({ onBack }: MemoryCenterProps) {
         title: '删除失败',
         message: err instanceof Error ? err.message : String(err),
       });
+    }
+  };
+
+  const handleDismissPattern = async (id: number) => {
+    try {
+      await invoke('set_companion_pattern_status', { id, status: 'dismissed' });
+      await loadData();
+    } catch (err) {
+      console.error('Failed to dismiss pattern:', err);
     }
   };
 
@@ -276,6 +328,78 @@ export function MemoryCenter({ onBack }: MemoryCenterProps) {
     );
   };
 
+  const renderPatternRow = (p: HabitPattern) => {
+    const status = STATUS_LABEL[p.status] ?? STATUS_LABEL.learning;
+    return (
+      <div
+        key={p.id}
+        className="flex items-center gap-2 rounded-lg px-2 py-1.5 -mx-2 hover:bg-white/5 transition-colors"
+      >
+        <div className="flex-1 min-w-0">
+          <Tooltip content={p.description} wrapperClassName="w-full truncate">
+            <div className="text-white/80 text-xs">{p.description}</div>
+          </Tooltip>
+          <div className="text-white/30 text-xs mt-0.5">
+            置信度 {Math.round(p.confidence * 100)}% · 观察到 {p.occurrences} 次 ·{' '}
+            <span className={status.color}>{status.text}</span>
+          </div>
+        </div>
+        {p.status !== 'dismissed' && (
+          <Tooltip content="不再使用此模式" wrapperClassName="shrink-0">
+            <button
+              onClick={() => handleDismissPattern(p.id)}
+              className="text-white/30 hover:text-red-400 transition-colors cursor-pointer shrink-0"
+            >
+              <Trash2 size={13} />
+            </button>
+          </Tooltip>
+        )}
+      </div>
+    );
+  };
+
+  /** 分组折叠行：一行标题 + 点击展开/收起内容 */
+  const renderGroupRow = (
+    key: string,
+    label: string,
+    count: number,
+    children: React.ReactNode,
+    emptyHint?: string
+  ) => {
+    const open = isOpen(key);
+    const toggleable = !searching;
+    return (
+      <div key={key}>
+        <button
+          onClick={() => toggleable && toggleGroup(key)}
+          className={`w-full flex items-center gap-2 px-3 py-2.5 rounded-xl border transition-colors cursor-pointer ${
+            open
+              ? 'bg-white/[0.04] border-white/15'
+              : 'bg-white/[0.02] border-white/10 hover:bg-white/5'
+          }`}
+        >
+          <ChevronRight
+            size={14}
+            className={`text-white/40 shrink-0 transition-transform ${open ? 'rotate-90' : ''}`}
+          />
+          <span className="text-white/70 text-xs font-medium">{label}</span>
+          <span className="text-white/25 text-xs">{count}</span>
+        </button>
+        {open && (
+          <div className="mt-1 pl-2 space-y-0.5">
+            {count === 0 ? (
+              <p className="text-white/25 text-xs px-2 py-1">{emptyHint ?? '这组还没有内容'}</p>
+            ) : (
+              children
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const emptyAll = facts.length === 0 && patterns.length === 0;
+
   return (
     <>
       <div className="flex items-center gap-3 mb-6">
@@ -292,7 +416,9 @@ export function MemoryCenter({ onBack }: MemoryCenterProps) {
         </div>
         <div>
           <h2 className="text-white text-lg font-semibold">记忆中心</h2>
-          <p className="text-white/40 text-xs">贾维斯记住的事，可查看、编辑、删除，变更有迹可循</p>
+          <p className="text-white/40 text-xs">
+            贾维斯记住的事与学到的习惯模式，可查看、编辑、删除，变更有迹可循
+          </p>
         </div>
       </div>
 
@@ -307,34 +433,43 @@ export function MemoryCenter({ onBack }: MemoryCenterProps) {
           />
         </div>
 
-        {filtered.length === 0 ? (
+        {emptyAll && !searching ? (
           <div className="rounded-xl border border-white/10 bg-white/[0.02] p-6 text-center">
             <p className="text-white/30 text-xs">
-              {facts.length === 0
-                ? '还没有记忆——和贾维斯聊聊，或者说一句「记住我喜欢…」'
-                : '没有匹配的记忆'}
+              还没有记忆——和贾维斯聊聊，或者说一句「记住我喜欢…」
             </p>
           </div>
+        ) : filtered.length === 0 && searching ? (
+          <div className="rounded-xl border border-white/10 bg-white/[0.02] p-6 text-center">
+            <p className="text-white/30 text-xs">没有匹配的记忆</p>
+          </div>
         ) : (
-          <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4 space-y-4">
-            {groups.known.map((g) => (
-              <section key={g.key}>
-                <div className="flex items-center gap-2 mb-1.5">
-                  <span className="text-white/50 text-xs font-medium">{g.label}</span>
-                  <span className="text-white/25 text-xs">{g.items.length}</span>
-                </div>
-                <div className="space-y-0.5">{g.items.map(renderFactRow)}</div>
-              </section>
-            ))}
-            {groups.others.length > 0 && (
-              <section>
-                <div className="flex items-center gap-2 mb-1.5">
-                  <span className="text-white/50 text-xs font-medium">其他</span>
-                  <span className="text-white/25 text-xs">{groups.others.length}</span>
-                </div>
-                <div className="space-y-0.5">{groups.others.map(renderFactRow)}</div>
-              </section>
+          <div className="space-y-2">
+            {patterns.length > 0 && !searching && (
+              <div>
+                {renderGroupRow(
+                  'patterns',
+                  '学到的习惯模式',
+                  patterns.length,
+                  patterns.map(renderPatternRow),
+                  '还没有学到模式——积累一天数据后每晚 21 点自动分析'
+                )}
+              </div>
             )}
+            <div className="space-y-2">
+              {groups.known.map((g) =>
+                searching && g.items.length === 0
+                  ? null
+                  : renderGroupRow(g.key, g.label, g.items.length, g.items.map(renderFactRow))
+              )}
+              {(groups.others.items.length > 0 || !searching) &&
+                renderGroupRow(
+                  'others',
+                  '其他',
+                  groups.others.items.length,
+                  groups.others.items.map(renderFactRow)
+                )}
+            </div>
           </div>
         )}
 

@@ -598,7 +598,7 @@ export function ModelSettings() {
                                 )}
                               </div>
                               <Tooltip
-                                content="单价（人民币/百万 token），成本面板据此估算金额，留空只统计 token"
+                                content="单价（人民币/百万 token），留空只统计 token"
                                 wrapperClassName="flex items-center gap-1 mr-1 flex-shrink-0"
                               >
                                 <div className="flex items-center gap-1 mr-1 flex-shrink-0">
