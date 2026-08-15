@@ -11,12 +11,16 @@
 //! text/event-stream（SSE 帧流，取匹配 id 的一帧）；initialize 响应可能带
 //! Mcp-Session-Id 头，后续请求必须回传；session 失效（404）重初始化一次再试。
 
+use futures_util::StreamExt;
 use serde_json::{json, Value};
 use std::time::Duration;
 
 const TIMEOUT: Duration = Duration::from_secs(30);
 /// 单个工具结果的最大字节数（超出截断并标注）
 const MAX_RESULT_BYTES: usize = 16 * 1024;
+/// 响应体字节上限：30s 超时只限时间不限流量，恶意 server 可灌 GB 级 body
+/// （CASE-005 H-2）；tools/list 大工具集也远小于此值，超限即中断报错
+const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 /// streamable HTTP 传输由 2025-03-26 版协议引入
 const PROTOCOL_VERSION: &str = "2025-03-26";
 
@@ -149,11 +153,12 @@ impl McpHttpClient {
         }
         let status = resp.status();
         if !status.is_success() {
-            let excerpt = resp.text().await.unwrap_or_default();
+            // 不含响应体摘要：非 2xx 响应内容可能来自内网服务，进 last_error
+            // 落库/设置页可读 = 内网响应外带通道（CASE-005 H-3 修复项）
             return Err(RpcError::Other(format!(
                 "HTTP {} {}",
                 status.as_u16(),
-                excerpt.chars().take(200).collect::<String>()
+                status.canonical_reason().unwrap_or("")
             )));
         }
         self.capture_session(&resp);
@@ -163,10 +168,7 @@ impl McpHttpClient {
             .and_then(|v| v.to_str().ok())
             .unwrap_or("")
             .to_string();
-        let body = resp
-            .text()
-            .await
-            .map_err(|e| RpcError::Other(format!("读取响应失败: {}", e)))?;
+        let body = read_body_limited(resp).await?;
         parse_response_body(&content_type, &body, id).map_err(RpcError::Other)
     }
 
@@ -216,6 +218,33 @@ impl McpHttpClient {
             }
         }
     }
+}
+
+/// 流式读响应体：Content-Length 预检 + chunked 流累加上限双重防护，
+/// 超 MAX_RESPONSE_BYTES 即中断报错（不落盘、不进内存上限）
+async fn read_body_limited(resp: reqwest::Response) -> Result<String, RpcError> {
+    if let Some(len) = resp.content_length() {
+        if len > MAX_RESPONSE_BYTES as u64 {
+            return Err(RpcError::Other(format!(
+                "响应体 {}MB 超过 {}MB 上限，已拒绝读取",
+                len / 1024 / 1024,
+                MAX_RESPONSE_BYTES / 1024 / 1024
+            )));
+        }
+    }
+    let mut body: Vec<u8> = Vec::new();
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| RpcError::Other(format!("读取响应失败: {}", e)))?;
+        if body.len() + chunk.len() > MAX_RESPONSE_BYTES {
+            return Err(RpcError::Other(format!(
+                "响应体超过 {}MB 上限，已中断读取",
+                MAX_RESPONSE_BYTES / 1024 / 1024
+            )));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    String::from_utf8(body).map_err(|e| RpcError::Other(format!("响应不是合法 UTF-8: {}", e)))
 }
 
 /// 提取 tools/call 结果文本：content 数组的 text 段拼接；

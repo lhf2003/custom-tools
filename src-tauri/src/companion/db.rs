@@ -1289,7 +1289,11 @@ pub struct McpToolCallLog {
     pub created_at: i64,
 }
 
-/// 写入一条调用记录（成功与失败都记——日志的本职是反映真实调用流）
+/// 每 server 最多保留的调用记录数（超出删最旧——CASE-001 M2 保留策略）
+const MCP_TOOL_CALL_KEEP: i64 = 500;
+
+/// 写入一条调用记录（成功与失败都记——日志的本职是反映真实调用流），
+/// 并裁剪到每 server 最近 MCP_TOOL_CALL_KEEP 条防表无限膨胀
 pub fn insert_mcp_tool_call(
     conn: &Connection,
     server_name: &str,
@@ -1309,6 +1313,12 @@ pub fn insert_mcp_tool_call(
             result_len as i64,
             chrono::Local::now().timestamp()
         ],
+    )?;
+    conn.execute(
+        "DELETE FROM mcp_tool_calls WHERE server_name = ?1 AND id NOT IN (
+             SELECT id FROM mcp_tool_calls WHERE server_name = ?1 ORDER BY id DESC LIMIT ?2
+         )",
+        rusqlite::params![server_name, MCP_TOOL_CALL_KEEP],
     )?;
     Ok(())
 }

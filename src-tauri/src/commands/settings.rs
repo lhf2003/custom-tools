@@ -28,9 +28,19 @@ fn mask_secret(secret: &str) -> String {
     }
 }
 
+/// 敏感 KV：原值禁止经 get_setting 泛化通道下发（与 get_settings 脱敏对齐，
+/// CASE-001 L8——WebView 内任意 invoke 代码可读回明文凭据）
+const SENSITIVE_KEYS: &[&str] = &["mcp_external_servers", "llm_api_key"];
+
 /// Get a single KV setting by key（插件启用状态等通用键）
 #[tauri::command]
 pub fn get_setting(state: State<'_, SettingsState>, key: String) -> Result<Option<String>, String> {
+    if SENSITIVE_KEYS.contains(&key.as_str()) {
+        return Err(format!(
+            "敏感设置项「{}」不通过 get_setting 下发，请使用专用脱敏通道",
+            key
+        ));
+    }
     let manager = state.0.lock().map_err(|e| e.to_string())?;
     manager.get_setting(&key).map_err(|e| e.to_string())
 }

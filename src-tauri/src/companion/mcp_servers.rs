@@ -14,6 +14,10 @@ use crate::settings::SettingsManager;
 /// settings 表键名
 pub const SETTINGS_KEY: &str = "mcp_external_servers";
 
+/// 连接验证失败的稳定错误前缀：前端据以弹「仍然保存」降级确认，
+/// 不靠文案子串匹配（CASE-001 M7）
+pub const VALIDATION_ERROR_PREFIX: &str = "MCP_VALIDATION:";
+
 /// 键值对（headers/env 保序存储）
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct KeyValue {
@@ -111,8 +115,10 @@ pub struct ExternalMcpServerInfo {
     pub enabled: bool,
     pub connected: bool,
     pub last_error: String,
-    /// 已配置凭据的 key 名（headers 与 env 合并，值不下发）
-    pub secret_entries: Vec<String>,
+    /// 已配置 http headers 凭据的 key 名（值不下发，按归属拆分——编辑弹窗按 transport 预填）
+    pub header_entries: Vec<String>,
+    /// 已配置 stdio env 凭据的 key 名（值不下发）
+    pub env_entries: Vec<String>,
     pub has_secret: bool,
     pub tools: Vec<ExternalToolBrief>,
 }
@@ -125,14 +131,20 @@ pub struct ExternalToolBrief {
 
 impl ExternalMcpServer {
     fn to_info(&self) -> ExternalMcpServerInfo {
-        let mut secret_entries: Vec<String> = self
+        let mut header_entries: Vec<String> = self
             .headers
             .iter()
-            .chain(self.env.iter())
             .filter(|kv| !kv.key.is_empty())
             .map(|kv| kv.key.clone())
             .collect();
-        secret_entries.dedup();
+        let mut env_entries: Vec<String> = self
+            .env
+            .iter()
+            .filter(|kv| !kv.key.is_empty())
+            .map(|kv| kv.key.clone())
+            .collect();
+        header_entries.dedup();
+        env_entries.dedup();
         ExternalMcpServerInfo {
             name: self.name.clone(),
             display_name: self.display_name.clone(),
@@ -144,8 +156,9 @@ impl ExternalMcpServer {
             enabled: self.enabled,
             connected: self.connected,
             last_error: self.last_error.clone(),
-            has_secret: !secret_entries.is_empty(),
-            secret_entries,
+            has_secret: !header_entries.is_empty() || !env_entries.is_empty(),
+            header_entries,
+            env_entries,
             tools: self
                 .tools
                 .iter()
@@ -201,7 +214,9 @@ fn validate_config(server: &ExternalMcpServer) -> Result<(), String> {
             if server.command.trim().is_empty() {
                 return Err("stdio 传输需要填写启动命令".to_string());
             }
-            Ok(())
+            // 注入面校验：cmd /c 拼串路径的 command/args 禁 cmd 元字符，
+            // env key 必须是合法环境变量名（CASE-001 C1 防御，保存前报错）
+            super::mcp_stdio::validate_stdio_config(server)
         }
         other => Err(format!("未知传输类型「{}」（支持 http / stdio）", other)),
     }
@@ -257,13 +272,14 @@ pub async fn import(
     mut server: ExternalMcpServer,
     force: bool,
 ) -> Result<ExternalMcpServerInfo, String> {
+    // 先 trim 再校验：带尾随空格的合法名字不应被误拒（CASE-001 L2）
+    server.name = server.name.trim().to_string();
     if !is_valid_slug(&server.name) {
         return Err(format!(
             "标识名「{}」不合法：仅限字母/数字/下划线/连字符，且不能包含连续双下划线",
             server.name
         ));
     }
-    server.name = server.name.trim().to_string();
     server.display_name = server.display_name.trim().to_string();
     server.description = server.description.trim().to_string();
     validate_config(&server)?;
@@ -275,7 +291,7 @@ pub async fn import(
         Ok(tools) => (true, String::new(), tools),
         Err(e) => {
             if !force {
-                return Err(format!("连接验证失败：{}", e));
+                return Err(format!("{VALIDATION_ERROR_PREFIX}连接验证失败：{}", e));
             }
             (false, e, Vec::new())
         }
@@ -395,7 +411,7 @@ pub async fn update(
         Ok(tools) => (true, String::new(), tools),
         Err(e) => {
             if !force {
-                return Err(format!("连接验证失败：{}", e));
+                return Err(format!("{VALIDATION_ERROR_PREFIX}连接验证失败：{}", e));
             }
             (false, e, Vec::new())
         }
@@ -654,19 +670,31 @@ pub async fn call_external_tool(
         }
     };
     let duration_ms = started.elapsed().as_millis() as i64;
-    // 落调用日志（拿不到库/开不了连接不致命——日志是观测，不是主链路）
+    // 落调用日志（拿不到库/开不了连接不致命——日志是观测，不是主链路；
+    // 同步 DB 写包 blocking 不占 tokio worker，busy 最多等 3s——CASE-001 M1）
     use tauri::Manager;
-    if let Some(state) = app_handle.try_state::<crate::db::DatabaseState>() {
-        if let Ok(conn) = rusqlite::Connection::open(&state.0) {
-            let _ = super::db::insert_mcp_tool_call(
-                &conn,
-                &server_name,
-                &tool_label,
-                status,
-                duration_ms,
-                text.len(),
-            );
-        }
+    if let Some(db_path) = app_handle
+        .try_state::<crate::db::DatabaseState>()
+        .map(|s| s.0.clone())
+    {
+        let result_len = text.len();
+        let log_server = server_name.clone();
+        let log_tool = tool_label.clone();
+        let log_status = status.to_string();
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            if let Ok(conn) = rusqlite::Connection::open(&db_path) {
+                let _ = conn.busy_timeout(std::time::Duration::from_secs(3));
+                let _ = super::db::insert_mcp_tool_call(
+                    &conn,
+                    &log_server,
+                    &log_tool,
+                    &log_status,
+                    duration_ms,
+                    result_len,
+                );
+            }
+        })
+        .await;
     }
     log::info!(
         "外部工具调用 {}（status={}）→ {} 字符，{}ms",
@@ -754,7 +782,9 @@ mod tests {
         };
         let json = serde_json::to_value(server.to_info()).unwrap();
         assert_eq!(json["has_secret"], true);
-        assert_eq!(json["secret_entries"][0], "Authorization");
+        // 凭据 key 按归属拆分：headers 的 Authorization 只进 header_entries，不进 env_entries
+        assert_eq!(json["header_entries"][0], "Authorization");
+        assert_eq!(json["env_entries"].as_array().map(Vec::len), Some(0));
         let s = json.to_string();
         assert!(!s.contains("Bearer secret"), "凭据值绝不下发前端");
     }
