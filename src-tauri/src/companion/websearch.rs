@@ -71,7 +71,11 @@ pub async fn execute_web_search_tool(
         body["engines"] = serde_json::json!([e]);
     }
 
+    // no_proxy：loopback 请求强制直连。reqwest 0.13 默认读 Windows 系统代理，
+    // 且不尊重注册表 ProxyOverride 的 127.* 绕过列表——Clash 系统代理开启时
+    // /search 会被送进代理挂死（实测 health 检查 120 秒全失败）
     let client = reqwest::Client::builder()
+        .no_proxy()
         .timeout(std::time::Duration::from_secs(SEARCH_TIMEOUT_SECS))
         .build()
         .map_err(|e| e.to_string())?;
@@ -293,7 +297,9 @@ async fn drain_log<R: tokio::io::AsyncRead + Unpin>(reader: R, tag: &'static str
 }
 
 async fn health_ok(port: u16) -> bool {
+    // no_proxy 同 execute_web_search_tool：loopback 健康检查不走系统代理
     let client = match reqwest::Client::builder()
+        .no_proxy()
         .timeout(std::time::Duration::from_secs(2))
         .build()
     {

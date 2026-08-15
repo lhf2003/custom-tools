@@ -11,7 +11,9 @@
 //!
 //! 生效范围：LLM 调用、模型列表、插件 AI 生成（经 build_client），
 //! 以及自动更新检查/下载（commands/updater.rs 经 apply_system_proxy 注入）。
-//! websearch 本地 daemon 请求为 loopback，天然不受影响。
+//! 例外：websearch 本地 daemon（companion/websearch.rs）必须显式 .no_proxy()——
+//! reqwest 0.13 默认读 Windows 系统代理且不尊重 ProxyOverride 绕过列表，
+//! 不 no_proxy 的话 loopback 请求会被送进代理挂死。
 
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;

@@ -420,6 +420,14 @@ export function ChatView() {
     };
 
     restoreSession();
+
+    // 视图切换会卸载本组件：后端若仍在生成，isLoading 已随卸载丢失，
+    // 取消按钮随之消失（生成却停不下来）。挂载时向后端要一次在飞状态恢复。
+    void invoke<boolean>('jarvis_chat_is_generating')
+      .then((generating) => {
+        if (generating) setIsLoading(true);
+      })
+      .catch(() => {});
   }, []);
 
   // ── Expand window when first response arrives ─────────────────────
