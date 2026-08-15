@@ -425,7 +425,14 @@ export function ChatView() {
     // 取消按钮随之消失（生成却停不下来）。挂载时向后端要一次在飞状态恢复。
     void invoke<boolean>('jarvis_chat_is_generating')
       .then((generating) => {
-        if (generating) setIsLoading(true);
+        if (!generating) return;
+        setIsLoading(true);
+        // 兜底重查：若 done/error 事件恰好在卸载期间已 emit（监听尚未注册），
+        // 之后不会有任何事件来复位加载态——3 秒后重查一次，在飞已复位则自行清掉
+        window.setTimeout(async () => {
+          const still = await invoke<boolean>('jarvis_chat_is_generating').catch(() => null);
+          if (still === false) setIsLoading(false);
+        }, 3000);
       })
       .catch(() => {});
   }, []);

@@ -296,15 +296,22 @@ async fn drain_log<R: tokio::io::AsyncRead + Unpin>(reader: R, tag: &'static str
     }
 }
 
+/// health_ok 专用直连 client（2s 超时，OnceLock 静态复用）：
+/// 健康检查在 daemon 启动窗口每秒一调，每次新建 client 浪费连接建立；
+/// no_proxy 语义固定，构建一次长期持有即可
+static HEALTH_CLIENT: std::sync::OnceLock<Option<reqwest::Client>> = std::sync::OnceLock::new();
+
 async fn health_ok(port: u16) -> bool {
     // no_proxy 同 execute_web_search_tool：loopback 健康检查不走系统代理
-    let client = match reqwest::Client::builder()
-        .no_proxy()
-        .timeout(std::time::Duration::from_secs(2))
-        .build()
-    {
-        Ok(c) => c,
-        Err(_) => return false,
+    let client = match HEALTH_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .no_proxy()
+            .timeout(std::time::Duration::from_secs(2))
+            .build()
+            .ok()
+    }) {
+        Some(c) => c,
+        None => return false,
     };
     client
         .get(format!("{}/health", base_url(port)))
