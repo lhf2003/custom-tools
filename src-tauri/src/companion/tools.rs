@@ -57,9 +57,9 @@ impl ToolGroup {
 
     pub fn description(&self) -> &'static str {
         match self {
-            ToolGroup::Perception => "了解电脑使用、剪贴板、习惯与备忘",
+            ToolGroup::Perception => "了解电脑使用环境信息、剪贴板、习惯与备忘",
             ToolGroup::Growth => "沉淀记忆、笔记、建议与经验",
-            ToolGroup::Interface => "把回答画成界面卡片",
+            ToolGroup::Interface => "模型回答可视化",
             ToolGroup::System => "在这台电脑上执行命令",
             ToolGroup::Network => "联网搜索获取最新信息",
         }
@@ -320,7 +320,7 @@ pub fn tool_definitions() -> Vec<ToolDef> {
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": "手册名（能力目录里列出的名字，如 error-analysis）"
+                        "description": "手册名（能力目录里列出的名字，如 reporter）"
                     }
                 },
                 "required": ["name"]

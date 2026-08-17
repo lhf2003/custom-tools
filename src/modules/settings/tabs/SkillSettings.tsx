@@ -154,7 +154,6 @@ export function SkillSettings() {
     void load();
   }, [load]);
 
-  const builtin = useMemo(() => manuals.filter((m) => m.builtin), [manuals]);
   const imported = useMemo(() => manuals.filter((m) => !m.builtin), [manuals]);
   const parsed = useMemo(() => parseSkillFrontmatter(raw), [raw]);
   // trigger 输入框为空时回退原文里的值（原文已有 trigger 时不强制重填）
@@ -283,16 +282,6 @@ export function SkillSettings() {
 
   return (
     <>
-      {/* 内置能力（不可删不可开关；内容编辑走 陪伴 → 进化治理） */}
-      <SettingGroup title="内置能力">
-        <div className="px-3 py-2.5 text-app-text-disabled text-xs leading-relaxed">
-          贾维斯的系统能力，随应用发布，不可删除、不可关闭；内容微调请前往「陪伴 → 进化治理」。
-        </div>
-        {builtin.map((m) => (
-          <SkillCard key={m.name} manual={m} />
-        ))}
-      </SettingGroup>
-
       {/* 导入的能力 */}
       <SettingGroup
         title="导入的能力"

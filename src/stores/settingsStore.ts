@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
+import type { ExternalServerInfo } from '@/modules/settings/tabs/McpServerModals';
 
 export interface AppSettings {
   always_on_top: boolean;
@@ -51,6 +52,8 @@ interface SettingsState extends AppSettings {
   appsTabQuery: string | null;
   /** 深链目标 tab（聊天视觉门槛 →「模型」tab）：SettingsView 挂载消费后清除 */
   pendingTab: string | null;
+  /** 第三方 MCP server 编辑二级页面：非空时设置页内容区切换为独立编辑页 */
+  mcpEditServer: ExternalServerInfo | null;
 
   // Actions
   loadSettings: () => Promise<void>;
@@ -99,6 +102,7 @@ interface SettingsState extends AppSettings {
   /** 应用 tab 深链预填（设置页挂载时消费） */
   setAppsTabQuery: (query: string | null) => void;
   setPendingTab: (tab: string | null) => void;
+  setMcpEditServer: (server: ExternalServerInfo | null) => void;
 }
 
 const defaultSettings: AppSettings = {
@@ -136,6 +140,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   isLoading: true,
   appsTabQuery: null,
   pendingTab: null,
+  mcpEditServer: null,
   shortcuts: [],
   shortcutsLoading: false,
 
@@ -520,4 +525,5 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   setAppsTabQuery: (query: string | null) => set({ appsTabQuery: query }),
   setPendingTab: (tab: string | null) => set({ pendingTab: tab }),
+  setMcpEditServer: (server) => set({ mcpEditServer: server }),
 }));

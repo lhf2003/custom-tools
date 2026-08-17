@@ -13,7 +13,6 @@ import {
   SlidersHorizontal,
   AppWindow,
   Clipboard,
-  Plug,
   GraduationCap,
 } from 'lucide-react';
 import { immediateResize } from '@/utils/tauri';
@@ -28,7 +27,6 @@ import { ShortcutsSettings } from './tabs/ShortcutsSettings';
 import { ModelSettings } from './tabs/ModelSettings';
 import { CompanionSettings } from './tabs/CompanionSettings';
 import { ToolsSettings } from './tabs/ToolsSettings';
-import { McpSettings } from './tabs/McpSettings';
 import { SkillSettings } from './tabs/SkillSettings';
 import { StatsSettings } from './tabs/StatsSettings';
 import { AdvancedSettings } from './tabs/AdvancedSettings';
@@ -36,6 +34,7 @@ import { ManualSettings } from './tabs/ManualSettings';
 import { PluginMarketSettings } from './tabs/PluginMarketSettings';
 import { PluginSettingsTab } from './tabs/PluginSettingsTab';
 import { AboutSettings } from './tabs/AboutSettings';
+import { EditServerView } from './tabs/McpServerModals';
 
 /** 插件设置 tab id 前缀：`plugin-settings:<pluginId>`，随外部插件安装/卸载动态增减 */
 const PLUGIN_SETTINGS_TAB_PREFIX = 'plugin-settings:';
@@ -71,7 +70,6 @@ const AI_NAV_GROUP: NavGroup = {
   items: [
     { id: 'model', name: '模型', icon: Bot },
     { id: 'tools', name: '工具', icon: Wrench },
-    { id: 'mcp', name: 'MCP', icon: Plug },
     { id: 'skill', name: 'SKILL', icon: GraduationCap },
     { id: 'companion', name: '陪伴', icon: Sparkles },
   ],
@@ -93,7 +91,6 @@ const STATIC_TAB_CONTENT: Record<string, React.ReactNode> = {
   shortcuts: <ShortcutsSettings />,
   model: <ModelSettings />,
   tools: <ToolsSettings />,
-  mcp: <McpSettings />,
   skill: <SkillSettings />,
   companion: <CompanionSettings />,
   stats: <StatsSettings />,
@@ -109,6 +106,9 @@ export function SettingsView() {
   const appsTabQuery = useSettingsStore((s) => s.appsTabQuery);
   // 通用深链：外部模块（聊天视觉门槛等）请求直达某个 tab，消费后清除
   const pendingTab = useSettingsStore((s) => s.pendingTab);
+  // 第三方 MCP server 编辑二级页面：非空时内容区整体切换为独立编辑页
+  const mcpEditServer = useSettingsStore((s) => s.mcpEditServer);
+  const setMcpEditServer = useSettingsStore((s) => s.setMcpEditServer);
 
   useEffect(() => {
     immediateResize(WINDOW_SIZE.SETTINGS.height, WINDOW_SIZE.SETTINGS.width);
@@ -166,7 +166,15 @@ export function SettingsView() {
   );
 
   let content: React.ReactNode;
-  if (activeTab.startsWith(PLUGIN_SETTINGS_TAB_PREFIX)) {
+  if (mcpEditServer) {
+    content = (
+      <EditServerView
+        server={mcpEditServer}
+        onBack={() => setMcpEditServer(null)}
+        onSaved={() => setMcpEditServer(null)}
+      />
+    );
+  } else if (activeTab.startsWith(PLUGIN_SETTINGS_TAB_PREFIX)) {
     const pluginId = activeTab.slice(PLUGIN_SETTINGS_TAB_PREFIX.length);
     const item = externalPlugins.find((it) => it.manifest.id === pluginId);
     // 插件被卸载后 tab 消失，内容回退插件市场
@@ -200,7 +208,10 @@ export function SettingsView() {
                 return (
                   <button
                     key={tab.id}
-                    onClick={() => setActiveTab(tab.id)}
+                    onClick={() => {
+                      setMcpEditServer(null);
+                      setActiveTab(tab.id);
+                    }}
                     className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 mb-0.5 rounded-lg text-sm transition-colors duration-150 cursor-pointer ${
                       isActive
                         ? 'bg-white/10 text-app-text-primary font-medium'

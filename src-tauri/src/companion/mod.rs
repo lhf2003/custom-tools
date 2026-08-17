@@ -9,7 +9,7 @@ pub mod envsense;
 pub mod fingerprint;
 pub mod mcp;
 pub mod mcp_client;
-pub mod mcp_register;
+pub mod mcp_config;
 pub mod mcp_servers;
 pub mod mcp_stdio;
 pub mod persona;

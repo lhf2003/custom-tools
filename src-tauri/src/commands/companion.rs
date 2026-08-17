@@ -40,20 +40,6 @@ pub fn delete_companion_place(
     crate::companion::envsense::remove_place(&db_state.0, &fingerprint)
 }
 
-// ── MCP 注册自愈 ─────────────────────────────────────────────
-
-/// 检测 ~/.claude.json 的 companion MCP 注册状态（MCP 设置页轮询）
-#[tauri::command]
-pub fn check_mcp_registration() -> crate::companion::mcp_register::McpRegistrationStatus {
-    crate::companion::mcp_register::check()
-}
-
-/// 一键修复 companion MCP 注册（备份原配置后写入期望条目）
-#[tauri::command]
-pub fn fix_mcp_registration() -> Result<String, String> {
-    crate::companion::mcp_register::fix()
-}
-
 /// 建议创建到用户点击之间应用可能已更新（Edge/Chrome 旧版本目录被删）——
 /// payload 路径失效时按 exe 名从使用记录重解析一条现存的替代路径
 fn resolve_launch_path(conn: &Connection, app: &db::LaunchAppItem) -> String {
@@ -568,6 +554,7 @@ pub fn list_manuals(app_handle: AppHandle) -> Result<Vec<ManualInfo>, String> {
         .map_err(|e| e.to_string())?;
     Ok(crate::companion::skills::scan_skills(&app_data)
         .into_iter()
+        .filter(|s| !s.builtin)
         .map(|s| ManualInfo {
             name: s.name,
             description: s.description,
@@ -657,6 +644,12 @@ pub async fn draft_skill_trigger(
 #[tauri::command]
 pub fn get_mcp_server_info() -> crate::companion::mcp::McpServerInfo {
     crate::companion::mcp::server_info()
+}
+
+/// 本地 companion MCP 的配置片段（JSON 字符串，供「复制配置」按钮使用）
+#[tauri::command]
+pub fn get_mcp_config() -> String {
+    crate::companion::mcp_config::config_json()
 }
 
 // ── 第三方 MCP server（二期：能调 + 能装 + 能管）──────────────────

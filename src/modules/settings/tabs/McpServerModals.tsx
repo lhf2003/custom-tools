@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { RefreshCw } from 'lucide-react';
+import { ChevronLeft, RefreshCw } from 'lucide-react';
 import { useToastStore } from '@/stores/toastStore';
 import { confirmDialog } from '@/stores/confirmStore';
 
@@ -248,14 +248,14 @@ export function CallLogModal({
   );
 }
 
-/** 配置编辑弹窗：表单预填（凭据只列 key、值留空=保持不变）+ 工具描述只读区 */
-export function EditServerModal({
+/** 配置编辑二级页面：表单预填（凭据只列 key、值留空=保持不变）+ 工具描述只读区 */
+export function EditServerView({
   server,
-  onClose,
+  onBack,
   onSaved,
 }: {
   server: ExternalServerInfo;
-  onClose: () => void;
+  onBack: () => void;
   onSaved: () => void;
 }) {
   const { addToast } = useToastStore();
@@ -275,10 +275,8 @@ export function EditServerModal({
   const [submitting, setSubmitting] = useState(false);
   const [expandedTools, setExpandedTools] = useState<Record<string, boolean>>({});
   const [refreshingTools, setRefreshingTools] = useState(false);
-  // 弹窗内数据镜像：刷新工具清单就地更新，不动父列表
+  // 页面内数据镜像：刷新工具清单就地更新，不动父列表
   const [current, setCurrent] = useState(server);
-  const contentRef = useRef<HTMLDivElement>(null);
-  useModalDialog(contentRef, onClose);
 
   const handleRefreshTools = async () => {
     setRefreshingTools(true);
@@ -365,37 +363,29 @@ export function EditServerModal({
   const secretCount = server.header_entries.length + server.env_entries.length;
 
   return (
-    // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions, jsx-a11y/click-events-have-key-events -- 遮罩点击关闭是 ESC 的鼠标等价路径
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby={`mcp-edit-title-${server.name}`}
-    >
-      <div
-        ref={contentRef}
-        className="bg-app-bg-elevated rounded-xl p-5 w-[440px] max-h-[75vh] flex flex-col border border-white/10 shadow-2xl"
-      >
-        <form
-          className="flex flex-col min-h-0 flex-1"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (ready) void handleSave();
-          }}
+    <div className="flex flex-col min-h-0">
+      <div className="flex items-center gap-3 mb-4">
+        <button
+          type="button"
+          onClick={onBack}
+          className="flex items-center gap-1 px-2 py-1 rounded-md text-app-text-tertiary text-xs hover:text-app-text-primary hover:bg-white/10 transition-colors cursor-pointer"
         >
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <h3
-              id={`mcp-edit-title-${server.name}`}
-              className="text-app-text-primary text-sm font-semibold"
-            >
-              配置 · {server.name}
-            </h3>
-          </div>
+          <ChevronLeft size={14} />
+          返回
+        </button>
+        <h3 className="text-app-text-primary text-sm font-semibold">
+          配置 · {server.name}
+        </h3>
+      </div>
 
-          <div className="mt-3 flex-1 overflow-y-auto min-h-0 space-y-2">
+      <form
+        className="flex flex-col"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (ready) void handleSave();
+        }}
+      >
+        <div className="space-y-2">
             {/* 类型切换 */}
             <div className="flex gap-1 p-1 rounded-lg bg-white/5">
               {(
@@ -538,36 +528,24 @@ export function EditServerModal({
                         <code className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-app-text-tertiary flex-shrink-0 mt-px">
                           {t.name}
                         </code>
-                        {/* 截断态：JS 裁剪 + 常规 inline 按钮（line-clamp 的 -webkit-box
-                            布局里 inline 按钮不混排，会被裁掉——弃用）；描述与按钮整体
-                            最多两行；展开态：全文 + 行内「收起」 */}
-                        <p className="min-w-0 flex-1 text-app-text-tertiary text-xs leading-relaxed break-words">
-                          {long && !expanded ? (
-                            <span>
-                              {desc.slice(0, 60)}
-                              <button
-                                type="button"
-                                onClick={toggle}
-                                className="text-app-brand-primary-light text-[10px] hover:underline cursor-pointer"
-                              >
-                                …展开
-                              </button>
-                            </span>
-                          ) : (
-                            <>
-                              {desc}
-                              {long && (
-                                <button
-                                  type="button"
-                                  onClick={toggle}
-                                  className="text-app-brand-primary-light text-[10px] ml-1 hover:underline cursor-pointer"
-                                >
-                                  收起
-                                </button>
-                              )}
-                            </>
-                          )}
+                        {/* 描述占满剩余宽度：折叠态单行 ellipsis 截断（临界点即右侧按钮），
+                            展开态全文换行；按钮始终 flex-shrink-0 固定行右 */}
+                        <p
+                          className={`min-w-0 flex-1 text-app-text-tertiary text-xs leading-relaxed break-words ${
+                            expanded ? '' : 'truncate'
+                          }`}
+                        >
+                          {desc}
                         </p>
+                        {long && (
+                          <button
+                            type="button"
+                            onClick={toggle}
+                            className="flex-shrink-0 mt-px text-app-brand-primary-light text-[10px] hover:underline cursor-pointer"
+                          >
+                            {expanded ? '收起' : '展开'}
+                          </button>
+                        )}
                       </div>
                     );
                   })}
@@ -576,25 +554,24 @@ export function EditServerModal({
             </div>
           </div>
 
-          <div className="flex justify-end gap-2 mt-3 flex-shrink-0">
-            <button
-              type="button"
-              disabled={submitting}
-              onClick={onClose}
-              className="px-3 py-1.5 rounded-lg text-xs text-app-text-tertiary hover:text-app-text-primary hover:bg-white/10 transition-colors cursor-pointer disabled:opacity-50"
-            >
-              取消
-            </button>
-            <button
-              type="submit"
-              disabled={!ready}
-              className="px-3 py-1.5 rounded-lg text-xs bg-app-status-info/15 text-app-status-info hover:bg-app-status-info/25 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {submitting ? '验证中…' : '保存并验证'}
-            </button>
-          </div>
-        </form>
-      </div>
+        <div className="flex justify-end gap-2 mt-4">
+          <button
+            type="button"
+            disabled={submitting}
+            onClick={onBack}
+            className="px-3 py-1.5 rounded-lg text-xs text-app-text-tertiary hover:text-app-text-primary hover:bg-white/10 transition-colors cursor-pointer disabled:opacity-50"
+          >
+            取消
+          </button>
+          <button
+            type="submit"
+            disabled={!ready}
+            className="px-3 py-1.5 rounded-lg text-xs bg-app-status-info/15 text-app-status-info hover:bg-app-status-info/25 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {submitting ? '验证中…' : '保存并验证'}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

@@ -12,7 +12,6 @@ const DEFAULT_REPORTER: &str = include_str!("skills/reporter.md");
 const DEFAULT_ANALYST: &str = include_str!("skills/analyst.md");
 const DEFAULT_RECALL: &str = include_str!("skills/recall.md");
 const DEFAULT_DIARY: &str = include_str!("skills/diary.md");
-const DEFAULT_ERROR_ANALYSIS: &str = include_str!("skills/error-analysis.md");
 
 /// (手册名, 内嵌默认版)——播种/回退共用的单一清单
 const EMBEDDED_SKILLS: &[(&str, &str)] = &[
@@ -20,7 +19,6 @@ const EMBEDDED_SKILLS: &[(&str, &str)] = &[
     ("analyst", DEFAULT_ANALYST),
     ("recall", DEFAULT_RECALL),
     ("diary", DEFAULT_DIARY),
-    ("error-analysis", DEFAULT_ERROR_ANALYSIS),
 ];
 
 /// 机器可读触发时刻（weekday 与 chrono num_days_from_monday 对齐：0=周一 … 6=周日）
@@ -166,17 +164,35 @@ pub fn apply_manual_content(app_data_dir: &Path, name: &str, content: &str) -> R
     std::fs::write(target, content).map_err(|e| format!("写入手册失败: {}", e))
 }
 
-/// 启动播种：skills/<name>.md 不存在时写入内嵌默认版。
+/// 启动播种：内置手册以系统版本为准——无条件覆盖写回内嵌默认版，
+/// 并清掉根目录里已不再内置的遗留 .md（内置目录是系统管的，用户编辑走 custom/）。
+/// custom/ 子目录不受影响。
 pub fn seed_skills(app_data_dir: &Path) {
     let dir = skills_dir(app_data_dir);
     let _ = std::fs::create_dir_all(&dir);
     for (name, default) in EMBEDDED_SKILLS {
         let target = dir.join(format!("{}.md", name));
-        if target.exists() {
-            continue;
-        }
         if let Err(e) = std::fs::write(&target, default) {
             log::warn!("播种手册 {} 失败: {}", name, e);
+        }
+    }
+    // 删除已不再内置的遗留文件（如升级前播种过的 error-analysis）
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("md") {
+                continue;
+            }
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_string();
+            if !EMBEDDED_SKILLS.iter().any(|(n, _)| *n == stem) {
+                if let Err(e) = std::fs::remove_file(&path) {
+                    log::warn!("删除遗留内置手册 {} 失败: {}", path.display(), e);
+                }
+            }
         }
     }
 }
