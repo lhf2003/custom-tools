@@ -37,8 +37,9 @@ function isBuiltInEntryId(id: string | undefined): id is string {
 
 const ITEMS_PER_ROW = 9;
 // 折叠态条数随视图切换（grid=ITEMS_PER_ROW / list=LIST_COLLAPSED_COUNT），见组件内 collapsedCount
-// 列表视图折叠态条数：行高 40px × 7；列表模式窗口默认高 575（listCollapsed），未填满部分留白
-const LIST_COLLAPSED_COUNT = 7;
+// 列表视图折叠态条数：行高 36px（图标 28 + py-1 × 2）× 9 + 8 间隙 + 底部 pb-2，
+// 与列表模式窗口默认高 440（listCollapsed）精确配套
+const LIST_COLLAPSED_COUNT = 9;
 // 冷启动填充上限（无任何使用记录时展示索引应用）：取 9 列 × 2 行，
 // 避免一次渲染全部索引应用、触发大量图标提取
 const RECENT_FALLBACK_COUNT = 18;
@@ -584,33 +585,60 @@ export function LauncherView() {
         </button>
       </div>
 
-      {/* Main Content */}
-      <div className="w-full flex-1 px-4 pb-4 overflow-hidden">
+      {/* Main Content（列表模式压缩底部留白，配合 listCollapsed 精确容纳 9 行） */}
+      <div className={`w-full flex-1 px-4 overflow-hidden ${isListView ? 'pb-2' : 'pb-4'}`}>
         {isNoteMode ? (
           <NoteActionPreview content={noteContent} />
         ) : isSuggestMode ? (
-          <TriggerSuggestList
-            suggestions={triggerSuggestions}
-            selectedIndex={selectedIndex}
-            onSelect={handleHoverSelect}
-            onOpen={(suggestion, index) => {
-              setSearchQuery('');
-              useAppStore.getState().openPluginView(suggestion.plugin.id, suggestion.arg || undefined);
-              handleItemClick(suggestResults[index]);
-            }}
-          />
+          isListView ? (
+            <TriggerSuggestList
+              suggestions={triggerSuggestions}
+              selectedIndex={selectedIndex}
+              onSelect={handleHoverSelect}
+              onOpen={(suggestion, index) => {
+                setSearchQuery('');
+                useAppStore.getState().openPluginView(suggestion.plugin.id, suggestion.arg || undefined);
+                handleItemClick(suggestResults[index]);
+              }}
+            />
+          ) : (
+            <TriggerGrid
+              items={suggestResults}
+              selectedIndex={selectedIndex}
+              onHover={handleHoverSelect}
+              onOpen={(index) => {
+                const suggestion = triggerSuggestions[index];
+                setSearchQuery('');
+                useAppStore.getState().openPluginView(suggestion.plugin.id, suggestion.arg || undefined);
+                handleItemClick(suggestResults[index]);
+              }}
+            />
+          )
         ) : isTriggerMode && triggerResult ? (
-          <TriggerResultCard
-            result={triggerResult}
-            arg={triggerMatch?.arg ?? ''}
-            argHint={triggerMatch?.trigger.argHint}
-            isSelected={selectedIndex === 0}
-            onClick={() => {
-              setSearchQuery('');
-              useAppStore.getState().openPluginView(triggerMatch!.plugin.id, triggerMatch!.arg || undefined);
-              handleItemClick(triggerResult);
-            }}
-          />
+          isListView ? (
+            <TriggerResultCard
+              result={triggerResult}
+              arg={triggerMatch?.arg ?? ''}
+              argHint={triggerMatch?.trigger.argHint}
+              isSelected={selectedIndex === 0}
+              onClick={() => {
+                setSearchQuery('');
+                useAppStore.getState().openPluginView(triggerMatch!.plugin.id, triggerMatch!.arg || undefined);
+                handleItemClick(triggerResult);
+              }}
+            />
+          ) : (
+            <TriggerGrid
+              items={[triggerResult]}
+              selectedIndex={selectedIndex}
+              onHover={handleHoverSelect}
+              onOpen={() => {
+                setSearchQuery('');
+                useAppStore.getState().openPluginView(triggerMatch!.plugin.id, triggerMatch!.arg || undefined);
+                handleItemClick(triggerResult);
+              }}
+            />
+          )
         ) : searchQuery ? (
           <SearchResults
             query={searchQuery}
@@ -680,7 +708,10 @@ export function LauncherView() {
 
 // Item Icon：内置工具 Lucide / 系统功能设置图标 / 外部应用提取图标 / 字母兜底，
 // 自带一次性提取守卫与模块级缓存；网格卡片（ItemCard）与列表行（ItemRow）共用
-function ItemIcon({ item, className = '' }: { item: AppItemData; className?: string }) {
+// size：md = 32px（网格卡片）/ sm = 28px（列表行，与紧凑行高配套）
+function ItemIcon({ item, size = 'md', className = '' }: { item: AppItemData; size?: 'md' | 'sm'; className?: string }) {
+  const tileSize = size === 'sm' ? 'w-7 h-7' : 'w-8 h-8';
+  const glyphSize = size === 'sm' ? 'w-3.5 h-3.5' : 'w-4 h-4';
   const [iconData, setIconData] = useState<string | null>(() => getCachedIcon(item.path) ?? null);
   // 一次性守卫：每个图标实例只尝试提取一次（null 结果不重试）
   const iconRequestedRef = useRef(false);
@@ -711,7 +742,7 @@ function ItemIcon({ item, className = '' }: { item: AppItemData; className?: str
     loadIcon();
   }, [item.path, item.isBuiltIn, item.name]);
 
-  const tileCls = `w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform ${className}`;
+  const tileCls = `${tileSize} rounded-lg flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform ${className}`;
 
   // 内置工具：Lucide 图标
   if (item.isBuiltIn) {
@@ -720,7 +751,7 @@ function ItemIcon({ item, className = '' }: { item: AppItemData; className?: str
       const Icon = tool.icon;
       return (
         <div className={`${tileCls} bg-app-bg-elevated`}>
-          <Icon className="w-4 h-4 text-app-text-secondary" />
+          <Icon className={`${glyphSize} text-app-text-secondary`} />
         </div>
       );
     }
@@ -730,7 +761,7 @@ function ItemIcon({ item, className = '' }: { item: AppItemData; className?: str
   if (item.path.startsWith('ms-settings:')) {
     return (
       <div className={`${tileCls} bg-app-bg-elevated`}>
-        <Settings className="w-4 h-4 text-app-text-secondary" />
+        <Settings className={`${glyphSize} text-app-text-secondary`} />
       </div>
     );
   }
@@ -738,7 +769,7 @@ function ItemIcon({ item, className = '' }: { item: AppItemData; className?: str
   // 外部应用：已提取的图标
   if (iconData) {
     return (
-      <div className={`w-8 h-8 rounded-lg overflow-hidden flex-shrink-0 group-hover:scale-105 transition-transform ${className}`}>
+      <div className={`${tileSize} rounded-lg overflow-hidden flex-shrink-0 group-hover:scale-105 transition-transform ${className}`}>
         <img
           src={iconData}
           alt={item.name}
@@ -806,6 +837,7 @@ function ItemCard({
 }
 
 // Item Row Component - 列表视图的横向行（图标左、名称中、选中回车提示右），选中语言与网格一致
+// 行高 36px（py-1 + 28px 图标）：列表模式走紧凑密度，与 listCollapsed 高度精确配套
 function ItemRow({
   item,
   isSelected,
@@ -837,9 +869,9 @@ function ItemRow({
       role="option"
       aria-selected={isSelected}
       tabIndex={-1}
-      className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors group text-left ${isSelected ? 'bg-white/10' : ''}`}
+      className={`flex items-center gap-3 px-3 py-1 rounded-lg transition-colors group text-left ${isSelected ? 'bg-white/10' : ''}`}
     >
-      <ItemIcon item={item} />
+      <ItemIcon item={item} size="sm" />
       <Tooltip content={item.name} wrapperClassName="flex-1 min-w-0">
         <span
           className={`flex-1 min-w-0 truncate text-sm transition-colors ${isSelected ? 'text-app-text-primary font-medium' : 'text-app-text-tertiary group-hover:text-app-text-primary'}`}
@@ -950,7 +982,47 @@ function SearchResults({
   );
 }
 
-// @ 前缀联想列表：未完整命中 trigger 时的模糊候选（@ti → @time），
+// @ 命令网格（网格视图）：@联想候选与 trigger 独占结果的九宫格呈现，
+// 与应用搜索共用 ItemCard 与「@命令」分组头，两种入口同一视觉语言；
+// 关键词/参数提示在此形态下省略（网格只承载图标+名称），回车/点击行为与列表视图一致
+function TriggerGrid({
+  items,
+  selectedIndex,
+  onHover,
+  onOpen,
+}: {
+  items: AppItemData[];
+  selectedIndex: number;
+  onHover: (index: number) => void;
+  onOpen: (index: number) => void;
+}) {
+  return (
+    <section className="h-full flex flex-col">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-sm font-semibold text-app-text-tertiary">@命令</h2>
+      </div>
+      <div
+        id="launcher-listbox"
+        className="overflow-y-auto overflow-x-hidden grid grid-cols-9 gap-2"
+        role="listbox"
+        aria-label="@命令"
+      >
+        {items.map((item, index) => (
+          <ItemCard
+            key={item.path}
+            id={`launcher-option-${index}`}
+            item={item}
+            isSelected={index === selectedIndex}
+            onClick={() => onOpen(index)}
+            onHover={() => onHover(index)}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+// @ 前缀联想列表（列表视图）：未完整命中 trigger 时的模糊候选（@ti → @time），
 // 每行展示插件名 + 关键词 + 说明；回车/点击以剩余参数打开
 function TriggerSuggestList({
   suggestions,
@@ -975,13 +1047,13 @@ function TriggerSuggestList({
             aria-selected={index === selectedIndex}
             onClick={() => onOpen(s, index)}
             onMouseMove={() => onSelect(index)}
-            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors cursor-pointer ${
+            className={`flex items-center gap-3 px-3 py-2 rounded-lg transition-colors cursor-pointer ${
               index === selectedIndex ? 'bg-white/10' : 'hover:bg-white/5'
             }`}
           >
             {Icon && (
-              <div className="w-8 h-8 rounded-lg bg-app-bg-elevated flex items-center justify-center flex-shrink-0">
-                <Icon className="w-4 h-4 text-app-text-secondary" />
+              <div className="w-7 h-7 rounded-lg bg-app-bg-elevated flex items-center justify-center flex-shrink-0">
+                <Icon className="w-3.5 h-3.5 text-app-text-secondary" />
               </div>
             )}
             <div className="flex-1 min-w-0">
@@ -1001,7 +1073,7 @@ function TriggerSuggestList({
   );
 }
 
-// Trigger 前缀路由的独占结果行：命中 @json 等插件 trigger 时的反馈
+// Trigger 前缀路由的独占结果行（列表视图）：命中 @json 等插件 trigger 时的反馈
 function TriggerResultCard({
   result,
   arg,
@@ -1023,13 +1095,13 @@ function TriggerResultCard({
         role="option"
         aria-selected={isSelected}
         onClick={onClick}
-        className={`flex items-center gap-3 px-3 py-3 rounded-lg transition-colors cursor-pointer ${
+        className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors cursor-pointer ${
           isSelected ? 'bg-white/10' : 'hover:bg-white/5'
         }`}
       >
         {Icon && (
-          <div className="w-8 h-8 rounded-lg bg-app-bg-elevated flex items-center justify-center flex-shrink-0">
-            <Icon className="w-4 h-4 text-app-text-secondary" />
+          <div className="w-7 h-7 rounded-lg bg-app-bg-elevated flex items-center justify-center flex-shrink-0">
+            <Icon className="w-3.5 h-3.5 text-app-text-secondary" />
           </div>
         )}
         <div className="flex-1 min-w-0">

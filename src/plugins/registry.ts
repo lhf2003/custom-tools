@@ -170,7 +170,8 @@ export interface TriggerSuggestion {
 /**
  * @ 前缀联想：query 以 @ 开头且未完整命中 trigger 时，用「@ 后第一段 token」
  * 模糊匹配全部 trigger 关键词（前缀优先、子串兜底）——记不起完整名称（@ti → @time）
- * 也能进入插件。排序：前缀 > 子串；同级按插件 order、关键词长度升序。
+ * 也能进入插件；裸「@」时空 token 视为匹配一切，列出全部可用插件 trigger。
+ * 排序：前缀 > 子串；同级按插件 order、关键词长度升序。
  */
 export function suggestTriggers(query: string): TriggerSuggestion[] {
   if (!query.startsWith('@')) return [];
@@ -178,7 +179,6 @@ export function suggestTriggers(query: string): TriggerSuggestion[] {
   const afterAt = query.slice(1);
   const tokenEnd = afterAt.search(/\s/);
   const token = (tokenEnd === -1 ? afterAt : afterAt.slice(0, tokenEnd)).toLowerCase();
-  if (!token) return [];
   const argStart = query.indexOf(' ', 1);
   const arg = argStart === -1 ? '' : query.slice(argStart).trim();
 
