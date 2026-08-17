@@ -333,3 +333,18 @@ pub(crate) fn read_image_data_url(
 pub fn read_chat_image(app_handle: AppHandle, path: String) -> Result<String, String> {
     read_image_data_url(&app_handle, &path)
 }
+
+/// 读取任意文件字节并返回 base64。剪贴板「发送给AI」把图片/文件路径桥进
+/// 聊天附件管线（与发送文件按钮统一）时用：路径来自剪贴板记录（用户已复制
+/// 过的文件），只读，加大小上限防 OOM。
+#[tauri::command]
+pub fn read_file_bytes_base64(path: String) -> Result<String, String> {
+    const MAX_BYTES: u64 = 64 * 1024 * 1024;
+    let meta = std::fs::metadata(&path).map_err(|e| format!("读取文件失败: {e}"))?;
+    if meta.len() > MAX_BYTES {
+        return Err("文件过大（上限 64MB）".to_string());
+    }
+    let bytes = std::fs::read(&path).map_err(|e| format!("读取文件失败: {e}"))?;
+    use base64::Engine;
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+}

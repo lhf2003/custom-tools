@@ -239,13 +239,23 @@ export function ClipboardView() {
     }
   }, [items, selectedId]);
 
-  // 发送给AI：条目内容原文填入聊天输入框并切到聊天视图（不自动发送，用户可补充指令）
-  // 文本发原文；图片发 PNG 落盘路径；文件发换行分隔的路径列表（与详情面板展示口径一致）
+  // 发送给AI：与聊天页底部左侧「发送文件」按钮统一——文本原文填入输入框；
+  // 图片/文件路径走聊天附件管线（addFiles：图片压缩落盘/文本读内容/视觉门槛），
+  // 不再把图片 PNG 落盘路径当纯文本塞进输入框。
   const handleSendToAI = useCallback(() => {
     const item = items.find((i) => i.id === selectedId);
     if (!item) return;
-    const { setChatPrefill, setActiveView } = useAppStore.getState();
-    setChatPrefill(item.content);
+    const { setChatPrefill, setChatPendingFiles, setActiveView } = useAppStore.getState();
+    if (item.content_type === 'text') {
+      setChatPrefill(item.content);
+    } else {
+      // image 类型 content 即单条 PNG 落盘路径；file 类型为换行分隔的路径列表
+      const paths = item.content
+        .split('\n')
+        .map((p) => p.trim())
+        .filter(Boolean);
+      setChatPendingFiles(paths);
+    }
     setActiveView('chat');
   }, [items, selectedId]);
 

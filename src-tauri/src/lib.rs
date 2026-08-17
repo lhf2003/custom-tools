@@ -602,6 +602,7 @@ pub fn run() {
             commands::chat::truncate_chat_after_last_user,
             commands::chat::save_chat_image,
             commands::chat::read_chat_image,
+            commands::chat::read_file_bytes_base64,
             // LLM Provider commands
             llm_provider::commands::get_llm_providers,
             llm_provider::commands::create_llm_provider,

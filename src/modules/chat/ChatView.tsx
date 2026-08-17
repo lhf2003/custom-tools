@@ -13,7 +13,7 @@ import { WINDOW_SIZE } from '@/constants/window';
 import { ChatHeader } from './ChatHeader';
 import { useVoiceInput } from './useVoiceInput';
 import { speakMarkdown, stopSpeech } from '@/utils/speech';
-import { buildRichContent, IMAGE_EXTS, TEXT_EXTS } from './attachments';
+import { buildRichContent, pathToFile, IMAGE_EXTS, TEXT_EXTS } from './attachments';
 import { PendingChips, VisionGateDialog } from './RichMessageView';
 import { useSettingsStore } from '@/stores/settingsStore';
 import {
@@ -49,7 +49,7 @@ const STICK_TO_BOTTOM_PX = 48;
 // ─────────────────────────────────────────────
 
 export function ChatView() {
-  const { setActiveView, chatPrefill } = useAppStore();
+  const { setActiveView, chatPrefill, chatPendingFiles } = useAppStore();
 
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -381,6 +381,36 @@ export function ChatView() {
     // 等视图切换渲染完成后聚焦
     setTimeout(() => textareaRef.current?.focus(), 100);
   }, [chatPrefill, handleSend]);
+
+  // Consume pending files: 剪贴板「发送给AI」的图片/文件路径走与发送文件按钮
+  // 同一条 addFiles 附件管线（压缩/读内容/视觉门槛），而非塞进输入框。
+  // 原子取走路径列表，StrictMode 二次执行拿到空数组直接跳过。
+  useEffect(() => {
+    if (chatPendingFiles.length === 0) return;
+    const paths = useAppStore.getState().consumeChatPendingFiles();
+    if (paths.length === 0) return;
+    // 等会话恢复（sessionId 就绪）再入列——addOneFile 依赖 sessionId 落盘图片；
+    // 2s 轮询上限兜底（restoreSession 总会 setSessionId，含新建分支）
+    let tries = 0;
+    const tryAdd = () => {
+      if (sessionIdRef.current !== null) {
+        void (async () => {
+          const files: File[] = [];
+          for (const p of paths) {
+            try {
+              files.push(await pathToFile(p));
+            } catch {
+              setError(`读取文件失败：${p}`);
+            }
+          }
+          if (files.length > 0) void addFiles(files);
+        })();
+      } else if (++tries < 20) {
+        setTimeout(tryAdd, 100);
+      }
+    };
+    tryAdd();
+  }, [chatPendingFiles, addFiles]);
 
   // ── Cancel streaming ──────────────────────────────────────────────
   const handleCancel = useCallback(async () => {

@@ -32,6 +32,14 @@ interface AppState {
   /** 原子取走 prefill（取值+清除一步完成），已消费/无 prefill 返回 null */
   consumeChatPrefill: () => { text: string; autoSend: boolean } | null;
 
+  // 剪贴板「发送给AI」→ 聊天附件管线：待附加的本地文件路径列表。
+  // 与 chatPrefill 平行，但走 addFiles（图片压缩/文本读内容/视觉门槛），
+  // 不再把图片路径当作纯文本塞进输入框。
+  chatPendingFiles: string[];
+  setChatPendingFiles: (paths: string[]) => void;
+  /** 原子取走待附加文件路径（取值+清空一步完成） */
+  consumeChatPendingFiles: () => string[];
+
   // Loading states
   isLoading: boolean;
   setLoading: (loading: boolean) => void;
@@ -97,6 +105,16 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (chatPrefill === null) return null;
     set({ chatPrefill: null, chatPrefillAutoSend: false });
     return { text: chatPrefill, autoSend: chatPrefillAutoSend };
+  },
+
+  // 待附加文件路径（与 consumeChatPrefill 同模式的原子消费）
+  chatPendingFiles: [],
+  setChatPendingFiles: (paths) => set({ chatPendingFiles: paths }),
+  consumeChatPendingFiles: () => {
+    const { chatPendingFiles } = get();
+    if (chatPendingFiles.length === 0) return [];
+    set({ chatPendingFiles: [] });
+    return chatPendingFiles;
   },
 
   // Loading

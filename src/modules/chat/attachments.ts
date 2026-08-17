@@ -3,6 +3,7 @@
  * DB content 协议与后端 scene_chat.rs 对齐：
  *   {"text": "...", "images": ["chat_images/<sid>/<hash>.png"], "files": [{"name","content"}]}
  */
+import { invoke } from '@tauri-apps/api/core';
 
 /** 待发附件：image 已压缩落盘（relPath 入库、dataUrl 预览）；file 内容 inline */
 export type PendingAttachment =
@@ -39,6 +40,24 @@ export function classifyFileName(name: string): FileClass {
   if (IMAGE_EXTS.includes(ext)) return 'image';
   if (TEXT_EXTS.includes(ext)) return 'text';
   return 'unsupported';
+}
+
+/** base64 → 字节（后端 read_file_bytes_base64 返回裸 base64，无 data: 前缀） */
+function base64ToBytes(base64: string): Uint8Array {
+  const bin = atob(base64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+/** 本地文件路径 → 浏览器 File。剪贴板「发送给AI」把路径桥进附件管线时用：
+ *  字节经后端 read_file_bytes_base64 读取（绕过 WebView2 直接读任意盘符路径的
+ *  权限限制），再解码为 File，与发送文件按钮/粘贴产出的 File 同构。 */
+export async function pathToFile(path: string): Promise<File> {
+  const base64 = await invoke<string>('read_file_bytes_base64', { path });
+  const bytes = base64ToBytes(base64);
+  const name = path.split(/[\\/]/).pop() || 'file';
+  return new File([bytes], name);
 }
 
 export interface CompressedImage {
