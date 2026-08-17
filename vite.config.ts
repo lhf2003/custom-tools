@@ -25,6 +25,7 @@ export default defineConfig({
         'companion-toast': path.resolve(__dirname, 'companion-toast.html'),
         'translate-toast': path.resolve(__dirname, 'translate-toast.html'),
         'voice-toast': path.resolve(__dirname, 'voice-toast.html'),
+        'memo-sticky': path.resolve(__dirname, 'memo-sticky.html'),
       },
     },
   },

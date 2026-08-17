@@ -1,3 +1,4 @@
+use chrono::Datelike;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
@@ -85,6 +86,10 @@ pub struct Memo {
     pub pinned: bool,
     /// 到期通知 one-shot 标记：晨间汇总展示或 tick 捡漏提醒后落时间，不再重复弹
     pub due_notified_at: Option<i64>,
+    /// 分类标签（封闭集单标签，LLM 解析时归类；存量备忘为 NULL）
+    pub tag: Option<String>,
+    /// 重复规则：daily / weekly:1-7（1=周一…7=周日），完成后自动生成下一次
+    pub recurrence: Option<String>,
     pub created_at: i64,
 }
 
@@ -192,13 +197,17 @@ pub fn init_tables(conn: &Connection) -> rusqlite::Result<()> {
             last_triggered_at INTEGER,
             pinned INTEGER NOT NULL DEFAULT 0,
             due_notified_at INTEGER,
+            tag TEXT,
+            recurrence TEXT,
             created_at INTEGER NOT NULL
         )",
         [],
     )?;
-    // 幂等迁移：旧库补 pinned / due_notified_at（PRAGMA 探列，缺失才 ALTER）
+    // 幂等迁移：旧库补列（PRAGMA 探列，缺失才 ALTER）
     ensure_memo_column(conn, "pinned", "INTEGER NOT NULL DEFAULT 0")?;
     ensure_memo_column(conn, "due_notified_at", "INTEGER")?;
+    ensure_memo_column(conn, "tag", "TEXT")?;
+    ensure_memo_column(conn, "recurrence", "TEXT")?;
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_memos_status ON memos(status, created_at DESC)",
         [],
@@ -460,7 +469,7 @@ fn ensure_memo_column(conn: &Connection, name: &str, ddl: &str) -> rusqlite::Res
 }
 
 const MEMO_COLS: &str =
-    "id, content, content_raw, status, acted_at, due_date, trigger_data, last_triggered_at, pinned, due_notified_at, created_at";
+    "id, content, content_raw, status, acted_at, due_date, trigger_data, last_triggered_at, pinned, due_notified_at, tag, recurrence, created_at";
 
 fn map_memo(row: &rusqlite::Row) -> rusqlite::Result<Memo> {
     Ok(Memo {
@@ -474,7 +483,9 @@ fn map_memo(row: &rusqlite::Row) -> rusqlite::Result<Memo> {
         last_triggered_at: row.get(7)?,
         pinned: row.get(8)?,
         due_notified_at: row.get(9)?,
-        created_at: row.get(10)?,
+        tag: row.get(10)?,
+        recurrence: row.get(11)?,
+        created_at: row.get(12)?,
     })
 }
 
@@ -495,21 +506,25 @@ pub fn create_memo(conn: &Connection, raw: &str, now: i64) -> rusqlite::Result<M
         last_triggered_at: None,
         pinned: false,
         due_notified_at: None,
+        tag: None,
+        recurrence: None,
         created_at: now,
     })
 }
 
-/// LLM 解析完成写回：重构正文 + 触发器 + 到期日（一次写全，避免半更新状态）
+/// LLM 解析完成写回：重构正文 + 触发器 + 到期日 + 标签 + 重复规则（一次写全，避免半更新状态）
 pub fn update_memo_parse(
     conn: &Connection,
     id: i64,
     content: &str,
     trigger_data: Option<&str>,
     due_date: Option<&str>,
+    tag: Option<&str>,
+    recurrence: Option<&str>,
 ) -> rusqlite::Result<()> {
     conn.execute(
-        "UPDATE memos SET content = ?2, trigger_data = ?3, due_date = ?4 WHERE id = ?1",
-        params![id, content, trigger_data, due_date],
+        "UPDATE memos SET content = ?2, trigger_data = ?3, due_date = ?4, tag = ?5, recurrence = ?6 WHERE id = ?1",
+        params![id, content, trigger_data, due_date, tag, recurrence],
     )?;
     Ok(())
 }
@@ -544,6 +559,64 @@ pub fn set_memo_pinned(conn: &Connection, id: i64, pinned: bool) -> rusqlite::Re
     conn.execute(
         "UPDATE memos SET pinned = ?2 WHERE id = ?1",
         params![id, pinned],
+    )?;
+    Ok(())
+}
+
+/// 单条查询（重复重生等需要整行的场景）
+pub fn get_memo(conn: &Connection, id: i64) -> rusqlite::Result<Memo> {
+    let sql = format!("SELECT {} FROM memos WHERE id = ?1", MEMO_COLS);
+    conn.query_row(&sql, params![id], map_memo)
+}
+
+/// 重复规则的下一次到期：daily → 明天；weekly:N（1=周一…7=周日）→ 往后下一个周 N
+/// （今天即周 N 则取下周——今天这条刚完成）
+fn next_due_date(today: chrono::NaiveDate, recurrence: &str) -> Option<chrono::NaiveDate> {
+    if recurrence == "daily" {
+        return Some(today + chrono::Duration::days(1));
+    }
+    let target: u32 = recurrence.strip_prefix("weekly:")?.parse().ok()?;
+    if !(1..=7).contains(&target) {
+        return None;
+    }
+    let current = today.weekday().num_days_from_monday() + 1; // 1..=7
+    let delta = if target > current {
+        target - current
+    } else {
+        7 - (current - target)
+    };
+    Some(today + chrono::Duration::days(delta as i64))
+}
+
+/// 重复备忘完成时生成下一次 occurrence：内容/原文/标签/触发器/规则照抄，
+/// due 推到下一周期；通知与处置状态全新（新行即新审计段，历史 occurrence 自然留痕）
+pub fn create_next_recurrence(
+    conn: &Connection,
+    memo: &Memo,
+    now: i64,
+) -> rusqlite::Result<()> {
+    let Some(recurrence) = memo.recurrence.as_deref() else {
+        return Ok(());
+    };
+    let today = chrono::DateTime::from_timestamp(now, 0)
+        .map(|utc| utc.with_timezone(&chrono::Local).date_naive());
+    let next = today.and_then(|t| next_due_date(t, recurrence));
+    let Some(next) = next else {
+        return Ok(());
+    };
+    let due = next.format("%Y-%m-%d").to_string();
+    conn.execute(
+        "INSERT INTO memos (content, content_raw, due_date, trigger_data, tag, recurrence, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            memo.content,
+            memo.content_raw,
+            due,
+            memo.trigger_data,
+            memo.tag,
+            memo.recurrence,
+            now
+        ],
     )?;
     Ok(())
 }

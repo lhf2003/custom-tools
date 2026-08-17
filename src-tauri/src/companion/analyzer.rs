@@ -1509,11 +1509,16 @@ fn parse_llm_patterns(reply: &str) -> Result<LlmPatternsResponse, String> {
 
 // ── 备忘解析（触发器 + 重构正文）──────────────────────────────
 
-/// 解析结果：重构正文（展示面）+ 触发器（情境匹配索引）
+/// 解析结果：重构正文（展示面）+ 触发器（情境匹配索引）+ 标签（封闭集）+ 重复规则
 pub struct ParsedMemo {
     pub refined: Option<String>,
     pub triggers: db::IntentTriggers,
+    pub tag: Option<String>,
+    pub recurrence: Option<String>,
 }
+
+/// 备忘分类封闭集（单标签；LLM 输出集外值一律丢弃为 NULL）
+const MEMO_TAGS: &[&str] = &["工作", "生活", "购物", "学习", "健康", "财务", "社交", "其他"];
 
 /// 解析备忘并写回数据库（创建和重试共用的完整链路）。
 /// 无论有没有触发器都写回——重构正文本身就是产出；解析失败正文兜底原文。
@@ -1536,8 +1541,16 @@ pub async fn parse_and_store_triggers(
         None
     };
     let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
-    db::update_memo_parse(&conn, memo_id, &refined, json.as_deref(), t.due.as_deref())
-        .map_err(|e| format!("写回解析结果失败: {}", e))?;
+    db::update_memo_parse(
+        &conn,
+        memo_id,
+        &refined,
+        json.as_deref(),
+        t.due.as_deref(),
+        parsed.tag.as_deref(),
+        parsed.recurrence.as_deref(),
+    )
+    .map_err(|e| format!("写回解析结果失败: {}", e))?;
     log::info!("备忘 #{} 解析成功", memo_id);
     // 重构正文已落库，通知备忘视图刷新（创建与重试补解析共用此链路，一并覆盖）
     let _ = app_handle.emit("memo:changed", ());
@@ -1568,7 +1581,7 @@ pub async fn parse_memo(
     let prompt = format!(
         "分析下面这条快速记下的备忘，输出重构正文和触发条件。\n\
          只输出 JSON，不要任何其他文字。格式：\n\
-         {{\"refined\":\"重构后的备忘正文\",\"due\":\"YYYY-MM-DD 或 null\",\"person\":\"联系人名 或 null\",\"channel\":\"沟通渠道（微信/钉钉/飞书/QQ 等）或 null\",\"keywords\":[\"窗口标题里可能出现的关键词，最多3个\"]}}\n\
+         {{\"refined\":\"重构后的备忘正文\",\"due\":\"YYYY-MM-DD 或 null\",\"person\":\"联系人名 或 null\",\"channel\":\"沟通渠道（微信/钉钉/飞书/QQ 等）或 null\",\"keywords\":[\"窗口标题里可能出现的关键词，最多3个\"],\"tag\":\"分类 或 null\",\"repeat\":\"重复规则 或 null\"}}\n\
          重构规则（refined）：\n\
          1. 用户是快速输入，正文要重构成「要做的事」的最小完整表述：动词+对象+事项。\n\
          2. 删掉时间词（明天/周五/下午等，已进 due）、删掉「提醒我/记得/需要」这类元话。\n\
@@ -1578,7 +1591,10 @@ pub async fn parse_memo(
          1. 今天是 {today}。\"明天\"=\"今天+1天\"，\"周五\"=最近的周五，\"下周X\"=下周的星期X。没有明确时间则 due 为 null。\n\
          2. person 只提取明确的人名/称呼（如\"张三\"\"前端小李\"），没有则为 null。\n\
          3. channel 只在明确提到沟通软件时填写。\n\
-         4. keywords 提取能识别相关应用/项目/事项的实词（如项目名、\"接口文档\"），不要虚词。没有合适的关键词就给空数组。{facts_context}\n\
+         4. keywords 提取能识别相关应用/项目/事项的实词（如项目名、\"接口文档\"），不要虚词。没有合适的关键词就给空数组。\n\
+         分类规则（tag）：从 工作/生活/购物/学习/健康/财务/社交/其他 中选一个最贴的，拿不准给「其他」。\n\
+         重复规则（repeat）：仅当原文明确表达了周期性（\"每天\"\"每周五\"\"每周末\"等）才填：\n\
+         每天 → \"daily\"；每周X → \"weekly:1\"到\"weekly:7\"（1=周一…7=周日，每周末=weekly:6）；其余一律 null。{facts_context}\n\
          原话：「{text}」",
         today = today,
         facts_context = facts_context,
@@ -1605,10 +1621,22 @@ pub async fn parse_memo(
     parsed.triggers.keywords.truncate(3);
     // refined 与原文逐字相同则视为无重构（省一次无意义写回的判断留给调用方，这里只归一化）
     parsed.refined = parsed.refined.map(|r| r.trim().to_string());
+    // tag 限封闭集，集外值（LLM 自由发挥）丢弃
+    parsed.tag = parsed.tag.filter(|t| MEMO_TAGS.contains(&t.as_str()));
+    // repeat 仅认 daily / weekly:1-7，其余丢弃
+    parsed.repeat = parsed.repeat.filter(|r| {
+        r == "daily"
+            || r
+                .strip_prefix("weekly:")
+                .and_then(|d| d.parse::<u32>().ok())
+                .is_some_and(|d| (1..=7).contains(&d))
+    });
 
     Ok(ParsedMemo {
         refined: parsed.refined,
         triggers: parsed.triggers,
+        tag: parsed.tag,
+        recurrence: parsed.repeat,
     })
 }
 
@@ -1616,6 +1644,10 @@ pub async fn parse_memo(
 struct ParsedMemoJson {
     #[serde(default)]
     refined: Option<String>,
+    #[serde(default)]
+    tag: Option<String>,
+    #[serde(default)]
+    repeat: Option<String>,
     #[serde(flatten)]
     triggers: db::IntentTriggers,
 }

@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { Check, ListTodo, Loader2, PenLine, Pin, X } from 'lucide-react';
+import { Check, ListTodo, Loader2, PenLine, Pin, Repeat, X } from 'lucide-react';
 import { THEME } from '@/constants/theme';
 import { WINDOW_SIZE } from '@/constants/window';
 import { immediateResize } from '@/utils/tauri';
@@ -22,7 +22,21 @@ interface Memo {
   acted_at: number | null;
   due_date: string | null;
   pinned: boolean;
+  tag: string | null;
+  recurrence: string | null;
   created_at: number;
+}
+
+/** 与后端 MEMO_TAGS 同序：chips 按固定顺序枚举（而非出现顺序，位置稳定可记忆） */
+const MEMO_TAG_ORDER = ['工作', '生活', '购物', '学习', '健康', '财务', '社交', '其他'] as const;
+
+const WEEKDAY_LABELS = ['一', '二', '三', '四', '五', '六', '日'] as const;
+
+function recurrenceLabel(recurrence: string): string | null {
+  if (recurrence === 'daily') return '每天';
+  const m = recurrence.match(/^weekly:([1-7])$/);
+  if (!m) return null;
+  return `每周${WEEKDAY_LABELS[Number(m[1]) - 1]}`;
 }
 
 function localDate(ts: number): string {
@@ -56,6 +70,7 @@ export function MemoView() {
   const [memos, setMemos] = useState<Memo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [tagFilter, setTagFilter] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -154,11 +169,22 @@ export function MemoView() {
 
   const keyword = query.trim().toLowerCase();
 
+  // chips 候选：固定顺序中当前列表实际存在的标签（无标签数据时整行不渲染）
+  const presentTags = useMemo(
+    () =>
+      MEMO_TAG_ORDER.filter((t) =>
+        (memos ?? []).some((m) => m.tag === t && m.status !== 'dismissed'),
+      ),
+    [memos],
+  );
+
   // 智能分组（Apple Reminders 语义）：置顶 → 已逾期 → 今天到期 → 近期到期 → 以后 →
-  // 无日期按创建日期 → 已完成；空组不渲染，搜索过滤对各组一视同仁
+  // 无日期按创建日期 → 已完成；空组不渲染，关键词与标签过滤对各组一视同仁
   const sections = useMemo<MemoSection[]>(() => {
     const list = memos ?? [];
-    const match = (m: Memo) => !keyword || m.content.toLowerCase().includes(keyword);
+    const match = (m: Memo) =>
+      (!keyword || m.content.toLowerCase().includes(keyword)) &&
+      (!tagFilter || m.tag === tagFilter);
     const byCreatedDesc = (a: Memo, b: Memo) => b.created_at - a.created_at;
     // 逾期越早越靠前；同天到期内新记的在前
     const byDueAsc = (a: Memo, b: Memo) =>
@@ -217,7 +243,7 @@ export function MemoView() {
 
     out.push({ key: 'done', label: '已完成', items: done });
     return out.filter((s) => s.items.length > 0);
-  }, [memos, keyword]);
+  }, [memos, keyword, tagFilter]);
 
   const isEmpty = sections.length === 0;
 
@@ -251,6 +277,30 @@ export function MemoView() {
           )}
         </div>
       </div>
+
+      {/* 标签 chips：单选过滤（再点当前项复位「全部」）；与关键词过滤叠加 */}
+      {presentTags.length > 0 && (
+        <div className="px-6 pb-1 flex items-center gap-1.5 flex-wrap">
+          {(['全部', ...presentTags] as const).map((t) => {
+            const active = t === '全部' ? tagFilter === null : tagFilter === t;
+            return (
+              <button
+                key={t}
+                onClick={() => setTagFilter(t === '全部' || active ? null : t)}
+                className="px-2 py-0.5 rounded-full text-xs transition-colors cursor-pointer"
+                style={{
+                  backgroundColor: active
+                    ? 'rgba(99, 102, 241, 0.25)'
+                    : 'rgba(255, 255, 255, 0.05)',
+                  color: active ? 'var(--app-brand-primary-light)' : THEME.TEXT_TERTIARY,
+                }}
+              >
+                {t}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Body */}
       <div className="flex-1 overflow-y-auto px-6 py-4">
@@ -353,6 +403,29 @@ function MemoRow({ memo, onToggle, onDismiss, onPinToggle }: MemoRowProps) {
           style={{ color: done ? THEME.TEXT_DISABLED : THEME.TEXT_SECONDARY }}
         >
           {memo.content}
+        {memo.tag && (
+          <span
+            className="ml-2 text-[10px] px-1.5 py-0.5 rounded"
+            style={{
+              backgroundColor: 'rgba(148, 163, 184, 0.15)',
+              color: THEME.TEXT_TERTIARY,
+            }}
+          >
+            {memo.tag}
+          </span>
+        )}
+        {memo.recurrence && recurrenceLabel(memo.recurrence) && (
+          <span
+            className="ml-2 text-[10px] px-1.5 py-0.5 rounded inline-flex items-center gap-0.5"
+            style={{
+              backgroundColor: 'rgba(148, 163, 184, 0.15)',
+              color: THEME.TEXT_TERTIARY,
+            }}
+          >
+            <Repeat size={9} />
+            {recurrenceLabel(memo.recurrence)}
+          </span>
+        )}
         {memo.due_date && (
           <span
             className="ml-2 text-[10px] px-1.5 py-0.5 rounded"

@@ -456,6 +456,10 @@ pub fn run() {
             voice::preload_window(app);
             app.manage(voice::VoiceToastState::default());
 
+            // 预创建备忘桌面便签窗（隐藏），随后按上次开关状态恢复显隐
+            companion::sticky::preload_window(app.handle());
+            companion::sticky::restore_on_startup(app.handle());
+
             // 启动陪伴模块（窗口活动采集 + 情境建议 + LLM 习惯分析）
             {
                 let companion_db_path = app.path().app_data_dir().unwrap().join(DB_FILE_NAME);
@@ -658,6 +662,9 @@ pub fn run() {
             commands::companion::set_memo_status,
             commands::companion::set_memo_pinned,
             commands::companion::bulk_set_memo_status,
+            companion::sticky::set_memo_sticky_enabled,
+            companion::sticky::save_memo_sticky_position,
+            companion::sticky::set_memo_sticky_height,
             commands::companion::get_companion_memory_facts,
             commands::companion::update_companion_memory_fact,
             commands::companion::delete_companion_memory_fact,

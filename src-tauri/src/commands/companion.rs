@@ -396,7 +396,21 @@ pub fn set_memo_status(
     }
     let conn = open_conn(&db_state)?;
     let now = chrono::Local::now().timestamp();
+    // 重复备忘需先取整行（内容/规则照抄生成下一次）
+    let memo = if status == "done" {
+        db::get_memo(&conn, id).ok()
+    } else {
+        None
+    };
     db::set_memo_status(&conn, id, &status, now).map_err(|e| format!("更新备忘状态失败: {}", e))?;
+    // 完成即重生下一次 occurrence（due 推到下一周期；失败只记日志，本次完成不回滚）
+    if let Some(m) = memo {
+        if m.recurrence.is_some() {
+            if let Err(e) = db::create_next_recurrence(&conn, &m, now) {
+                log::warn!("重复备忘 #{} 生成下一次失败: {}", id, e);
+            }
+        }
+    }
     let _ = app_handle.emit("memo:changed", ());
     Ok(())
 }

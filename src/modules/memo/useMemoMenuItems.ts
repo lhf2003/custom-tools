@@ -1,16 +1,40 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { CheckCheck, Eraser } from 'lucide-react';
+import { listen } from '@tauri-apps/api/event';
+import { CheckCheck, Eraser, StickyNote } from 'lucide-react';
 import type { MenuItem } from '@/types';
 import { confirmDialog } from '@/stores/confirmStore';
 import { useToastStore } from '@/stores/toastStore';
 
 /**
- * 备忘插件的 nav 菜单项（列表级批量操作）。
+ * 备忘插件的 nav 菜单项（列表级批量操作 + 桌面便签开关）。
  * 菜单与视图不共享状态：批量改库后由后端 memo:changed 事件驱动视图刷新。
+ * 便签开关状态跨窗口同步：便签自己的关闭按钮也走同一命令，经 memo-sticky:toggled 回流。
  */
 export function useMemoMenuItems(): MenuItem[] {
   const { addToast } = useToastStore();
+  const [stickyEnabled, setStickyEnabled] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    invoke<string | null>('get_setting', { key: 'memo_sticky.enabled' })
+      .then((v) => setStickyEnabled(v === '1'))
+      .catch(() => setStickyEnabled(false));
+    const unlisten = listen<boolean>('memo-sticky:toggled', (e) => {
+      setStickyEnabled(e.payload);
+    });
+    return () => {
+      unlisten.then((f) => f());
+    };
+  }, []);
+
+  const handleToggleSticky = useCallback(() => {
+    const next = !(stickyEnabled ?? false);
+    setStickyEnabled(next); // 立即反馈，事件回流对齐
+    invoke('set_memo_sticky_enabled', { enabled: next }).catch((e: unknown) => {
+      setStickyEnabled(!next);
+      addToast({ type: 'error', title: '便签开关失败', message: String(e) });
+    });
+  }, [stickyEnabled, addToast]);
 
   const handleCompleteAll = useCallback(async () => {
     const ok = await confirmDialog({
@@ -60,7 +84,13 @@ export function useMemoMenuItems(): MenuItem[] {
   }, [addToast]);
 
   return [
-    { id: 'complete-all', label: '全部标为完成', icon: CheckCheck, onClick: handleCompleteAll },
+    {
+      id: 'toggle-sticky',
+      label: stickyEnabled ? '隐藏桌面便签' : '显示桌面便签',
+      icon: StickyNote,
+      onClick: handleToggleSticky,
+    },
+    { id: 'complete-all', label: '全部标为完成', icon: CheckCheck, separator: true, onClick: handleCompleteAll },
     {
       id: 'clear-done',
       label: '清空已完成',

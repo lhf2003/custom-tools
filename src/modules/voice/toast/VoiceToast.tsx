@@ -2,12 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { BookPlus, Check, Copy, Loader2, Send, X } from 'lucide-react';
+import { BookPlus, Check, Copy, Loader2, Send, StickyNote, X } from 'lucide-react';
 import { Tooltip } from '@/components/Tooltip';
 
 /**
  * 全局语音输入浮窗：录音条(实时电平/计时,hover 展开取消/完成) →
- * 转写(Moss) → 完成卡片(可编辑 + 发送AI/存笔记/复制 三选一)。
+ * 转写(Moss) → 完成卡片(可编辑 + 发送AI/存笔记/存备忘/复制 四选一)。
  * 状态机在此,窗口显隐/定位/尺寸在 Rust(voice 模块);背景 panel-glass-toast
  * 主题玻璃(颜色与透明度随全局主题),同划词翻译/陪伴浮窗标准。
  */
@@ -292,6 +292,20 @@ export default function VoiceToast() {
     }
   }, [text, acting, dismiss]);
 
+  // 存到备忘:与启动器「记」同一命令(LLM 异步重构+解析触发器),
+  // 备忘视图/桌面便签由 memo:changed 事件自动刷新
+  const handleSaveMemo = useCallback(async () => {
+    if (!text.trim() || acting) return;
+    setActing(true);
+    try {
+      await invoke('create_companion_intent', { text: text.trim() });
+      dismiss();
+    } catch (err) {
+      setError(typeof err === 'string' ? err : '存备忘失败');
+      setActing(false);
+    }
+  }, [text, acting, dismiss]);
+
   const handleCopy = useCallback(async () => {
     if (!text.trim() || acting) return;
     setActing(true);
@@ -304,7 +318,7 @@ export default function VoiceToast() {
     }
   }, [text, acting, dismiss]);
 
-  // 结果卡片快捷键:Ctrl+Enter 发送 / Ctrl+S 存笔记 / Ctrl+C 复制。
+  // 结果卡片快捷键:Ctrl+Enter 发送 / Ctrl+S 存笔记 / Ctrl+M 存备忘 / Ctrl+C 复制。
   // Ctrl+C 有选区时放行原生复制选区,无选区才触发「复制全文并关窗」
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -317,6 +331,9 @@ export default function VoiceToast() {
       } else if (key === 's') {
         e.preventDefault();
         void handleSaveNote();
+      } else if (key === 'm') {
+        e.preventDefault();
+        void handleSaveMemo();
       } else if (key === 'c') {
         const selection = window.getSelection();
         if (selection && selection.toString().length > 0) return;
@@ -326,7 +343,7 @@ export default function VoiceToast() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleSendToChat, handleSaveNote, handleCopy]);
+  }, [handleSendToChat, handleSaveNote, handleSaveMemo, handleCopy]);
 
   if (phase === 'idle') return null;
 
@@ -360,6 +377,16 @@ export default function VoiceToast() {
                   <BookPlus size={13} />
                 </button>
               </Tooltip>
+              <Tooltip content="存到备忘（Ctrl+M）" wrapperClassName="shrink-0">
+                <button
+                  onClick={handleSaveMemo}
+                  disabled={!text.trim() || acting}
+                  className="w-6 h-6 rounded-md flex items-center justify-center text-app-text-tertiary hover:text-app-text-primary hover:bg-app-bg-hover transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  aria-label="存到备忘"
+                >
+                  <StickyNote size={13} />
+                </button>
+              </Tooltip>
               <Tooltip content="复制到剪贴板（Ctrl+C）" wrapperClassName="shrink-0">
                 <button
                   onClick={handleCopy}
@@ -390,10 +417,11 @@ export default function VoiceToast() {
               placeholder="转写文本(可直接编辑)"
               className="flex-1 min-h-0 mx-2.5 mb-1 px-2 py-1.5 rounded-lg bg-transparent border-none text-xs text-app-text-primary placeholder-app-text-placeholder outline-none resize-none leading-relaxed"
             />
-            {/* 底部快捷键提示条:三操作键盘直达 */}
+            {/* 底部快捷键提示条:四操作键盘直达 */}
             <div className="flex items-center justify-center gap-4 px-2.5 pb-2">
               <HintKeys keys={['Ctrl', 'Enter']} label="发送" />
               <HintKeys keys={['Ctrl', 'S']} label="存笔记" />
+              <HintKeys keys={['Ctrl', 'M']} label="存备忘" />
               <HintKeys keys={['Ctrl', 'C']} label="复制" />
             </div>
           </>

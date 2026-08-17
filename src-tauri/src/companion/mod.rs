@@ -13,6 +13,7 @@ pub mod mcp_config;
 pub mod mcp_servers;
 pub mod mcp_stdio;
 pub mod persona;
+pub mod sticky;
 pub mod plugin_gen_tool;
 pub mod recall;
 pub mod scene_chat;
