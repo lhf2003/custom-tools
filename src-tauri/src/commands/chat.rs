@@ -335,11 +335,41 @@ pub fn read_chat_image(app_handle: AppHandle, path: String) -> Result<String, St
 }
 
 /// 读取任意文件字节并返回 base64。剪贴板「发送给AI」把图片/文件路径桥进
-/// 聊天附件管线（与发送文件按钮统一）时用：路径来自剪贴板记录（用户已复制
-/// 过的文件），只读，加大小上限防 OOM。
+/// 聊天附件管线（与发送文件按钮统一）时用：路径必须来自剪贴板记录
+/// （clipboard_history 某条 image 条目的 content，或某条 file 条目 content
+/// 的完整行）——该命令对前端全开放，不校验就是「任意 JS 读任意文件」通道。
+/// 只读，加大小上限防 OOM。
 #[tauri::command]
-pub fn read_file_bytes_base64(path: String) -> Result<String, String> {
+pub fn read_file_bytes_base64(
+    db_state: State<DatabaseState>,
+    path: String,
+) -> Result<String, String> {
     const MAX_BYTES: u64 = 64 * 1024 * 1024;
+    // 候选行拉回 Rust 侧做完整行精确比对：instr 子串命中不足以放行
+    // （"foo.txt" 会命中 "foo.txt.bak"），trim 对齐前端 split('\n')+trim 口径
+    let conn = crate::db::open_connection(&db_state.0).map_err(|e| e.to_string())?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT content FROM clipboard_history
+             WHERE (content_type = 'image' AND content = ?1)
+                OR (content_type = 'file' AND instr(content, ?1) > 0)",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![path], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?;
+    let mut allowed = false;
+    for row in rows {
+        let content = row.map_err(|e| e.to_string())?;
+        if content.split('\n').any(|line| line.trim() == path) {
+            allowed = true;
+            break;
+        }
+    }
+    if !allowed {
+        return Err("路径不在剪贴板记录中，拒绝读取".to_string());
+    }
+
     let meta = std::fs::metadata(&path).map_err(|e| format!("读取文件失败: {e}"))?;
     if meta.len() > MAX_BYTES {
         return Err("文件过大（上限 64MB）".to_string());

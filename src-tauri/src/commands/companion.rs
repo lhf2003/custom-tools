@@ -648,7 +648,7 @@ pub fn get_mcp_server_info() -> crate::companion::mcp::McpServerInfo {
 
 /// 本地 companion MCP 的配置片段（JSON 字符串，供「复制配置」按钮使用）
 #[tauri::command]
-pub fn get_mcp_config() -> String {
+pub fn get_mcp_config() -> Result<String, String> {
     crate::companion::mcp_config::config_json()
 }
 

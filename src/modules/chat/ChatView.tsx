@@ -407,6 +407,10 @@ export function ChatView() {
         })();
       } else if (++tries < 20) {
         setTimeout(tryAdd, 100);
+      } else {
+        // restoreSession 失败时 sessionId 恒为 null：附件已被原子取走，
+        // 静默丢弃用户无感知，如实告知
+        setError('会话未就绪，附件未能添加，请重试');
       }
     };
     tryAdd();
@@ -587,6 +591,10 @@ export function ChatView() {
     },
     [handleNewSession],
   );
+
+  // 稳定引用：SessionHistoryPanel 的 click-outside effect 依赖 onClose，
+  // 内联箭头会让监听器随流式重渲染每帧重挂（极端时漏接一次点击）
+  const closeHistory = useCallback(() => setHistoryOpen(false), []);
 
   const handleVisionGoSettings = () => {
     useSettingsStore.getState().setPendingTab('model');
@@ -801,7 +809,7 @@ export function ChatView() {
           top={historyPos.top}
           right={historyPos.right}
           anchorRef={historyBtnRef}
-          onClose={() => setHistoryOpen(false)}
+          onClose={closeHistory}
           onSwitch={switchSession}
           onDelete={deleteSession}
         />

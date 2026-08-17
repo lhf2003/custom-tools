@@ -8,23 +8,23 @@
 use serde_json::{json, Value};
 
 /// 期望的配置条目：command 指向当前 exe，args 只带 --mcp-server。
-fn expected_entry() -> Value {
+fn expected_entry() -> Result<Value, String> {
     let exe = std::env::current_exe()
         .map(|p| p.to_string_lossy().replace('\\', "/"))
-        .unwrap_or_default();
-    json!({
+        .map_err(|e| format!("获取程序路径失败: {e}"))?;
+    Ok(json!({
         "type": "stdio",
         "command": exe,
         "args": ["--mcp-server"]
-    })
+    }))
 }
 
 /// 本地 companion MCP 的配置片段（JSON，可直接粘贴进 mcpServers）。
-pub fn config_json() -> String {
+pub fn config_json() -> Result<String, String> {
     serde_json::to_string_pretty(&json!({
-        "mcpServers": { "companion": expected_entry() }
+        "mcpServers": { "companion": expected_entry()? }
     }))
-    .unwrap_or_default()
+    .map_err(|e| format!("生成配置失败: {e}"))
 }
 
 #[cfg(test)]
@@ -33,7 +33,7 @@ mod tests {
 
     #[test]
     fn config_json_wraps_companion_entry() {
-        let cfg: Value = serde_json::from_str(&config_json()).unwrap();
+        let cfg: Value = serde_json::from_str(&config_json().unwrap()).unwrap();
         assert!(cfg["mcpServers"]["companion"].is_object());
         assert_eq!(cfg["mcpServers"]["companion"]["type"], "stdio");
         assert_eq!(
