@@ -81,6 +81,10 @@ pub struct Memo {
     pub trigger_data: Option<String>,
     /// 上次情境触发时间（同日不重复弹）
     pub last_triggered_at: Option<i64>,
+    /// 置顶（展示面 pinned 组在最上；done 后保留标记，勾回 pending 复活）
+    pub pinned: bool,
+    /// 到期通知 one-shot 标记：晨间汇总展示或 tick 捡漏提醒后落时间，不再重复弹
+    pub due_notified_at: Option<i64>,
     pub created_at: i64,
 }
 
@@ -186,10 +190,15 @@ pub fn init_tables(conn: &Connection) -> rusqlite::Result<()> {
             due_date TEXT,
             trigger_data TEXT,
             last_triggered_at INTEGER,
+            pinned INTEGER NOT NULL DEFAULT 0,
+            due_notified_at INTEGER,
             created_at INTEGER NOT NULL
         )",
         [],
     )?;
+    // 幂等迁移：旧库补 pinned / due_notified_at（PRAGMA 探列，缺失才 ALTER）
+    ensure_memo_column(conn, "pinned", "INTEGER NOT NULL DEFAULT 0")?;
+    ensure_memo_column(conn, "due_notified_at", "INTEGER")?;
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_memos_status ON memos(status, created_at DESC)",
         [],
@@ -438,8 +447,20 @@ pub fn create_suggestion(
 
 // ── memos（备忘唯一真源）─────────────────────────────────────
 
+/// 幂等迁移：memos 表补列（PRAGMA 探列，缺失才 ALTER；与 db/mod.rs 的既有先例同法）
+fn ensure_memo_column(conn: &Connection, name: &str, ddl: &str) -> rusqlite::Result<()> {
+    let mut stmt = conn.prepare("PRAGMA table_info(memos)")?;
+    let columns = stmt
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<rusqlite::Result<Vec<String>>>()?;
+    if !columns.iter().any(|c| c == name) {
+        conn.execute(&format!("ALTER TABLE memos ADD COLUMN {} {}", name, ddl), [])?;
+    }
+    Ok(())
+}
+
 const MEMO_COLS: &str =
-    "id, content, content_raw, status, acted_at, due_date, trigger_data, last_triggered_at, created_at";
+    "id, content, content_raw, status, acted_at, due_date, trigger_data, last_triggered_at, pinned, due_notified_at, created_at";
 
 fn map_memo(row: &rusqlite::Row) -> rusqlite::Result<Memo> {
     Ok(Memo {
@@ -451,7 +472,9 @@ fn map_memo(row: &rusqlite::Row) -> rusqlite::Result<Memo> {
         due_date: row.get(5)?,
         trigger_data: row.get(6)?,
         last_triggered_at: row.get(7)?,
-        created_at: row.get(8)?,
+        pinned: row.get(8)?,
+        due_notified_at: row.get(9)?,
+        created_at: row.get(10)?,
     })
 }
 
@@ -470,6 +493,8 @@ pub fn create_memo(conn: &Connection, raw: &str, now: i64) -> rusqlite::Result<M
         due_date: None,
         trigger_data: None,
         last_triggered_at: None,
+        pinned: false,
+        due_notified_at: None,
         created_at: now,
     })
 }
@@ -499,6 +524,70 @@ pub fn set_memo_status(conn: &Connection, id: i64, status: &str, now: i64) -> ru
     Ok(())
 }
 
+/// 批量处置备忘（菜单「全部标为完成」「清空已完成」）：单条 UPDATE，
+/// 迁移白名单在命令层收窄，这里只贯彻 acted_at 语义（处置态落时间、回 pending 清空）
+pub fn bulk_set_memo_status(
+    conn: &Connection,
+    from_status: &str,
+    to_status: &str,
+    now: i64,
+) -> rusqlite::Result<usize> {
+    let acted: Option<i64> = if to_status == "pending" { None } else { Some(now) };
+    conn.execute(
+        "UPDATE memos SET status = ?2, acted_at = ?3 WHERE status = ?1",
+        params![from_status, to_status, acted],
+    )
+}
+
+/// 置顶/取消置顶（视图 pin 按钮）
+pub fn set_memo_pinned(conn: &Connection, id: i64, pinned: bool) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE memos SET pinned = ?2 WHERE id = ?1",
+        params![id, pinned],
+    )?;
+    Ok(())
+}
+
+/// 标记到期提醒已发（晨间汇总展示 / tick 捡漏后调用，one-shot）
+pub fn mark_memos_due_notified(
+    conn: &Connection,
+    ids: &[i64],
+    now: i64,
+) -> rusqlite::Result<()> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    let sql = format!(
+        "UPDATE memos SET due_notified_at = ?1 WHERE id IN ({})",
+        placeholders
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(now)];
+    for id in ids {
+        param_values.push(Box::new(*id));
+    }
+    let refs: Vec<&dyn rusqlite::types::ToSql> =
+        param_values.iter().map(|p| p.as_ref()).collect();
+    stmt.execute(refs.as_slice())?;
+    Ok(())
+}
+
+/// tick 捡漏：今天已到期（含逾期）但尚未提醒过的 pending 备忘
+/// （晨间汇总已展示的会被标记，天然不重复）
+pub fn list_memos_due_unnotified(conn: &Connection, today: &str) -> rusqlite::Result<Vec<Memo>> {
+    let sql = format!(
+        "SELECT {} FROM memos
+         WHERE status = 'pending' AND due_date IS NOT NULL AND due_date <= ?1
+           AND due_notified_at IS NULL
+         ORDER BY due_date ASC, created_at DESC",
+        MEMO_COLS
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params![today], map_memo)?;
+    rows.collect()
+}
+
 /// 主动面用的待处理备忘（晨间汇总/情境触发/list_memos 工具共用）。
 /// 7 天降级与 due 过滤在调用方做（与展示面「全部 pending」口径区分）
 pub fn list_memos_active(conn: &Connection) -> rusqlite::Result<Vec<Memo>> {
@@ -511,11 +600,12 @@ pub fn list_memos_active(conn: &Connection) -> rusqlite::Result<Vec<Memo>> {
     rows.collect()
 }
 
-/// 笔记视图用：pending 在前（旧→新），已处置在后（新处置在前），封顶 limit
+/// 备忘视图用：pending 在前（置顶优先、其余旧→新），已处置在后（新处置在前），封顶 limit
 pub fn list_memos_for_view(conn: &Connection, limit: i64) -> rusqlite::Result<Vec<Memo>> {
     let sql = format!(
         "SELECT {} FROM memos
          ORDER BY CASE WHEN status = 'pending' THEN 0 ELSE 1 END,
+                  CASE WHEN status = 'pending' THEN -pinned ELSE 0 END,
                   CASE WHEN status = 'pending' THEN created_at ELSE -created_at END
          LIMIT ?1",
         MEMO_COLS

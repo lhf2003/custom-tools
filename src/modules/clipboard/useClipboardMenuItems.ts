@@ -1,13 +1,13 @@
 import { useCallback, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { save } from '@tauri-apps/plugin-dialog';
-import { ClipboardPaste, Copy, Download, FolderOpen, Sparkles, Star, Trash2 } from 'lucide-react';
+import { ClipboardPaste, Copy, Download, FolderOpen, Sparkles, Star, StickyNote, Trash2 } from 'lucide-react';
 import { useClipboardSelectionStore } from '@/stores/clipboardSelectionStore';
 import { useToastStore } from '@/stores/toastStore';
 import { confirmDialog } from '@/stores/confirmStore';
 import type { MenuItem } from '@/types';
 
-type ClipboardEntryAction = 'paste' | 'copy' | 'favorite' | 'delete' | 'reveal' | 'send-to-ai';
+type ClipboardEntryAction = 'paste' | 'copy' | 'favorite' | 'delete' | 'reveal' | 'send-to-ai' | 'to-memo';
 
 /**
  * 剪贴板条目级动作（粘贴/复制/发送给AI/收藏/删除/打开位置）：
@@ -45,6 +45,13 @@ export function useClipboardItemMenuItems(): MenuItem[] {
       icon: Sparkles,
       disabled: !clipboardSelection.hasSelection,
       onClick: () => dispatchClipboardAction('send-to-ai'),
+    },
+    {
+      id: 'to-memo',
+      label: '转为备忘',
+      icon: StickyNote,
+      disabled: !clipboardSelection.hasSelection || !clipboardSelection.isText,
+      onClick: () => dispatchClipboardAction('to-memo'),
     },
     {
       id: 'favorite',

@@ -37,6 +37,11 @@ export interface ViewPlugin {
   /** 启动器网格/手册排序，缺的排最后 */
   order?: number;
   /**
+   * 系统必需插件：永不禁用。市场页不渲染开关（显示「系统必需」徽标），
+   * 注册表读写禁用状态时短路（历史遗留的 builtin.<id>.enabled='0' 自动失效）。
+   */
+  essential?: boolean;
+  /**
    * 后端 shortcut:open_module 事件 moduleId → 本插件的映射（仅映射，非声明）。
    * 吸收前后端历史 id 不一致（notes→markdown、passwords→password）。
    */

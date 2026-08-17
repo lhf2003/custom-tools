@@ -10,12 +10,15 @@ interface ClipboardSelectionState {
   isFavorite: boolean;
   /** 选中项是图片（image 类型，或路径指向图片的文件类型），控制「在资源管理器中打开」菜单项 */
   isImage: boolean;
-  setSelection: (selection: { hasSelection: boolean; isFavorite: boolean; isImage: boolean }) => void;
+  /** 选中项是纯文本（text 类型），控制「转为备忘」菜单项（图片/文件路径列表转备忘无意义） */
+  isText: boolean;
+  setSelection: (selection: { hasSelection: boolean; isFavorite: boolean; isImage: boolean; isText: boolean }) => void;
 }
 
 export const useClipboardSelectionStore = create<ClipboardSelectionState>((set) => ({
   hasSelection: false,
   isFavorite: false,
   isImage: false,
+  isText: false,
   setSelection: (selection) => set(selection),
 }));

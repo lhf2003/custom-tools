@@ -43,7 +43,7 @@ export function classifyFileName(name: string): FileClass {
 }
 
 /** base64 → 字节（后端 read_file_bytes_base64 返回裸 base64，无 data: 前缀） */
-function base64ToBytes(base64: string): Uint8Array {
+function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
   const bin = atob(base64);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);

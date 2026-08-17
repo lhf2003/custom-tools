@@ -5,7 +5,7 @@ use std::time::Duration;
 use chrono::{Datelike, Timelike};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 use super::db::{self, ActivityLog};
 use super::suggester;
@@ -1539,6 +1539,8 @@ pub async fn parse_and_store_triggers(
     db::update_memo_parse(&conn, memo_id, &refined, json.as_deref(), t.due.as_deref())
         .map_err(|e| format!("写回解析结果失败: {}", e))?;
     log::info!("备忘 #{} 解析成功", memo_id);
+    // 重构正文已落库，通知备忘视图刷新（创建与重试补解析共用此链路，一并覆盖）
+    let _ = app_handle.emit("memo:changed", ());
     Ok(())
 }
 

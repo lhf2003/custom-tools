@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { FileText, Plus, Folder, Loader2, Search, Maximize2, Minimize2, Download, Pencil, X, ListTodo, Wand2 } from 'lucide-react';
+import { FileText, Plus, Folder, Loader2, Search, Maximize2, Minimize2, Download, Pencil, X, Wand2 } from 'lucide-react';
 import { Tooltip } from '@/components/Tooltip';
 import { save } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
@@ -8,7 +8,6 @@ import { useToastStore } from '@/stores/toastStore';
 import type { NoteItemData, CreateNoteRequest } from './types';
 import { useNotes } from './hooks/useNotes';
 import { Modal, EmptyState, SortableNoteTree, ErrorBoundary, VditorEditor, ContextMenu, MenuIcons, DeleteConfirmDialog } from './components';
-import { MemosView, MEMO_VIEW_PATH } from './components/MemosView';
 import { exportNoteAsImage } from './utils/export';
 import type { MenuItem } from './components/ContextMenu';
 import { THEME } from '@/constants/theme';
@@ -49,8 +48,7 @@ export function MarkdownView() {
     toggleFolder,
   } = useNotes();
 
-  // 打开外部指定的笔记（如陪伴设置「在笔记中查看」→ 陪伴日报/备忘.md）。
-  // 载荷形状：{ notePath: string }，读后清除
+  // 打开外部指定的笔记。载荷形状：{ notePath: string }，读后清除
   usePluginPayload(markdownPlugin.id, useCallback((payload: unknown) => {
     if (typeof payload !== 'object' || payload === null) return;
     const { notePath } = payload as { notePath?: unknown };
@@ -610,33 +608,6 @@ export function MarkdownView() {
           className="flex-1 overflow-y-auto p-2"
           onContextMenu={(e) => handleEmptyAreaContextMenu(e, '')}
         >
-          {/* 置顶虚拟节点：备忘视图（DB 驱动，非 md 文件） */}
-          {!searchQuery.trim() && (
-            <button
-              onClick={() => setSelectedNote(MEMO_VIEW_PATH)}
-              className="w-full flex items-center gap-2 px-2 py-1.5 mb-1 rounded-md text-sm transition-colors cursor-pointer"
-              style={{
-                color: selectedNote === MEMO_VIEW_PATH ? THEME.SELECTED : THEME.TEXT_TERTIARY,
-                backgroundColor:
-                  selectedNote === MEMO_VIEW_PATH ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
-              }}
-              onMouseEnter={(e) => {
-                if (selectedNote !== MEMO_VIEW_PATH) {
-                  e.currentTarget.style.color = THEME.TEXT_PRIMARY;
-                  e.currentTarget.style.backgroundColor = THEME.BG_HOVER;
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (selectedNote !== MEMO_VIEW_PATH) {
-                  e.currentTarget.style.color = THEME.TEXT_TERTIARY;
-                  e.currentTarget.style.backgroundColor = 'transparent';
-                }
-              }}
-            >
-              <ListTodo size={13} className="shrink-0" />
-              备忘
-            </button>
-          )}
           {isLoading ? (
             <div className="flex items-center justify-center h-full" style={{ color: THEME.TEXT_DISABLED }}>
               <Loader2 size={20} className="animate-spin mr-2" />
@@ -737,11 +708,7 @@ export function MarkdownView() {
 
       {/* Editor Area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {selectedNote === MEMO_VIEW_PATH ? (
-          <ErrorBoundary>
-            <MemosView />
-          </ErrorBoundary>
-        ) : selectedNote && noteContent ? (
+        {selectedNote && noteContent ? (
           <>
             {/* Title Bar：固定 48px 与左侧搜索行同高，底线与之连成通栏分割线 */}
             <div

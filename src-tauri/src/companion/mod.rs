@@ -290,6 +290,7 @@ fn run_collector(
                 event.timestamp,
                 &mut last_digest_date,
             );
+            check_due_reminders(&conn, &app_handle, event.timestamp);
             check_intent_triggers(&conn, &app_handle, &event);
         }
 
@@ -424,6 +425,28 @@ fn check_morning_digest(
     *last_digest_date = today.clone();
     analyzer::save_setting(db_path, "companion_last_digest_date", &today);
 
+    // 汇总展示过的到期备忘即视为已通知（one-shot），tick 捡漏不再对它们重复弹
+    let due_ids: Vec<i64> = active
+        .iter()
+        .filter(|m| m.due_date.is_some())
+        .map(|m| m.id)
+        .collect();
+    if let Err(e) = db::mark_memos_due_notified(conn, &due_ids, now) {
+        log::warn!("标记晨间汇总到期通知失败: {}", e);
+    }
+
+    // 已逾期单拎一行置顶展示（红字段）：memo_is_active 含逾期，
+    // 但混在一起数数时逾期的紧迫感被稀释了
+    let overdue_count = active
+        .iter()
+        .filter(|m| m.due_date.as_deref().is_some_and(|d| d < today.as_str()))
+        .count();
+    let overdue_line = if overdue_count > 0 {
+        format!("已逾期 {} 条！\n\n", overdue_count)
+    } else {
+        String::new()
+    };
+
     let titles: Vec<String> = active.iter().take(3).map(|m| m.content.clone()).collect();
     let suffix = if active.len() > 3 {
         format!("\n…以及另外 {} 条", active.len() - 3)
@@ -437,16 +460,18 @@ fn check_morning_digest(
         .unwrap_or_default();
     let body = match diary::today_focus(conn) {
         Some(focus) => format!(
-            "{}今日关注：\n{}\n\n备忘待办 {} 条：\n{}{}",
+            "{}{}今日关注：\n{}\n\n备忘待办 {} 条：\n{}{}",
             weather_line,
+            overdue_line,
             focus,
             active.len(),
             titles.join("\n"),
             suffix
         ),
         None => format!(
-            "{}今天有 {} 条备忘待办：\n{}{}",
+            "{}{}今天有 {} 条备忘待办：\n{}{}",
             weather_line,
+            overdue_line,
             active.len(),
             titles.join("\n"),
             suffix
@@ -458,6 +483,39 @@ fn check_morning_digest(
         app_handle,
         suggester::TYPE_DAILY_DIGEST,
         "今日备忘",
+        Some(&body),
+        None,
+    );
+}
+
+/// 到期捡漏：晨间汇总之后当天新到期的备忘（典型：白天才记下的「今天到期」），
+/// 随 9 秒意图节流扫一次，批量弹一条提醒并标记 one-shot；
+/// 逾期不重复弹——次日起由晨间汇总的「已逾期」红字段承接。
+fn check_due_reminders(conn: &Connection, app_handle: &AppHandle, now: i64) {
+    let today = fmt_date(now);
+    let due = db::list_memos_due_unnotified(conn, &today).unwrap_or_default();
+    if due.is_empty() {
+        return;
+    }
+
+    let titles: Vec<String> = due.iter().take(3).map(|m| m.content.clone()).collect();
+    let suffix = if due.len() > 3 {
+        format!("\n…以及另外 {} 条", due.len() - 3)
+    } else {
+        String::new()
+    };
+    let body = format!("{} 条备忘今天到期：\n{}{}", due.len(), titles.join("\n"), suffix);
+
+    // 先标记后弹：弹窗失败顶多丢一次提醒，不标记则 9 秒后重复弹
+    let ids: Vec<i64> = due.iter().map(|m| m.id).collect();
+    if let Err(e) = db::mark_memos_due_notified(conn, &ids, now) {
+        log::warn!("标记到期提醒失败: {}", e);
+    }
+    let _ = suggester::push_suggestion(
+        conn,
+        app_handle,
+        suggester::TYPE_INTENT_REMINDER,
+        "备忘到期",
         Some(&body),
         None,
     );

@@ -10,14 +10,13 @@ import {
 } from 'lucide-react';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useToastStore } from '@/stores/toastStore';
+import { useAppStore } from '@/stores/appStore';
 import { confirmDialog } from '@/stores/confirmStore';
 import { SettingGroup, SettingRow, Toggle } from '../components/SettingsPrimitives';
 import { CustomSelect } from '../components/CustomSelect';
 import { MemoryCenter } from './MemoryCenter';
 import { SuggestionCenter } from './SuggestionCenter';
 import { EvolutionGovernance } from './EvolutionGovernance';
-import { MEMO_VIEW_PATH } from '../../markdown/components/MemosView';
-import type { OpenViewDetail } from '@/types';
 
 /** 贾维斯认下的场所（CASE-003：fingerprint 原文只在本机展示，不进 LLM 上下文） */
 interface CompanionPlace {
@@ -25,8 +24,6 @@ interface CompanionPlace {
   name: string;
   created_at: number;
 }
-
-/** 备忘笔记的相对路径（与后端 commands/companion.rs 的 INTENT_NOTE_RELATIVE 对应） */
 
 export function CompanionSettings() {
   const {
@@ -123,13 +120,8 @@ export function CompanionSettings() {
     }
   };
 
-  const handleOpenNotes = async () => {
-    // 备忘已迁 memos 表（DB 唯一真源）：打开笔记模块的备忘视图而非旧 md 文件
-    window.dispatchEvent(
-      new CustomEvent<OpenViewDetail>('app:open-view', {
-        detail: { view: 'markdown', payload: { notePath: MEMO_VIEW_PATH } },
-      })
-    );
+  const handleOpenMemos = () => {
+    useAppStore.getState().openPluginView('memo');
   };
 
   const retentionOptions = [
@@ -219,13 +211,13 @@ export function CompanionSettings() {
       <SettingGroup title="数据与洞察">
         <SettingRow
           title="我的备忘"
-          description="启动器输入「记 xxx」回车记录；备忘写入笔记，随日报一起沉淀"
+          description="启动器输入「记 xxx」回车记录；在备忘插件中查看打理，随日报一起沉淀"
         >
           <button
-            onClick={handleOpenNotes}
+            onClick={handleOpenMemos}
             className="px-2.5 py-1.5 rounded-lg text-app-text-tertiary text-xs hover:bg-white/10 hover:text-app-text-primary transition-colors cursor-pointer"
           >
-            在笔记中查看
+            打开备忘
           </button>
         </SettingRow>
 

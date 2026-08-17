@@ -11,6 +11,7 @@ const clipboardPlugin: ViewPlugin = {
   description:
     '记录并管理您的剪贴板历史，支持文本、图片、文件等多种格式。可收藏常用内容，快速粘贴历史记录。',
   order: 3,
+  essential: true,
   shortcutModuleId: 'clipboard',
   triggers: [{ keyword: '@clipboard' }],
   load: () => import('./ClipboardView').then((m) => ({ default: m.ClipboardView })),

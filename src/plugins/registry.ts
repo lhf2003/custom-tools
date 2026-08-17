@@ -44,10 +44,10 @@ export function listPlugins(): ViewPlugin[] {
  */
 const disabledBuiltInIds = new Set<string>();
 
-/** 加载内置插件启用状态（App 挂载时调用；外部插件 id 读 builtin key 不存在，自动跳过） */
+/** 加载内置插件启用状态（App 挂载时调用；外部插件 id 读 builtin key 不存在，自动跳过；essential 插件跳过读取，历史脏数据自动失效） */
 export async function loadBuiltInPluginStates(): Promise<void> {
   for (const plugin of byId.values()) {
-    if (externalIds.has(plugin.id)) continue;
+    if (externalIds.has(plugin.id) || plugin.essential) continue;
     const enabled = await invoke<string | null>('get_setting', {
       key: `builtin.${plugin.id}.enabled`,
     });
@@ -56,8 +56,9 @@ export async function loadBuiltInPluginStates(): Promise<void> {
   }
 }
 
-/** 更新内置插件启用状态（市场页开关后同步内存；落盘由调用方负责） */
+/** 更新内置插件启用状态（市场页开关后同步内存；落盘由调用方负责；essential 插件静默拒绝） */
 export function setBuiltInPluginEnabled(id: string, enabled: boolean): void {
+  if (byId.get(id)?.essential) return;
   if (enabled) disabledBuiltInIds.delete(id);
   else disabledBuiltInIds.add(id);
 }

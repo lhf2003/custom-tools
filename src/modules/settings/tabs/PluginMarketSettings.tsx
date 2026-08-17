@@ -384,15 +384,19 @@ export function PluginMarketSettings({ onOpenPluginSettings }: PluginMarketSetti
 
   return (
     <>
-      {/* 内置插件：系统能力，支持开关；禁用联动其全局快捷键（释放组合键） */}
+      {/* 内置插件：系统能力，支持开关；禁用联动其全局快捷键（释放组合键）；essential 插件常驻不可禁用 */}
       <SettingGroup title="内置插件">
         {builtInPlugins.map((plugin) => {
           return (
             <SettingRow key={plugin.id} title={plugin.name} description={plugin.description}>
-              <Toggle
-                enabled={builtInEnabled[plugin.id] ?? true}
-                onToggle={(v) => handleBuiltInToggle(plugin.id, plugin.name, v)}
-              />
+              {plugin.essential ? (
+                <span className="text-xs text-app-text-disabled">系统必需</span>
+              ) : (
+                <Toggle
+                  enabled={builtInEnabled[plugin.id] ?? true}
+                  onToggle={(v) => handleBuiltInToggle(plugin.id, plugin.name, v)}
+                />
+              )}
             </SettingRow>
           );
         })}

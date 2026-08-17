@@ -24,6 +24,7 @@ import { ClipboardListItem } from './ClipboardListItem';
 import { ClipboardDetail } from './ClipboardDetail';
 import { useClipboardSelectionStore } from '@/stores/clipboardSelectionStore';
 import { useAppStore } from '@/stores/appStore';
+import { useToastStore } from '@/stores/toastStore';
 
 /** 焦点在输入框/文本域时不响应单键快捷键（F 收藏 / Del 删除），避免与输入冲突 */
 function isTypingTarget(): boolean {
@@ -259,6 +260,28 @@ export function ClipboardView() {
     setActiveView('chat');
   }, [items, selectedId]);
 
+  // 转为备忘：文本条目原文走启动器「记」同一命令（LLM 异步重构+解析触发器），
+  // 备忘视图由后端 memo:changed 事件驱动刷新，这里只负责创建与反馈
+  const handleToMemo = useCallback(async () => {
+    const item = items.find((i) => i.id === selectedId);
+    if (!item || item.content_type !== 'text') return;
+    const { addToast } = useToastStore.getState();
+    try {
+      await invoke('create_companion_intent', { text: item.content });
+      addToast({
+        type: 'success',
+        title: '已转为备忘',
+        message: item.content.length > 50 ? `${item.content.slice(0, 50)}…` : item.content,
+      });
+    } catch (err) {
+      addToast({
+        type: 'error',
+        title: '转备忘失败',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }, [items, selectedId]);
+
   // Group items by date
   const groupedItems = useMemo(() => {
     const groups: { [key: string]: ClipboardItemData[] } = {};
@@ -306,10 +329,11 @@ export function ClipboardView() {
         ? selectedItem.content_type === 'image' ||
           (selectedItem.content_type === 'file' && isImageFile(selectedItem.content))
         : false,
+      isText: selectedItem?.content_type === 'text',
     });
   }, [selectedItem, setSelection]);
   useEffect(() => {
-    return () => setSelection({ hasSelection: false, isFavorite: false, isImage: false });
+    return () => setSelection({ hasSelection: false, isFavorite: false, isImage: false, isText: false });
   }, [setSelection]);
 
   // TopNavigationBar 动作菜单 / 右键菜单的条目级动作（custom event 下发）
@@ -320,12 +344,14 @@ export function ClipboardView() {
     const onDelete = () => { if (selectedId != null) handleDelete(selectedId); };
     const onReveal = () => { handleRevealInExplorer(); };
     const onSendToAI = () => { handleSendToAI(); };
+    const onToMemo = () => { void handleToMemo(); };
     window.addEventListener('clipboard:paste-selected', onPaste);
     window.addEventListener('clipboard:copy-selected', onCopy);
     window.addEventListener('clipboard:favorite-selected', onFavorite);
     window.addEventListener('clipboard:delete-selected', onDelete);
     window.addEventListener('clipboard:reveal-selected', onReveal);
     window.addEventListener('clipboard:send-to-ai-selected', onSendToAI);
+    window.addEventListener('clipboard:to-memo-selected', onToMemo);
     return () => {
       window.removeEventListener('clipboard:paste-selected', onPaste);
       window.removeEventListener('clipboard:copy-selected', onCopy);
@@ -333,8 +359,9 @@ export function ClipboardView() {
       window.removeEventListener('clipboard:delete-selected', onDelete);
       window.removeEventListener('clipboard:reveal-selected', onReveal);
       window.removeEventListener('clipboard:send-to-ai-selected', onSendToAI);
+      window.removeEventListener('clipboard:to-memo-selected', onToMemo);
     };
-  }, [selectedId, handlePasteItem, handleCopyToClipboard, handleToggleFavorite, handleDelete, handleRevealInExplorer, handleSendToAI]);
+  }, [selectedId, handlePasteItem, handleCopyToClipboard, handleToggleFavorite, handleDelete, handleRevealInExplorer, handleSendToAI, handleToMemo]);
 
   // Keyboard navigation for clipboard list
   useEffect(() => {

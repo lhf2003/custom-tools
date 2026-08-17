@@ -656,6 +656,8 @@ pub fn run() {
             commands::companion::create_companion_intent,
             commands::companion::list_memos,
             commands::companion::set_memo_status,
+            commands::companion::set_memo_pinned,
+            commands::companion::bulk_set_memo_status,
             commands::companion::get_companion_memory_facts,
             commands::companion::update_companion_memory_fact,
             commands::companion::delete_companion_memory_fact,

@@ -359,6 +359,8 @@ pub fn create_companion_intent(
     let now = chrono::Local::now().timestamp();
     let memo = db::create_memo(&conn, &text, now).map_err(|e| format!("保存备忘失败: {}", e))?;
     let id = memo.id;
+    // 原文已落库，通知备忘视图立刻显示（重构正文落库后由解析链路再发一次）
+    let _ = app_handle.emit("memo:changed", ());
 
     // 异步解析（重构正文 + 触发器），不阻塞 launcher 返回
     let db_path = db_state.0.clone();
@@ -385,6 +387,7 @@ pub fn list_memos(
 #[tauri::command]
 pub fn set_memo_status(
     db_state: State<DatabaseState>,
+    app_handle: AppHandle,
     id: i64,
     status: String,
 ) -> Result<(), String> {
@@ -393,7 +396,47 @@ pub fn set_memo_status(
     }
     let conn = open_conn(&db_state)?;
     let now = chrono::Local::now().timestamp();
-    db::set_memo_status(&conn, id, &status, now).map_err(|e| format!("更新备忘状态失败: {}", e))
+    db::set_memo_status(&conn, id, &status, now).map_err(|e| format!("更新备忘状态失败: {}", e))?;
+    let _ = app_handle.emit("memo:changed", ());
+    Ok(())
+}
+
+/// 备忘视图：置顶 / 取消置顶
+#[tauri::command]
+pub fn set_memo_pinned(
+    db_state: State<DatabaseState>,
+    app_handle: AppHandle,
+    id: i64,
+    pinned: bool,
+) -> Result<(), String> {
+    let conn = open_conn(&db_state)?;
+    db::set_memo_pinned(&conn, id, pinned).map_err(|e| format!("更新置顶失败: {}", e))?;
+    let _ = app_handle.emit("memo:changed", ());
+    Ok(())
+}
+
+/// 备忘视图菜单批量处置（「全部标为完成」「清空已完成」）。
+/// 迁移白名单仅 pending→done / done→dismissed，其余组合拒绝（防调用方乱迁）。
+#[tauri::command]
+pub fn bulk_set_memo_status(
+    db_state: State<DatabaseState>,
+    app_handle: AppHandle,
+    from_status: String,
+    to_status: String,
+) -> Result<usize, String> {
+    let allowed = matches!(
+        (from_status.as_str(), to_status.as_str()),
+        ("pending", "done") | ("done", "dismissed")
+    );
+    if !allowed {
+        return Err(format!("非法批量迁移: {} → {}", from_status, to_status));
+    }
+    let conn = open_conn(&db_state)?;
+    let now = chrono::Local::now().timestamp();
+    let n = db::bulk_set_memo_status(&conn, &from_status, &to_status, now)
+        .map_err(|e| format!("批量更新备忘状态失败: {}", e))?;
+    let _ = app_handle.emit("memo:changed", ());
+    Ok(n)
 }
 
 // ── 记忆层 ───────────────────────────────────────────────────

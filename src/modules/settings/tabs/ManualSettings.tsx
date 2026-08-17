@@ -160,7 +160,7 @@ export function ManualSettings({ onNavigateTab }: ManualSettingsProps) {
           {
             icon: <StickyNote className="w-4 h-4 text-app-text-secondary" />,
             title: '快速备忘',
-            desc: '在启动器输入「记 xxx」回车即记录待办备忘，内容写入笔记，随日报一起沉淀。',
+            desc: '在启动器输入「记 xxx」回车即记录待办备忘，在备忘插件（@memo）中查看打理，随日报一起沉淀。',
           },
         ].map(({ icon, title, desc }) => (
           <div key={title} className="flex items-start gap-3 px-3 py-3">

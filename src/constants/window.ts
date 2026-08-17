@@ -35,6 +35,10 @@ export const WINDOW_SIZE = {
     height: 600,
     width: 820,
   },
+  MEMO: {
+    height: 600,
+    width: 820,
+  },
   JSON_FORMATTER: {
     height: 600,
     width: 820,
