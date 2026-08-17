@@ -54,6 +54,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          BAIDU_MAP_AK: ${{ secrets.BAIDU_MAP_AK }}
+          BAIDU_MAP_SK: ${{ secrets.BAIDU_MAP_SK }}
         with:
           tagName: ${{ github.event.release.tag_name }}
           releaseName: ${{ github.event.release.tag_name }}
