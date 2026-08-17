@@ -1009,7 +1009,9 @@ function TriggerGrid({
       >
         {items.map((item, index) => (
           <ItemCard
-            key={item.path}
+            // 同插件多 trigger 时 path（builtin://<id>）会重复，而 path 记录进 app_usage
+            // 不能改格式，故用索引补唯一（网格条目无内部状态，重挂载无副作用）
+            key={`${item.path}:${index}`}
             id={`launcher-option-${index}`}
             item={item}
             isSelected={index === selectedIndex}

@@ -529,14 +529,14 @@ pub fn update_memo_parse(
     Ok(())
 }
 
-/// 处置备忘（done / dismissed / 回 pending），acted_at 仅处置态落时间
-pub fn set_memo_status(conn: &Connection, id: i64, status: &str, now: i64) -> rusqlite::Result<()> {
+/// 处置备忘（done / dismissed / 回 pending），acted_at 仅处置态落时间。
+/// 返回实际发生迁移的行数：重复处置同一状态为 0（命令层据此跳过重复备忘重生）
+pub fn set_memo_status(conn: &Connection, id: i64, status: &str, now: i64) -> rusqlite::Result<usize> {
     let acted: Option<i64> = if status == "pending" { None } else { Some(now) };
     conn.execute(
-        "UPDATE memos SET status = ?2, acted_at = ?3 WHERE id = ?1",
+        "UPDATE memos SET status = ?2, acted_at = ?3 WHERE id = ?1 AND status != ?2",
         params![id, status, acted],
-    )?;
-    Ok(())
+    )
 }
 
 /// 批量处置备忘（菜单「全部标为完成」「清空已完成」）：单条 UPDATE，
@@ -569,6 +569,17 @@ pub fn get_memo(conn: &Connection, id: i64) -> rusqlite::Result<Memo> {
     conn.query_row(&sql, params![id], map_memo)
 }
 
+/// 待办中的重复备忘（批量完成时用于重生下一次，需在批量 UPDATE 前捞取）
+pub fn list_pending_recurring(conn: &Connection) -> rusqlite::Result<Vec<Memo>> {
+    let sql = format!(
+        "SELECT {} FROM memos WHERE status = 'pending' AND recurrence IS NOT NULL",
+        MEMO_COLS
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map([], map_memo)?;
+    rows.collect()
+}
+
 /// 重复规则的下一次到期：daily → 明天；weekly:N（1=周一…7=周日）→ 往后下一个周 N
 /// （今天即周 N 则取下周——今天这条刚完成）
 fn next_due_date(today: chrono::NaiveDate, recurrence: &str) -> Option<chrono::NaiveDate> {
@@ -588,7 +599,8 @@ fn next_due_date(today: chrono::NaiveDate, recurrence: &str) -> Option<chrono::N
     Some(today + chrono::Duration::days(delta as i64))
 }
 
-/// 重复备忘完成时生成下一次 occurrence：内容/原文/标签/触发器/规则照抄，
+/// 重复备忘完成时生成下一次 occurrence：内容/原文/标签/触发器/规则/置顶状态照抄
+/// （钉在桌面便签的重复备忘，完成一次后下一次仍在桌面；取消钉当前一条即整链退出），
 /// due 推到下一周期；通知与处置状态全新（新行即新审计段，历史 occurrence 自然留痕）
 pub fn create_next_recurrence(
     conn: &Connection,
@@ -606,8 +618,8 @@ pub fn create_next_recurrence(
     };
     let due = next.format("%Y-%m-%d").to_string();
     conn.execute(
-        "INSERT INTO memos (content, content_raw, due_date, trigger_data, tag, recurrence, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO memos (content, content_raw, due_date, trigger_data, tag, recurrence, pinned, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
             memo.content,
             memo.content_raw,
@@ -615,6 +627,7 @@ pub fn create_next_recurrence(
             memo.trigger_data,
             memo.tag,
             memo.recurrence,
+            memo.pinned,
             now
         ],
     )?;
@@ -1626,5 +1639,110 @@ mod tests {
         upsert_pattern(&conn, "app_combo", "s", "描述", "{}", 0.7, d1).unwrap();
         upsert_pattern(&conn, "app_combo", "s", "描述", "{}", 0.7, d2).unwrap();
         assert_eq!(occurrences_and_status(&conn), (2, "confirmed".to_string()));
+    }
+
+    // ── 重复备忘：日期计算与 occurrence 重生 ─────────────────────
+
+    fn memo_setup() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        init_tables(&conn).unwrap();
+        conn
+    }
+
+    #[test]
+    fn next_due_date_daily_and_weekly_rules() {
+        // 2026-08-17 是周一，便于手算核对
+        let mon = chrono::NaiveDate::from_ymd_opt(2026, 8, 17).unwrap();
+        let fri = chrono::NaiveDate::from_ymd_opt(2026, 8, 21).unwrap();
+        // daily → 明天
+        assert_eq!(
+            next_due_date(mon, "daily"),
+            chrono::NaiveDate::from_ymd_opt(2026, 8, 18)
+        );
+        // weekly:5（周五）从周一 → 本周五
+        assert_eq!(
+            next_due_date(mon, "weekly:5"),
+            chrono::NaiveDate::from_ymd_opt(2026, 8, 21)
+        );
+        // weekly:1（周一）当天即周 N → 下周一
+        assert_eq!(
+            next_due_date(mon, "weekly:1"),
+            chrono::NaiveDate::from_ymd_opt(2026, 8, 24)
+        );
+        // weekly:3（周三）从周五 → 下周三
+        assert_eq!(
+            next_due_date(fri, "weekly:3"),
+            chrono::NaiveDate::from_ymd_opt(2026, 8, 26)
+        );
+        // 集外规则丢弃
+        assert_eq!(next_due_date(mon, "weekly:0"), None);
+        assert_eq!(next_due_date(mon, "weekly:8"), None);
+        assert_eq!(next_due_date(mon, "monthly"), None);
+    }
+
+    #[test]
+    fn set_memo_status_reports_actual_transition() {
+        let conn = memo_setup();
+        let now = day_ts(20000, 12);
+        let memo = create_memo(&conn, "喝水", now).unwrap();
+        assert_eq!(set_memo_status(&conn, memo.id, "done", now).unwrap(), 1);
+        // 重复处置同一状态：无迁移返回 0（命令层据此跳过重生，防重复勾选复制条目）
+        assert_eq!(set_memo_status(&conn, memo.id, "done", now).unwrap(), 0);
+        assert_eq!(set_memo_status(&conn, memo.id, "pending", now).unwrap(), 1);
+    }
+
+    #[test]
+    fn list_pending_recurring_filters_done_and_plain() {
+        let conn = memo_setup();
+        let now = day_ts(20000, 12);
+        let daily = create_memo(&conn, "每天喝水", now).unwrap();
+        update_memo_parse(&conn, daily.id, "每天喝水", None, None, None, Some("daily")).unwrap();
+        create_memo(&conn, "一次性", now).unwrap();
+        let done_daily = create_memo(&conn, "已完成的重复", now).unwrap();
+        update_memo_parse(
+            &conn,
+            done_daily.id,
+            "已完成的重复",
+            None,
+            None,
+            None,
+            Some("daily"),
+        )
+        .unwrap();
+        set_memo_status(&conn, done_daily.id, "done", now).unwrap();
+        let ids: Vec<i64> = list_pending_recurring(&conn)
+            .unwrap()
+            .iter()
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(ids, vec![daily.id], "只应列出待办中的重复备忘");
+    }
+
+    #[test]
+    fn next_recurrence_inherits_pinned_and_rule() {
+        let conn = memo_setup();
+        // UTC 正午落库，任意时区下都是同一个本地日
+        let now = day_ts(20000, 12);
+        let memo = create_memo(&conn, "每天喝水", now).unwrap();
+        update_memo_parse(&conn, memo.id, "每天喝水", None, None, None, Some("daily")).unwrap();
+        set_memo_pinned(&conn, memo.id, true).unwrap();
+        create_next_recurrence(&conn, &get_memo(&conn, memo.id).unwrap(), now).unwrap();
+
+        let next: Memo = conn
+            .query_row(
+                &format!("SELECT {} FROM memos WHERE id != ?1", MEMO_COLS),
+                params![memo.id],
+                map_memo,
+            )
+            .unwrap();
+        assert!(next.pinned, "钉住的重复备忘，下一次应继承置顶状态");
+        assert_eq!(next.recurrence.as_deref(), Some("daily"));
+        assert_eq!(next.status, "pending");
+        let today = chrono::DateTime::from_timestamp(now, 0)
+            .unwrap()
+            .with_timezone(&chrono::Local)
+            .date_naive();
+        let expected_due = (today + chrono::Duration::days(1)).format("%Y-%m-%d").to_string();
+        assert_eq!(next.due_date.as_deref(), Some(expected_due.as_str()));
     }
 }

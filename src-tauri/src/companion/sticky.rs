@@ -64,9 +64,46 @@ fn show_window(app: &AppHandle) {
         return;
     };
     if let Some(pos) = saved_position(app) {
-        let _ = win.set_position(pos);
+        let _ = win.set_position(clamp_to_screen(app, &win, pos));
     }
     let _ = win.show();
+}
+
+/// 回放拖拽落点前按显示器钳制：外接屏拔除后落点可能出界，
+/// 收拢到最近显示器的可视区内（右/下侧留出窗口自身尺寸）
+fn clamp_to_screen(
+    app: &AppHandle,
+    win: &tauri::WebviewWindow,
+    pos: PhysicalPosition<i32>,
+) -> PhysicalPosition<i32> {
+    let monitor = win
+        .current_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| app.monitor_from_point(pos.x as f64, pos.y as f64).ok().flatten())
+        .or_else(|| app.primary_monitor().ok().flatten());
+    let Some(monitor) = monitor else {
+        return pos;
+    };
+    let scale = monitor.scale_factor();
+    let win_size = win
+        .outer_size()
+        .unwrap_or(tauri::PhysicalSize::new(STICKY_W as u32, STICKY_H as u32));
+    let w = (win_size.width as f64 * scale) as i32;
+    let h = (win_size.height as f64 * scale) as i32;
+    let mpos = *monitor.position();
+    let msize = *monitor.size();
+    let x = if msize.width as i32 <= w {
+        mpos.x
+    } else {
+        pos.x.clamp(mpos.x, mpos.x + msize.width as i32 - w)
+    };
+    let y = if msize.height as i32 <= h {
+        mpos.y
+    } else {
+        pos.y.clamp(mpos.y, mpos.y + msize.height as i32 - h)
+    };
+    PhysicalPosition::new(x, y)
 }
 
 /// 启动恢复：上次退出时便签开着则直接显示

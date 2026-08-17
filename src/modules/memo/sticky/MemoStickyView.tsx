@@ -122,8 +122,10 @@ export function MemoStickyView() {
       await invoke('set_memo_status', { id, status: 'done' });
     } catch (e) {
       console.error('Failed to complete memo:', e);
+      // 失败回滚：重拉与库对齐（成功路径的事件回流也会再刷一次，重复拉取幂等）
+      void load();
     }
-  }, []);
+  }, [load]);
 
   const close = useCallback(() => {
     invoke('set_memo_sticky_enabled', { enabled: false }).catch((e: unknown) => {

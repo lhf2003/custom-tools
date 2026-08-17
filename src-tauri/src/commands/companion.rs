@@ -396,18 +396,17 @@ pub fn set_memo_status(
     }
     let conn = open_conn(&db_state)?;
     let now = chrono::Local::now().timestamp();
-    // 重复备忘需先取整行（内容/规则照抄生成下一次）
-    let memo = if status == "done" {
-        db::get_memo(&conn, id).ok()
-    } else {
-        None
-    };
-    db::set_memo_status(&conn, id, &status, now).map_err(|e| format!("更新备忘状态失败: {}", e))?;
+    // 仅本行确实发生状态迁移才重生：done 重复勾选/双击双发时第二次 UPDATE 迁移 0 行，
+    // 跳过重生，防复制出重复的下一次备忘
+    let changed = db::set_memo_status(&conn, id, &status, now)
+        .map_err(|e| format!("更新备忘状态失败: {}", e))?;
     // 完成即重生下一次 occurrence（due 推到下一周期；失败只记日志，本次完成不回滚）
-    if let Some(m) = memo {
-        if m.recurrence.is_some() {
-            if let Err(e) = db::create_next_recurrence(&conn, &m, now) {
-                log::warn!("重复备忘 #{} 生成下一次失败: {}", id, e);
+    if status == "done" && changed > 0 {
+        if let Ok(m) = db::get_memo(&conn, id) {
+            if m.recurrence.is_some() {
+                if let Err(e) = db::create_next_recurrence(&conn, &m, now) {
+                    log::warn!("重复备忘 #{} 生成下一次失败: {}", id, e);
+                }
             }
         }
     }
@@ -447,8 +446,22 @@ pub fn bulk_set_memo_status(
     }
     let conn = open_conn(&db_state)?;
     let now = chrono::Local::now().timestamp();
+    // 重复备忘批量完成同样重生下一次（与单条完成行为一致）：先捞待办中的重复备忘再批量迁移
+    let recurring = if from_status == "pending" && to_status == "done" {
+        db::list_pending_recurring(&conn).unwrap_or_else(|e| {
+            log::warn!("批量完成前查询重复备忘失败: {}", e);
+            Vec::new()
+        })
+    } else {
+        Vec::new()
+    };
     let n = db::bulk_set_memo_status(&conn, &from_status, &to_status, now)
         .map_err(|e| format!("批量更新备忘状态失败: {}", e))?;
+    for m in &recurring {
+        if let Err(e) = db::create_next_recurrence(&conn, m, now) {
+            log::warn!("批量完成重复备忘 #{} 生成下一次失败: {}", m.id, e);
+        }
+    }
     let _ = app_handle.emit("memo:changed", ());
     Ok(n)
 }
