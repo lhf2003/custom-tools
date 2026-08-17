@@ -394,9 +394,6 @@ function App() {
       {/* Update Notification（欢迎页期间抑制，不与教学叠罗汉） */}
       {welcomeDone && <UpdateNotification />}
 
-      {/* Update Notification */}
-      <UpdateNotification />
-
       {/* Changelog Dialog - shown after auto-update */}
       <ChangelogDialog
         isOpen={showChangelog}

@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { useUpdater } from '@/hooks/useUpdater';
 import { Download, X, CheckCircle2, AlertCircle } from 'lucide-react';
-import type { UpdateInfo } from '@/hooks/useUpdater';
 
 interface UpdateCheckResult {
   status: 'latest' | 'failed';
@@ -14,7 +13,6 @@ export function UpdateNotification() {
   const {
     updateInfo,
     downloadState,
-    setUpdateInfo,
     startDownload,
     installNow,
     dismissReady,
@@ -25,22 +23,8 @@ export function UpdateNotification() {
   const [checkResult, setCheckResult] = useState<UpdateCheckResult | null>(null);
   const [showResult, setShowResult] = useState(false);
 
-  // Listen for update-available event from backend
-  useEffect(() => {
-    const unlisten = listen('update-available', (event) => {
-      const info = event.payload as UpdateInfo;
-      setUpdateInfo(info);
-      if (!dismissed) {
-        setShowNotification(true);
-      }
-    });
-
-    return () => {
-      unlisten.then((fn) => fn()).catch((err: unknown) => {
-        console.error('Failed to cleanup update listener:', err);
-      });
-    };
-  }, [dismissed, setUpdateInfo]);
+  // update-available 事件由 useUpdater.ts 模块级订阅写入 store（欢迎页抑制期间
+  // 组件不挂载也不丢事件），这里只消费 updateInfo 变化驱动横幅显示。
 
   // Listen for manual check results (latest / failed) from backend
   useEffect(() => {

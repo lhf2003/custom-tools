@@ -49,6 +49,16 @@
   --app-status-info: #2563eb;
   --app-status-info-deep: #1d4ed8;     /* Action Blue Deep（主按钮 hover） */
 
+  /* 状态色 RGB 三通道：供 Tailwind 透明度修饰符合成 rgb(var(--x-rgb) / alpha)，
+     与 --app-panel-rgb 同模式；与上方 hex 值必须逐一同步 */
+  --app-status-success-rgb: 34 197 94;
+  --app-status-warning-rgb: 245 158 11;
+  --app-status-warning-text-rgb: 252 211 77;
+  --app-status-error-rgb: 239 68 68;
+  --app-status-error-text-rgb: 248 113 113;
+  --app-status-info-rgb: 37 99 235;
+  --app-status-info-deep-rgb: 29 78 216;
+
   /* 透明度变体 */
   --app-alpha-white-5: rgba(255, 255, 255, 0.05);
   --app-alpha-white-10: rgba(255, 255, 255, 0.10);
@@ -165,6 +175,15 @@
   --app-status-info: #2563eb;
   --app-status-info-deep: #1e40af;
 
+  /* 状态色 RGB 三通道：与上方 hex 值逐一同步 */
+  --app-status-success-rgb: 22 163 74;
+  --app-status-warning-rgb: 217 119 6;
+  --app-status-warning-text-rgb: 180 83 9;
+  --app-status-error-rgb: 220 38 38;
+  --app-status-error-text-rgb: 220 38 38;
+  --app-status-info-rgb: 37 99 235;
+  --app-status-info-deep-rgb: 30 64 175;
+
   /* 透明度变体：浅色表面用黑色叠加系（变量名保持 white 前缀，值语义为叠加层） */
   --app-alpha-white-5: rgba(0, 0, 0, 0.05);
   --app-alpha-white-10: rgba(0, 0, 0, 0.08);
@@ -254,6 +273,10 @@
   /* 状态色：沿用深色族；info 换深橘实体底（白字 5.18:1 达标） */
   --app-status-info: #c2410c;
   --app-status-info-deep: #9a3412;
+
+  /* 状态色 RGB 三通道：仅本主题覆盖的 info/info-deep 需要声明，其余继承 :root */
+  --app-status-info-rgb: 194 65 12;
+  --app-status-info-deep-rgb: 154 52 18;
 
   /* Tooltip */
   --tooltip-bg: #343d42;

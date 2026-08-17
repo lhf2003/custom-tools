@@ -76,6 +76,14 @@ if (typeof window !== 'undefined' && (window as unknown as { __TAURI__?: unknown
   }).catch((err: unknown) => {
     console.error('Failed to subscribe download progress:', err);
   });
+
+  // 订阅「发现新版本」事件。同样模块级：后端启动检查后单次发射不重发，
+  // 组件级监听在欢迎页抑制期间组件不挂载，事件会永久丢失（横幅不再出现）。
+  listen<UpdateInfo>('update-available', (event) => {
+    useUpdaterStore.setState({ updateInfo: event.payload });
+  }).catch((err: unknown) => {
+    console.error('Failed to subscribe update-available:', err);
+  });
 }
 
 function toErrorMessage(err: unknown, fallback: string): string {

@@ -52,15 +52,40 @@ export default {
           800: 'var(--app-bg-primary)',       // 存量 bg-zinc-800
           900: 'var(--app-bg-secondary)',     // 存量 bg-zinc-900
         },
-        // 状态色
+        // 状态色：函数形式支持透明度修饰符（bg-app-status-info/20 等）。
+        // 无修饰符直接用 var(--app-status-*)，带修饰符合成 rgb(var(--app-status-*-rgb) / alpha)，
+        // RGB 三通道变量定义在 index.css 各主题块（与 --app-panel-rgb 同模式）。
+        // 注意：纯 var() 形式 + /alpha 会被 Tailwind 静默丢弃（parseColor 无法解析 var()），
+        // 故必须走函数形式，否则所有 status 透明度类都不生成。
         'app-status': {
-          success: 'var(--app-status-success)',
-          warning: 'var(--app-status-warning)',
-          'warning-text': 'var(--app-status-warning-text)',
-          error: 'var(--app-status-error)',
-          'error-text': 'var(--app-status-error-text)',
-          info: 'var(--app-status-info)',
-          'info-deep': 'var(--app-status-info-deep)',   // Action Blue Deep（主按钮 hover）
+          success: ({ opacityValue }) =>
+            opacityValue === undefined
+              ? 'var(--app-status-success)'
+              : `rgb(var(--app-status-success-rgb) / ${opacityValue})`,
+          warning: ({ opacityValue }) =>
+            opacityValue === undefined
+              ? 'var(--app-status-warning)'
+              : `rgb(var(--app-status-warning-rgb) / ${opacityValue})`,
+          'warning-text': ({ opacityValue }) =>
+            opacityValue === undefined
+              ? 'var(--app-status-warning-text)'
+              : `rgb(var(--app-status-warning-text-rgb) / ${opacityValue})`,
+          error: ({ opacityValue }) =>
+            opacityValue === undefined
+              ? 'var(--app-status-error)'
+              : `rgb(var(--app-status-error-rgb) / ${opacityValue})`,
+          'error-text': ({ opacityValue }) =>
+            opacityValue === undefined
+              ? 'var(--app-status-error-text)'
+              : `rgb(var(--app-status-error-text-rgb) / ${opacityValue})`,
+          info: ({ opacityValue }) =>
+            opacityValue === undefined
+              ? 'var(--app-status-info)'
+              : `rgb(var(--app-status-info-rgb) / ${opacityValue})`,
+          'info-deep': ({ opacityValue }) =>
+            opacityValue === undefined
+              ? 'var(--app-status-info-deep)'
+              : `rgb(var(--app-status-info-deep-rgb) / ${opacityValue})`,   // Action Blue Deep（主按钮 hover）
         },
         // 保留原有的 glass 颜色
         glass: {
