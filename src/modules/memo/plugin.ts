@@ -12,6 +12,7 @@ const memoPlugin: ViewPlugin = {
     '随手记与待办打理：启动器输入「记 + 内容」快速记录，按日期分组查看，勾选完成或忽略，随陪伴日报沉淀。',
   order: 4,
   essential: true,
+  shortcutModuleId: 'memo',
   triggers: [{ keyword: '@memo', argHint: '备忘内容' }],
   load: () => import('./MemoView').then((m) => ({ default: m.MemoView })),
   nav: {

@@ -39,6 +39,7 @@ pub enum ShortcutAction {
     OpenPasswords,
     OpenSettings,
     OpenEverything,
+    OpenMemo,
     TranslateSelection,
     VoiceInput,
 }
@@ -52,6 +53,7 @@ impl ShortcutAction {
             ShortcutAction::OpenPasswords => "open_passwords",
             ShortcutAction::OpenSettings => "open_settings",
             ShortcutAction::OpenEverything => "open_everything",
+            ShortcutAction::OpenMemo => "open_memo",
             ShortcutAction::TranslateSelection => "translate_selection",
             ShortcutAction::VoiceInput => "voice_input",
         }
@@ -65,6 +67,7 @@ impl ShortcutAction {
             "open_passwords" => Some(ShortcutAction::OpenPasswords),
             "open_settings" => Some(ShortcutAction::OpenSettings),
             "open_everything" => Some(ShortcutAction::OpenEverything),
+            "open_memo" => Some(ShortcutAction::OpenMemo),
             "translate_selection" => Some(ShortcutAction::TranslateSelection),
             "voice_input" => Some(ShortcutAction::VoiceInput),
             _ => None,
@@ -120,6 +123,14 @@ pub fn get_default_shortcuts() -> Vec<ShortcutConfig> {
             name: "打开文件搜索".to_string(),
             description: "快速访问文件搜索（Everything）".to_string(),
             default_keys: "Ctrl+Shift+F".to_string(),
+            custom_keys: None,
+            enabled: true,
+        },
+        ShortcutConfig {
+            id: "open_memo".to_string(),
+            name: "打开备忘".to_string(),
+            description: "快速访问备忘插件".to_string(),
+            default_keys: "Ctrl+Shift+M".to_string(),
             custom_keys: None,
             enabled: true,
         },
@@ -226,6 +237,7 @@ impl ShortcutManager {
             "open_clipboard",
             "open_notes",
             "open_everything",
+            "open_memo",
             "open_settings",
             "open_passwords",
             "translate_selection",
@@ -622,7 +634,7 @@ fn handle_shortcut_action(app_handle: &AppHandle, action_id: &str) {
             crate::voice::toggle(app_handle);
         }
         "open_clipboard" | "open_notes" | "open_passwords" | "open_settings"
-        | "open_everything" => {
+        | "open_everything" | "open_memo" => {
             // 捕获前台窗口以支持自动粘贴
             #[cfg(windows)]
             crate::capture_prev_window_hwnd(app_handle);
@@ -638,6 +650,7 @@ fn handle_shortcut_action(app_handle: &AppHandle, action_id: &str) {
                 "open_passwords" => "passwords",
                 "open_settings" => "settings",
                 "open_everything" => "everything",
+                "open_memo" => "memo",
                 _ => "",
             };
             let _ = app_handle.emit("shortcut:open_module", module);
