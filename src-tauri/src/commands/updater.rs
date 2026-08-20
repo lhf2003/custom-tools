@@ -213,12 +213,16 @@ pub async fn download_update(app: AppHandle) -> Result<(), String> {
         return Err(format!("Failed to persist downloaded update: {}", e));
     }
 
-    // 预写未读更新日志（新版本首次启动时弹出）；失败不阻塞更新流程
+    // 预写未读更新日志（新版本首次启动时弹出）；失败不阻塞更新流程。
+    // 日期必须转本地时间入库：update.date 是 UTC OffsetDateTime，其 to_string()
+    // 输出「+00:00:00」非标准格式前端无法解析，会原样显示 UTC 文本。
     if let Some(body) = update.body.clone().filter(|b| !b.trim().is_empty()) {
         if let Err(e) = crate::commands::changelog::upsert_changelog(
             &app,
             &update.version,
-            update.date.as_ref().map(|d| d.to_string()),
+            update
+                .date
+                .and_then(|d| crate::commands::changelog::format_unix_local(d.unix_timestamp())),
             &body,
         ) {
             log::warn!("Failed to save changelog for {}: {}", update.version, e);

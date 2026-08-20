@@ -44,6 +44,13 @@ fn get_db_connection(app: &AppHandle) -> Result<Connection, String> {
     Connection::open(&db_state.0).map_err(|e| format!("Failed to open database: {}", e))
 }
 
+/// Unix 时间戳 → 本地时间字符串（入库唯一格式，前端按本地时区解析）。
+/// GitHub 同步与更新下载预写两条路径共用；时间戳超界返回 None 而非错乱值。
+pub fn format_unix_local(ts: i64) -> Option<String> {
+    chrono::DateTime::from_timestamp(ts, 0)
+        .map(|utc| utc.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M:%S").to_string())
+}
+
 /// 写入/覆盖一条未读 changelog（updater 下载成功路径与 add_changelog 命令共用）。
 /// is_read 固定为 0：重启后的新版本首次启动凭未读标记弹出更新日志。
 pub fn upsert_changelog(
@@ -84,6 +91,69 @@ pub fn mark_all_changelogs_read(app: AppHandle) -> Result<(), String> {
         .map_err(|e| format!("Failed to mark all changelogs as read: {}", e))?;
 
     Ok(())
+}
+
+/// 矫正历史遗留的 release_date 格式：下载路径曾以 time crate Display 写入
+/// 「2026-08-15 16:23:45.0 +00:00:00」（UTC 且前端无法解析）。启动时幂等扫描，
+/// 命中旧格式即按 UTC 转本地时间重写；已是本地格式的行原样跳过。
+pub fn migrate_release_dates(app: &AppHandle) -> Result<usize, String> {
+    let conn = get_db_connection(app)?;
+
+    let mut stmt = conn
+        .prepare("SELECT version, release_date FROM changelog WHERE release_date IS NOT NULL")
+        .map_err(|e| format!("Failed to prepare query: {e}"))?;
+    let rows: Vec<(String, String)> = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .map_err(|e| format!("Failed to query changelog dates: {e}"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("Failed to collect changelog dates: {e}"))?;
+
+    let mut fixed = 0usize;
+    for (version, raw) in rows {
+        // 旧格式特征：time crate Display 的「±HH:MM:SS」三段偏移尾
+        let Some((naive_part, offset_part)) = raw.rsplit_once(' ') else {
+            continue;
+        };
+        if !is_legacy_offset(offset_part) {
+            continue;
+        }
+        let Some(fixed_date) = parse_legacy_display(naive_part, offset_part) else {
+            log::warn!("Unparseable legacy release_date for {version}: {raw}");
+            continue;
+        };
+        conn.execute(
+            "UPDATE changelog SET release_date = ?1 WHERE version = ?2",
+            params![fixed_date, version],
+        )
+        .map_err(|e| format!("Failed to fix release_date for {version}: {e}"))?;
+        fixed += 1;
+    }
+    if fixed > 0 {
+        log::info!("Migrated {fixed} legacy changelog release_date(s) to local time");
+    }
+    Ok(fixed)
+}
+
+/// 匹配 time crate Display 的偏移尾「+00:00:00 / -05:30:15」
+fn is_legacy_offset(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 9
+        && (b[0] == b'+' || b[0] == b'-')
+        && b[3] == b':'
+        && b[6] == b':'
+        && b[1..3].iter().chain(&b[4..6]).chain(&b[7..9]).all(u8::is_ascii_digit)
+}
+
+/// 「2026-08-15 16:23:45.0」+「+00:00:00」→ 本地时间字符串
+fn parse_legacy_display(naive_part: &str, offset_part: &str) -> Option<String> {
+    let naive = chrono::NaiveDateTime::parse_from_str(naive_part, "%Y-%m-%d %H:%M:%S%.f").ok()?;
+    let sign: i32 = if offset_part.starts_with('+') { 1 } else { -1 };
+    let h: i32 = offset_part.get(1..3)?.parse().ok()?;
+    let m: i32 = offset_part.get(4..6)?.parse().ok()?;
+    let s: i32 = offset_part.get(7..9)?.parse().ok()?;
+    let offset = chrono::FixedOffset::east_opt(sign * (h * 3600 + m * 60 + s))?;
+    let utc_ts = naive.and_utc().timestamp() - offset.local_minus_utc() as i64;
+    format_unix_local(utc_ts)
 }
 
 /// Check if there are unread changelogs for the current version
@@ -175,7 +245,7 @@ pub async fn sync_releases_changelog(app: AppHandle) -> Result<usize, String> {
             .published_at
             .as_deref()
             .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-            .map(|dt| dt.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M:%S").to_string());
+            .and_then(|dt| format_unix_local(dt.timestamp()));
         conn.execute(
             "INSERT INTO changelog (version, release_date, content, is_read, created_at)
              VALUES (?1, ?2, ?3, 0, CURRENT_TIMESTAMP)
@@ -351,4 +421,38 @@ pub fn seed_history(app: &AppHandle) -> Result<(), String> {
         .map_err(|e| format!("Failed to seed changelog {version}: {e}"))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_offset_detection() {
+        assert!(is_legacy_offset("+00:00:00"));
+        assert!(is_legacy_offset("+08:00:00"));
+        assert!(is_legacy_offset("-05:30:15"));
+        assert!(!is_legacy_offset("16:23:45")); // 本地格式的尾段不是偏移
+        assert!(!is_legacy_offset("+08:00")); // 两段偏移不算
+        assert!(!is_legacy_offset("+0800:00")); // 形状不符
+        assert!(!is_legacy_offset(""));
+    }
+
+    #[test]
+    fn legacy_display_utc_to_local() {
+        // UTC 旧格式按偏移转本地时间（断言与运行环境时区无关）
+        let local = parse_legacy_display("2026-08-15 16:23:45.0", "+00:00:00").unwrap();
+        let offset_hours = chrono::Local::now().offset().local_minus_utc() / 3600;
+        let expected =
+            chrono::NaiveDateTime::parse_from_str("2026-08-15 16:23:45", "%Y-%m-%d %H:%M:%S")
+                .unwrap()
+                + chrono::Duration::hours(offset_hours as i64);
+        assert_eq!(local, expected.format("%Y-%m-%d %H:%M:%S").to_string());
+    }
+
+    #[test]
+    fn legacy_display_rejects_garbage() {
+        assert!(parse_legacy_display("not-a-date", "+00:00:00").is_none());
+        assert!(parse_legacy_display("2026-08-15 16:23:45", "+99:99:99").is_none());
+    }
 }

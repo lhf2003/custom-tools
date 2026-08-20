@@ -135,6 +135,11 @@ pub fn run() {
                 log::warn!("Failed to seed changelog history: {e}");
             }
 
+            // 矫正旧版下载路径写入的 UTC Display 格式 release_date（幂等）
+            if let Err(e) = commands::changelog::migrate_release_dates(app.handle()) {
+                log::warn!("Failed to migrate changelog release_date: {e}");
+            }
+
             // Initialize pending update cache (populated by check_for_update)
             app.manage(commands::updater::PendingUpdate(Mutex::new(None)));
 
