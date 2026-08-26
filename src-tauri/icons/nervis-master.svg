@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Nervis 主图标（变体 D2「火柴人」定稿）
+     头=Agent 大脑（Signal Indigo 点睛）, 右竖=身体, 斜杠=手臂, 左竖三格=工具
+     1024 全出血主图, 由 tauri icon 派生全套尺寸 -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <rect x="1" y="1" width="1022" height="1022" rx="230" fill="#1e1e21" stroke="#ffffff" stroke-opacity="0.1" stroke-width="2"/>
+  <!-- 左竖: 三个工具格 96x108 间距16, 底部与身体圆帽齐平 y=794（首格右上角直角，被手臂圆帽覆盖） -->
+  <path d="M 284 438 H 358 V 524 A 22 22 0 0 1 336 546 H 284 A 22 22 0 0 1 262 524 V 460 A 22 22 0 0 1 284 438 Z" fill="#f4f4f5"/>
+  <rect x="262" y="562" width="96" height="108" rx="22" fill="#f4f4f5"/>
+  <rect x="262" y="686" width="96" height="108" rx="22" fill="#f4f4f5"/>
+  <!-- 斜杠: 手臂（起点圆帽顶部 y=438 与首格顶边相切，左半嵌入首格，无缝融合） -->
+  <path d="M 358 486 L 676 746" fill="none" stroke="#f4f4f5" stroke-width="96" stroke-linecap="round"/>
+  <!-- 右竖: 身体 -->
+  <path d="M 676 438 L 676 746" fill="none" stroke="#f4f4f5" stroke-width="96" stroke-linecap="round"/>
+  <!-- 头: 大脑(品牌色) -->
+  <circle cx="676" cy="294" r="72" fill="#6366f1"/>
+</svg>
