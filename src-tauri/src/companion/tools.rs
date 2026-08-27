@@ -892,8 +892,9 @@ fn tool_remember_fact(db_path: &Path, args: &Value) -> Result<String, String> {
     let now = chrono::Local::now().timestamp();
 
     // 第一级：向量召回（Embedder 不可用/无索引时得到 None → 直接走 bigram）
-    let recalled = fact_pipeline::vector_recall(&conn, fact)
-        .filter(|(_, _, score)| *score >= fact_pipeline::RECALL_THRESHOLD);
+    let recall = fact_pipeline::vector_recall(&conn, fact);
+    let recall_score = recall.as_ref().map(|(_, _, s)| *s);
+    let recalled = recall.filter(|(_, _, score)| *score >= fact_pipeline::RECALL_THRESHOLD);
     if let Some((old_id, old_text, score)) = recalled {
         // 第二级：LLM 裁决；失败回落 bigram（不阻塞记忆写入）
         match fact_pipeline::llm_arbitrate(db_path, fact, &old_text) {
@@ -933,7 +934,12 @@ fn tool_remember_fact(db_path: &Path, args: &Value) -> Result<String, String> {
         }
     }
 
-    // 回落路径：bigram 查重（阈值标定见 MERGE_THRESHOLD 定义处注释）
+    // 回落路径：bigram 查重（阈值标定见 MERGE_THRESHOLD 定义处注释）。
+    // 召回分数随行落审计（below = 低于召回阈值）——标定阈值需要全量分布, 不止命中侧
+    let fallback_src = match recall_score {
+        Some(s) => format!("explicit|vec={s:.2}|below"),
+        None => "explicit".to_string(),
+    };
     let mut best: Option<(i64, String, f64)> = None;
     if let Ok(mut stmt) = conn.prepare(
         "SELECT id, fact FROM memory_facts WHERE category = ?1 ORDER BY confirmations DESC, last_confirmed DESC",
@@ -953,7 +959,7 @@ fn tool_remember_fact(db_path: &Path, args: &Value) -> Result<String, String> {
 
     if let Some((id, old, sim)) = best {
         if sim >= MERGE_THRESHOLD {
-            db::update_memory_fact(&conn, id, fact, category, "explicit", now)
+            db::update_memory_fact(&conn, id, fact, category, &fallback_src, now)
                 .map_err(|e| format!("覆盖记忆失败: {}", e))?;
             fact_pipeline::sync_fact_index(&mut conn);
             return Ok(format!(
@@ -966,7 +972,7 @@ fn tool_remember_fact(db_path: &Path, args: &Value) -> Result<String, String> {
         }
     }
 
-    db::upsert_memory_fact(&conn, fact, category, "explicit", now)
+    db::upsert_memory_fact(&conn, fact, category, &fallback_src, now)
         .map_err(|e| format!("写入记忆失败: {}", e))?;
     fact_pipeline::sync_fact_index(&mut conn);
     Ok(format!("已记住（{}）：{}", category, fact))

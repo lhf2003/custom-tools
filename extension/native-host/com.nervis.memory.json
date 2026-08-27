@@ -1,9 +1,0 @@
-{
-  "name": "com.nervis.memory",
-  "description": "Nervis memory indexing host (native messaging)",
-  "path": "D:\\workspace\\custom-tools\\src-tauri\\target\\release\\memory-host.exe",
-  "type": "stdio",
-  "allowed_origins": [
-    "chrome-extension://mgngjbnpmkfaiaekhcapcnfdioglgdkh/"
-  ]
-}

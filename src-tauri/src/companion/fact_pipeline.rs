@@ -103,7 +103,7 @@ pub(crate) fn llm_arbitrate(
         Scene::Companion,
         "remember_fact_arbitrate",
         &app_data,
-    ))?;
+    ))??;
     let upper = reply.trim().to_uppercase();
     if upper.contains("UPDATE") {
         Ok(Verdict::Update)
@@ -117,19 +117,22 @@ pub(crate) fn llm_arbitrate(
 }
 
 /// MCP 进程是同步 stdio 循环（自建 runtime）；app 内场景通道已在 tokio 里
-/// （block_in_place 借当前 runtime）。两种调用点都安全。
-fn block_on_llm<F: std::future::Future>(fut: F) -> F::Output {
+/// （block_in_place 借当前 runtime）。panic 一律收敛为 Err 回落 bigram,
+/// 绝不让 MCP 进程死在裁决上（隐身降级原则）
+fn block_on_llm<F: std::future::Future>(fut: F) -> Result<F::Output, String> {
     match tokio::runtime::Handle::try_current() {
-        Ok(h) => tokio::task::block_in_place(|| h.block_on(fut)),
-        Err(_) => tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| format!("创建 runtime 失败: {e}"))
-            .and_then(|rt| {
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| rt.block_on(fut)))
-                    .map_err(|_| "block_on panic".to_string())
-            })
-            .expect("fact_pipeline LLM runtime"),
+        Ok(h) => std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            tokio::task::block_in_place(|| h.block_on(fut))
+        }))
+        .map_err(|_| "LLM 调用 panic".to_string()),
+        Err(_) => {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| format!("创建 runtime 失败: {e}"))?;
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| rt.block_on(fut)))
+                .map_err(|_| "LLM 调用 panic".to_string())
+        }
     }
 }
 

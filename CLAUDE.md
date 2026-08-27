@@ -137,3 +137,4 @@ python scripts/prompt_regression.py
 - Password manager requires unlock with master password; uses AES-GCM encryption
 - Notes are stored as files on disk with metadata in SQLite
 - The search roadmap includes plans for usage-based ranking (P1) and Everything integration (P3)
+- 记忆检索 host 开发循环：浏览器拉起的是 **release** 二进制（native-host manifest 指向 `target/release/memory-host.exe`），改了 `crates/nervis-memory` 必须 `cargo build --release -p nervis-memory` 并在 `edge://extensions` 重载扩展，否则扩展连的是旧协议 host（黑名单/新请求会静默失败）

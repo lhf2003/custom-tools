@@ -73,6 +73,10 @@ fn db_path() -> Result<PathBuf> {
     Ok(base.join("com.flowhub.app").join("flowhub.db"))
 }
 
+/// 帧长上限：协议消息最大不过数百 KB（正文 2 万字符）, 截断的流/异常对端
+/// 申报的 u32 长度可达 4GB, 不设限会直接把内存吃爆
+const MAX_FRAME_BYTES: usize = 32 * 1024 * 1024;
+
 fn read_frame(stdin: &mut impl Read) -> Result<Option<String>> {
     let mut len_buf = [0u8; 4];
     match stdin.read_exact(&mut len_buf) {
@@ -81,6 +85,7 @@ fn read_frame(stdin: &mut impl Read) -> Result<Option<String>> {
         Err(e) => return Err(e.into()),
     }
     let len = u32::from_le_bytes(len_buf) as usize;
+    anyhow::ensure!(len <= MAX_FRAME_BYTES, "帧长 {len} 超过上限 {MAX_FRAME_BYTES}");
     let mut buf = vec![0u8; len];
     stdin.read_exact(&mut buf)?;
     Ok(Some(String::from_utf8(buf)?))

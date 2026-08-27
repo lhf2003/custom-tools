@@ -154,7 +154,15 @@ pub fn list_blacklist(conn: &Connection) -> Result<Vec<String>> {
 
 pub fn add_blacklist(conn: &Connection, domain: &str) -> Result<()> {
     let domain = domain.trim().trim_start_matches("*.").to_lowercase();
-    anyhow::ensure!(!domain.is_empty() && domain.contains('.'), "非法域名: {domain}");
+    // 域名字符集白名单：设置页自由输入会原样进扩展 popup 渲染, 堵住标签注入
+    anyhow::ensure!(
+        !domain.is_empty()
+            && domain.contains('.')
+            && domain
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-'),
+        "非法域名: {domain}"
+    );
     conn.execute(
         "INSERT OR IGNORE INTO memory_blacklist(domain, created_at) VALUES (?1, ?2)",
         params![domain, now_local()],

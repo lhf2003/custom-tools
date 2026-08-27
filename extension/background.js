@@ -7,6 +7,7 @@ const HOST_NAME = 'com.nervis.memory';
 const STATS_KEY = 'nervis_stats';
 const BLACKLIST_KEY = 'nervis_blacklist';
 const PENDING_OPS_KEY = 'nervis_pending_ops';
+const MIGRATED_KEY = 'nervis_blacklist_migrated';
 
 let port = null;
 let reconnectTimer = null;
@@ -146,7 +147,22 @@ async function savePendingOps(ops) {
   await chrome.storage.local.set({ [PENDING_OPS_KEY]: ops });
 }
 
-/** 连通时: 先重放离线增删, 再拉全量覆盖本地缓存 */
+/** M2 时代本地黑名单一次性迁移：host 空 + 本地非空时把本地推给 host（否则首次拉取会抹掉存量） */
+async function migrateLocalBlacklistOnce() {
+  const done = (await chrome.storage.local.get(MIGRATED_KEY))[MIGRATED_KEY];
+  if (done) return;
+  const local = await getBlacklist();
+  if (local.length) {
+    const r = await callNative({ type: 'get_blacklist' });
+    const hostList = r.blacklist || [];
+    for (const d of local) {
+      if (!hostList.includes(d)) await callNative({ type: 'block_domain', domain: d });
+    }
+  }
+  await chrome.storage.local.set({ [MIGRATED_KEY]: true }); // 推送中途失败不置标记, 下次同步重试
+}
+
+/** 连通时: 先重放离线增删, 再做一次性迁移, 最后拉全量覆盖本地缓存 */
 async function syncBlacklist() {
   if (!port) return;
   try {
@@ -155,6 +171,7 @@ async function syncBlacklist() {
       await callNative({ type: t, domain: op.domain });
     }
     await savePendingOps([]);
+    await migrateLocalBlacklistOnce();
     const r = await callNative({ type: 'get_blacklist' });
     await chrome.storage.local.set({ [BLACKLIST_KEY]: r.blacklist || [] });
   } catch (e) { /* host 中途断开: 保留缓存与 pending_ops, 下次连通再同步 */ }

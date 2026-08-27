@@ -18,11 +18,19 @@ function renderBlacklist(list) {
   for (const d of list) {
     const row = document.createElement('div');
     row.className = 'domain-row';
-    row.innerHTML = `<span>${d}</span><div class="actions"><button data-d="${d}">移除</button></div>`;
-    row.querySelector('button').onclick = async () => {
+    const span = document.createElement('span');
+    span.textContent = d; // textContent: 域名经设置页自由输入入库, 不走 innerHTML
+    const actions = document.createElement('div');
+    actions.className = 'actions';
+    const btn = document.createElement('button');
+    btn.textContent = '移除';
+    btn.onclick = async () => {
       await send({ kind: 'unblockDomain', domain: d });
       refresh();
     };
+    actions.appendChild(btn);
+    row.appendChild(span);
+    row.appendChild(actions);
     box.appendChild(row);
   }
 }
