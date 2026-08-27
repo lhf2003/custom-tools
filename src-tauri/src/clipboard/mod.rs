@@ -4,6 +4,7 @@ use std::thread;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc::channel;
 
+pub mod favicon;
 mod watcher;
 
 pub use watcher::ClipboardWatcher;

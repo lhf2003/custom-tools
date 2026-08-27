@@ -499,6 +499,7 @@ pub fn run() {
             commands::window::set_blur_hold,
             commands::clipboard::get_clipboard_history,
             commands::clipboard::get_app_icon,
+            commands::clipboard::get_site_favicon,
             commands::clipboard::toggle_clipboard_favorite,
             commands::clipboard::delete_clipboard_item,
             commands::clipboard::clear_clipboard_history,

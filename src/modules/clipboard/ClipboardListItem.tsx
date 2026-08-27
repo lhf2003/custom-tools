@@ -3,9 +3,10 @@
  * 选中铺 Scrim White 10（DESIGN.md 列表选中规则）
  */
 import { forwardRef } from 'react';
-import { Star } from 'lucide-react';
+import { Link2, Star } from 'lucide-react';
 import type { ClipboardItemData } from './types';
-import { getTypeConfig, formatTime, displayName } from './utils';
+import { detectTextKind, getTypeConfig, formatTime, displayName } from './utils';
+import { useFavicon } from './useFavicon';
 
 interface ClipboardListItemProps {
   item: ClipboardItemData;
@@ -21,6 +22,9 @@ export const ClipboardListItem = forwardRef<HTMLDivElement, ClipboardListItemPro
     const config = getTypeConfig(item.content_type, item.content);
     const Icon = config.icon;
     const preview = displayName(item.content, item.content_type);
+    // 整链文本：类型图标换成站点 favicon，加载中/抓取失败回退通用链接图标
+    const isLink = item.content_type === 'text' && detectTextKind(item.content) === 'link';
+    const favicon = useFavicon(isLink ? item.content.trim() : null);
 
     return (
       <div
@@ -32,7 +36,15 @@ export const ClipboardListItem = forwardRef<HTMLDivElement, ClipboardListItemPro
           isSelected ? 'bg-white/10' : 'hover:bg-white/5'
         }`}
       >
-        <Icon size={15} className={`${config.iconClass} shrink-0`} />
+        {isLink ? (
+          favicon ? (
+            <img src={favicon} alt="" className="w-[15px] h-[15px] rounded-sm shrink-0" />
+          ) : (
+            <Link2 size={15} className="text-[#60a5fa] shrink-0" />
+          )
+        ) : (
+          <Icon size={15} className={`${config.iconClass} shrink-0`} />
+        )}
         <div className="flex-1 min-w-0">
           <div
             className={`text-sm truncate ${

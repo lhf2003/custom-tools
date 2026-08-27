@@ -24,6 +24,7 @@ import {
   JSON_TOKEN_COLORS,
 } from './utils';
 import { imageCache } from './imageCache';
+import { useFavicon } from './useFavicon';
 import { MediaPlayer } from './MediaPlayer';
 
 interface ClipboardDetailProps {
@@ -270,10 +271,17 @@ function TextContent({ content, onOpenUrl }: { content: string; onOpenUrl: (url:
 // ─── 整链卡片 ────────────────────────────────────────────────────────────────
 
 function LinkCard({ url, onOpenUrl }: { url: string; onOpenUrl: (url: string) => void }) {
+  // 站点 favicon 替换通用链接图标，加载中/抓取失败回退 Link2
+  const favicon = useFavicon(url);
+
   return (
     <div className="flex flex-col items-start gap-3">
       <div className="w-full flex items-start gap-2.5 bg-app-bg-tertiary rounded-lg px-4 py-3.5">
-        <Link2 size={16} className="text-[#60a5fa] shrink-0 mt-1" />
+        {favicon ? (
+          <img src={favicon} alt="" className="w-4 h-4 rounded-sm shrink-0 mt-1" />
+        ) : (
+          <Link2 size={16} className="text-[#60a5fa] shrink-0 mt-1" />
+        )}
         <button
           onClick={() => onOpenUrl(url)}
           className="text-sm text-[#60a5fa] hover:underline break-all text-left leading-6 cursor-pointer select-text"

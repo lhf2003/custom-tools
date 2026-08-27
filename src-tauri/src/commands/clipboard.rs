@@ -57,6 +57,12 @@ pub fn get_app_icon(exe_path: String) -> Result<Option<String>, String> {
     crate::search::icon::extract_icon(&exe_path).map_err(|e| e.to_string())
 }
 
+/// 获取站点 favicon（data URL）。磁盘缓存 7 天，抓不到返回 None 由前端回退通用链接图标。
+#[tauri::command]
+pub async fn get_site_favicon(url: String) -> Result<Option<String>, String> {
+    Ok(crate::clipboard::favicon::get_favicon_data_url(&url).await)
+}
+
 /// Get clipboard history
 #[tauri::command]
 pub fn get_clipboard_history(
