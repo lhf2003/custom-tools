@@ -4,6 +4,7 @@ pub mod chat;
 pub mod clipboard;
 pub mod companion;
 pub mod llm;
+pub mod memory;
 pub mod notes;
 pub mod plugin_gen;
 pub mod plugins;

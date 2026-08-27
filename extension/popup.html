@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<!-- popup.html — D13: 纯状态仪表盘, 不做搜索框（搜索唯一入口是启动器） -->
+<!-- 视觉: 对齐 DESIGN.md token（扩展无共享样式表, hex 为 token 值直引；violet 点缀已退出, 用 signal-indigo 系） -->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 320px;
+      font-family: "HarmonyOS Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+      background: #1e1e21; /* surface-base */
+      color: #f4f4f5;      /* ink-primary */
+      padding: 12px;
+    }
+    .header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .brand { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; }
+    .brand img { width: 24px; height: 24px; border-radius: 8px; }
+    .badge {
+      font-size: 12px; padding: 2px 8px; border-radius: 12px; /* rounded-lg */
+      border: 1px solid #ffffff1a; /* scrim-white-10 */
+    }
+    .badge.on  { color: #22c55e; background: #22c55e1f; border-color: #22c55e4d; } /* status-success */
+    .badge.off { color: #f87171; background: #f871711f; border-color: #f871714d; } /* status-error-text */
+    .stats {
+      display: grid; grid-template-columns: repeat(3, 1fr);
+      background: #2e2e33; /* surface-card */
+      border: 1px solid #ffffff0d; /* scrim-white-5 */
+      border-radius: 12px; padding: 12px 0; margin-bottom: 8px;
+    }
+    .stat { text-align: center; }
+    .stat .num { font-size: 18px; font-weight: 700; color: #818cf8; } /* Display 上限 + signal-indigo-light */
+    .stat .label { font-size: 12px; color: #a1a1aa; margin-top: 2px; } /* ink-tertiary */
+    .cost {
+      font-size: 12px; color: #a1a1aa; text-align: center; margin-bottom: 12px;
+    }
+    .cost b { color: #22c55e; font-weight: 600; }
+    .section-title { font-size: 12px; color: #a1a1aa; margin: 8px 0 6px; }
+    .domain-row {
+      display: flex; align-items: center; justify-content: space-between;
+      background: #2e2e33;
+      border: 1px solid #ffffff0d;
+      border-radius: 8px; padding: 6px 12px; margin-bottom: 6px; font-size: 12px;
+      gap: 8px;
+    }
+    .domain-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .domain-row .actions button {
+      flex-shrink: 0;
+      font-size: 12px; padding: 4px 8px; border-radius: 8px; cursor: pointer;
+      border: 1px solid #ffffff1a; background: transparent; color: #f4f4f5;
+    }
+    .domain-row .actions button:hover { background: #ffffff0d; }
+    .domain-row .actions button:disabled { color: #71717a; cursor: not-allowed; }
+    .btn-block {
+      width: 100%; padding: 8px 16px; border-radius: 8px; cursor: pointer;
+      border: 1px solid #6366f166; /* signal-indigo */
+      background: #6366f126; color: #c7d2fe;
+      font-size: 14px; margin-top: 8px;
+    }
+    .btn-block:hover { background: #6366f140; }
+    .btn-block.danger {
+      border-color: #f8717166; background: #f871711a; color: #f87171;
+    }
+    .btn-block:disabled { opacity: 0.4; cursor: not-allowed; }
+    .empty { font-size: 12px; color: #a1a1aa; text-align: center; padding: 6px 0; } /* ink-tertiary: 对比度 6.4:1 过 AA */
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="brand">
+      <img src="icons/icon-32.png" alt="">
+      <span>Nervis 记忆</span>
+    </div>
+    <span id="conn" class="badge off">未连接</span>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="num" id="statPages">0</div><div class="label">页面（今日）</div></div>
+    <div class="stat"><div class="num" id="statSubs">0</div><div class="label">字幕段（今日）</div></div>
+    <div class="stat"><div class="num" id="statQueue">0</div><div class="label">队列</div></div>
+  </div>
+
+  <div class="cost">本地运行 · <b>¥0</b> · 数据不出本机</div>
+
+  <div class="section-title">当前站点</div>
+  <div class="domain-row">
+    <span id="curDomain">-</span>
+    <div class="actions"><button id="btnBlock">不再索引此站点</button></div>
+  </div>
+
+  <div class="section-title">黑名单</div>
+  <div id="blacklistBox"><div class="empty">暂无</div></div>
+
+  <button class="btn-block" id="btnOpenMemory" title="聚焦 Nervis 主窗（Alt+Space 随时检索）">打开记忆库</button>
+  <button class="btn-block danger" id="btnClear">清空全部浏览索引</button>
+
+  <script src="popup.js"></script>
+</body>
+</html>

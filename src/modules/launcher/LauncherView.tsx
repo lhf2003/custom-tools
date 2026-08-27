@@ -11,6 +11,7 @@ import { WINDOW_SIZE } from '../../constants/window';
 import { listLauncherEntries, isLauncherEntryId, entryIdToViewMode } from '@/plugins/launcherEntries';
 import { matchTrigger, suggestTriggers, type TriggerSuggestion } from '@/plugins/registry';
 import { getCachedIcon, setCachedIcon } from './iconCache';
+import { MemoryStrip, MemoryList, memoryHitTitle, type MemoryHit } from './MemoryResults';
 import { Tooltip } from '@/components/Tooltip';
 
 
@@ -56,12 +57,37 @@ export function LauncherView() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
 
+  // 记忆检索（D5）：hits 异步流入；memorySel 是 C 分组独立选中态（与网格 selectedIndex 互斥）
+  const [memoryHits, setMemoryHits] = useState<MemoryHit[]>([]);
+  const [memorySel, setMemorySel] = useState(-1);
+  // 陈旧响应守卫：只认最后一次请求的返回
+  const memoryReqRef = useRef(0);
+
   // 结果排列视图：grid 横向网格（默认）| list 列表（设置页可切）
   const launcherView = useSettingsStore((s) => s.launcher_view);
   const isListView = launcherView === 'list';
-  // 折叠态条数与垂直导航步长随视图切换：网格按行跳（9），列表逐项走（1）
+
+  // 「记」命令解析：兼容全角空格与连续空格。null = 非备忘模式
+  const noteContent = (() => {
+    const q = searchQuery.trim();
+    if (q === '记') return '';
+    const m = q.match(/^记[\s　]+([\s\S]*)$/);
+    return m ? m[1].trim() : null;
+  })();
+  const isNoteMode = noteContent !== null;
+
+  // 「s 」前缀记忆检索模式（D5: 纯语义全量视图）：s + 空格 + 查询词
+  const memoryQuery = (() => {
+    if (isNoteMode) return null;
+    const q = searchQuery.trim();
+    const m = q.match(/^s[\s　]+([\s\S]*)$/);
+    return m ? m[1].trim() : null;
+  })();
+  const isMemoryMode = memoryQuery !== null;
+
+  // 折叠态条数与垂直导航步长随视图切换：网格按行跳（9），列表/记忆模式逐项走（1）
   const collapsedCount = isListView ? LIST_COLLAPSED_COUNT : ITEMS_PER_ROW;
-  const rowStep = isListView ? 1 : ITEMS_PER_ROW;
+  const rowStep = isListView || isMemoryMode ? 1 : ITEMS_PER_ROW;
 
   // Compute displayed items before using in effects
   const displayedItems = isExpanded ? recentItems : recentItems.slice(0, collapsedCount);
@@ -90,15 +116,6 @@ export function LauncherView() {
   }, [searchQuery, displayedItems, recentItems, launcherEntries]);
 
   const allResults = useMemo(() => buildResults(apps), [buildResults, apps]);
-
-  // 「记」命令解析：兼容全角空格与连续空格。null = 非备忘模式
-  const noteContent = (() => {
-    const q = searchQuery.trim();
-    if (q === '记') return '';
-    const m = q.match(/^记[\s\u3000]+([\s\S]*)$/);
-    return m ? m[1].trim() : null;
-  })();
-  const isNoteMode = noteContent !== null;
 
   // Trigger 前缀路由：查询行首命中某插件 trigger 时进入独占态，
   // 结果区只渲染该插件一行，回车以剩余文本为载荷打开（@json xxx / 裸 @json）
@@ -138,14 +155,16 @@ export function LauncherView() {
   // 备忘模式无结果网格，导航集合为空；trigger 独占态导航集合只有独占结果
   const navItems = useMemo(() => isNoteMode
     ? []
-    : isTriggerMode
-      ? (triggerResult ? [triggerResult] : [])
-      : isSuggestMode
-        ? suggestResults
-        : searchQuery && !isExpanded
-          ? allResults.slice(0, collapsedCount)
-          : allResults,
-  [isNoteMode, isTriggerMode, triggerResult, isSuggestMode, suggestResults, searchQuery, isExpanded, allResults, collapsedCount]);
+    : isMemoryMode
+      ? memoryHits.map(h => ({ name: memoryHitTitle(h), path: `memory://${h.id}` }))
+      : isTriggerMode
+        ? (triggerResult ? [triggerResult] : [])
+        : isSuggestMode
+          ? suggestResults
+          : searchQuery && !isExpanded
+            ? allResults.slice(0, collapsedCount)
+            : allResults,
+  [isNoteMode, isMemoryMode, memoryHits, isTriggerMode, triggerResult, isSuggestMode, suggestResults, searchQuery, isExpanded, allResults, collapsedCount]);
 
   // Reset selection when items change
   useEffect(() => {
@@ -201,20 +220,54 @@ export function LauncherView() {
     return () => clearTimeout(timer);
   }, [searchQuery, searchApps]);
 
-  // Set window height based on expanded state and view mode
+  // 记忆检索（异步不阻塞主结果，D5）：普通查询取 3 条入 C 分组，s 模式取 8 条全量
   useEffect(() => {
+    const stripQuery = searchQuery.trim();
+    const enabled = isMemoryMode
+      ? (memoryQuery?.length ?? 0) >= 2
+      : !isNoteMode && !isTriggerMode && !isSuggestMode && stripQuery.length >= 2;
+    if (!enabled) {
+      setMemoryHits([]);
+      setMemorySel(-1);
+      return;
+    }
+    const reqId = ++memoryReqRef.current;
+    const timer = setTimeout(() => {
+      const q = isMemoryMode ? memoryQuery! : stripQuery;
+      safeInvoke('memory_search', { query: q, k: isMemoryMode ? 8 : 3 })
+        .then((hits) => {
+          if (memoryReqRef.current === reqId) {
+            setMemoryHits((hits as MemoryHit[]) ?? []);
+            setMemorySel(-1);
+          }
+        })
+        .catch(() => {
+          // 模型未就绪/无索引等失败不打扰主流程，分组静默缺席
+        });
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [searchQuery, isMemoryMode, memoryQuery, isNoteMode, isTriggerMode, isSuggestMode]);
+
+  // Set window height based on expanded state and view mode
+  // C 分组出现时额外撑高（3 条记忆行 + 分组头 ≈ 148px）；记忆模式按列表折叠高
+  const showMemoryStrip = !isNoteMode && !isTriggerMode && !isSuggestMode && !isMemoryMode && !!searchQuery && memoryHits.length > 0;
+  useEffect(() => {
+    const stripExtra = showMemoryStrip ? 148 : 0;
     const height = isExpanded
       ? WINDOW_SIZE.LAUNCHER.expanded
-      : isListView
+      : isMemoryMode
         ? WINDOW_SIZE.LAUNCHER.listCollapsed
-        : WINDOW_SIZE.LAUNCHER.collapsed;
+        : (isListView
+          ? WINDOW_SIZE.LAUNCHER.listCollapsed
+          : WINDOW_SIZE.LAUNCHER.collapsed) + stripExtra;
     debouncedResize(height, WINDOW_SIZE.LAUNCHER.width);
-  }, [isExpanded, isListView]);
+  }, [isExpanded, isListView, isMemoryMode, showMemoryStrip]);
 
   // 唤起即折叠：与 query 重置一致的"每次唤起全新状态"语义
   useEffect(() => {
     const unlisten = listen('window:shown', () => {
       setIsExpanded(false);
+      setMemorySel(-1);
     });
 
     return () => {
@@ -376,7 +429,39 @@ export function LauncherView() {
     }
   };
 
+  // 记忆条目打开：浏览/字幕跳 URL（字幕带 #t= 秒级锚点），笔记跳笔记视图，其余复制内容
+  const handleMemoryOpen = useCallback(async (hit: MemoryHit) => {
+    try {
+      const res = await safeInvoke('memory_open', { id: hit.id }) as {
+        action: string;
+        content?: string;
+      };
+      if (res.action === 'opened_url') {
+        await safeInvoke('hide_window');
+      } else if (res.action === 'copy_content' && res.content) {
+        await navigator.clipboard.writeText(res.content);
+        addToast({
+          type: 'success',
+          title: '已复制',
+          message: res.content.length > 50 ? `${res.content.slice(0, 50)}…` : res.content,
+        });
+        await safeInvoke('hide_window');
+      } else if (res.action === 'open_note') {
+        setActiveView('markdown');
+      }
+    } catch (err) {
+      addToast({ type: 'error', title: '打开记忆失败', message: String(err) });
+    }
+  }, [addToast, setActiveView]);
+
   const handleItemClick = useCallback(async (item: AppItemData) => {
+    // 记忆条目（s 模式导航集合的 memory:// 项）走记忆打开通道
+    if (item.path.startsWith('memory://')) {
+      const hit = memoryHits.find(h => `memory://${h.id}` === item.path);
+      if (hit) await handleMemoryOpen(hit);
+      return;
+    }
+
     // Optimistic update: move item to first position of recent list
     const promoteToRecent = () => {
       setRecentItems(prev => [item, ...prev.filter(i => i.path !== item.path)]);
@@ -412,7 +497,7 @@ export function LauncherView() {
     } catch (err) {
       console.error('Failed to hide window:', err);
     }
-  }, [setActiveView, recordAppUsage, launchApp, addToast]);
+  }, [setActiveView, recordAppUsage, launchApp, addToast, memoryHits, handleMemoryOpen]);
 
   // Handle keyboard navigation
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -431,8 +516,44 @@ export function LauncherView() {
       return;
     }
 
-    // 备忘模式无结果网格、列表视图无横向移动：左右键放行给输入框移动光标，不做网格导航
-    if ((isNoteMode || isListView) && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+    // 备忘/记忆模式无结果网格、列表视图无横向移动：左右键放行给输入框移动光标，不做网格导航
+    if ((isNoteMode || isListView || isMemoryMode) && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+      return;
+    }
+
+    // C 分组选中态优先于网格导航（此时 selectedIndex 为 -1，焦点在记忆条上）
+    if (memorySel >= 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        lastKeyboardNavRef.current = Date.now();
+        if (memorySel + 1 >= Math.min(memoryHits.length, 3)) {
+          setMemorySel(-1);
+          focusExpandButton();
+        } else {
+          setMemorySel(memorySel + 1);
+        }
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        lastKeyboardNavRef.current = Date.now();
+        if (memorySel === 0) {
+          setMemorySel(-1);
+          const last = navItems.length - 1;
+          focusGridItem(last);
+          setSelectedIndex(last);
+        } else {
+          setMemorySel(memorySel - 1);
+        }
+        return;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const hit = memoryHits[memorySel];
+        if (hit) void handleMemoryOpen(hit);
+        return;
+      }
+      // 其他键（字符输入等）放行，查询变化会自然重置 memorySel
       return;
     }
 
@@ -450,7 +571,12 @@ export function LauncherView() {
             return 0;
           }
           if (prev + rowStep > maxIndex) {
-            // 已在最后一行/最后一项：溢出聚焦「展开」按钮
+            // 已在最后一行/最后一项：有记忆分组则先进入分组，否则溢出聚焦「展开」按钮
+            if (!isMemoryMode && memoryHits.length > 0) {
+              setSelectedIndex(-1);
+              setMemorySel(0);
+              return -1;
+            }
             focusExpandButton();
             return -1;
           }
@@ -516,8 +642,8 @@ export function LauncherView() {
           }
           return;
         }
-        // 防抖窗口内的回车：先冲刷搜索再启动，避免命中陈旧结果
-        if (searchQuery && searchTimerRef.current !== null) {
+        // 防抖窗口内的回车：先冲刷搜索再启动，避免命中陈旧结果（记忆模式导航集合是记忆条目，不走应用冲刷）
+        if (searchQuery && searchTimerRef.current !== null && !isMemoryMode) {
           clearTimeout(searchTimerRef.current);
           searchTimerRef.current = null;
           void (async () => {
@@ -546,7 +672,7 @@ export function LauncherView() {
         }
         break;
     }
-  }, [searchQuery, navItems, selectedIndex, setActiveView, addToast, setSearchQuery, searchApps, buildResults, handleItemClick, isNoteMode, noteContent, isTriggerMode, triggerMatch, triggerResult, isSuggestMode, triggerSuggestions, suggestResults, focusSettingsButton, focusExpandButton, focusGridItem, isListView, rowStep]);
+  }, [searchQuery, navItems, selectedIndex, setActiveView, addToast, setSearchQuery, searchApps, buildResults, handleItemClick, isNoteMode, noteContent, isTriggerMode, triggerMatch, triggerResult, isSuggestMode, triggerSuggestions, suggestResults, focusSettingsButton, focusExpandButton, focusGridItem, isListView, rowStep, isMemoryMode, memorySel, memoryHits, handleMemoryOpen]);
 
   return (
     <div
@@ -589,6 +715,13 @@ export function LauncherView() {
       <div className={`w-full flex-1 px-4 overflow-hidden ${isListView ? 'pb-2' : 'pb-4'}`}>
         {isNoteMode ? (
           <NoteActionPreview content={noteContent} />
+        ) : isMemoryMode ? (
+          <MemoryList
+            hits={memoryHits}
+            selectedIndex={selectedIndex}
+            onOpen={(hit) => void handleMemoryOpen(hit)}
+            onHover={handleHoverSelect}
+          />
         ) : isSuggestMode ? (
           isListView ? (
             <TriggerSuggestList
@@ -640,20 +773,29 @@ export function LauncherView() {
             />
           )
         ) : searchQuery ? (
-          <SearchResults
-            query={searchQuery}
-            allResults={allResults}
-            visibleResults={navItems}
-            isExpanded={isExpanded}
-            isListView={isListView}
-            collapsedCount={collapsedCount}
-            onToggleExpand={() => setIsExpanded(!isExpanded)}
-            expandBtnRef={expandBtnRef}
-            selectedIndex={selectedIndex}
-            onItemClick={handleItemClick}
-            onSelect={handleHoverSelect}
-            searchError={searchError}
-          />
+          <>
+            <SearchResults
+              query={searchQuery}
+              allResults={allResults}
+              visibleResults={navItems}
+              isExpanded={isExpanded}
+              isListView={isListView}
+              collapsedCount={collapsedCount}
+              onToggleExpand={() => setIsExpanded(!isExpanded)}
+              expandBtnRef={expandBtnRef}
+              selectedIndex={selectedIndex}
+              onItemClick={handleItemClick}
+              onSelect={handleHoverSelect}
+              searchError={searchError}
+            />
+            {/* C 分组：应用结果下方的记忆条，异步流入不抢主结果（D5） */}
+            <MemoryStrip
+              hits={memoryHits}
+              selectedIndex={memorySel}
+              onOpen={(hit) => void handleMemoryOpen(hit)}
+              onHover={setMemorySel}
+            />
+          </>
         ) : (
           <section className="h-full flex flex-col">
             {/* Section Header */}

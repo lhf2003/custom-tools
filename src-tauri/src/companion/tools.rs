@@ -11,7 +11,7 @@ use std::path::Path;
 use rusqlite::Connection;
 use serde_json::{json, Value};
 
-use super::{analyzer, db};
+use super::{analyzer, db, fact_pipeline};
 
 /// write_note 工具被限制在该目录前缀下，防止 agent 越权写其他笔记
 pub(crate) const NOTE_DIR_PREFIX: &str = "陪伴日报";
@@ -860,8 +860,9 @@ pub(crate) fn char_bigram_jaccard(a: &str, b: &str) -> f64 {
 }
 
 /// 显式记忆：用户说「记住X」时立即落库（source=explicit，写审计）。
-/// 同分类下语义查重（bigram Jaccard ≥ 阈值）→ 覆盖旧条目（纠正场景不再并存矛盾条目）；
-/// 无匹配 → 新增（文本完全相等仍走 upsert 的确认累计）。
+/// 两级流水线（D12）：向量召回 ≥ 阈值 → 小模型裁决 ADD/UPDATE/NOOP；
+/// 无命中或任一环节不可用 → 回落 bigram 查重（≥ 阈值覆盖，否则新增）。
+/// 分数与路径写入审计 source 字段（explicit|vec=..|llm:..）供阈值标定。
 fn tool_remember_fact(db_path: &Path, args: &Value) -> Result<String, String> {
     let fact = args
         .get("fact")
@@ -887,11 +888,52 @@ fn tool_remember_fact(db_path: &Path, args: &Value) -> Result<String, String> {
         ));
     }
 
-    // 查重阈值标定见 MERGE_THRESHOLD 定义处注释
-    let conn = open_db(db_path)?;
+    let mut conn = open_db(db_path)?;
     let now = chrono::Local::now().timestamp();
 
-    // 同分类查重：取相似度最高者
+    // 第一级：向量召回（Embedder 不可用/无索引时得到 None → 直接走 bigram）
+    let recalled = fact_pipeline::vector_recall(&conn, fact)
+        .filter(|(_, _, score)| *score >= fact_pipeline::RECALL_THRESHOLD);
+    if let Some((old_id, old_text, score)) = recalled {
+        // 第二级：LLM 裁决；失败回落 bigram（不阻塞记忆写入）
+        match fact_pipeline::llm_arbitrate(db_path, fact, &old_text) {
+            Ok(fact_pipeline::Verdict::Update) => {
+                let src = format!("explicit|vec={score:.2}|llm:update");
+                db::update_memory_fact(&conn, old_id, fact, category, &src, now)
+                    .map_err(|e| format!("覆盖记忆失败: {}", e))?;
+                fact_pipeline::sync_fact_index(&mut conn);
+                return Ok(format!(
+                    "已更新记忆（{}）：{}（向量 {:.0}% 召回 + 模型裁决覆盖原「{}」）",
+                    category,
+                    fact,
+                    score * 100.0,
+                    old_text.chars().take(24).collect::<String>()
+                ));
+            }
+            Ok(fact_pipeline::Verdict::Noop) => {
+                let src = format!("explicit|vec={score:.2}|llm:noop");
+                db::confirm_memory_fact(&conn, old_id, &src, now)
+                    .map_err(|e| format!("确认记忆失败: {}", e))?;
+                return Ok(format!(
+                    "已有相同记忆（{}）：{}（模型裁决无需重复写入）",
+                    category,
+                    old_text.chars().take(40).collect::<String>()
+                ));
+            }
+            Ok(fact_pipeline::Verdict::Add) => {
+                let src = format!("explicit|vec={score:.2}|llm:add");
+                db::upsert_memory_fact(&conn, fact, category, &src, now)
+                    .map_err(|e| format!("写入记忆失败: {}", e))?;
+                fact_pipeline::sync_fact_index(&mut conn);
+                return Ok(format!("已记住（{}）：{}", category, fact));
+            }
+            Err(e) => {
+                log::info!("remember_fact 裁决不可用（{}），回落 bigram 查重", e);
+            }
+        }
+    }
+
+    // 回落路径：bigram 查重（阈值标定见 MERGE_THRESHOLD 定义处注释）
     let mut best: Option<(i64, String, f64)> = None;
     if let Ok(mut stmt) = conn.prepare(
         "SELECT id, fact FROM memory_facts WHERE category = ?1 ORDER BY confirmations DESC, last_confirmed DESC",
@@ -913,6 +955,7 @@ fn tool_remember_fact(db_path: &Path, args: &Value) -> Result<String, String> {
         if sim >= MERGE_THRESHOLD {
             db::update_memory_fact(&conn, id, fact, category, "explicit", now)
                 .map_err(|e| format!("覆盖记忆失败: {}", e))?;
+            fact_pipeline::sync_fact_index(&mut conn);
             return Ok(format!(
                 "已更新记忆（{}）：{}（覆盖原「{}」，相似度 {:.0}%）",
                 category,
@@ -925,6 +968,7 @@ fn tool_remember_fact(db_path: &Path, args: &Value) -> Result<String, String> {
 
     db::upsert_memory_fact(&conn, fact, category, "explicit", now)
         .map_err(|e| format!("写入记忆失败: {}", e))?;
+    fact_pipeline::sync_fact_index(&mut conn);
     Ok(format!("已记住（{}）：{}", category, fact))
 }
 
@@ -937,7 +981,7 @@ fn tool_forget_fact(db_path: &Path, args: &Value) -> Result<String, String> {
         .filter(|s| !s.is_empty())
         .ok_or("缺少参数 keyword")?;
 
-    let conn = open_db(db_path)?;
+    let mut conn = open_db(db_path)?;
     let matches = db::find_memory_facts_by_keyword(&conn, keyword, 20)
         .map_err(|e| format!("查询记忆失败: {}", e))?;
     if matches.is_empty() {
@@ -964,6 +1008,7 @@ fn tool_forget_fact(db_path: &Path, args: &Value) -> Result<String, String> {
             .map_err(|e| format!("删除记忆失败: {}", e))?;
         forgotten.push(format!("- {}", f.fact));
     }
+    fact_pipeline::sync_fact_index(&mut conn); // 索引孤儿随删除清理
     Ok(format!(
         "已忘掉 {} 条：\n{}",
         forgotten.len(),

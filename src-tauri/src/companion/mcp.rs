@@ -26,6 +26,8 @@ pub(crate) use super::tools::NOTE_DIR_PREFIX;
 
 /// MCP server 入口：阻塞式读取 stdin 直到 EOF（claude CLI 关闭管道时退出）
 pub fn run_mcp_server(db_path: PathBuf, notes_dir: PathBuf) {
+    // vec0 扩展必须先于任何 Connection::open 注册（remember_fact 两级流水线要走向量库）
+    nervis_memory::store::register_vec_extension();
     // MCP 模式独立运行（不经过 Tauri 启动流程），需自行确保表结构就绪
     if let Ok(conn) = Connection::open(&db_path) {
         if let Err(e) = db::init_tables(&conn) {

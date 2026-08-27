@@ -1770,6 +1770,26 @@ pub(crate) fn resolve_scene_provider(
     ),
     String,
 > {
+    let app_data_dir = app_handle.path().app_data_dir().unwrap_or_default();
+    resolve_scene_provider_with_dir(conn, scene, &app_data_dir)
+}
+
+/// app_data_dir 直给版：MCP 进程（无 AppHandle）与 GUI 共用同一解析逻辑
+pub(crate) fn resolve_scene_provider_with_dir(
+    conn: &Connection,
+    scene: Scene,
+    app_data_dir: &std::path::Path,
+) -> Result<
+    (
+        crate::llm_provider::models::Provider,
+        crate::llm_provider::models::Model,
+        bool,
+        String,
+        String,
+        Scene,
+    ),
+    String,
+> {
     let provider_db = LlmProviderDb;
     let resolved = provider_db
         .get_scene_model(conn, scene.clone())
@@ -1800,8 +1820,7 @@ pub(crate) fn resolve_scene_provider(
 
     let api_key = match &provider.api_key_encrypted {
         Some(encrypted) if !encrypted.is_empty() => {
-            let app_data_dir = app_handle.path().app_data_dir().unwrap_or_default();
-            decrypt(encrypted, &app_data_dir).map_err(|e| format!("解密 API Key 失败: {}", e))?
+            decrypt(encrypted, app_data_dir).map_err(|e| format!("解密 API Key 失败: {}", e))?
         }
         _ => String::new(),
     };
@@ -1819,11 +1838,23 @@ pub(crate) async fn call_scene_model_llm(
     scene: Scene,
     source: &str,
 ) -> Result<String, String> {
+    let app_data_dir = app_handle.path().app_data_dir().unwrap_or_default();
+    call_scene_model_llm_with_dir(db_path, prompt, scene, source, &app_data_dir).await
+}
+
+/// app_data_dir 直给版：MCP 进程（无 AppHandle，如 remember_fact 两级裁决）复用同一通道
+pub(crate) async fn call_scene_model_llm_with_dir(
+    db_path: &PathBuf,
+    prompt: String,
+    scene: Scene,
+    source: &str,
+    app_data_dir: &std::path::Path,
+) -> Result<String, String> {
     let started = std::time::Instant::now();
     let conn = Connection::open(db_path).map_err(|e| format!("打开数据库失败: {}", e))?;
 
     let (provider, model, thinking_mode, reasoning_effort, api_key, used_scene) =
-        resolve_scene_provider(app_handle, &conn, scene)?;
+        resolve_scene_provider_with_dir(&conn, scene, app_data_dir)?;
 
     let messages = vec![ChatMessage {
         role: "user".to_string(),

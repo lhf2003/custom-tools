@@ -104,6 +104,9 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            // vec0 扩展必须先于任何 Connection::open 注册（auto_extension 只对之后打开的连接生效）
+            nervis_memory::store::register_vec_extension();
+
             // 统一 HTTP 客户端工厂：系统代理开关在 build_client 中读取（MCP 模式无 setup，句柄缺失时退化直连）
             http::init(app.handle().clone());
 
@@ -271,6 +274,22 @@ pub fn run() {
             let search_index = search::SearchIndex::with_db(db_state.clone());
             let search_index_arc = Arc::new(Mutex::new(search_index));
             app.manage(commands::search::SearchState(search_index_arc.clone()));
+            // 记忆检索 Embedder 懒加载容器（首次 memory_search 时加载模型）
+            app.manage(commands::memory::MemoryEmbedderState(std::sync::Arc::new(Mutex::new(None))));
+
+            // 浏览数据 90 天滚动删除的执行点（D10）：启动即清一次 + 每 24h 周期清
+            {
+                let purge_db = db_state.0.clone();
+                tauri::async_runtime::spawn(async move {
+                    commands::memory::purge_expired_now(&purge_db);
+                    let mut tick = tokio::time::interval(std::time::Duration::from_secs(24 * 3600));
+                    tick.tick().await; // interval 首次立即触发, 吞掉（上面刚清过）
+                    loop {
+                        tick.tick().await;
+                        commands::memory::purge_expired_now(&purge_db);
+                    }
+                });
+            }
 
             // Background initial indexing: load cache first, fall back to full scan
             {
@@ -555,6 +574,15 @@ pub fn run() {
             commands::search::record_app_usage,
             commands::search::extract_app_icon,
             commands::search::get_recent_apps,
+            commands::memory::memory_search,
+            commands::memory::memory_open,
+            commands::memory::memory_get_blacklist,
+            commands::memory::memory_add_blacklist,
+            commands::memory::memory_remove_blacklist,
+            commands::memory::memory_get_retention,
+            commands::memory::memory_set_retention,
+            commands::memory::memory_clear_browsing,
+            commands::memory::memory_source_stats,
             // Everything integration
             commands::search::is_everything_available,
             commands::search::search_everything,

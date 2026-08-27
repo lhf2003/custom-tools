@@ -849,6 +849,40 @@ pub fn upsert_memory_fact(
     Ok(())
 }
 
+/// 按 id 确认一条事实（两级流水线 NOOP 裁决：语义重复不写入, 只累计确认）
+pub fn confirm_memory_fact(
+    conn: &Connection,
+    id: i64,
+    source: &str,
+    now: i64,
+) -> rusqlite::Result<()> {
+    let text: Option<String> = conn
+        .query_row(
+            "SELECT fact FROM memory_facts WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let Some(text) = text else { return Ok(()) };
+    conn.execute(
+        "UPDATE memory_facts SET confirmations = confirmations + 1, last_confirmed = ?2 WHERE id = ?1",
+        params![id, now],
+    )?;
+    log_fact_event(
+        conn,
+        FactEvent {
+            fact_id: Some(id),
+            action: "confirm",
+            old_text: None,
+            new_text: Some(&text),
+            category: None,
+            source,
+            now,
+        },
+    )?;
+    Ok(())
+}
+
 /// 覆盖一条事实的文本与分类（提取管道 update 动作 / 用户编辑），confirmations 保留
 pub fn update_memory_fact(
     conn: &Connection,

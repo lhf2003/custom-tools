@@ -11,6 +11,8 @@ import {
   ChevronDown,
   ChevronRight,
   Brain,
+  Globe,
+  Plus,
 } from 'lucide-react';
 import { Tooltip } from '@/components/Tooltip';
 import { confirmDialog } from '@/stores/confirmStore';
@@ -74,6 +76,13 @@ const SOURCE_LABEL: Record<string, string> = {
   analysis: '每日分析',
 };
 
+/** 两级流水线来源串（explicit|vec=0.88|llm:update）→ 可读标签 */
+function sourceLabel(source: string): string {
+  const base = source.split('|')[0];
+  const label = SOURCE_LABEL[base] ?? base;
+  return source.includes('|llm:') ? `${label} · 向量裁决` : label;
+}
+
 const STATUS_LABEL: Record<string, { text: string; color: string }> = {
   dismissed: { text: '已忽略', color: 'text-white/30' },
   learning: { text: '学习中', color: 'text-amber-400' },
@@ -87,6 +96,185 @@ function formatTime(ts: number): string {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+const RETENTION_OPTIONS = [
+  { value: '30', label: '30 天' },
+  { value: '90', label: '90 天' },
+  { value: '180', label: '180 天' },
+  { value: '365', label: '一年' },
+];
+
+/** 浏览记忆与隐私（M4）：浏览器扩展索引的页面/字幕——统计、保留期、黑名单、一键清除。
+ *  黑名单单真源在 SQLite，扩展侧只是缓存（≤30s 同步）。 */
+function BrowsingPrivacySection() {
+  const { addToast } = useToastStore();
+  const [stats, setStats] = useState<Record<string, number>>({});
+  const [retention, setRetention] = useState('90');
+  const [blacklist, setBlacklist] = useState<string[]>([]);
+  const [newDomain, setNewDomain] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      const [pairs, days, list] = await Promise.all([
+        invoke<[string, number][]>('memory_source_stats'),
+        invoke<number>('memory_get_retention'),
+        invoke<string[]>('memory_get_blacklist'),
+      ]);
+      setStats(Object.fromEntries(pairs));
+      setRetention(String(days));
+      setBlacklist(list);
+    } catch (err) {
+      console.error('Failed to load browsing privacy state:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const handleRetentionChange = async (value: string) => {
+    const prev = retention;
+    setRetention(value);
+    try {
+      await invoke('memory_set_retention', { days: Number(value) });
+    } catch (err) {
+      setRetention(prev);
+      addToast({
+        type: 'error',
+        title: '保留期保存失败',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
+  const handleAddDomain = async () => {
+    const domain = newDomain.trim().toLowerCase().replace(/^\*\./, '');
+    if (!domain || !domain.includes('.')) {
+      addToast({ type: 'error', title: '域名格式不对', message: '例如 bilibili.com' });
+      return;
+    }
+    try {
+      const list = await invoke<string[]>('memory_add_blacklist', { domain });
+      setBlacklist(list);
+      setNewDomain('');
+      addToast({ type: 'success', title: '已拉黑', message: `${domain} 的存量索引已物理删除` });
+    } catch (err) {
+      addToast({
+        type: 'error',
+        title: '拉黑失败',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
+  const handleRemoveDomain = async (domain: string) => {
+    try {
+      const list = await invoke<string[]>('memory_remove_blacklist', { domain });
+      setBlacklist(list);
+    } catch (err) {
+      addToast({
+        type: 'error',
+        title: '移除失败',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
+  const handleClearBrowsing = async () => {
+    const ok = await confirmDialog({
+      title: '清除浏览索引',
+      message: '物理删除全部浏览页面与字幕索引，不可恢复。',
+      detail: '剪贴板、笔记与记忆事实不受影响。',
+      danger: true,
+      confirmLabel: '全部删除',
+    });
+    if (!ok) return;
+    try {
+      const n = await invoke<number>('memory_clear_browsing');
+      addToast({ type: 'success', title: '已清除', message: `物理删除 ${n} 条浏览索引` });
+      await load();
+    } catch (err) {
+      addToast({
+        type: 'error',
+        title: '清除失败',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
+  const browsingCount = (stats.browser ?? 0) + (stats.subtitle ?? 0);
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <Globe size={13} className="text-white/40" />
+        <span className="text-white/50 text-xs font-medium">浏览记忆与隐私</span>
+        <span className="text-white/25 text-xs">
+          页面 {stats.browser ?? 0} · 字幕段 {stats.subtitle ?? 0}
+        </span>
+      </div>
+
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-white/40 text-xs flex-1">
+          浏览数据滚动保留（到期物理删除，剪贴板/笔记不受限）
+        </span>
+        <CustomSelect
+          value={retention}
+          onChange={handleRetentionChange}
+          options={RETENTION_OPTIONS}
+          className="w-28 flex-shrink-0"
+        />
+      </div>
+
+      <div className="mb-3">
+        <div className="text-white/40 text-xs mb-1.5">
+          索引黑名单（这些站点不再采集，浏览器扩展 ≤30 秒同步生效）
+        </div>
+        {blacklist.length > 0 && (
+          <div className="space-y-0.5 mb-2">
+            {blacklist.map((d) => (
+              <div
+                key={d}
+                className="flex items-center gap-2 rounded-lg px-2 py-1 -mx-2 hover:bg-white/5 transition-colors"
+              >
+                <span className="text-white/70 text-xs flex-1 min-w-0 truncate">{d}</span>
+                <button
+                  onClick={() => handleRemoveDomain(d)}
+                  className="text-white/30 hover:text-red-400 transition-colors cursor-pointer shrink-0"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="flex items-center gap-2">
+          <input
+            value={newDomain}
+            onChange={(e) => setNewDomain(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleAddDomain()}
+            placeholder="添加域名，例如 example.com"
+            className="flex-1 bg-white/5 text-white text-xs rounded-lg px-2.5 py-1.5 outline-none border border-white/10 focus:border-white/20 placeholder:text-white/30"
+          />
+          <button
+            onClick={handleAddDomain}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white/10 text-white/70 text-xs hover:bg-white/15 transition-colors cursor-pointer shrink-0"
+          >
+            <Plus size={12} /> 拉黑
+          </button>
+        </div>
+      </div>
+
+      <button
+        onClick={handleClearBrowsing}
+        disabled={browsingCount === 0}
+        className="w-full px-3 py-2 rounded-lg border border-red-500/30 bg-red-500/10 text-red-300 text-xs hover:bg-red-500/20 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+      >
+        清除全部浏览索引（{browsingCount} 条）
+      </button>
+    </div>
+  );
 }
 
 interface MemoryCenterProps {
@@ -271,9 +459,9 @@ export function MemoryCenter({ onBack }: MemoryCenterProps) {
         ) : (
           <div className="flex items-center gap-2 text-xs">
             <span className="text-white/80 flex-1 min-w-0 break-words">{fact.fact}</span>
-            <Tooltip content={`来源：${SOURCE_LABEL[fact.source] ?? fact.source}`} wrapperClassName="shrink-0">
+            <Tooltip content={`来源：${sourceLabel(fact.source)}`} wrapperClassName="shrink-0">
               <span className="text-white/30 shrink-0">
-                {SOURCE_LABEL[fact.source] ?? fact.source} · ×{fact.confirmations}
+                {sourceLabel(fact.source)} · ×{fact.confirmations}
               </span>
             </Tooltip>
             <Tooltip content="变更历史" wrapperClassName="shrink-0">
@@ -313,7 +501,7 @@ export function MemoryCenter({ onBack }: MemoryCenterProps) {
                   {' · '}
                   <span>{ACTION_LABEL[ev.action] ?? ev.action}</span>
                   {' · '}
-                  <span>{SOURCE_LABEL[ev.source] ?? ev.source}</span>
+                  <span>{sourceLabel(ev.source)}</span>
                   {ev.action === 'update' && ev.old_text && (
                     <div className="text-white/30 mt-0.5">
                       「{ev.old_text}」→「{ev.new_text}」
@@ -473,6 +661,8 @@ export function MemoryCenter({ onBack }: MemoryCenterProps) {
           </div>
         )}
 
+        <BrowsingPrivacySection />
+
         <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
           <div className="flex items-center gap-2 mb-2">
             <History size={13} className="text-white/40" />
@@ -488,7 +678,7 @@ export function MemoryCenter({ onBack }: MemoryCenterProps) {
                     {formatTime(ev.created_at)}
                   </span>
                   <span className="text-white/50 shrink-0">{ACTION_LABEL[ev.action] ?? ev.action}</span>
-                  <span className="text-white/25 shrink-0">{SOURCE_LABEL[ev.source] ?? ev.source}</span>
+                  <span className="text-white/25 shrink-0">{sourceLabel(ev.source)}</span>
                   <span className="text-white/60 truncate">
                     {ev.new_text ?? ev.old_text ?? ''}
                   </span>

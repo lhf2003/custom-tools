@@ -1,0 +1,37 @@
+{
+  "manifest_version": 3,
+  "name": "Nervis 记忆索引",
+  "version": "0.1.0",
+  "description": "把你浏览过的页面正文与视频字幕索引到本机 Nervis，启动器里语义找回。数据不出本机。",
+  "permissions": ["nativeMessaging", "storage", "activeTab", "alarms"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["readability.js", "content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "*://*.bilibili.com/video/*",
+        "*://www.youtube.com/watch*"
+      ],
+      "js": ["subtitle.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "icons": {
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  }
+}
