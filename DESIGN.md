@@ -222,7 +222,7 @@ components:
 - **原生控件**：`:root` 声明 `color-scheme`，日期选择器等系统控件随主题。
 - **防闪屏**：index.html 内联脚本在 React 挂载前预读 localStorage 缓存的主题模式（`flowhub-theme-mode`，由 ThemeController 写入）并解析 `prefers-color-scheme`，消除首帧深色闪屏。
 - **陪伴 Toast 跟随主题**：companion-toast.html 同款内联脚本（与主窗口同 origin 共享 localStorage），组件的 `bg-zinc-900/95` 经 zinc 映射 + Tailwind color-mix 自动换浅色，`text-white/*` 由类级覆盖翻墨阶。
-- **导出图片跟随主题**：JSON Canvas 导出（jsonCanvas.ts PALETTE_DARK/LIGHT）与 Markdown 导出（export.ts STYLE_CONTENT_*、Vditor.preview mode/hljs github↔github-dark）均读 `document.documentElement.dataset.themeFamily` 出对应明暗族的图片。
+- **导出图片跟随主题**：JSON Canvas 导出（jsonCanvas.ts PALETTE_DARK/LIGHT）与 Markdown 导出（export.ts STYLE_CONTENT_*，react-markdown + rehype-highlight 渲染，hljs 补丁深/浅双套内联）均读 `document.documentElement.dataset.themeFamily` 出对应明暗族的图片。
 
 ### 主题族架构与橘子海（2026-08-06）
 外观系统升级为两层：`data-theme` 是具体主题（dark / light / orange-sea），`data-theme-family` 是明暗族（dark / light）。全部浅色类级覆盖挂 `[data-theme-family='light']`，深色族新增主题（如橘子海）对覆盖层零改动。新主题登记三处：`ThemeController.tsx` 的 `THEME_FAMILY`、index.css 的 `[data-theme='<id>']` token 块、两个 html 防闪屏脚本的 FAMILY 映射。`theme=system` 只在 zinc dark/light 间跟随，变体主题一律显式选择。

@@ -11,8 +11,6 @@ node_modules
 dist
 dist-ssr
 
-# Allow Vditor assets in public directory
-!public/vditor/dist/
 *.local
 
 # Editor directories and files
@@ -52,3 +50,9 @@ mdeditor-*.png
 # Python
 __pycache__/
 *.pyc
+
+# spike 产物（模型/语料/构建）
+spikes/*/target/
+spikes/*/models/
+spikes/*/corpus/
+spikes/*/cache/

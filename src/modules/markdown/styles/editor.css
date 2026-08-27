@@ -1,0 +1,437 @@
+/* CodeMirror 6 编辑器主题 - 与项目 THEME 统一（Vditor 时代 vditor.css 的继任者） */
+
+/* ============================================
+   主题 CSS 变量（映射自 index.css 的 --app-* 语义变量，
+   随 data-theme 自动切换深/浅；accent 高亮色在浅色主题下换深档见下方覆盖）
+   ============================================ */
+.markdown-editor-container {
+  --cm-bg-hover: var(--app-bg-hover);
+  --cm-bg-active: var(--app-alpha-white-10);
+
+  --cm-text-primary: var(--app-text-primary);
+  --cm-text-secondary: var(--app-text-secondary);
+  --cm-text-tertiary: var(--app-text-tertiary);
+  --cm-text-disabled: var(--app-text-disabled);
+
+  --cm-border-default: var(--app-border-default);
+  --cm-border-emphasis: var(--app-border-emphasis);
+
+  /* 灰纱层（行内代码底、语言标签、复制按钮；浅色翻黑纱见 light 覆盖） */
+  --cm-scrim-code: rgba(63, 63, 70, 0.6);
+  --cm-scrim-chip: rgba(63, 63, 70, 0.4);
+  --cm-scrim-button: rgba(63, 63, 70, 0.85);
+
+  /* 深色主题高亮色（浅色主题深档覆盖见下方） */
+  --cm-accent-blue: #3b82f6;
+  --cm-accent-blue-light: #93c5fd;
+  --cm-accent-purple: #c084fc;
+  --cm-accent-green: #4ade80;
+  --cm-accent-cyan: #22d3ee;
+  --cm-accent-amber: #fbbf24;
+  --cm-accent-orange: #fdba74;
+  --cm-accent-pink: #f472b6;
+  --cm-accent-red: #f87171;
+
+  /* 代码高亮专属色（块底走灰纱：半透不透死，玻璃面板上透得出主题渐变） */
+  --cm-hl-bg: var(--cm-scrim-chip);
+  --cm-hl-comment: var(--cm-text-disabled);
+  --cm-hl-keyword: var(--cm-accent-purple);
+  --cm-hl-string: var(--cm-accent-green);
+  --cm-hl-number: var(--cm-accent-amber);
+  --cm-hl-function: var(--cm-accent-blue-light);
+  --cm-hl-type: var(--cm-accent-cyan);
+  --cm-hl-variable: var(--cm-accent-pink);
+  --cm-hl-attr: var(--cm-accent-orange);
+  --cm-hl-tag: var(--cm-accent-red);
+  --cm-hl-punctuation: var(--cm-text-tertiary);
+  --cm-hl-operator: var(--cm-text-secondary);
+}
+
+/* 浅色主题：高亮色换深档，保证浅底对比（对齐 GitHub light 语法色策略） */
+[data-theme='light'] .markdown-editor-container {
+  --cm-accent-blue: #2563eb;
+  --cm-accent-blue-light: #3b82f6;
+  --cm-accent-purple: #9333ea;
+  --cm-accent-green: #16a34a;
+  --cm-accent-cyan: #0891b2;
+  --cm-accent-amber: #d97706;
+  --cm-accent-orange: #ea580c;
+  --cm-accent-pink: #db2777;
+  --cm-accent-red: #dc2626;
+
+  /* 灰纱层翻黑纱（Black Scrim Rule） */
+  --cm-scrim-code: rgba(0, 0, 0, 0.07);
+  --cm-scrim-chip: rgba(0, 0, 0, 0.06);
+  --cm-scrim-button: rgba(0, 0, 0, 0.08);
+}
+
+/* ============================================
+   布局骨架
+   ============================================ */
+.cm-editor-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.cm-editor-host {
+  flex: 1;
+  min-height: 0;
+}
+
+.cm-editor-host .cm-editor {
+  height: 100%;
+  background: transparent;
+}
+
+.cm-editor-host .cm-editor.cm-focused {
+  outline: none;
+}
+
+/* 中英一体字体栈：HarmonyOS Sans SC
+   【同步点】字体栈改动需同步 src/styles/fonts/harmonyos-sans-sc.css 等五处（见打包字体流程备忘） */
+.cm-editor-host .cm-scroller {
+  font-family: 'HarmonyOS Sans SC', -apple-system, BlinkMacSystemFont,
+               'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: 15px;
+  line-height: 1.75;
+}
+
+.cm-editor-host .cm-content {
+  padding: 16px 24px;
+  caret-color: var(--cm-text-primary);
+  color: var(--cm-text-primary);
+}
+
+.cm-editor-host .cm-line {
+  padding: 0 2px;
+}
+
+.cm-editor-host .cm-placeholder {
+  color: var(--cm-text-disabled);
+}
+
+/* 选区（!important 压 CM6 运行时注入的基础主题） */
+.markdown-editor-container .cm-editor .cm-selectionBackground,
+.markdown-editor-container .cm-editor.cm-focused .cm-selectionBackground {
+  background: var(--cm-bg-active) !important;
+}
+
+.markdown-editor-container .cm-editor .cm-selectionMatch {
+  background: var(--cm-scrim-chip) !important;
+}
+
+.cm-editor-host .cm-cursor {
+  border-left-color: var(--cm-text-primary);
+}
+
+/* ============================================
+   工具栏
+   ============================================ */
+.cm-toolbar {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  flex-shrink: 0;
+  /* 透明：透出玻璃面板；底部分隔由笔记标题栏承担，工具栏自身不划线 */
+  background: transparent;
+}
+
+.cm-toolbar-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cm-text-tertiary);
+  border-radius: 5px;
+  margin: 0 1px;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.cm-toolbar-btn:hover {
+  background: var(--cm-bg-hover);
+  color: var(--cm-text-primary);
+}
+
+.cm-toolbar-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--cm-border-emphasis);
+  margin: 0 6px;
+  flex-shrink: 0;
+}
+
+/* 标题下拉入口与工具栏按钮同高 */
+.cm-toolbar .cm-heading-menu > div > button {
+  height: 28px;
+  font-size: 13px;
+}
+
+/* ============================================
+   代码块（折叠态行装饰 + 头部行内 widget）
+   【铁律】编辑器内行装饰/小部件严禁纵向 margin——CM6 高度图只量
+   border-box（padding+border 计入，margin 忽略），margin 会累积成
+   整行点击偏移。间距一律用 padding 或透明 border 实现。
+   ============================================ */
+.cm-editor-host .cm-codeblock-line {
+  /* 等宽字体栈改动同步上述字体同步点备忘 */
+  font-family: 'Fira Code', 'JetBrains Mono', 'SF Mono', Consolas, Monaco, monospace;
+  font-size: 13.5px;
+  line-height: 1.6;
+  background: var(--cm-hl-bg);
+  border-left: 1px solid var(--cm-border-default);
+  border-right: 1px solid var(--cm-border-default);
+  box-sizing: border-box;
+  padding: 0 12px;
+}
+
+.cm-editor-host .cm-codeblock-first {
+  border-top: 1px solid var(--cm-border-default);
+  border-radius: 10px 10px 0 0;
+  padding-top: 8px;
+}
+
+.cm-editor-host .cm-codeblock-last {
+  border-bottom: 1px solid var(--cm-border-default);
+  border-radius: 0 0 10px 10px;
+  padding-bottom: 8px;
+}
+
+/* 源码态（光标在块内）：fence 行同样铺底，视觉上与折叠态一致 */
+.cm-editor-host .cm-codeblock-source {
+  color: var(--cm-text-secondary);
+}
+
+/* header 是开 fence 行内容的行内替换：卡片底/边框/圆角全部由行装饰承担，
+   这里只负责行内 flex 布局。行高与源码态 fence 行一致（两态几何相同，点击不跳行） */
+.cm-codeblock-header {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  vertical-align: middle;
+  user-select: none;
+}
+
+.cm-codeblock-lang {
+  color: var(--cm-accent-cyan);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 1px 6px;
+  background: var(--cm-scrim-chip);
+  border-radius: 4px;
+  font-family: 'Fira Code', 'JetBrains Mono', 'SF Mono', Consolas, Monaco, monospace;
+  /* 可点击：点击 header 任意处会把光标投递到源码语言名末尾 */
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.cm-codeblock-lang:hover {
+  background: var(--cm-bg-hover);
+}
+
+.cm-codeblock-copy {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 必须 ≤ 代码行行高（13.5px*1.6≈21.6px），否则折叠态行比源码态高，几何就不一致了 */
+  width: 20px;
+  height: 20px;
+  color: var(--cm-text-tertiary);
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: all 0.15s ease;
+}
+
+.cm-codeblock-copy svg {
+  width: 12px;
+  height: 12px;
+}
+
+.cm-codeblock-header:hover .cm-codeblock-copy,
+.cm-codeblock-copy:hover {
+  opacity: 1;
+}
+
+.cm-codeblock-copy:hover {
+  background: var(--cm-bg-hover);
+  color: var(--cm-text-primary);
+}
+
+.cm-codeblock-copy.is-copied {
+  color: var(--cm-accent-green);
+  opacity: 1;
+}
+
+/* ============================================
+   即时渲染装饰（livePreview）
+   ============================================ */
+.cm-editor-host .cm-heading-line-1 {
+  border-bottom: 1px solid var(--cm-border-default);
+  padding-bottom: 4px;
+}
+
+.cm-editor-host .cm-heading-line-2 {
+  border-bottom: 1px solid var(--cm-border-default);
+  padding-bottom: 3px;
+}
+
+.cm-editor-host .cm-quote-line {
+  border-left: 3px solid var(--cm-accent-blue);
+  background: var(--cm-bg-active);
+  border-radius: 0 8px 8px 0;
+  padding-left: 12px;
+  box-sizing: border-box;
+}
+
+.cm-inlinecode-chip {
+  background: var(--cm-scrim-code);
+  border-radius: 5px;
+  padding: 1px 2px;
+  color: var(--cm-accent-pink) !important;
+  font-family: 'Fira Code', 'JetBrains Mono', 'SF Mono', Consolas, Monaco, monospace;
+  font-size: 0.88em;
+}
+
+.cm-hr-widget {
+  /* 纵向间距用 padding（计入高度图），不用 margin */
+  padding: 10px 0;
+  height: 0;
+  box-sizing: content-box;
+}
+
+.cm-hr-widget::before {
+  content: '';
+  display: block;
+  border-top: 1px solid var(--cm-border-emphasis);
+}
+
+.cm-task-checkbox {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin: 0 4px 0 2px;
+  vertical-align: -2px;
+  border: 1px solid var(--cm-border-emphasis);
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  position: relative;
+}
+
+.cm-task-checkbox:checked {
+  background: var(--cm-accent-blue);
+  border-color: var(--cm-accent-blue);
+}
+
+.cm-task-checkbox:checked::after {
+  content: '';
+  position: absolute;
+  left: 3.5px;
+  top: 0.5px;
+  width: 4px;
+  height: 8px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+/* ============================================
+   搜索面板（Ctrl+F，玻璃风）
+   ============================================ */
+.markdown-editor-container .cm-panel.cm-search {
+  background: var(--app-bg-primary);
+  color: var(--cm-text-primary);
+  border-bottom: 1px solid var(--cm-border-default);
+  padding: 6px 10px;
+  font-family: inherit;
+}
+
+.markdown-editor-container .cm-panel.cm-search label {
+  font-size: 12px;
+  color: var(--cm-text-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 8px;
+}
+
+.markdown-editor-container .cm-panel.cm-search .cm-textfield {
+  background: var(--cm-scrim-chip);
+  color: var(--cm-text-primary);
+  border: 1px solid var(--cm-border-default);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+
+.markdown-editor-container .cm-panel.cm-search .cm-textfield:focus {
+  border-color: var(--cm-accent-blue);
+}
+
+.markdown-editor-container .cm-panel.cm-search .cm-button {
+  background: var(--cm-scrim-chip);
+  color: var(--cm-text-secondary);
+  border: 1px solid var(--cm-border-default);
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  background-image: none;
+}
+
+.markdown-editor-container .cm-panel.cm-search .cm-button:hover {
+  background: var(--cm-bg-hover);
+  color: var(--cm-text-primary);
+}
+
+.markdown-editor-container .cm-panel.cm-search button[name='close'] {
+  color: var(--cm-text-tertiary);
+  font-size: 16px;
+}
+
+.markdown-editor-container .cm-searchMatch {
+  background: var(--cm-scrim-button);
+  outline: 1px solid var(--cm-border-emphasis);
+}
+
+.markdown-editor-container .cm-searchMatch-selected {
+  background: rgba(59, 130, 246, 0.35);
+}
+
+/* ============================================
+   滚动条（自动隐藏标准：thumb 默认透明，is-scrolling 淡入）
+   ============================================ */
+.cm-editor-host .cm-scroller::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.cm-editor-host .cm-scroller::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.cm-editor-host .cm-scroller::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 4px;
+  transition: background-color 400ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.cm-editor-host .cm-scroller.is-scrolling::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+  transition-duration: 150ms;
+}
+
+.cm-editor-host .cm-scroller::-webkit-scrollbar-thumb:hover,
+.cm-editor-host .cm-scroller.is-scrolling::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover);
+  transition-duration: 150ms;
+}

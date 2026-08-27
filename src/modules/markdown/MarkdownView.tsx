@@ -7,7 +7,7 @@ import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { useToastStore } from '@/stores/toastStore';
 import type { NoteItemData, CreateNoteRequest } from './types';
 import { useNotes } from './hooks/useNotes';
-import { Modal, EmptyState, SortableNoteTree, ErrorBoundary, VditorEditor, ContextMenu, MenuIcons, DeleteConfirmDialog } from './components';
+import { Modal, EmptyState, SortableNoteTree, ErrorBoundary, CodeMirrorEditor, ContextMenu, MenuIcons, DeleteConfirmDialog } from './components';
 import { exportNoteAsImage } from './utils/export';
 import type { MenuItem } from './components/ContextMenu';
 import { THEME } from '@/constants/theme';
@@ -929,8 +929,8 @@ export function MarkdownView() {
             )}
 
             {/* WYSIWYG Markdown Editor */}
-            <div className="flex-1 overflow-hidden vditor-container">
-              <VditorEditor
+            <div className="flex-1 overflow-hidden markdown-editor-container">
+              <CodeMirrorEditor
                 value={editorContent}
                 onChange={setEditorContent}
                 placeholder="开始写作..."
