@@ -1,4 +1,5 @@
-//! 贾维斯聊天的共享组装件：系统提示（compose_chat_system）、事实分组渲染、
+//! 贾维斯聊天的共享组装件：系统提示（compose_chat_system）、尾部上下文便签
+//! （compose_context_note：摘要+当下状态，压请求末尾保 KV Cache）、事实分组渲染、
 //! 时间间隔桥接、首轮日期与独白开关。聊天发送通道在 scene_chat.rs（场景模型
 //! tool-use 循环），本文件不再有独立发送通道。
 
@@ -7,7 +8,7 @@ use std::path::{Path, PathBuf};
 use chrono::Datelike;
 
 use rusqlite::Connection;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Manager};
 
 use super::{analyzer, db, persona};
 
@@ -16,6 +17,11 @@ use super::{analyzer, db, persona};
 /// 或场景模型回退通道（有数据工具版）；false 为无工具降级措辞。
 /// ui_rules：render_ui 使用规则，仅场景通道传入（agent 通道经 MCP 没有
 /// render_ui），注入「工具与专长手册」小节内，不挂尾部。
+///
+/// 注意：分钟级时间戳、当下状态、此前摘要都不在本函数产出里——
+/// 它们走 compose_context_note，作为独立消息压在请求真正的末尾（KV Cache：
+/// 系统提示后面还挂着全部历史消息，高挥发内容留在系统提示尾部会让其后的
+/// 摘要+历史跨分钟整段重新 prefill）。
 pub(crate) fn compose_chat_system(
     app_data: &Path,
     db_path: &Path,
@@ -31,52 +37,13 @@ pub(crate) fn compose_chat_system(
         .and_then(|c| db::list_memory_facts(c, 50).ok())
         .unwrap_or_default();
     let facts_text = format_facts_grouped(&facts);
-    // 以下动态段全部追加末尾（前缀稳定段不吃 KV Cache 失效）
-    let now = chrono::Local::now();
-    // 真实时间进提示词——模型本身没有时钟，不知道「现在几点」
-    let weekday = match now.weekday().num_days_from_monday() {
-        0 => "一",
-        1 => "二",
-        2 => "三",
-        3 => "四",
-        4 => "五",
-        5 => "六",
-        _ => "日",
-    };
-    let time_text = format!(
-        "现在是 {} 周{} {}",
-        now.format("%Y-%m-%d"),
-        weekday,
-        now.format("%H:%M")
-    );
-    let state_text = conn
-        .as_ref()
-        .map(|c| super::state::current_state_sentence(c, now.timestamp()))
-        .unwrap_or_default();
-    let state_text = if state_text.is_empty() {
-        time_text
-    } else {
-        format!("{}\n{}", time_text, state_text)
-    };
-    // 上次聊天时间对照：模型有「同一会话=同一时刻」的连续性先验，末尾一句孤立
-    // 时间戳唤不醒它（他昨晚说「去洗澡」，今早发「早」，模型还停在昨晚的话头）。
-    // 把算好的时间差直接喂给它；间隔太短说明是同一场对话，不用打断
-    let gap_text = conn
-        .as_ref()
-        .and_then(super::db::last_assistant_chat_at)
-        .map(|ts| chat_gap_bridge(ts, now.timestamp()))
-        .unwrap_or_default();
-    let state_text = if gap_text.is_empty() {
-        state_text
-    } else {
-        format!("{}\n{}", state_text, gap_text)
-    };
     let focus_text = conn
         .as_ref()
         .and_then(super::diary::today_focus)
         .unwrap_or_default();
     let attitude_text = persona::load_attitude(app_data).trim().to_string();
     // 日内情绪状态机：当前生效的心情（同类覆盖 + 12h TTL），空则跳过该段
+    let now = chrono::Local::now();
     let emotion_text = conn
         .as_ref()
         .map(|c| super::emotion::render_current(c, now.timestamp()))
@@ -146,14 +113,15 @@ pub(crate) fn compose_chat_system(
         Some(t) => format!("\n\n---\n\n# 你的窗外\n{}", t),
         None => String::new(),
     };
-    // 拼装顺序（LHF 2026-08-03 定版）：
+    // 拼装顺序（LHF 2026-08-03 定版；2026-08-25 起当下状态/摘要移出系统提示）：
     //   静态前缀：persona → tool(工具编排+手册元数据+界面卡片) → evolution → 场合/独白
-    //   动态后缀：你记住的他 → 关注 → 心境 → 心情 → 窗外 → 时间
-    //   （facts 归动态段——记忆更新不再让中间段缓存失效；时间在尾部，动态段全在末尾）
+    //   动态后缀：你记住的他 → 关注 → 心境 → 心情 → 窗外
+    //   （facts 归动态段——记忆更新不再让中间段缓存失效；
+    //     比 facts 更易变的摘要/时间/状态走 compose_context_note 压请求末尾）
     format!(
         "{persona}\n\n---\n\n{tool}\n\n---\n\n{evolution}\n\n---\n\n\
          现在是「聊天」场合：完整的你，能干活也能接梗。\n{monologue}\n\n---\n\n\
-         # 你记住的他\n{facts}{focus}{attitude}{emotion}{env}\n\n---\n\n# 当下状态\n{state}",
+         # 你记住的他\n{facts}{focus}{attitude}{emotion}{env}",
         persona = persona_text,
         tool = tool_section,
         evolution = evolution,
@@ -163,6 +131,70 @@ pub(crate) fn compose_chat_system(
         attitude = attitude_section,
         emotion = emotion_section,
         env = env_section,
+    )
+}
+
+/// 尾部上下文便签：此前摘要 + 当下状态（真实时间/状态叙事/距上次聊天）。
+/// 作为独立 user 消息插在 messages 末尾、他当轮消息之前，不进系统提示。
+/// KV Cache 视角：系统提示后面还挂着全部历史消息——分钟级时间戳若留在系统
+/// 提示尾部，每次跨分钟都会让其后的摘要+历史整段重新 prefill；便签挪到请求
+/// 真正的末尾后，跨分钟只重算便签自身（几十 token），静态前缀与历史全保缓存。
+/// 便签在会话间不落库，每轮按实时数据重建。
+pub(crate) fn compose_context_note(db_path: &Path, summary: &str) -> String {
+    let conn = Connection::open(db_path).ok();
+    let now = chrono::Local::now();
+    // 真实时间进提示词——模型本身没有时钟，不知道「现在几点」
+    let weekday = match now.weekday().num_days_from_monday() {
+        0 => "一",
+        1 => "二",
+        2 => "三",
+        3 => "四",
+        4 => "五",
+        5 => "六",
+        _ => "日",
+    };
+    let time_text = format!(
+        "现在是 {} 周{} {}",
+        now.format("%Y-%m-%d"),
+        weekday,
+        now.format("%H:%M")
+    );
+    let state_text = conn
+        .as_ref()
+        .map(|c| super::state::current_state_sentence(c, now.timestamp()))
+        .unwrap_or_default();
+    let state_text = if state_text.is_empty() {
+        time_text
+    } else {
+        format!("{}\n{}", time_text, state_text)
+    };
+    // 上次聊天时间对照：模型有「同一会话=同一时刻」的连续性先验，末尾一句孤立
+    // 时间戳唤不醒它（他昨晚说「去洗澡」，今早发「早」，模型还停在昨晚的话头）。
+    // 把算好的时间差直接喂给它；间隔太短说明是同一场对话，不用打断
+    let gap_text = conn
+        .as_ref()
+        .and_then(super::db::last_assistant_chat_at)
+        .map(|ts| chat_gap_bridge(ts, now.timestamp()))
+        .unwrap_or_default();
+    let state_text = if gap_text.is_empty() {
+        state_text
+    } else {
+        format!("{}\n{}", state_text, gap_text)
+    };
+    format_context_note(summary, &state_text)
+}
+
+/// 便签排版（纯函数，便于单测）：摘要仅在非空时出现
+fn format_context_note(summary: &str, state_text: &str) -> String {
+    let summary_section = if summary.is_empty() {
+        String::new()
+    } else {
+        format!("\n# 此前聊天的摘要\n{}\n", summary)
+    };
+    format!(
+        "（系统提示：以下是背景上下文，不是他发的消息，不用回应本段——\n\
+         {summary}\n# 当下状态\n{state}\n）",
+        summary = summary_section,
         state = state_text
     )
 }
@@ -269,35 +301,9 @@ pub(crate) fn monologue_enabled(app_handle: &AppHandle) -> bool {
         .unwrap_or(true)
 }
 
-/// 聊天系统提示（前端场景模型回退时取用，with_tools=false）。
-/// async command：环境感知补刷直接 await，不占 IPC 线程（同步 command 里
-/// block_on 会把 locate+weather 串行 ~16s 的等待冻结在启动器消息泵上）
-#[tauri::command]
-pub async fn jarvis_chat_system(
-    app_handle: AppHandle,
-    db_state: State<'_, crate::db::DatabaseState>,
-    with_tools: bool,
-) -> Result<String, String> {
-    touch_first_chat_date(&db_state.0);
-    let monologue = monologue_enabled(&app_handle);
-    let app_data = app_handle
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?;
-    // 环境感知补刷：过期才网络请求，失败有 5 分钟背压（断网时不会每条消息都重试）
-    super::envsense::refresh_if_stale(&db_state.0).await;
-    Ok(compose_chat_system(
-        &app_data,
-        &db_state.0,
-        with_tools,
-        monologue,
-        None,
-    ))
-}
-
 #[cfg(test)]
 mod tests {
-    use super::chat_gap_bridge;
+    use super::{chat_gap_bridge, format_context_note};
 
     /// 本地时间构造辅助
     fn ts(s: &str) -> i64 {
@@ -340,5 +346,22 @@ mod tests {
         let s = chat_gap_bridge(ts("2026-08-01 21:00:00"), ts("2026-08-04 07:55:00"));
         assert!(s.contains("08-01"), "多天: {}", s);
         assert!(s.contains("天前"), "多天: {}", s);
+    }
+
+    #[test]
+    fn note_without_summary_omits_summary_header() {
+        let s = format_context_note("", "现在是 2026-08-25 周二 10:45");
+        assert!(!s.contains("此前聊天的摘要"), "空摘要不带头: {}", s);
+        assert!(s.contains("# 当下状态"), "状态段必在: {}", s);
+        assert!(s.starts_with("（系统提示"), "便签外壳: {}", s);
+    }
+
+    #[test]
+    fn note_with_summary_puts_summary_before_state() {
+        let s = format_context_note("他昨晚在调 IVR 报表", "现在是 2026-08-25 周二 10:45");
+        let summary_at = s.find("# 此前聊天的摘要").expect("摘要段");
+        let state_at = s.find("# 当下状态").expect("状态段");
+        assert!(summary_at < state_at, "摘要在前、状态收尾: {}", s);
+        assert!(s.contains("他昨晚在调 IVR 报表"));
     }
 }

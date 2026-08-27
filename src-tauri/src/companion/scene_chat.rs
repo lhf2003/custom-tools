@@ -314,14 +314,19 @@ async fn run_scene_chat(
     }
 
     // 历史上下文：增量摘要（必要时先压缩旧消息）+ 最近原文。
-    // 摘要追加到系统提示末尾（动态内容一律追加，前缀稳定不吃 KV Cache 失效）
+    // 摘要不再追加进系统提示——它与当下状态（分钟级时间戳）一起走尾部便签，
+    // 压在请求真正的末尾（见 chat::compose_context_note 的 KV Cache 注释）
     let context = load_context(app_handle, db_path, session_id).await?;
-    if !context.summary.is_empty() {
-        system_prompt.push_str(&format!("\n\n---\n\n# 此前聊天的摘要\n{}", context.summary));
-    }
-    crate::llm::log_prompt("chat_scene", &system_prompt);
+    let context_note = chat::compose_context_note(db_path, &context.summary);
+    crate::llm::log_prompt(
+        "chat_scene",
+        &format!(
+            "{}\n\n=== 尾部上下文便签（独立 user 消息，压当轮消息之前） ===\n{}",
+            system_prompt, context_note
+        ),
+    );
 
-    // 组装消息：system + 近期历史 + 本轮用户消息。
+    // 组装消息：system + 近期历史 + 尾部便签 + 本轮用户消息。
     // 当轮消息前端已先落库，load_context 会把它读进 recent 末尾——
     // 弹出与 text 同内容的末尾 user 消息当权威源（content_type 在手才
     // 知道是不是 rich），否则当轮会重复两遍；rich 消息重复还会把
@@ -341,6 +346,8 @@ async fn run_scene_chat(
             &content_type,
         )?);
     }
+    // 尾部便签不落库、每轮重建：跨轮前缀只断在便签处，历史全保缓存
+    messages.push(json!({ "role": "user", "content": context_note }));
     match current {
         Some((_, content, content_type)) => messages.push(build_chat_message(
             app_handle,
@@ -892,7 +899,7 @@ async fn plain_fallback(
 ) -> Result<(), String> {
     // 环境感知补刷（与主通道同款；降级是模型能力问题，窗外感知不受影响）
     super::envsense::refresh_if_stale(db_path).await;
-    let mut system_prompt = chat::compose_chat_system(
+    let system_prompt = chat::compose_chat_system(
         app_data,
         db_path,
         false,
@@ -900,10 +907,15 @@ async fn plain_fallback(
         None,
     );
     let context = load_context(app_handle, db_path, session_id).await?;
-    if !context.summary.is_empty() {
-        system_prompt.push_str(&format!("\n\n---\n\n# 此前聊天的摘要\n{}", context.summary));
-    }
-    crate::llm::log_prompt("chat_scene_notools", &system_prompt);
+    // 尾部便签（摘要+当下状态）与主通道同一处理：压请求末尾，不进系统提示
+    let context_note = chat::compose_context_note(db_path, &context.summary);
+    crate::llm::log_prompt(
+        "chat_scene_notools",
+        &format!(
+            "{}\n\n=== 尾部上下文便签（独立 user 消息，压当轮消息之前） ===\n{}",
+            system_prompt, context_note
+        ),
+    );
     // 当轮去重（同 run_scene_chat：前端先落库，recent 末尾即当轮消息）；
     // 兜底通道结构上传不了图——rich 一律降级为引用文本，失忆但活着
     let mut recent = context.recent;
@@ -935,6 +947,11 @@ async fn plain_fallback(
         Some((_, content, _)) => content,
         None => text.to_string(),
     };
+    msgs.push(crate::llm::ChatMessage {
+        role: "user".to_string(),
+        content: context_note,
+        images: None,
+    });
     msgs.push(crate::llm::ChatMessage {
         role: "user".to_string(),
         content: current_text,

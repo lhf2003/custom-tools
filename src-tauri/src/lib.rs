@@ -684,7 +684,6 @@ pub fn run() {
             companion::scene_chat::jarvis_chat_send_scene,
             companion::scene_chat::jarvis_chat_cancel_scene,
             companion::scene_chat::jarvis_chat_is_generating,
-            companion::chat::jarvis_chat_system,
             commands::companion::list_companion_tools,
             commands::companion::set_companion_tool_enabled,
             commands::companion::get_mcp_server_info,

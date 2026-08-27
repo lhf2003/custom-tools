@@ -16,7 +16,7 @@
   - 动态段（facts/focus/attitude/emotion/时间）用固定合成数据
     → 同一份代码 = 同一份 prompt = 输出可比（OpenClaw prompt snapshot 精神）
   - 模板与 src-tauri/src/companion/chat.rs::compose_chat_system 逐段同步：
-    【改 Rust 拼装时，必须同步本脚本的 compose()】，否则测的是过期模板
+    【改 Rust 拼装时，必须同步本脚本的 compose()/compose_note()】，否则测的是过期模板
   - 真实模型调用（默认 deepseek-v4-flash 快冒烟，需 DEEPSEEK_API_KEY；
     正式回归 --model qwen3.7-plus，需 DASHSCOPE_API_KEY），禁工具、
     只读不写库——纯只读回归，不污染记忆/情绪数据
@@ -215,17 +215,12 @@ def skill_entries() -> list[str]:
 
 def compose(now_synth=SYNTH_TIME, last_chat: datetime | None = datetime(2026, 8, 3, 11, 20)) -> str:
     """拼系统提示词。now_synth=(date, weekday_idx, hh:mm)；last_chat=上次聊天
-    时间（None=无对照句）。默认 last_chat 为当天 11:20（同日 3 小时间隔）。"""
+    时间（None=无对照句）。默认 last_chat 为当天 11:20（同日 3 小时间隔）。
+    注：时间/对照句不在系统提示里——2026-08-25 起走 compose_note 尾部便签
+    （KV Cache：分钟级时间戳留在系统提示尾部会让其后的摘要+历史整段重新
+    prefill）；两参数保留只为便签复用同一签名。"""
     persona = read(PERSONA)
     tool = read(REPO / "src-tauri/src/companion/tool.md")
-    date, wd, hhmm = now_synth
-    time_text = f"现在是 {date} 周{WEEKDAY[wd]} {hhmm}"
-    now_dt = datetime.strptime(f"{date} {hhmm}", "%Y-%m-%d %H:%M")
-    state_text = time_text
-    if last_chat is not None:
-        bridge = gap_bridge(last_chat, now_dt)
-        if bridge:
-            state_text = f"{state_text}\n{bridge}"
 
     monologue = (
         "你有内心独白的习惯：偶尔会把一闪而过的真实想法用 <aside>…</aside> 裹起来说——\n"
@@ -253,7 +248,7 @@ def compose(now_synth=SYNTH_TIME, last_chat: datetime | None = datetime(2026, 8,
     emotion_lines = "\n".join(f"- {c}：{r}" for c, r in SYNTH_EMOTION)
 
     # 拼装顺序（与 chat.rs 定版一致）：persona → tool → evolution → 场合/独白
-    # → 你记住的他 → 关注 → 心境 → 心情 → 时间（+上次聊天对照）
+    # → 你记住的他 → 关注 → 心境 → 心情（当下状态/摘要在 compose_note）
     return (
         f"{persona}\n\n---\n\n{tool}\n\n---\n\n{SYNTH_EVOLUTION}\n\n---\n\n"
         f"现在是「聊天」场合：完整的你，能干活也能接梗。\n{monologue}\n\n---\n\n"
@@ -261,7 +256,23 @@ def compose(now_synth=SYNTH_TIME, last_chat: datetime | None = datetime(2026, 8,
         f"\n\n---\n\n# 他今天的关注\n{SYNTH_FOCUS}"
         f"\n\n---\n\n# 你昨天的心境（写于 0 点）\n{SYNTH_ATTITUDE}"
         f"\n\n---\n\n# 你此刻的心情\n{emotion_lines}"
-        f"\n\n---\n\n# 当下状态\n{state_text}"
+    )
+
+
+def compose_note(now_synth=SYNTH_TIME, last_chat: datetime | None = datetime(2026, 8, 3, 11, 20), summary: str = "") -> str:
+    """尾部上下文便签（复刻 chat.rs::compose_context_note）：摘要+当下状态，
+    作为独立 user 消息压在他当轮消息之前；不落库、每轮重建。"""
+    date, wd, hhmm = now_synth
+    state_text = f"现在是 {date} 周{WEEKDAY[wd]} {hhmm}"
+    now_dt = datetime.strptime(f"{date} {hhmm}", "%Y-%m-%d %H:%M")
+    if last_chat is not None:
+        bridge = gap_bridge(last_chat, now_dt)
+        if bridge:
+            state_text = f"{state_text}\n{bridge}"
+    summary_section = f"\n# 此前聊天的摘要\n{summary}\n" if summary else ""
+    return (
+        f"（系统提示：以下是背景上下文，不是他发的消息，不用回应本段——\n"
+        f"{summary_section}\n# 当下状态\n{state_text}\n）"
     )
 
 
@@ -384,7 +395,13 @@ def run_periods(model, verbose):
         print(f"\n===== 时段·{tag}（{now_synth[0]} {now_synth[2]}；{bridge or '无对照'}）=====")
         for label, msg in cases:
             time.sleep(RATE_LIMIT_DELAY)
-            messages = [{"role": "system", "content": system}, {"role": "user", "content": msg}]
+            # 便签压当轮消息之前（复刻 scene_chat 消息组装）；不落历史
+            note = compose_note(now_synth, last_chat)
+            messages = [
+                {"role": "system", "content": system},
+                {"role": "user", "content": note},
+                {"role": "user", "content": msg},
+            ]
             ok_call, reply = chat(messages, model)
             if not ok_call:
                 print(f"  [SKIP] {label}：{reply}")
@@ -405,14 +422,17 @@ def run_periods(model, verbose):
     return all_ok
 
 
-def run_group(tag, system, history, cases, model, verbose):
+def run_group(tag, system, note, history, cases, model, verbose):
     """跑一组用例。任一用例网络失败即中止本组：残缺上下文（有 user 无
-    assistant）上继续跑只会产出连锁假阳性（评审 H-15）。剩余用例记 SKIP。"""
+    assistant）上继续跑只会产出连锁假阳性（评审 H-15）。剩余用例记 SKIP。
+    便签（note）每轮压在他消息之前、不进历史——复刻 scene_chat 的
+    「便签不落库、每轮重建」。"""
     results = []
     messages = [{"role": "system", "content": system}] + list(history)
     print(f"\n===== {tag} =====")
     for idx, (label, msg, expectation) in enumerate(cases):
         time.sleep(RATE_LIMIT_DELAY)
+        messages.append({"role": "user", "content": note})
         messages.append({"role": "user", "content": msg})
         ok_call, reply = chat(messages, model)
         if not ok_call:
@@ -422,6 +442,7 @@ def run_group(tag, system, history, cases, model, verbose):
                 print(f"  [SKIP] {rest_label}：本组已中止（前序用例网络失败）")
                 results.append((rest_label, False, [], False, False, rest_exp))
             break
+        messages.pop(-2)  # 便签弹出，历史只留他的话与回复（复刻不落库）
         messages.append({"role": "assistant", "content": reply})
         fails = check_hard(reply)
         status = "PASS" if not fails else "FAIL"
@@ -456,14 +477,15 @@ def main():
         sys.exit(0 if ok else 1)
 
     system = compose()
+    note = compose_note()
     print(f"=== 聊天 prompt 回归 · {args.model} · prompt {len(system)} 字符 ===")
     if args.verbose:
         print("---- prompt 预览 ----")
         print(system[:1200])
         print("---- 预览结束 ----")
 
-    clean = run_group("干净历史", system, [], CASES, args.model, args.verbose)
-    poisoned = run_group("投毒历史（复刻生产抢跑样本）", system, POISONED_HISTORY, POISON_CASES, args.model, args.verbose)
+    clean = run_group("干净历史", system, note, [], CASES, args.model, args.verbose)
+    poisoned = run_group("投毒历史（复刻生产抢跑样本）", system, note, POISONED_HISTORY, POISON_CASES, args.model, args.verbose)
 
     # 汇总
     all_results = clean + poisoned
