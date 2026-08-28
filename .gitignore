@@ -56,3 +56,13 @@ spikes/*/target/
 spikes/*/models/
 spikes/*/corpus/
 spikes/*/cache/
+
+# 打包资源二进制（52MB uv.exe，发版前从本机拷贝/CI 下载）
+src-tauri/resources/uv.exe
+
+# sidecar 本地 wheel 缓存（pip 提取的 3.4GB torch wheel，安装辅助）
+sidecar/wemm/wheels/
+
+# sidecar 模型目录联接（指向 spikes 已下载模型，4.5GB 权重不入 git）
+sidecar/wemm/models/
+sidecar/wemm/.venv/

@@ -1,0 +1,34 @@
+[project]
+name = "nervis-wemm-sidecar"
+version = "0.1.0"
+description = "nervis 记忆检索二期 WeMM 多模态 embedding sidecar"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    # CUDA 12.8 构建（RTX 50 系 Blackwell 需要），走下方 pytorch-cu128 专用源
+    "torch==2.8.0",
+    # 缺失时 transformers video processor 静默注册为 None（N0 坑2），必须显式声明
+    # 注意对应关系：torch 2.8 ↔ torchvision 0.23（不是 0.28，后者是 torch 2.13 的搭档）
+    "torchvision==0.23.0",
+    # 钉版：WeMM 官方验证版本（N0 复现环境）
+    "transformers==5.2.0",
+    "qwen-vl-utils[decord]==0.0.14",
+    "accelerate>=1.1.0",
+    "pillow",
+    "numpy",
+]
+
+[tool.uv]
+# 国内镜像（uv sync 走清华 PyPI）
+index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+
+# torch/torchvision 必须走 cu128 专用源：PyPI（及清华 PyPI）的 Windows wheel
+# 只有 +cpu 版，装错触发 sidecar gpu_required 退出。
+# download.pytorch.org 国内慢，用阿里云 pytorch-wheels 镜像（cu128 目录齐全，含 cp313 win wheel）
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://mirrors.aliyun.com/pytorch-wheels/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }

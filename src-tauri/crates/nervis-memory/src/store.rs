@@ -1,17 +1,20 @@
 //! sqlite-vec 向量库: memory_items 元数据 + memory_vectors vec0 虚拟表，同库 flowhub.db
 //!
-//! 决策依据 D7/D10/D11:
+//! 决策依据 D7/D10/D11 + 二期裁决 CASE-007:
 //! - 向量进 flowhub.db, 与 clipboard/notes 同库 JOIN, 暴力扫描规模足够
 //! - URL 级去重 + 内容哈希判变更 (D11)
-//! - 浏览数据 90 天滚动过期物理删除; 剪贴板/笔记 expires_at=NULL 不过期 (D10)
+//! - 二期 Q9: 全部数据永久保留（推翻一期 90 天滚动）, expires_at 恒 NULL, 保留期配置与滚动清理已撤除
+//! - 二期 N0: WeMM-2B 2048 全维（512 截断裸查询不过线弃用）, schema v1->v2 迁移重建 vec 表
 
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
-/// bge-small-zh-v1.5 输出维度（换模型时同步改这里并重建 memory_vectors）
-pub const EMBEDDING_DIM: usize = 512;
-/// 检索过滤时的过取倍数（过期/来源过滤后再截断）
+/// WeMM-Embedding-2B 全维输出（N0: 2048d+指令 top-3 94%; 换模型时同步改这里并重建 memory_vectors）
+pub const EMBEDDING_DIM: usize = 2048;
+/// schema 版本: v1=bge 512d + 90 天滚动（一期）; v2=WeMM 2048d + 全永久 + modality（二期 N1）
+pub const SCHEMA_VERSION: i64 = 2;
+/// 检索过滤时的过取倍数（来源过滤后再截断）
 const OVER_FETCH: usize = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,6 +28,8 @@ pub struct MemoryItem {
     pub chunk_index: i64,
     pub content: String,
     pub content_hash: String,
+    /// 模态: text | image | video（N1 起写入, 老数据迁移默认 text; N2/N3 图片视频用）
+    pub modality: String,
     pub created_at: Option<String>,
     pub indexed_at: String,
     pub expires_at: Option<String>,
@@ -44,6 +49,10 @@ pub struct DocMeta<'a> {
     pub url: Option<&'a str>,
     pub domain: Option<&'a str>,
     pub title: Option<&'a str>,
+    /// 模态（默认 text）
+    pub modality: Option<&'a str>,
+    /// 自定义去重键（默认 url 或 source_ref；N2 主图用 url+"#img" 与正文区分）
+    pub dedup_key: Option<&'a str>,
     pub created_at: Option<&'a str>,
     pub expires_at: Option<&'a str>,
 }
@@ -80,7 +89,7 @@ pub fn register_vec_extension() {
     });
 }
 
-/// 建表（vec0 扩展已通过 register_vec_extension 全局注册）
+/// 建表（vec0 扩展已通过 register_vec_extension 全局注册）+ v1->v2 迁移检查
 pub fn init_memory_tables(conn: &Connection) -> Result<()> {
     register_vec_extension();
 
@@ -96,13 +105,13 @@ pub fn init_memory_tables(conn: &Connection) -> Result<()> {
             chunk_index INTEGER NOT NULL DEFAULT 0,
             content TEXT NOT NULL,
             content_hash TEXT NOT NULL,
+            modality TEXT NOT NULL DEFAULT 'text',
             created_at TEXT,
             indexed_at TEXT NOT NULL,
             expires_at TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_memory_dedup ON memory_items(source, dedup_key);
         CREATE INDEX IF NOT EXISTS idx_memory_domain ON memory_items(domain);
-        CREATE INDEX IF NOT EXISTS idx_memory_expires ON memory_items(expires_at);
         CREATE VIRTUAL TABLE IF NOT EXISTS memory_vectors USING vec0(
             embedding float[{EMBEDDING_DIM}]
         );
@@ -115,32 +124,98 @@ pub fn init_memory_tables(conn: &Connection) -> Result<()> {
             value TEXT NOT NULL
         );"
     ))?;
+    migrate_schema(conn)?;
+    // modality 索引必须在迁移后建：老库的 ALTER ADD COLUMN 发生在 migrate_schema 里，
+    // 放主批量会因列不存在报错（老库 CREATE TABLE IF NOT EXISTS 跳过不更新定义）
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_memory_modality ON memory_items(modality);",
+    )?;
     Ok(())
 }
 
-/// 默认保留期（D10：90 天滚动），设置页可改，落 memory_meta
-pub const DEFAULT_RETENTION_DAYS: i64 = 90;
-const RETENTION_KEY: &str = "retention_days";
-
-/// 读取浏览数据保留期（天）。未配置/非法值回退默认 90
-pub fn get_retention_days(conn: &Connection) -> i64 {
+fn meta_get(conn: &Connection, key: &str) -> Option<String> {
     conn.query_row(
         "SELECT value FROM memory_meta WHERE key = ?1",
-        params![RETENTION_KEY],
+        params![key],
         |r| r.get::<_, String>(0),
     )
     .ok()
-    .and_then(|v| v.parse::<i64>().ok())
-    .filter(|&d| d > 0)
-    .unwrap_or(DEFAULT_RETENTION_DAYS)
 }
 
-pub fn set_retention_days(conn: &Connection, days: i64) -> Result<()> {
-    anyhow::ensure!(days > 0, "保留期必须为正整数天");
+fn meta_set(conn: &Connection, key: &str, value: &str) -> Result<()> {
     conn.execute(
         "INSERT INTO memory_meta(key, value) VALUES (?1, ?2)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        params![RETENTION_KEY, days.to_string()],
+        params![key, value],
+    )?;
+    Ok(())
+}
+
+/// v1(bge 512d/90 天滚动) -> v2(WeMM 2048d/全永久/modality)：
+/// 旧向量空间不兼容直接 DROP（bge 向量无法迁移, 内容原文在库待重 embed）;
+/// expires_at 全清（Q9 全永久, 否则老数据到期会被 search 过滤「被消失」）;
+/// 标 migration_pending, 由 backfill 工具重 embed 后清除。
+fn migrate_schema(conn: &Connection) -> Result<()> {
+    let version: i64 = meta_get(conn, "schema_version")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1);
+    if version >= SCHEMA_VERSION {
+        return Ok(());
+    }
+
+    // 老库补 modality 列（新库 CREATE 已含; ALTER 重复执行报错, 先探测）
+    let has_modality: bool = conn
+        .prepare("SELECT modality FROM memory_items LIMIT 0")
+        .is_ok();
+    if !has_modality {
+        conn.execute(
+            "ALTER TABLE memory_items ADD COLUMN modality TEXT NOT NULL DEFAULT 'text'",
+            [],
+        )?;
+    }
+
+    let item_count: i64 = conn.query_row("SELECT COUNT(*) FROM memory_items", [], |r| r.get(0))?;
+    conn.execute_batch(
+        "DROP TABLE IF EXISTS memory_vectors;
+         UPDATE memory_items SET expires_at = NULL;",
+    )?;
+    // vec 表由 init 的 CREATE IF NOT EXISTS 在下次调用重建? —— 不行, 本次 init 已建过(512d 旧定义
+    // 只存在于 v1 库; v2 代码建表即 2048d)。此处 DROP 的是 v1 旧表, 立即按 v2 定义重建:
+    conn.execute_batch(&format!(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS memory_vectors USING vec0(
+            embedding float[{EMBEDDING_DIM}]
+        );"
+    ))?;
+
+    if item_count > 0 {
+        meta_set(conn, "migration_pending", "1")?;
+    }
+    meta_set(conn, "schema_version", &SCHEMA_VERSION.to_string())?;
+    Ok(())
+}
+
+/// 是否存在待重 embed 的存量数据（v1->v2 迁移后置位）
+pub fn migration_pending(conn: &Connection) -> bool {
+    meta_get(conn, "migration_pending").as_deref() == Some("1")
+}
+
+/// 重 embed 完成后调用：清除待迁移标记
+pub fn migration_done(conn: &Connection) -> Result<()> {
+    meta_set(conn, "migration_pending", "0")
+}
+
+/// 迁移专用：对存量行直接写回向量（绕过 index_document 的哈希去重——
+/// v1->v2 内容哈希未变但向量空间已换，去重判定会误跳）
+pub fn write_vector(conn: &Connection, rowid: i64, emb: &[f32]) -> Result<()> {
+    anyhow::ensure!(
+        emb.len() == EMBEDDING_DIM,
+        "embedding 维度 {} 与库定义 {} 不符",
+        emb.len(),
+        EMBEDDING_DIM
+    );
+    conn.execute(
+        "INSERT OR REPLACE INTO memory_vectors(rowid, embedding) VALUES (?1, ?2)",
+        params![rowid, emb_to_bytes(emb)],
     )?;
     Ok(())
 }
@@ -201,9 +276,10 @@ pub fn index_document(
     chunks: &[(i64, String, String, Vec<f32>)],
 ) -> Result<IndexOutcome> {
     let dedup_key = meta
-        .url
+        .dedup_key
+        .or(meta.url)
         .or(meta.source_ref)
-        .context("DocMeta 缺 url 与 source_ref, 无法去重")?;
+        .context("DocMeta 缺 dedup_key/url/source_ref, 无法去重")?;
 
     let tx = conn.transaction()?;
 
@@ -236,17 +312,18 @@ pub fn index_document(
     )?;
 
     let now = now_local();
+    let modality = meta.modality.unwrap_or("text");
     for (ci, content, hash, emb) in chunks {
         if emb.len() != EMBEDDING_DIM {
             anyhow::bail!("embedding 维度 {} 与库定义 {} 不符", emb.len(), EMBEDDING_DIM);
         }
         tx.execute(
             "INSERT INTO memory_items
-             (source, source_ref, url, domain, title, dedup_key, chunk_index, content, content_hash, created_at, indexed_at, expires_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+             (source, source_ref, url, domain, title, dedup_key, chunk_index, content, content_hash, modality, created_at, indexed_at, expires_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
             params![
                 meta.source, meta.source_ref, meta.url, meta.domain, meta.title,
-                dedup_key, ci, content, hash, meta.created_at, now, meta.expires_at,
+                dedup_key, ci, content, hash, modality, meta.created_at, now, meta.expires_at,
             ],
         )?;
         let rowid = tx.last_insert_rowid();
@@ -281,11 +358,10 @@ pub fn search(
     if knn.is_empty() {
         return Ok(vec![]);
     }
-    let now = now_local();
     let mut hits = Vec::with_capacity(k);
     for (rowid, dist) in knn {
         let item = conn.query_row(
-            "SELECT id, source, source_ref, url, domain, title, chunk_index, content, content_hash, created_at, indexed_at, expires_at
+            "SELECT id, source, source_ref, url, domain, title, chunk_index, content, content_hash, modality, created_at, indexed_at, expires_at
              FROM memory_items WHERE id = ?1",
             params![rowid],
             |r| {
@@ -293,16 +369,13 @@ pub fn search(
                     id: r.get(0)?, source: r.get(1)?, source_ref: r.get(2)?,
                     url: r.get(3)?, domain: r.get(4)?, title: r.get(5)?,
                     chunk_index: r.get(6)?, content: r.get(7)?, content_hash: r.get(8)?,
-                    created_at: r.get(9)?, indexed_at: r.get(10)?, expires_at: r.get(11)?,
+                    modality: r.get(9)?,
+                    created_at: r.get(10)?, indexed_at: r.get(11)?, expires_at: r.get(12)?,
                 })
             },
         );
         let Ok(item) = item else { continue };
-        if let Some(exp) = &item.expires_at {
-            if exp.as_str() <= now.as_str() {
-                continue;
-            }
-        }
+        // Q9 全永久: 不再做过期过滤（expires_at 迁移时已全清, 新数据恒 NULL）
         if let Some(sf) = source_filter {
             if item.source != sf {
                 continue;
@@ -317,26 +390,6 @@ pub fn search(
         }
     }
     Ok(hits)
-}
-
-/// 过期物理删除（90 天滚动, D10）。返回删除条数。
-pub fn purge_expired(conn: &Connection) -> Result<usize> {
-    let now = now_local();
-    let ids: Vec<i64> = {
-        let mut st = conn.prepare(
-            "SELECT id FROM memory_items WHERE expires_at IS NOT NULL AND expires_at <= ?1",
-        )?;
-        let mapped = st.query_map(params![now], |r| r.get(0))?;
-        mapped.collect::<std::result::Result<Vec<_>, _>>()?
-    };
-    for id in &ids {
-        conn.execute("DELETE FROM memory_vectors WHERE rowid = ?1", params![id])?;
-    }
-    let n = conn.execute(
-        "DELETE FROM memory_items WHERE expires_at IS NOT NULL AND expires_at <= ?1",
-        params![now],
-    )?;
-    Ok(n)
 }
 
 /// 按域名物理删除（D10 域名级例外）

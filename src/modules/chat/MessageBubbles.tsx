@@ -1,7 +1,7 @@
-import { memo } from 'react';
+import { memo, useRef, useState, type ComponentPropsWithoutRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { MousePointerClick } from 'lucide-react';
+import { Check, Copy, MousePointerClick } from 'lucide-react';
 import { parseActionMessage } from './a2ui/action';
 import { UserRichBubble } from './RichMessageView';
 import type { ChatMessage } from './sessionUtils';
@@ -91,6 +91,42 @@ function splitAsides(text: string): { aside: boolean; text: string }[] {
   return parts;
 }
 
+/** 代码块：右上角复制按钮，hover 浮现（命名 group/code 隔离消息气泡的 group-hover），
+ *  复制成功瞬间常亮打勾；文本从渲染后的 pre 取 innerText，与屏幕所见一致 */
+function CodeBlock({ children, ...props }: ComponentPropsWithoutRef<'pre'>) {
+  const preRef = useRef<HTMLPreElement>(null);
+  const [copied, setCopied] = useState(false);
+  const onCopy = () => {
+    const text = preRef.current?.innerText ?? '';
+    navigator.clipboard.writeText(text).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      },
+      () => undefined,
+    );
+  };
+  return (
+    <div className="relative group/code">
+      <pre ref={preRef} {...props}>
+        {children}
+      </pre>
+      <button
+        type="button"
+        onClick={onCopy}
+        aria-label={copied ? '已复制' : '复制代码'}
+        className={`absolute top-1.5 right-1.5 w-6 h-6 rounded-md flex items-center justify-center transition-all cursor-pointer ${
+          copied
+            ? 'opacity-100 text-emerald-400'
+            : 'opacity-0 group-hover/code:opacity-100 text-zinc-500 hover:text-zinc-300 hover:bg-white/10'
+        }`}
+      >
+        {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+      </button>
+    </div>
+  );
+}
+
 /** 助手消息渲染：正文走 Markdown，独白段（心声）渲染为灰小斜体。
  *  memo：流式期间只有流式气泡的 text 变化，历史气泡跳过 ReactMarkdown 全量重 parse */
 export const AssistantContent = memo(function AssistantContent({ text }: { text: string }) {
@@ -105,7 +141,7 @@ export const AssistantContent = memo(function AssistantContent({ text }: { text:
             {p.text}
           </div>
         ) : (
-          <ReactMarkdown key={i} remarkPlugins={[remarkGfm]}>
+          <ReactMarkdown key={i} remarkPlugins={[remarkGfm]} components={{ pre: CodeBlock }}>
             {p.text}
           </ReactMarkdown>
         ),

@@ -4,7 +4,7 @@
  * MemoryStrip: 查询态下方 2-3 条「你可能在找」分组，异步流入，不抢应用结果。
  * MemoryList:  `s ` 前缀独占全量语义检索视图。
  */
-import { Globe, Subtitles, FileText, ClipboardList, Brain } from 'lucide-react';
+import { Globe, Subtitles, FileText, ClipboardList, Brain, Image as ImageIcon } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 
 export interface MemoryHit {
@@ -15,6 +15,7 @@ export interface MemoryHit {
   domain: string | null;
   snippet: string;
   score: number;
+  modality: string;
   created_at: string | null;
   indexed_at: string;
 }
@@ -67,6 +68,7 @@ function MemoryRow({
       <span className="flex items-center gap-1 flex-shrink-0 text-app-text-tertiary">
         <meta.Icon className="w-3.5 h-3.5" />
         <span className="text-xs">{meta.label}</span>
+        {hit.modality === 'image' && <ImageIcon className="w-3 h-3 text-app-text-tertiary/60" />}
       </span>
       <span
         className={`truncate text-sm transition-colors ${isSelected ? 'text-app-text-primary font-medium' : 'text-app-text-secondary group-hover:text-app-text-primary'}`}

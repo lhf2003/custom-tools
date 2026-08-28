@@ -241,8 +241,9 @@ export function LauncherView() {
             setMemorySel(-1);
           }
         })
-        .catch(() => {
-          // 模型未就绪/无索引等失败不打扰主流程，分组静默缺席
+        .catch((err) => {
+          // 模型未就绪/无索引等失败不打扰主流程，分组静默缺席；console 留痕供排障
+          console.warn('memory_search failed:', err);
         });
     }, 250);
     return () => clearTimeout(timer);
@@ -436,7 +437,7 @@ export function LauncherView() {
         action: string;
         content?: string;
       };
-      if (res.action === 'opened_url') {
+      if (res.action === 'opened_url' || res.action === 'opened_file') {
         await safeInvoke('hide_window');
       } else if (res.action === 'copy_content' && res.content) {
         await navigator.clipboard.writeText(res.content);

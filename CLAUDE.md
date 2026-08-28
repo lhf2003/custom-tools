@@ -138,3 +138,4 @@ python scripts/prompt_regression.py
 - Notes are stored as files on disk with metadata in SQLite
 - The search roadmap includes plans for usage-based ranking (P1) and Everything integration (P3)
 - 记忆检索 host 开发循环：浏览器拉起的是 **release** 二进制（native-host manifest 指向 `target/release/memory-host.exe`），改了 `crates/nervis-memory` 必须 `cargo build --release -p nervis-memory` 并在 `edge://extensions` 重载扩展，否则扩展连的是旧协议 host（黑名单/新请求会静默失败）
+- 记忆检索二期（N1 起）：embedding 引擎为 WeMM Python sidecar（`sidecar/wemm/`，stdio JSON 帧协议见 server.py 头注释）。Python 解析顺序：`NERVIS_WEMM_PYTHON` > 开发形态 `sidecar/wemm/.venv` > 生产形态 `{app_data}/wemm-venv`（设置页记忆中心一键安装 = uv sync + 模型下载）> PATH。torch 必须 cu128 源（PyPI/清华的 Windows wheel 只有 +cpu，装错触发 gpu_required）；模型走 hf-mirror 且必须 `HF_HUB_DISABLE_XET=1`

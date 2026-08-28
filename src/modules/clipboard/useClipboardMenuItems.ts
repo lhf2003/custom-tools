@@ -1,13 +1,13 @@
 import { useCallback, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { save } from '@tauri-apps/plugin-dialog';
-import { ClipboardPaste, Copy, Download, FolderOpen, Sparkles, Star, StickyNote, Trash2 } from 'lucide-react';
+import { ClipboardPaste, Copy, Download, FolderOpen, ImagePlus, Sparkles, Star, StickyNote, Trash2 } from 'lucide-react';
 import { useClipboardSelectionStore } from '@/stores/clipboardSelectionStore';
 import { useToastStore } from '@/stores/toastStore';
 import { confirmDialog } from '@/stores/confirmStore';
 import type { MenuItem } from '@/types';
 
-type ClipboardEntryAction = 'paste' | 'copy' | 'favorite' | 'delete' | 'reveal' | 'send-to-ai' | 'to-memo';
+type ClipboardEntryAction = 'paste' | 'copy' | 'favorite' | 'delete' | 'reveal' | 'send-to-ai' | 'to-memo' | 'index-to-memory';
 
 /**
  * 剪贴板条目级动作（粘贴/复制/发送给AI/收藏/删除/打开位置）：
@@ -73,6 +73,11 @@ export function useClipboardItemMenuItems(): MenuItem[] {
     },
     ...(clipboardSelection.isImage
       ? [{
+          id: 'index-to-memory',
+          label: '索引到记忆',
+          icon: ImagePlus,
+          onClick: () => dispatchClipboardAction('index-to-memory'),
+        }, {
           id: 'reveal',
           label: '在资源管理器中打开',
           icon: FolderOpen,

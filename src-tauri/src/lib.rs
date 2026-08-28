@@ -277,20 +277,6 @@ pub fn run() {
             // 记忆检索 Embedder 懒加载容器（首次 memory_search 时加载模型）
             app.manage(commands::memory::MemoryEmbedderState(std::sync::Arc::new(Mutex::new(None))));
 
-            // 浏览数据 90 天滚动删除的执行点（D10）：启动即清一次 + 每 24h 周期清
-            {
-                let purge_db = db_state.0.clone();
-                tauri::async_runtime::spawn(async move {
-                    commands::memory::purge_expired_now(&purge_db);
-                    let mut tick = tokio::time::interval(std::time::Duration::from_secs(24 * 3600));
-                    tick.tick().await; // interval 首次立即触发, 吞掉（上面刚清过）
-                    loop {
-                        tick.tick().await;
-                        commands::memory::purge_expired_now(&purge_db);
-                    }
-                });
-            }
-
             // Background initial indexing: load cache first, fall back to full scan
             {
                 let search_index_for_init = search_index_arc.clone();
@@ -579,10 +565,12 @@ pub fn run() {
             commands::memory::memory_get_blacklist,
             commands::memory::memory_add_blacklist,
             commands::memory::memory_remove_blacklist,
-            commands::memory::memory_get_retention,
-            commands::memory::memory_set_retention,
             commands::memory::memory_clear_browsing,
             commands::memory::memory_source_stats,
+            commands::memory::memory_migration_pending,
+            commands::memory::memory_env_status,
+            commands::memory::memory_env_install,
+            commands::memory::memory_index_image,
             // Everything integration
             commands::search::is_everything_available,
             commands::search::search_everything,

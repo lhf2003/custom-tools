@@ -195,6 +195,28 @@ async function mutateBlacklist(op, domain) {
   return getBlacklist();
 }
 
+// ---- N2: 页面主图 fetch → base64（SW 不受页面 CORS 限制） ----
+const IMAGE_MAX_BYTES = 5 * 1024 * 1024; // 5MB 上限，过大跳过
+
+async function fetchImageBase64(url) {
+  try {
+    const resp = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!resp.ok) return null;
+    const blob = await resp.blob();
+    if (blob.size > IMAGE_MAX_BYTES) return null;
+    const buf = await blob.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let binary = '';
+    const CHUNK = 8192;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+    }
+    return { base64: btoa(binary), mime: blob.type || 'image/jpeg' };
+  } catch (e) {
+    return null; // 图片 fetch 失败不阻塞正文索引
+  }
+}
+
 // ---- 消息路由 ----
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   (async () => {
@@ -202,6 +224,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       case 'page': {
         const list = await getBlacklist();
         if (list.some(d => msg.domain === d || msg.domain.endsWith('.' + d))) return { dropped: 'blacklist' };
+        // N2: 有主图 URL 时后台 fetch 转 base64（失败/过大则 null，不阻塞正文）
+        let image_base64 = null, image_mime = null;
+        if (msg.imageUrl) {
+          const img = await fetchImageBase64(msg.imageUrl);
+          if (img) { image_base64 = img.base64; image_mime = img.mime; }
+        }
         sendNative({
           type: 'index',
           source: 'browser',
@@ -209,6 +237,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           domain: msg.domain,
           title: msg.title,
           content: msg.content,
+          image_base64,
+          image_mime,
           created_at: new Date().toISOString(),
         });
         const s = await getStats();

@@ -12,7 +12,7 @@ use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
 use nervis_memory::chunk::content_hash;
-use nervis_memory::embed::{init_ort, resolve_model_dir, Embedder};
+use nervis_memory::sidecar::{MemoryEmbedder, SidecarEmbedder};
 use nervis_memory::store::{self, DocMeta};
 use rusqlite::Connection;
 
@@ -21,6 +21,7 @@ use crate::llm_provider::models::Scene;
 
 /// 召回门槛初值：只决定「是否打扰 LLM」不决定正确性——偏低让 LLM 多裁几次,
 /// 分数分布落审计后按实测收（标定依据见 llm_call_logs source=remember_fact_arbitrate）
+/// ⚠️ 二期 N1 换 WeMM 后分数分布已变（新空间）, 阈值需按新分布重新标定（同一期 D9 教训）
 pub(crate) const RECALL_THRESHOLD: f32 = 0.65;
 
 /// LLM 裁决结果
@@ -31,15 +32,13 @@ pub(crate) enum Verdict {
     Noop,
 }
 
-/// 进程级懒加载 Embedder：模型 95MB, remember/forget 低频, 首次用到才加载;
-/// 模型/ORT 缺失时返回 None → 调用方回落 bigram（隐身降级）
-fn shared_embedder() -> Option<&'static Mutex<Embedder>> {
-    static EMB: OnceLock<Option<Mutex<Embedder>>> = OnceLock::new();
+/// 进程级懒加载 Embedder：remember/forget 低频, 首次用到才路径解析（sidecar 按需拉起）;
+/// sidecar/模型/GPU 缺失时返回 None → 调用方回落 bigram（隐身降级, 语义与一期一致）
+fn shared_embedder() -> Option<&'static Mutex<SidecarEmbedder>> {
+    static EMB: OnceLock<Option<Mutex<SidecarEmbedder>>> = OnceLock::new();
     EMB.get_or_init(|| {
-        let model_dir = resolve_model_dir().ok()?;
-        init_ort(None).ok()?;
-        let e = Embedder::new(&model_dir)
-            .map_err(|err| log::warn!("fact_pipeline Embedder 初始化失败: {err:#}"))
+        let e = SidecarEmbedder::resolve_default()
+            .map_err(|err| log::warn!("fact_pipeline SidecarEmbedder 初始化失败: {err:#}"))
             .ok()?;
         Some(Mutex::new(e))
     })

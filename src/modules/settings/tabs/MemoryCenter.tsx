@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import {
   ArrowLeft,
   Search,
@@ -13,6 +14,9 @@ import {
   Brain,
   Globe,
   Plus,
+  Cpu,
+  Package,
+  HardDrive,
 } from 'lucide-react';
 import { Tooltip } from '@/components/Tooltip';
 import { confirmDialog } from '@/stores/confirmStore';
@@ -98,31 +102,22 @@ function formatTime(ts: number): string {
   });
 }
 
-const RETENTION_OPTIONS = [
-  { value: '30', label: '30 天' },
-  { value: '90', label: '90 天' },
-  { value: '180', label: '180 天' },
-  { value: '365', label: '一年' },
-];
-
-/** 浏览记忆与隐私（M4）：浏览器扩展索引的页面/字幕——统计、保留期、黑名单、一键清除。
+/** 浏览记忆与隐私（M4）：浏览器扩展索引的页面/字幕——统计、黑名单、一键清除。
+ *  Q9 二期裁决：全部数据永久保留，不再设滚动保留期。
  *  黑名单单真源在 SQLite，扩展侧只是缓存（≤30s 同步）。 */
 function BrowsingPrivacySection() {
   const { addToast } = useToastStore();
   const [stats, setStats] = useState<Record<string, number>>({});
-  const [retention, setRetention] = useState('90');
   const [blacklist, setBlacklist] = useState<string[]>([]);
   const [newDomain, setNewDomain] = useState('');
 
   const load = useCallback(async () => {
     try {
-      const [pairs, days, list] = await Promise.all([
+      const [pairs, list] = await Promise.all([
         invoke<[string, number][]>('memory_source_stats'),
-        invoke<number>('memory_get_retention'),
         invoke<string[]>('memory_get_blacklist'),
       ]);
       setStats(Object.fromEntries(pairs));
-      setRetention(String(days));
       setBlacklist(list);
     } catch (err) {
       console.error('Failed to load browsing privacy state:', err);
@@ -132,21 +127,6 @@ function BrowsingPrivacySection() {
   useEffect(() => {
     load();
   }, [load]);
-
-  const handleRetentionChange = async (value: string) => {
-    const prev = retention;
-    setRetention(value);
-    try {
-      await invoke('memory_set_retention', { days: Number(value) });
-    } catch (err) {
-      setRetention(prev);
-      addToast({
-        type: 'error',
-        title: '保留期保存失败',
-        message: err instanceof Error ? err.message : String(err),
-      });
-    }
-  };
 
   const handleAddDomain = async () => {
     const domain = newDomain.trim().toLowerCase().replace(/^\*\./, '');
@@ -215,18 +195,6 @@ function BrowsingPrivacySection() {
         </span>
       </div>
 
-      <div className="flex items-center gap-2 mb-3">
-        <span className="text-white/40 text-xs flex-1">
-          浏览数据滚动保留（到期物理删除，剪贴板/笔记不受限）
-        </span>
-        <CustomSelect
-          value={retention}
-          onChange={handleRetentionChange}
-          options={RETENTION_OPTIONS}
-          className="w-28 flex-shrink-0"
-        />
-      </div>
-
       <div className="mb-3">
         <div className="text-white/40 text-xs mb-1.5">
           索引黑名单（这些站点不再采集，浏览器扩展 ≤30 秒同步生效）
@@ -279,6 +247,133 @@ function BrowsingPrivacySection() {
 
 interface MemoryCenterProps {
   onBack: () => void;
+}
+
+interface EnvStatus {
+  gpu: boolean;
+  deps: boolean;
+  model: boolean;
+  installing: boolean;
+  model_bytes: number;
+  model_expected_bytes: number;
+}
+
+interface EnvProgress {
+  stage: 'deps' | 'model' | 'done' | 'error';
+  percent: number | null;
+  message: string;
+}
+
+/** 本地模型环境（N1-5）：记忆检索的 WeMM sidecar 三要素状态灯 + 一键安装。
+ *  GPU → Python 依赖（uv sync ~2.5GB）→ 模型（hf-mirror ~5.1GB），安装进度走 memory-env-progress 事件。 */
+function LocalModelEnvSection() {
+  const { addToast } = useToastStore();
+  const [status, setStatus] = useState<EnvStatus | null>(null);
+  const [progress, setProgress] = useState<EnvProgress | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setStatus(await invoke<EnvStatus>('memory_env_status'));
+    } catch (err) {
+      console.error('Failed to load memory env status:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+    const unlisten = listen<EnvProgress>('memory-env-progress', (e) => {
+      setProgress(e.payload);
+      if (e.payload.stage === 'done') {
+        addToast({ type: 'success', title: '本地模型环境就绪', message: '记忆检索已可用' });
+        load();
+      } else if (e.payload.stage === 'error') {
+        addToast({ type: 'error', title: '环境安装失败', message: e.payload.message });
+        load();
+      }
+    });
+    return () => {
+      unlisten.then((f) => f());
+    };
+  }, [load, addToast]);
+
+  const handleInstall = async () => {
+    try {
+      await invoke('memory_env_install');
+    } catch (err) {
+      addToast({
+        type: 'error',
+        title: '无法启动安装',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
+  if (!status) return null;
+  const ready = status.gpu && status.deps && status.model;
+  const installing = status.installing || (progress && progress.stage !== 'done' && progress.stage !== 'error');
+
+  const lamp = (ok: boolean, icon: React.ReactNode, label: string, detail: string) => (
+    <div className="flex items-center gap-2">
+      <span className={ok ? 'text-emerald-400' : 'text-white/25'}>{icon}</span>
+      <span className={`text-xs flex-1 ${ok ? 'text-white/70' : 'text-white/40'}`}>{label}</span>
+      <span className={`text-xs ${ok ? 'text-emerald-400/80' : 'text-white/25'}`}>{detail}</span>
+    </div>
+  );
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/[0.02] p-4">
+      <div className="flex items-center gap-2 mb-3">
+        <Cpu size={13} className="text-white/40" />
+        <span className="text-white/50 text-xs font-medium">本地模型环境</span>
+        <span className={`text-xs ${ready ? 'text-emerald-400/80' : 'text-white/25'}`}>
+          {ready ? '就绪 · WeMM 多模态检索可用' : '未就绪'}
+        </span>
+      </div>
+
+      <div className="space-y-1.5 mb-3">
+        {lamp(status.gpu, <Cpu size={12} />, 'NVIDIA GPU', status.gpu ? '已检测到' : '需要 ≥6GB 显存')}
+        {lamp(status.deps, <Package size={12} />, 'Python 依赖', status.deps ? '已安装' : '约 2.5GB')}
+        {lamp(
+          status.model,
+          <HardDrive size={12} />,
+          'WeMM 模型',
+          status.model
+            ? '已就绪'
+            : `${(status.model_bytes / 1e9).toFixed(1)} / ${(status.model_expected_bytes / 1e9).toFixed(1)} GB`
+        )}
+      </div>
+
+      {!ready && (
+        <>
+          {installing && progress ? (
+            <div>
+              <div className="text-white/50 text-xs mb-1.5">{progress.message}</div>
+              <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                {progress.percent != null ? (
+                  <div
+                    className="h-full bg-app-brand-primary transition-all duration-500"
+                    style={{ width: `${progress.percent}%` }}
+                  />
+                ) : (
+                  <div className="h-full w-1/3 bg-app-brand-primary animate-pulse rounded-full" />
+                )}
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={handleInstall}
+              disabled={!status.gpu}
+              className="w-full px-3 py-2 rounded-lg bg-app-brand-primary/20 text-app-brand-primary-light text-xs border border-app-brand-primary/30 hover:bg-app-brand-primary/30 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              {status.gpu
+                ? '一键安装（依赖 + 模型共约 7.6GB，可断点续传）'
+                : '未检测到 NVIDIA GPU，无法启用本地检索'}
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  );
 }
 
 /** 记忆中心：贾维斯记住的事（五维分组）+ 学到的习惯模式——分组折叠、搜索、编辑、删除、变更审计 */
@@ -660,6 +755,8 @@ export function MemoryCenter({ onBack }: MemoryCenterProps) {
             </div>
           </div>
         )}
+
+        <LocalModelEnvSection />
 
         <BrowsingPrivacySection />
 

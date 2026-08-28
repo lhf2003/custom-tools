@@ -36,9 +36,12 @@ const TRIP_HINT_SECS: i64 = 3 * 86400;
 /// 单次 HTTP 超时（触点补刷会阻塞组 prompt，必须短）
 const HTTP_TIMEOUT_SECS: u64 = 8;
 /// 陌生场所询问窗口：见到 3~7 个不同日期才提示模型去问（<3 过滤偶发，
-/// >7 视为「他不想说/没机会说」，不烦他）；观察记录滚动 14 天
+/// >7 视为「他不想说/没机会说」，不烦他）；观察记录滚动 14 天。
+/// 语气分档：3~4 天「话题不合适就改天」的软提示实测会被任务型聊天无限 defer，
+/// 5 天起升级为催促——窗口过半，再等「合适话头」就永远问不出口了
 const PLACE_ASK_MIN_DAYS: u32 = 3;
 const PLACE_ASK_MAX_DAYS: u32 = 7;
+const PLACE_ASK_URGENT_DAYS: u32 = 5;
 const SIGHTING_RETENTION_DAYS: i64 = 14;
 
 /// settings.companion_env_cache 的 JSON 结构（serde default 兼容旧版缺字段）
@@ -587,16 +590,26 @@ fn render_inject(cache: &EnvCache, now: i64) -> Option<String> {
             "场所名是他亲口认下的，自然用，别报网络指纹原文。",
         );
     }
-    // 陌生场所询问提示：3~7 天窗口内提示模型自然地问；窗外偶发与抗拒都不打扰
+    // 陌生场所询问提示：3~7 天窗口内提示模型自然地问；窗外偶发与抗拒都不打扰。
+    // 5 天起语气升级：软提示对任务型聊天会一直 defer（实测 4 天 5 个会话没问出口）
     if cache.place.is_none()
         && (PLACE_ASK_MIN_DAYS..=PLACE_ASK_MAX_DAYS).contains(&cache.place_unknown_days)
     {
-        s.push_str(&format!(
-            "\n这个地方你已经在 {} 个不同的日子里见过他了，还不知道是哪儿——\
-             可以自然问问他（比如「这儿是家还是公司？」），他答了就用 name_current_place 记住；\
-             话题不合适就改天再问，别硬问。",
-            cache.place_unknown_days
-        ));
+        if cache.place_unknown_days >= PLACE_ASK_URGENT_DAYS {
+            s.push_str(&format!(
+                "\n这个地方你已经在 {} 个不同的日子里见过他了，还不知道是哪儿——\
+                 别等「合适的话头」了，窗口快关了：这两天找个能搭话的瞬间就问\
+                 （比如「这儿我常陪你了，是家还是公司？」），他答了就用 name_current_place 记住。",
+                cache.place_unknown_days
+            ));
+        } else {
+            s.push_str(&format!(
+                "\n这个地方你已经在 {} 个不同的日子里见过他了，还不知道是哪儿——\
+                 可以自然问问他（比如「这儿是家还是公司？」），他答了就用 name_current_place 记住；\
+                 话题不合适就改天再问，别硬问。",
+                cache.place_unknown_days
+            ));
+        }
     }
     // 出差提示：城市变化 3 天内
     if cache.city_changed_at > 0 && now - cache.city_changed_at < TRIP_HINT_SECS {
@@ -850,11 +863,19 @@ mod tests {
         let mut c = cache_with("武汉市", None, 0, now - 100);
         c.place_unknown_days = 2;
         assert!(!render_inject(&c, now).unwrap().contains("name_current_place"));
-        // 3 天：提示问
+        // 3 天：软提示（允许改天再问）
         c.place_unknown_days = 3;
         let s = render_inject(&c, now).unwrap();
         assert!(s.contains("3 个不同的日子"));
         assert!(s.contains("name_current_place"));
+        assert!(s.contains("别硬问"));
+        assert!(!s.contains("窗口快关了"));
+        // 5 天：语气升级为催促（软提示实测会被任务型聊天无限 defer）
+        c.place_unknown_days = 5;
+        let s = render_inject(&c, now).unwrap();
+        assert!(s.contains("5 个不同的日子"));
+        assert!(s.contains("窗口快关了"));
+        assert!(!s.contains("别硬问"));
         // 7 天：仍提示
         c.place_unknown_days = 7;
         assert!(render_inject(&c, now).unwrap().contains("7 个不同的日子"));

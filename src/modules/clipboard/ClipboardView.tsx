@@ -240,6 +240,31 @@ export function ClipboardView() {
     }
   }, [items, selectedId]);
 
+  // N2: 图片条目「索引到记忆」——base64 送 WeMM embed_image 写入向量库（modality=image）
+  const handleIndexToMemory = useCallback(async () => {
+    const item = items.find((i) => i.id === selectedId);
+    if (!item) return;
+    try {
+      const base64 = item.content_type === 'image'
+        ? await invoke<string>('get_clipboard_image_base64', { id: item.id })
+        : await invoke<string>('read_image_file_as_base64', { path: item.content });
+      const label = `[剪贴板图片] ${new Date(item.created_at).toLocaleString('zh-CN')}`;
+      await invoke('memory_index_image', {
+        imageBase64: base64,
+        mime: 'image/png',
+        sourceRef: `clipboard-${item.id}`,
+        label,
+      });
+      useToastStore.getState().addToast({ type: 'success', title: '已索引', message: '图片已加入记忆检索' });
+    } catch (err) {
+      useToastStore.getState().addToast({
+        type: 'error',
+        title: '索引失败',
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }, [items, selectedId]);
+
   // 发送给AI：与聊天页底部左侧「发送文件」按钮统一——文本原文填入输入框；
   // 图片/文件路径走聊天附件管线（addFiles：图片压缩落盘/文本读内容/视觉门槛），
   // 不再把图片 PNG 落盘路径当纯文本塞进输入框。
@@ -343,6 +368,7 @@ export function ClipboardView() {
     const onFavorite = () => { if (selectedId != null) handleToggleFavorite(selectedId); };
     const onDelete = () => { if (selectedId != null) handleDelete(selectedId); };
     const onReveal = () => { handleRevealInExplorer(); };
+    const onIndexToMemory = () => { void handleIndexToMemory(); };
     const onSendToAI = () => { handleSendToAI(); };
     const onToMemo = () => { void handleToMemo(); };
     window.addEventListener('clipboard:paste-selected', onPaste);
@@ -350,6 +376,7 @@ export function ClipboardView() {
     window.addEventListener('clipboard:favorite-selected', onFavorite);
     window.addEventListener('clipboard:delete-selected', onDelete);
     window.addEventListener('clipboard:reveal-selected', onReveal);
+    window.addEventListener('clipboard:index-to-memory-selected', onIndexToMemory);
     window.addEventListener('clipboard:send-to-ai-selected', onSendToAI);
     window.addEventListener('clipboard:to-memo-selected', onToMemo);
     return () => {
@@ -358,10 +385,11 @@ export function ClipboardView() {
       window.removeEventListener('clipboard:favorite-selected', onFavorite);
       window.removeEventListener('clipboard:delete-selected', onDelete);
       window.removeEventListener('clipboard:reveal-selected', onReveal);
+      window.removeEventListener('clipboard:index-to-memory-selected', onIndexToMemory);
       window.removeEventListener('clipboard:send-to-ai-selected', onSendToAI);
       window.removeEventListener('clipboard:to-memo-selected', onToMemo);
     };
-  }, [selectedId, handlePasteItem, handleCopyToClipboard, handleToggleFavorite, handleDelete, handleRevealInExplorer, handleSendToAI, handleToMemo]);
+  }, [selectedId, handlePasteItem, handleCopyToClipboard, handleToggleFavorite, handleDelete, handleRevealInExplorer, handleIndexToMemory, handleSendToAI, handleToMemo]);
 
   // Keyboard navigation for clipboard list
   useEffect(() => {

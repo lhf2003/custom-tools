@@ -1,13 +1,14 @@
-//! memory-backfill: 已有数据回填（剪贴板文本 + notes 目录）+ 检索验证
+//! memory-backfill: 已有数据回填（剪贴板文本 + notes 目录）+ 检索验证 + v1->v2 迁移重 embed
 //!
 //! 用法:
-//!   memory-backfill                      # 回填
+//!   memory-backfill                      # 回填（常规索引, 哈希去重）
+//!   memory-backfill --remigrate          # 二期 N1: 存量 memory_items 全部重 embed（WeMM 2048d）
 //!   memory-backfill --search "查询词"     # 检索验证
-//! 环境变量: NERVIS_DB_PATH / NERVIS_MODEL_DIR / NERVIS_NOTES_DIR / ORT_DYLIB_PATH
+//! 环境变量: NERVIS_DB_PATH / NERVIS_NOTES_DIR / NERVIS_WEMM_MODEL_DIR / NERVIS_WEMM_PYTHON / NERVIS_WEMM_SERVER
 
 use anyhow::{Context, Result};
 use nervis_memory::chunk::{chunk_text, content_hash, is_indexable};
-use nervis_memory::embed::{init_ort, resolve_model_dir, Embedder};
+use nervis_memory::sidecar::{MemoryEmbedder, SidecarEmbedder};
 use nervis_memory::store::{self, DocMeta, IndexOutcome};
 use rusqlite::Connection;
 use std::path::PathBuf;
@@ -33,7 +34,7 @@ fn notes_dir() -> Result<PathBuf> {
 /// 单文档索引: 切块 → 批量 embed → 带去重写入
 fn index_one(
     conn: &mut Connection,
-    embedder: &mut Embedder,
+    embedder: &mut SidecarEmbedder,
     meta: &DocMeta,
     text: &str,
 ) -> Result<IndexOutcome> {
@@ -50,7 +51,7 @@ fn index_one(
     store::index_document(conn, meta, &rows)
 }
 
-fn backfill(conn: &mut Connection, embedder: &mut Embedder) -> Result<()> {
+fn backfill(conn: &mut Connection, embedder: &mut SidecarEmbedder) -> Result<()> {
     let mut indexed = 0usize;
     let mut skipped = 0usize;
 
@@ -152,7 +153,7 @@ fn collect_md(dir: &PathBuf, out: &mut Vec<PathBuf>) {
     }
 }
 
-fn run_search(conn: &Connection, embedder: &mut Embedder, query: &str) -> Result<()> {
+fn run_search(conn: &Connection, embedder: &mut SidecarEmbedder, query: &str) -> Result<()> {
     let emb = embedder.embed_query(query)?;
     let hits = store::search(conn, &emb, 5, None)?;
     println!("query: {query}");
@@ -170,15 +171,48 @@ fn run_search(conn: &Connection, embedder: &mut Embedder, query: &str) -> Result
     Ok(())
 }
 
+/// v1->v2 迁移：对 memory_items 存量逐批重 embed（WeMM 2048d）。
+/// 幂等：中断重跑无妨（INSERT OR REPLACE 按 rowid 覆盖）；全部完成才清 migration_pending。
+fn remigrate(conn: &mut Connection, embedder: &mut SidecarEmbedder) -> Result<()> {
+    if !store::migration_pending(conn) {
+        println!("无待迁移数据（migration_pending != 1），跳过");
+        return Ok(());
+    }
+    let rows: Vec<(i64, String)> = {
+        let mut st = conn.prepare("SELECT id, content FROM memory_items ORDER BY id")?;
+        let mapped = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        mapped.collect::<std::result::Result<_, _>>()?
+    };
+    println!("重 embed {} 条（WeMM 2048d）...", rows.len());
+    const BATCH: usize = 32;
+    let mut done = 0usize;
+    for chunk in rows.chunks(BATCH) {
+        let texts: Vec<String> = chunk.iter().map(|(_, c)| c.clone()).collect();
+        let embs = embedder.embed_documents(&texts)?;
+        let tx = conn.transaction()?;
+        for ((id, _), emb) in chunk.iter().zip(embs) {
+            store::write_vector(&tx, *id, &emb)?;
+        }
+        tx.commit()?;
+        done += chunk.len();
+        println!("  {done}/{}", rows.len());
+    }
+    store::migration_done(conn)?;
+    println!("迁移完成：migration_pending 已清除");
+    Ok(())
+}
+
 fn main() -> Result<()> {
     store::register_vec_extension(); // 必须先于 Connection::open
-    init_ort(None)?;
-    let mut embedder = Embedder::new(&resolve_model_dir()?)?;
+    let mut embedder = SidecarEmbedder::resolve_default()?;
     let mut conn = Connection::open(db_path()?)?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     store::init_memory_tables(&conn)?;
 
     let args: Vec<String> = std::env::args().collect();
+    if args.iter().any(|a| a == "--remigrate") {
+        return remigrate(&mut conn, &mut embedder);
+    }
     match args.iter().position(|a| a == "--search") {
         Some(i) => {
             let q = args.get(i + 1).context("--search 需要查询词")?;

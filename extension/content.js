@@ -20,6 +20,22 @@
     return !!document.querySelector('input[type="password"]');
   }
 
+  /** N2: 提取页面主图 URL（og:image > twitter:image > 大面积 img） */
+  function extractMainImageUrl() {
+    const meta = document.querySelector('meta[property="og:image"]')
+      || document.querySelector('meta[name="twitter:image"]')
+      || document.querySelector('meta[name="twitter:image:src"]');
+    if (meta?.content) return meta.content;
+    // 备选：页面中面积最大的已加载 img（>=200x100 才算「主图」量级）
+    let best = null, bestArea = 200 * 100;
+    for (const img of document.querySelectorAll('img[src]')) {
+      if (!img.complete || !img.naturalWidth) continue;
+      const area = img.naturalWidth * img.naturalHeight;
+      if (area > bestArea) { bestArea = area; best = img.src; }
+    }
+    return best;
+  }
+
   function extract() {
     if (reported) return;
     if (hasPasswordField()) return; // D10 不可关闭的出厂底线
@@ -34,6 +50,7 @@
         domain: location.hostname,
         title: article?.title || document.title,
         content: content.slice(0, MAX_CONTENT_CHARS),
+        imageUrl: extractMainImageUrl(),
       });
     } catch (e) {
       // 抽取失败静默放弃本页（下个点还有机会）

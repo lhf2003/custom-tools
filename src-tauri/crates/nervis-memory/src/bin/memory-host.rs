@@ -6,7 +6,7 @@
 
 use anyhow::{Context, Result};
 use nervis_memory::chunk::{chunk_text, content_hash, is_indexable};
-use nervis_memory::embed::{init_ort, resolve_model_dir, Embedder};
+use nervis_memory::sidecar::{MemoryEmbedder, SidecarEmbedder};
 use nervis_memory::store::{self, DocMeta};
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -25,6 +25,9 @@ enum Request {
         title: Option<String>,
         content: String,
         created_at: Option<String>,
+        /// N2: 页面主图 base64（og:image 优先，>5MB 扩展侧已跳过）
+        image_base64: Option<String>,
+        image_mime: Option<String>,
     },
     /// 视频字幕索引（段级, start 秒用于 ?t= 跳转, D3）
     IndexSubtitle {
@@ -99,24 +102,24 @@ fn write_frame(stdout: &mut impl Write, resp: &Response) -> Result<()> {
     Ok(())
 }
 
-fn handle(req: Request, conn: &mut Connection, embedder: &mut Embedder) -> Result<serde_json::Value> {
+fn handle(req: Request, conn: &mut Connection, embedder: &mut SidecarEmbedder) -> Result<serde_json::Value> {
     match req {
         Request::Ping => Ok(serde_json::json!({"pong": true})),
-        Request::Index { source, url, domain, title, content, created_at } => {
+        Request::Index { source, url, domain, title, content, created_at, image_base64, image_mime } => {
             if !is_indexable(&content) {
                 return Ok(serde_json::json!({"outcome": "too_short"}));
             }
-            // 保留期每次读取（设置页改动即时生效, 无需重启 host）
-            let expires =
-                chrono::Local::now() + chrono::Duration::days(store::get_retention_days(conn));
+            // 二期 Q9: 全永久, expires_at 恒 NULL（一期 90 天滚动已废）
             let meta = DocMeta {
                 source: &source,
                 source_ref: None,
                 url: url.as_deref(),
                 domain: domain.as_deref(),
                 title: title.as_deref(),
+                modality: None,
+                dedup_key: None,
                 created_at: created_at.as_deref(),
-                expires_at: Some(&expires.format("%Y-%m-%d %H:%M:%S").to_string()),
+                expires_at: None,
             };
             let chunks = chunk_text(&content);
             let embeddings = embedder.embed_documents(&chunks)?;
@@ -126,12 +129,36 @@ fn handle(req: Request, conn: &mut Connection, embedder: &mut Embedder) -> Resul
                 .map(|(i, c)| (i as i64, c.clone(), content_hash(c), embeddings[i].clone()))
                 .collect();
             let outcome = store::index_document(conn, &meta, &rows)?;
-            Ok(serde_json::json!({"outcome": format!("{outcome:?}")}))
+
+            // N2: 页面主图单独索引一条 modality=image 记录（dedup_key 加 #img 后缀与正文区分）
+            let mut image_indexed = false;
+            if let (Some(b64), Some(page_url)) = (&image_base64, &url) {
+                if let Ok(emb) = embedder.embed_image(b64, image_mime.as_deref().unwrap_or("image/jpeg")) {
+                    let img_desc = format!("[页面主图] {}", title.as_deref().unwrap_or(""));
+                    let img_dedup = format!("{page_url}#img");
+                    let img_meta = DocMeta {
+                        source: &source,
+                        source_ref: None,
+                        url: url.as_deref(),
+                        domain: domain.as_deref(),
+                        title: title.as_deref(),
+                        modality: Some("image"),
+                        dedup_key: Some(&img_dedup),
+                        created_at: created_at.as_deref(),
+                        expires_at: None,
+                    };
+                    let img_rows = vec![(0i64, img_desc.clone(), content_hash(&img_desc), emb)];
+                    image_indexed = matches!(
+                        store::index_document(conn, &img_meta, &img_rows)?,
+                        store::IndexOutcome::Indexed(_)
+                    );
+                }
+                // embed_image 失败不阻塞正文索引（sidecar 可能不支持/图片损坏）
+            }
+
+            Ok(serde_json::json!({"outcome": format!("{outcome:?}"), "image_indexed": image_indexed}))
         }
         Request::IndexSubtitle { url, domain, title, segments, created_at } => {
-            let expires = chrono::Local::now()
-                + chrono::Duration::days(store::get_retention_days(conn));
-            let expires_s = expires.format("%Y-%m-%d %H:%M:%S").to_string();
             // D7: 字幕按 45 秒窗口合并切段（单行字幕太短, 无独立检索价值）, 窗口起始秒支撑 ?t= 跳转
             const WINDOW_SECS: u64 = 45;
             let mut windows: std::collections::BTreeMap<u64, Vec<&str>> = std::collections::BTreeMap::new();
@@ -154,8 +181,10 @@ fn handle(req: Request, conn: &mut Connection, embedder: &mut Embedder) -> Resul
                     url: Some(&seg_url),
                     domain: domain.as_deref(),
                     title: title.as_deref(),
+                    modality: None,
+                    dedup_key: None,
                     created_at: created_at.as_deref(),
-                    expires_at: Some(&expires_s),
+                    expires_at: None,
                 };
                 let emb = embedder.embed_documents(std::slice::from_ref(&content))?;
                 let rows = vec![(0i64, content.clone(), content_hash(&content), emb[0].clone())];
@@ -214,8 +243,7 @@ fn focus_main_app() -> Result<serde_json::Value> {
 
 fn main() -> Result<()> {
     store::register_vec_extension(); // 必须先于 Connection::open
-    init_ort(None)?;
-    let mut embedder = Embedder::new(&resolve_model_dir()?)?;
+    let mut embedder = SidecarEmbedder::resolve_default()?;
     let mut conn = Connection::open(db_path()?)?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     store::init_memory_tables(&conn)?;

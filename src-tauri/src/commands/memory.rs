@@ -1,19 +1,19 @@
 //! 记忆检索命令（M3: 启动器语义分组 + `s ` 前缀全量模式）
 //! 设计: docs/architecture/2026-08-27-CASE-001-多模态记忆检索系统设计_01.md D5
+//! 二期 N1: bge 进程内 ONNX → WeMM sidecar（CASE-007; 首次查询承担 sidecar 拉起+模型加载 ~15s）。
 //!
-//! 延迟预算: embed ~10ms + vec0 暴力扫描 ~10ms, spawn_blocking 不阻塞主线程。
-//! Embedder 懒加载（首次检索时加载 95MB 模型, 之后常驻内存 ~150MB, 在 300MB 预算内）。
+//! 延迟预算: 查询 embed ~42ms(GPU) + vec0 暴力扫描 ~10ms, spawn_blocking 不阻塞主线程。
 
 use crate::db::DatabaseState;
-use nervis_memory::embed::{resolve_model_dir, Embedder};
+use nervis_memory::sidecar::{MemoryEmbedder, SidecarEmbedder};
 use nervis_memory::store;
 use rusqlite::Connection;
 use serde::Serialize;
 use std::sync::Mutex;
 use tauri::State;
 
-/// Embedder 懒加载容器（ort Session 非 Sync, Mutex 兜底；Arc 供 spawn_blocking 持有）
-pub struct MemoryEmbedderState(pub std::sync::Arc<Mutex<Option<Embedder>>>);
+/// SidecarEmbedder 懒加载容器（首次检索时路径解析, sidecar 子进程按需拉起）
+pub struct MemoryEmbedderState(pub std::sync::Arc<Mutex<Option<SidecarEmbedder>>>);
 
 #[derive(Serialize)]
 pub struct MemoryHitDto {
@@ -24,6 +24,8 @@ pub struct MemoryHitDto {
     pub domain: Option<String>,
     pub snippet: String,
     pub score: f32,
+    /// 模态: text | image | video（N2/N3 展示用）
+    pub modality: String,
     pub created_at: Option<String>,
     pub indexed_at: String,
 }
@@ -46,12 +48,9 @@ pub async fn memory_search(
     let db_path = db.0.clone();
     let embedder_arc = state.0.clone();
     tokio::task::spawn_blocking(move || {
-        nervis_memory::embed::init_ort(None).map_err(|e| e.to_string())?;
-
         let mut guard = embedder_arc.lock().map_err(|e| format!("embedder lock: {e}"))?;
         if guard.is_none() {
-            let dir = resolve_model_dir().map_err(|e| e.to_string())?;
-            *guard = Some(Embedder::new(&dir).map_err(|e| e.to_string())?);
+            *guard = Some(SidecarEmbedder::resolve_default().map_err(|e| e.to_string())?);
         }
         let embedder = guard.as_mut().expect("embedder just initialized");
         let emb = embedder.embed_query(&query).map_err(|e| e.to_string())?;
@@ -69,6 +68,7 @@ pub async fn memory_search(
                 domain: h.item.domain,
                 snippet: h.item.content.chars().take(120).collect(),
                 score: h.score,
+                modality: h.item.modality,
                 created_at: h.item.created_at,
                 indexed_at: h.item.indexed_at,
             })
@@ -84,7 +84,7 @@ pub async fn memory_open(id: i64, db: State<'_, DatabaseState>) -> Result<Memory
     tokio::task::spawn_blocking(move || {
         let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
         let row = conn.query_row(
-            "SELECT source, url, content, source_ref FROM memory_items WHERE id = ?1",
+            "SELECT source, url, content, source_ref, modality FROM memory_items WHERE id = ?1",
             [id],
             |r| {
                 Ok((
@@ -92,14 +92,38 @@ pub async fn memory_open(id: i64, db: State<'_, DatabaseState>) -> Result<Memory
                     r.get::<_, Option<String>>(1)?,
                     r.get::<_, String>(2)?,
                     r.get::<_, Option<String>>(3)?,
+                    r.get::<_, String>(4)?,
                 ))
             },
         );
-        let (source, url, content, source_ref) = match row {
+        let (source, url, content, source_ref, modality) = match row {
             Ok(v) => v,
             Err(rusqlite::Error::QueryReturnedNoRows) => return Err("记忆条目不存在".to_string()),
             Err(e) => return Err(e.to_string()),
         };
+
+        // N2: 剪贴板图片条目——从 source_ref 解析剪贴板 id → 打开图片文件
+        if source == "clipboard" && modality == "image" {
+            if let Some(ref sref) = source_ref {
+                if let Some(clip_id) = sref.strip_prefix("clipboard-").and_then(|s| s.parse::<i64>().ok()) {
+                    let path: Option<String> = conn
+                        .query_row(
+                            "SELECT content FROM clipboard_history WHERE id = ?1",
+                            [clip_id],
+                            |r| r.get(0),
+                        )
+                        .ok();
+                    if let Some(p) = path {
+                        if std::path::Path::new(&p).exists() {
+                            open::that(&p).map_err(|e| format!("打开图片失败: {e}"))?;
+                            return Ok(MemoryOpenResult { action: "opened_file".into(), content: Some(p), source_ref: None });
+                        }
+                    }
+                }
+            }
+            // 图片文件已删/解析失败 → 回落复制描述文本
+            return Ok(MemoryOpenResult { action: "copy_content".into(), content: Some(content), source_ref });
+        }
 
         match source.as_str() {
             // 浏览页/字幕段: 后端直接开浏览器（字幕 url 自带 #t= 秒级锚点）
@@ -118,7 +142,7 @@ pub async fn memory_open(id: i64, db: State<'_, DatabaseState>) -> Result<Memory
     .map_err(|e| format!("memory_open join: {e}"))?
 }
 
-// ---------- M4: 隐私控制（黑名单/保留期/一键清除/统计, SQLite 单真源） ----------
+// ---------- M4: 隐私控制（黑名单/一键清除/统计, SQLite 单真源; Q9 全永久后保留期配置已撤除） ----------
 
 #[tauri::command]
 pub async fn memory_get_blacklist(db: State<'_, DatabaseState>) -> Result<Vec<String>, String> {
@@ -163,28 +187,6 @@ pub async fn memory_remove_blacklist(
     .map_err(|e| format!("memory_remove_blacklist join: {e}"))?
 }
 
-#[tauri::command]
-pub async fn memory_get_retention(db: State<'_, DatabaseState>) -> Result<i64, String> {
-    let db_path = db.0.clone();
-    tokio::task::spawn_blocking(move || {
-        let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
-        Ok(store::get_retention_days(&conn))
-    })
-    .await
-    .map_err(|e| format!("memory_get_retention join: {e}"))?
-}
-
-#[tauri::command]
-pub async fn memory_set_retention(days: i64, db: State<'_, DatabaseState>) -> Result<(), String> {
-    let db_path = db.0.clone();
-    tokio::task::spawn_blocking(move || {
-        let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
-        store::set_retention_days(&conn, days).map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| format!("memory_set_retention join: {e}"))?
-}
-
 /// 一键清除浏览索引（页面 + 字幕, 剪贴板/笔记/记忆不受影响, D10）
 #[tauri::command]
 pub async fn memory_clear_browsing(db: State<'_, DatabaseState>) -> Result<usize, String> {
@@ -211,14 +213,273 @@ pub async fn memory_source_stats(db: State<'_, DatabaseState>) -> Result<Vec<(St
     .map_err(|e| format!("memory_source_stats join: {e}"))?
 }
 
-/// 过期浏览数据物理清除（启动 + 24h 周期调用, D10 滚动删除的执行点）
-pub fn purge_expired_now(db_path: &std::path::Path) {
-    match Connection::open(db_path)
-        .map_err(|e| e.to_string())
-        .and_then(|conn| store::purge_expired(&conn).map_err(|e| e.to_string()))
-    {
-        Ok(n) if n > 0 => log::info!("记忆库过期清理: 物理删除 {} 条", n),
-        Ok(_) => {}
-        Err(e) => log::warn!("记忆库过期清理失败: {}", e),
+// ---------- 二期 N1: schema v1->v2 迁移（WeMM 重 embed） ----------
+
+/// 是否存在待重 embed 的存量数据（前端据此显示「记忆索引升级中」）
+#[tauri::command]
+pub async fn memory_migration_pending(db: State<'_, DatabaseState>) -> Result<bool, String> {
+    let db_path = db.0.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
+        Ok(store::migration_pending(&conn))
+    })
+    .await
+    .map_err(|e| format!("memory_migration_pending join: {e}"))?
+}
+
+// ---------- 二期 N1-5: 本地模型环境（GPU/依赖/模型 状态灯 + 一键安装引导） ----------
+// 三要素：GPU（nvidia-smi 可见）→ venv 依赖（uv sync, ~2.5GB 清华镜像）→ 模型（~5.1GB hf-mirror）。
+// venv 落 {app_data}/wemm-venv（安装目录 Program Files 不可写），模型落 {app_data}/models/。
+
+/// 模型完整下载后的体积基准（实测 5.46GB，进度估算分母留余量）
+const EXPECTED_MODEL_BYTES: u64 = 5_400_000_000;
+/// 完整性判定阈值：目录总大小超过即视为已下全（低于此值视为半成品继续下载）
+const MODEL_COMPLETE_BYTES: u64 = 5_000_000_000;
+
+#[derive(Serialize, Clone)]
+pub struct MemoryEnvStatus {
+    /// nvidia-smi 可见 GPU
+    pub gpu: bool,
+    /// venv python 就位
+    pub deps: bool,
+    /// 模型完整就位
+    pub model: bool,
+    /// 安装流水线进行中
+    pub installing: bool,
+    /// 模型目录当前字节数（进度展示）
+    pub model_bytes: u64,
+    pub model_expected_bytes: u64,
+}
+
+#[derive(Serialize, Clone)]
+struct MemoryEnvProgress {
+    /// deps | model | done | error
+    stage: &'static str,
+    percent: Option<u8>,
+    message: String,
+}
+
+static ENV_INSTALLING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn app_data_dir() -> Result<std::path::PathBuf, String> {
+    dirs::data_dir()
+        .map(|d| d.join(crate::APP_DIR_NAME))
+        .ok_or_else(|| "无法定位 app_data".to_string())
+}
+
+fn venv_python(app_data: &std::path::Path) -> std::path::PathBuf {
+    app_data.join("wemm-venv").join("Scripts").join("python.exe")
+}
+
+fn wemm_model_dir(app_data: &std::path::Path) -> std::path::PathBuf {
+    app_data.join("models").join("wemm-embedding-2b")
+}
+
+/// uv.exe 解析：exe 同目录（生产打包形态）> PATH（开发形态）
+fn resolve_uv() -> Option<std::path::PathBuf> {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let bundled = dir.join("uv.exe");
+            if bundled.exists() {
+                return Some(bundled);
+            }
+        }
     }
+    std::process::Command::new("uv")
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .ok()
+        .filter(|s| s.success())
+        .map(|_| std::path::PathBuf::from("uv"))
+}
+
+fn dir_size(path: &std::path::Path) -> u64 {
+    let mut total = 0u64;
+    let mut stack = vec![path.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if let Ok(meta) = entry.metadata() {
+                    if meta.is_dir() {
+                        stack.push(p);
+                    } else {
+                        total += meta.len();
+                    }
+                }
+            }
+        }
+    }
+    total
+}
+
+fn model_complete(model_dir: &std::path::Path) -> bool {
+    model_dir.join("config.json").exists()
+        && model_dir.join("model.safetensors").exists()
+        && dir_size(model_dir) >= MODEL_COMPLETE_BYTES
+}
+
+/// GPU 检测：nvidia-smi 随驱动必装且入 PATH，能列出 GPU 即视为可用
+fn gpu_available() -> bool {
+    std::process::Command::new("nvidia-smi")
+        .arg("-L")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .map(|o| o.status.success() && String::from_utf8_lossy(&o.stdout).contains("GPU"))
+        .unwrap_or(false)
+}
+
+#[tauri::command]
+pub async fn memory_env_status() -> Result<MemoryEnvStatus, String> {
+    tokio::task::spawn_blocking(|| {
+        let app_data = app_data_dir()?;
+        let model_dir = wemm_model_dir(&app_data);
+        Ok(MemoryEnvStatus {
+            gpu: gpu_available(),
+            deps: venv_python(&app_data).exists(),
+            model: model_complete(&model_dir),
+            installing: ENV_INSTALLING.load(std::sync::atomic::Ordering::SeqCst),
+            model_bytes: if model_dir.exists() { dir_size(&model_dir) } else { 0 },
+            model_expected_bytes: EXPECTED_MODEL_BYTES,
+        })
+    })
+    .await
+    .map_err(|e| format!("memory_env_status join: {e}"))?
+}
+
+fn emit_env_progress(app: &tauri::AppHandle, stage: &'static str, percent: Option<u8>, message: impl Into<String>) {
+    use tauri::Emitter;
+    let _ = app.emit(
+        "memory-env-progress",
+        MemoryEnvProgress { stage, percent, message: message.into() },
+    );
+}
+
+/// 一键安装：uv sync 建 venv → 下载模型。后台线程执行，进度走 memory-env-progress 事件。
+#[tauri::command]
+pub async fn memory_env_install(app: tauri::AppHandle) -> Result<(), String> {
+    if ENV_INSTALLING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return Err("安装已在进行中".to_string());
+    }
+    std::thread::spawn(move || {
+        let result = run_env_install(&app);
+        ENV_INSTALLING.store(false, std::sync::atomic::Ordering::SeqCst);
+        match result {
+            Ok(()) => emit_env_progress(&app, "done", Some(100), "本地模型环境就绪".to_string()),
+            Err(e) => emit_env_progress(&app, "error", None, e),
+        }
+    });
+    Ok(())
+}
+
+fn run_env_install(app: &tauri::AppHandle) -> Result<(), String> {
+    let app_data = app_data_dir()?;
+    let sidecar_dir = nervis_memory::sidecar::resolve_sidecar_dir();
+    let uv = resolve_uv().ok_or("uv.exe 未找到（应随安装包分发或入 PATH）")?;
+    let venv_dir = app_data.join("wemm-venv");
+    let venv_py = venv_python(&app_data);
+    let model_dir = wemm_model_dir(&app_data);
+
+    // 阶段 1: uv sync 建 venv 装依赖（torch 等 ~2.5GB, 清华镜像）
+    if !venv_py.exists() {
+        emit_env_progress(app, "deps", None, "安装 Python 依赖（约 2.5GB，首次较慢）…");
+        let output = std::process::Command::new(&uv)
+            .arg("sync")
+            .arg("--project")
+            .arg(&sidecar_dir)
+            .env("UV_PROJECT_ENVIRONMENT", &venv_dir)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .map_err(|e| format!("启动 uv 失败: {e}"))?;
+        if !output.status.success() || !venv_py.exists() {
+            let tail = String::from_utf8_lossy(&output.stderr);
+            let tail: String = tail.lines().rev().take(5).collect::<Vec<_>>().join(" | ");
+            return Err(format!("依赖安装失败: {tail}"));
+        }
+    }
+
+    // 阶段 2: 下载模型（~5.1GB, hf-mirror, 断点续传）
+    if !model_complete(&model_dir) {
+        emit_env_progress(app, "model", Some(0), "下载 WeMM 模型（约 5.1GB）…");
+        let mut child = std::process::Command::new(&venv_py)
+            .arg(sidecar_dir.join("download_model.py"))
+            .arg(&model_dir)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(|e| format!("启动模型下载失败: {e}"))?;
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    if !status.success() || !model_complete(&model_dir) {
+                        return Err("模型下载未完成（网络中断可点安装重试，已下部分会续传）".to_string());
+                    }
+                    break;
+                }
+                Ok(None) => {
+                    let bytes = dir_size(&model_dir);
+                    let pct = ((bytes * 100) / EXPECTED_MODEL_BYTES).min(99) as u8;
+                    emit_env_progress(
+                        app,
+                        "model",
+                        Some(pct),
+                        format!("下载 WeMM 模型… {:.1} / 5.1 GB", bytes as f64 / 1e9),
+                    );
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                }
+                Err(e) => return Err(format!("模型下载进程异常: {e}")),
+            }
+        }
+    }
+    Ok(())
+}
+
+// ---------- 二期 N2: 剪贴板图片 opt-in 索引 ----------
+
+/// 「索引此图」：剪贴板图片 → sidecar embed_image → memory_items (modality=image)
+#[tauri::command]
+pub async fn memory_index_image(
+    image_base64: String,
+    mime: String,
+    source_ref: String,
+    label: String,
+    state: State<'_, MemoryEmbedderState>,
+    db: State<'_, DatabaseState>,
+) -> Result<(), String> {
+    let db_path = db.0.clone();
+    let embedder_arc = state.0.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut guard = embedder_arc.lock().map_err(|e| format!("embedder lock: {e}"))?;
+        if guard.is_none() {
+            *guard = Some(SidecarEmbedder::resolve_default().map_err(|e| e.to_string())?);
+        }
+        let embedder = guard.as_mut().expect("embedder just initialized");
+        let emb = embedder
+            .embed_image(&image_base64, &mime)
+            .map_err(|e| e.to_string())?;
+        drop(guard);
+
+        let mut conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
+        let hash = nervis_memory::chunk::content_hash(&label);
+        let meta = store::DocMeta {
+            source: "clipboard",
+            source_ref: Some(&source_ref),
+            url: None,
+            domain: None,
+            title: Some(&label),
+            modality: Some("image"),
+            dedup_key: Some(&source_ref), // 剪贴板条目 id 即去重键（同一条目重复索引只更新）
+            created_at: None,
+            expires_at: None,
+        };
+        let rows = vec![(0i64, label.clone(), hash, emb)];
+        store::index_document(&mut conn, &meta, &rows).map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("memory_index_image join: {e}"))?
 }

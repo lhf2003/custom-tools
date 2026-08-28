@@ -41,6 +41,12 @@
   "bundle": {
     "active": true,
     "targets": ["msi", "nsis"],
+    "resources": {
+      "resources/uv.exe": "uv.exe",
+      "../sidecar/wemm/server.py": "sidecar/wemm/server.py",
+      "../sidecar/wemm/pyproject.toml": "sidecar/wemm/pyproject.toml",
+      "../sidecar/wemm/download_model.py": "sidecar/wemm/download_model.py"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
