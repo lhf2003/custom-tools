@@ -22,6 +22,8 @@ const clipboardPlugin: ViewPlugin = {
     contextMenu: true,
     // 右键只给条目级动作；列表级（清空/导出）只留在顶部「操作」下拉
     useContextMenuItems: useClipboardItemMenuItems,
+    // 条目级右键菜单不追加壳公共项（关于/窗口置顶/设置）
+    contextMenuCommonItems: false,
   },
 };
 

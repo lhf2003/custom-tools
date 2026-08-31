@@ -118,7 +118,7 @@ export function ClipboardDetail({ item, onCopyPartial }: ClipboardDetailProps) {
   return (
     <>
       {/* 头部：单行元信息（类型/时间/来源），高度与左栏搜索行对齐（h-11）。
-          条目动作（复制/收藏/删除）在 TopNavigationBar 的动作菜单里 */}
+          条目动作（粘贴/复制/发送给AI/收藏/删除）在页面右键菜单里 */}
       <div className="flex items-center gap-2 px-5 h-11 border-b border-app-border-subtle shrink-0 min-w-0">
         <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0 ${config.chipClass}`}>
           {config.label}

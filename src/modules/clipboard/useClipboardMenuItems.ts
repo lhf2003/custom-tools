@@ -89,13 +89,12 @@ export function useClipboardItemMenuItems(): MenuItem[] {
 }
 
 /**
- * 剪贴板顶部「操作」下拉的完整菜单：条目级动作 + 列表级动作（清空/导出）。
- * 从 App.tsx viewConfigs.clipboard 收编。右键浮层只用条目级子集
- * （useClipboardItemMenuItems），列表级操作不进右键。
+ * 剪贴板顶部「操作」下拉的菜单：仅列表级动作（清空/导出）。
+ * 条目级动作（粘贴/复制/发送给AI/收藏/删除等）只在页面右键浮层
+ * （useClipboardItemMenuItems）出现，两个入口互不复用。
  */
 export function useClipboardMenuItems(): MenuItem[] {
   const { addToast } = useToastStore();
-  const itemMenuItems = useClipboardItemMenuItems();
 
   // 清空剪贴板历史（keepFavorites=true 时仅删除非收藏记录）
   const handleClearClipboard = useCallback(async (keepFavorites: boolean) => {
@@ -145,13 +144,11 @@ export function useClipboardMenuItems(): MenuItem[] {
   }, [addToast]);
 
   return useMemo((): MenuItem[] => [
-    ...itemMenuItems,
     {
       id: 'clear-all',
       label: '清空历史',
       icon: Trash2,
       danger: true,
-      separator: true,
       onClick: () => handleClearClipboard(false),
     },
     {
@@ -164,8 +161,7 @@ export function useClipboardMenuItems(): MenuItem[] {
       id: 'export',
       label: '导出数据',
       icon: Download,
-      separator: true,
       onClick: handleExportClipboard,
     },
-  ], [itemMenuItems, handleClearClipboard, handleExportClipboard]);
+  ], [handleClearClipboard, handleExportClipboard]);
 }

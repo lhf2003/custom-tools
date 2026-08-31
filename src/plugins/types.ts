@@ -63,10 +63,15 @@ export interface ViewPlugin {
     /** true 时壳在内容区接管右键，在光标处浮出菜单 */
     contextMenu?: boolean;
     /**
-     * 右键浮层的菜单项；缺省回退 useMenuItems 的输出。
+     * 右键浮层的菜单项；缺省为空。
      * 与顶部动作菜单分离的场景：右键只给条目级动作（如剪贴板），
      * 列表级/批量操作只留在顶部下拉。
      */
     useContextMenuItems?: () => MenuItem[];
+    /**
+     * 默认 true：右键菜单尾部统一追加公共项（置顶/设置/关于）。
+     * 条目级右键场景（如剪贴板）设 false，右键只显示插件自有项。
+     */
+    contextMenuCommonItems?: boolean;
   };
 }

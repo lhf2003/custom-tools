@@ -344,7 +344,7 @@ export function ClipboardView() {
     setCurrentGroup((prev) => (prev && keys.includes(prev) ? prev : keys[0] ?? null));
   }, [groupedItems]);
 
-  // 同步选中状态到 store，供 TopNavigationBar 动作菜单使用；卸载时清空
+  // 同步选中状态到 store，供条目级动作菜单（页面右键浮层）使用；卸载时清空
   const setSelection = useClipboardSelectionStore((s) => s.setSelection);
   useEffect(() => {
     setSelection({
@@ -361,7 +361,7 @@ export function ClipboardView() {
     return () => setSelection({ hasSelection: false, isFavorite: false, isImage: false, isText: false });
   }, [setSelection]);
 
-  // TopNavigationBar 动作菜单 / 右键菜单的条目级动作（custom event 下发）
+  // 页面右键菜单的条目级动作（custom event 下发）
   useEffect(() => {
     const onPaste = () => { if (selectedId != null) handlePasteItem(selectedId); };
     const onCopy = () => { if (selectedId != null) handleCopyToClipboard(selectedId); };

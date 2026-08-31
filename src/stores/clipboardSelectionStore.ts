@@ -1,9 +1,9 @@
 import { create } from 'zustand';
 
 /**
- * 剪贴板选中项对 TopNavigationBar 动作菜单的可见状态。
- * ClipboardView 写入（选中项变化时同步），App.tsx 菜单配置消费
- * （决定 复制/收藏/删除 的 disabled 与 收藏/取消收藏 文案）。
+ * 剪贴板选中项对条目级动作菜单（页面右键浮层）的可见状态。
+ * ClipboardView 写入（选中项变化时同步），useClipboardItemMenuItems 消费
+ * （决定 粘贴/复制/收藏/删除 的 disabled 与 收藏/取消收藏 文案）。
  */
 interface ClipboardSelectionState {
   hasSelection: boolean;

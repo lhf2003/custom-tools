@@ -44,17 +44,21 @@ export function PluginHost({ plugin, commonMenuItems, onBack }: PluginHostProps)
     [pluginMenuItems, commonMenuItems]
   );
 
-  // 右键浮层菜单：优先 useContextMenuItems（条目级子集），缺省回退完整菜单
+  // 右键浮层菜单：优先 useContextMenuItems（条目级子集），缺省为空；
+  // 公共项（置顶/设置/关于）默认追加，nav.contextMenuCommonItems=false 的插件（如剪贴板）
+  // 右键只显示插件自有项，与顶部「操作」下拉彻底分离
   const useContextMenuItems = plugin.nav.useContextMenuItems ?? useEmptyMenuItems;
   const contextMenuPluginItems = useContextMenuItems();
   const contextMenuItems = useMemo(
-    () => [...contextMenuPluginItems, ...commonMenuItems],
-    [contextMenuPluginItems, commonMenuItems]
+    () => plugin.nav.contextMenuCommonItems === false
+      ? contextMenuPluginItems
+      : [...contextMenuPluginItems, ...commonMenuItems],
+    [contextMenuPluginItems, commonMenuItems, plugin.nav.contextMenuCommonItems]
   );
 
   const LazyView = getLazyView(plugin);
 
-  // 右键菜单（nav.contextMenu 开启时）：与动作菜单同一内容，在光标处浮出
+  // 右键菜单（nav.contextMenu 开启时）：插件自有右键项在光标处浮出
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
 
