@@ -17,7 +17,7 @@
         "*://*.bilibili.com/video/*",
         "*://www.youtube.com/watch*"
       ],
-      "js": ["subtitle.js"],
+      "js": ["subtitle.js", "video-frame.js"],
       "run_at": "document_idle"
     }
   ],

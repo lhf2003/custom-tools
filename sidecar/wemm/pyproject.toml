@@ -11,7 +11,9 @@ dependencies = [
     "torchvision==0.23.0",
     # 钉版：WeMM 官方验证版本（N0 复现环境）
     "transformers==5.2.0",
-    "qwen-vl-utils[decord]==0.0.14",
+    # 视频解码用 PyAV 顺序解码（MediaRecorder webm 元数据残缺，decord 帧索引路线必炸）
+    "av==18.1.0",
+    "qwen-vl-utils==0.0.14",
     "accelerate>=1.1.0",
     "pillow",
     "numpy",
@@ -21,14 +23,8 @@ dependencies = [
 # 国内镜像（uv sync 走清华 PyPI）
 index-url = "https://pypi.tuna.tsinghua.edu.cn/simple"
 
-# torch/torchvision 必须走 cu128 专用源：PyPI（及清华 PyPI）的 Windows wheel
-# 只有 +cpu 版，装错触发 sidecar gpu_required 退出。
-# download.pytorch.org 国内慢，用阿里云 pytorch-wheels 镜像（cu128 目录齐全，含 cp313 win wheel）
-[[tool.uv.index]]
-name = "pytorch-cu128"
-url = "https://mirrors.aliyun.com/pytorch-wheels/cu128"
-explicit = true
-
 [tool.uv.sources]
-torch = { index = "pytorch-cu128" }
-torchvision = { index = "pytorch-cu128" }
+# torch/torchvision 必须 cu128 构建：PyPI/清华的 Windows wheel 只有 +cpu，装错触发 gpu_required；
+# 阿里云 pytorch-wheels 不是 simple 布局（包页 404），索引源形式不可解析——用仓库内本地 wheel（N1 起即如此，见 uv.lock）
+torch = { path = "wheels/torch-2.8.0+cu128-cp313-cp313-win_amd64.whl" }
+torchvision = { path = "wheels/torchvision-0.23.0+cu128-cp313-cp313-win_amd64.whl" }

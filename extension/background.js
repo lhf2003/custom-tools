@@ -260,6 +260,27 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         await updateStats({ subtitleSegments: s.subtitleSegments + msg.segments.length });
         return { sent: true };
       }
+      case 'video_segment': {
+        // N3: 视频画面分片（opt-in 录制, ~2.7MB base64）
+        // 用 callNative（请求-响应）而非 sendNative（入队）——embed 失败的错误需要回到 content script
+        const list = await getBlacklist();
+        if (list.some(d => msg.domain === d || msg.domain.endsWith('.' + d))) return { dropped: 'blacklist' };
+        try {
+          const r = await callNative({
+            type: 'index_video',
+            url: msg.url,
+            domain: msg.domain,
+            title: msg.title,
+            start_seconds: msg.startSeconds,
+            end_seconds: msg.endSeconds,
+            video_base64: msg.video_base64,
+            created_at: new Date().toISOString(),
+          }, 300_000); // 实测视频 embed 130s+/段（32帧×720p 过 2B 视觉塔），留 2x+ 余量
+          return { sent: true, result: r };
+        } catch (e) {
+          return { sent: false, error: String(e) };
+        }
+      }
       case 'getState': {
         const stats = await getStats();
         const blacklist = await getBlacklist();

@@ -3,7 +3,13 @@
 # 协议：stdin/stdout 传 [u32 LE 长度][JSON] 帧（与 memory-host native messaging 同格式，D1）。
 # 生命周期由 Rust 侧管理（按需拉起、空闲退出、shutdown 命令），本进程模型常驻。
 #
-# 启动握手：进程起来先发 {"type":"loading"}，模型就绪发 {"type":"ready",device,dimension}；
+# 进程唯一性（TCP 代理共享，CASE-009）：
+#   第一个实例绑定 127.0.0.1:47812 成为主实例（加载模型占显存 + TCP 监听）。
+#   后续实例检测到端口已占用 → 代理模式：不加载模型（零显存），stdin 帧转发到主实例 TCP。
+#   代理收到 shutdown 只退出自己（不杀主实例）；主实例退出后下一个 spawn 自动成为新主实例。
+#   Rust 侧零改动——握手/帧协议对主/代理完全透明。
+#
+# 启动握手：主实例 loading → ready；代理直接 ready（模型已加载）。
 # 无 NVIDIA GPU（D7：N1 只保 GPU）发 {"type":"error","error":"gpu_required"} 后退出码 2。
 #
 # 请求（type 字段）：
@@ -11,17 +17,20 @@
 #   embed_documents {texts:[...]}                     -> result.vectors [[f32;2048]...]（语料侧，无 instruct）
 #   embed_query {text}                                -> result.vector [f32;2048]（查询侧，固定 instruct 前缀，N0 规范）
 #   embed_image {image_base64, mime}                  -> result.vector
-#   embed_video {video_base64, mime, captured_seconds?} -> result.vector
-#   shutdown                                          -> {"ok":true} 后退出码 0
+#   embed_video {video_base64, mime}                    -> result.vector
+#     解码走 PyAV 顺序解码（N3 坑：MediaRecorder webm 元数据残缺，decord 帧索引路线硬失败）
+#   shutdown                                          -> {"ok":true} 后退出码 0（代理模式只退自己不转发）
 #
 # 维度固定 2048 全维（N0：512 截断裸查询不过线已弃用）；模型 bf16（8GB 显卡约束）。
 
 import base64
 import json
 import os
+import socket
 import struct
 import sys
 import tempfile
+import threading
 import time
 
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
@@ -32,15 +41,23 @@ QUERY_INSTRUCT = "为这个句子生成表示以用于检索相关的个人记�
 DIMENSION = 2048
 EMBED_BATCH = 8
 MAX_FRAME_BYTES = 64 * 1024 * 1024  # 视频 base64 单段 ~2.7MB，余量充足
+PRIMARY_PORT = 47812  # 主实例 TCP 监听端口（SO_EXCLUSIVEADDRUSE 保证绑定即唯一）
+# 视频帧预算（显存硬约束：处理器 video longest_edge=224MP 不缩放，720p×32≈2.9万 token 必 OOM）
+VIDEO_NFRAMES = 32
+VIDEO_MAX_W = 720
+VIDEO_MAX_H = 360
 
 _processor = None
 _model = None
 _device = "cpu"
+_model_lock = threading.Lock()  # GPU 模型非线程安全：主实例 stdio/TCP 两路请求串行化
 
 
 def log(msg):
     print(f"[wemm {time.strftime('%H:%M:%S')}] {msg}", file=sys.stderr, flush=True)
 
+
+# ---- stdio 帧读写（Rust ⇄ 本进程） ----
 
 def send(payload):
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -61,6 +78,39 @@ def read_frame():
         return None
     return json.loads(body.decode("utf-8"))
 
+
+# ---- TCP 帧读写（代理 ⇄ 主实例） ----
+
+def _recv_exact(sock, n):
+    buf = b""
+    while len(buf) < n:
+        chunk = sock.recv(n - len(buf))
+        if not chunk:
+            return None
+        buf += chunk
+    return buf
+
+
+def read_frame_tcp(sock):
+    """从 TCP 读一帧，返回解析后的 dict；连接断开返回 None"""
+    header = _recv_exact(sock, 4)
+    if header is None:
+        return None
+    (length,) = struct.unpack("<I", header)
+    if length > MAX_FRAME_BYTES:
+        raise ValueError(f"TCP 帧超长 {length}")
+    body = _recv_exact(sock, length)
+    if body is None:
+        return None
+    return json.loads(body.decode("utf-8"))
+
+
+def write_frame_tcp(sock, payload):
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    sock.sendall(struct.pack("<I", len(data)) + data)
+
+
+# ---- 模型 ----
 
 def load_model():
     global _processor, _model, _device
@@ -140,11 +190,38 @@ def embed_query(text):
     return emb[0].tolist()
 
 
-def _write_temp(b64, suffix):
+def _write_temp(data: bytes, suffix: str):
     fd, path = tempfile.mkstemp(suffix=suffix)
     with os.fdopen(fd, "wb") as f:
-        f.write(base64.b64decode(b64))
+        f.write(data)
     return path
+
+
+def _read_video_frames(path, nframes=VIDEO_NFRAMES, max_w=VIDEO_MAX_W, max_h=VIDEO_MAX_H):
+    """PyAV 顺序解码全帧 → 降采样（默认 ≤640×360）→ 均匀抽 nframes 帧。
+    - 顺序解码不依赖容器元数据/帧索引：MediaRecorder webm（unknown-size、无 Duration/Cues）
+      decord 帧计数路线必炸（video_reader.cc:270），PyAV 直接可读（N3 坑）。
+    - 降采样是显存硬约束：处理器 video longest_edge=224MP 基本不缩放，720p×32 帧
+      ≈ 2.9 万视觉 token，8GB 显存（模型占 5.1GB）OOM；640×360×24 ≈ 5.5k token。
+    返回 PIL Image 列表，走 fetch_video 的帧列表路径。"""
+    import av
+
+    container = av.open(path)
+    try:
+        frames = []
+        for f in container.decode(video=0):
+            img = f.to_image()
+            if img.width > max_w or img.height > max_h:
+                img.thumbnail((max_w, max_h))  # 保比例缩到框内
+            frames.append(img)
+    finally:
+        container.close()
+    total = len(frames)
+    if total == 0:
+        raise ValueError("视频无帧")
+    n = min(nframes, total) // 2 * 2  # temporal_patch_size=2 对齐
+    idx = [round(i * (total - 1) / max(n - 1, 1)) for i in range(n)]
+    return [frames[i] for i in idx]
 
 
 def embed_media(b64, mime, kind):
@@ -154,9 +231,25 @@ def embed_media(b64, mime, kind):
     suffix = {"image": ".png", "video": ".webm"}[kind]
     if mime and "/" in mime:
         suffix = "." + mime.split("/", 1)[1].split(";")[0]
-    path = _write_temp(b64, suffix)
+    raw = base64.b64decode(b64)
+    path = _write_temp(raw, suffix)
     try:
-        msg = [{"role": "user", "content": [{"type": kind, kind: path}]}]
+        if kind == "video":
+            try:
+                frames = _read_video_frames(path)
+            except Exception:
+                # 现场取证：浏览器链路 stderr 不可见，失败样本落盘供离线分析
+                dbg = os.path.join(tempfile.gettempdir(), "nervis_wemm_debug")
+                os.makedirs(dbg, exist_ok=True)
+                with open(os.path.join(dbg, "fail.webm"), "wb") as f:
+                    f.write(raw)
+                with open(os.path.join(dbg, "diag.json"), "w", encoding="utf-8") as f:
+                    json.dump({"mime": mime, "bytes": len(raw)}, f)
+                log(f"视频解码失败，样本已写入 {dbg}")
+                raise
+            msg = [{"role": "user", "content": [{"type": "video", "video": frames}]}]
+        else:
+            msg = [{"role": "user", "content": [{"type": kind, kind: path}]}]
         emb = _encode(msg)
         return emb[0].tolist()
     finally:
@@ -181,11 +274,48 @@ def handle(req):
     raise ValueError(f"未知请求类型 {rtype}")
 
 
-def main():
-    sys.stdout.reconfigure(encoding="utf-8")
-    sys.stderr.reconfigure(encoding="utf-8")
+# ---- 主实例模式（加载模型 + TCP 监听代理连接） ----
+
+def tcp_handler(conn):
+    """处理一个代理连接：读帧 → 加锁调 handle → 写响应"""
+    try:
+        while True:
+            req = read_frame_tcp(conn)
+            if req is None:
+                break
+            # shutdown 不允许从 TCP 通道杀主实例（代理侧已过滤，这里防御性忽略）
+            if req.get("type") == "shutdown":
+                write_frame_tcp(conn, {"ok": True, "req_id": req.get("req_id")})
+                continue
+            with _model_lock:
+                try:
+                    result = handle(req)
+                    resp = {"ok": True, "req_id": req.get("req_id"), "result": result}
+                except Exception as e:
+                    log(f"TCP 请求失败: {e}")
+                    resp = {"ok": False, "req_id": req.get("req_id"), "error": str(e)}
+            write_frame_tcp(conn, resp)
+    except (OSError, ValueError, json.JSONDecodeError):
+        pass
+    finally:
+        conn.close()
+
+
+def primary_mode(listener):
     send({"type": "loading"})
     load_model()
+    # TCP 监听线程（daemon：主线程退出时自动结束）
+    def accept_loop():
+        while True:
+            try:
+                conn, _ = listener.accept()
+            except OSError:
+                break
+            threading.Thread(target=tcp_handler, args=(conn,), daemon=True).start()
+    threading.Thread(target=accept_loop, daemon=True).start()
+    log(f"主实例模式，TCP 监听 :{PRIMARY_PORT}（帧预算 {VIDEO_NFRAMES}f×{VIDEO_MAX_W}w）")
+
+    # stdio 主循环（owner Rust 进程的直接请求）
     while True:
         try:
             req = read_frame()
@@ -193,13 +323,74 @@ def main():
             send({"ok": False, "error": f"帧解析失败: {e}"})
             continue
         if req is None:
-            break  # stdin 关闭，父进程已退出
+            break  # stdin 关闭，owner 进程已退出
+        with _model_lock:
+            try:
+                result = handle(req)
+                send({"ok": True, "req_id": req.get("req_id"), "result": result})
+            except Exception as e:
+                log(f"请求失败: {e}")
+                send({"ok": False, "req_id": req.get("req_id"), "error": str(e)})
+
+
+# ---- 代理模式（不加载模型，stdin 帧转发到主实例 TCP） ----
+
+def proxy_mode():
+    try:
+        sock = socket.create_connection(("127.0.0.1", PRIMARY_PORT), timeout=5)
+    except OSError:
+        # 竞态：检测到时还在，连接时已退出 → 报错让 Rust 清理后重新 spawn
+        send({"type": "error", "error": "primary_gone",
+              "detail": "WeMM 主实例已退出，请重试"})
+        sys.exit(3)
+    # create_connection 的 timeout 会残留在 socket 上作用于后续所有 recv/sendall，
+    # 视频 embed 单段 130s+，5s 必触发误报「主实例连接断开」→ 连接成功后立即解除
+    sock.settimeout(None)
+
+    send({"type": "ready", "device": "proxy", "dimension": DIMENSION})
+    log("代理模式（模型由主实例承载）")
+
+    while True:
         try:
-            result = handle(req)
-            send({"ok": True, "req_id": req.get("req_id"), "result": result})
-        except Exception as e:  # 推理错误不致命，回包继续服务
-            log(f"请求失败: {e}")
-            send({"ok": False, "req_id": req.get("req_id"), "error": str(e)})
+            req = read_frame()
+        except (ValueError, json.JSONDecodeError) as e:
+            send({"ok": False, "error": f"帧解析失败: {e}"})
+            continue
+        if req is None:
+            break  # stdin 关闭，owner 进程已退出
+        if req.get("type") == "shutdown":
+            send({"ok": True, "req_id": req.get("req_id")})
+            break  # 只退自己，不杀主实例
+        try:
+            write_frame_tcp(sock, req)
+            resp = read_frame_tcp(sock)
+            if resp is None:
+                send({"ok": False, "req_id": req.get("req_id"),
+                      "error": "WeMM 主实例连接断开"})
+                break
+            send(resp)  # 主实例响应已是完整格式，直接透传
+        except OSError:
+            send({"ok": False, "req_id": req.get("req_id"),
+                  "error": "WeMM 主实例连接断开"})
+            break
+    sock.close()
+
+
+def main():
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
+    # SO_EXCLUSIVEADDRUSE：Windows 上保证端口绑定即进程唯一（防 SO_REUSEADDR 劫持）
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+    try:
+        listener.bind(("127.0.0.1", PRIMARY_PORT))
+        listener.listen(4)
+    except OSError:
+        listener.close()
+        proxy_mode()
+        return
+    primary_mode(listener)
 
 
 if __name__ == "__main__":

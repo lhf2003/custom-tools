@@ -37,6 +37,16 @@ enum Request {
         segments: Vec<SubtitleSegment>,
         created_at: Option<String>,
     },
+    /// N3: 视频画面分片索引（opt-in 录制, 10s webm base64 ~2.7MB）
+    IndexVideo {
+        url: String,
+        domain: Option<String>,
+        title: Option<String>,
+        start_seconds: i64,
+        end_seconds: i64,
+        video_base64: String,
+        created_at: Option<String>,
+    },
     /// D10: 一键清除浏览索引
     ClearBrowsing,
     /// D10: 按域名删除
@@ -54,6 +64,11 @@ enum Request {
 struct SubtitleSegment {
     start: f64,
     text: String,
+}
+
+/// 秒 → mm:ss（视频画面段描述用）
+fn fmt_secs(s: i64) -> String {
+    format!("{}:{:02}", s / 60, s % 60)
 }
 
 #[derive(Debug, Serialize)]
@@ -193,6 +208,31 @@ fn handle(req: Request, conn: &mut Connection, embedder: &mut SidecarEmbedder) -
                 }
             }
             Ok(serde_json::json!({"indexed_segments": indexed}))
+        }
+        Request::IndexVideo { url, domain, title, start_seconds, end_seconds, video_base64, created_at } => {
+            // N3: 整段 10s webm 直送 WeMM（弃抽帧, CASE-007 Q1）；每段一条 modality=video
+            let emb = embedder.embed_video(&video_base64, "video/webm")?;
+            let seg_url = format!("{url}#t={start_seconds}");
+            let desc = format!(
+                "[视频画面] {} {}-{}",
+                title.as_deref().unwrap_or(""),
+                fmt_secs(start_seconds),
+                fmt_secs(end_seconds)
+            );
+            let meta = DocMeta {
+                source: "browser",
+                source_ref: None,
+                url: Some(&seg_url),
+                domain: domain.as_deref(),
+                title: title.as_deref(),
+                modality: Some("video"),
+                dedup_key: Some(&seg_url), // 段级去重：url+起始秒天然区分
+                created_at: created_at.as_deref(),
+                expires_at: None,
+            };
+            let rows = vec![(0i64, desc.clone(), content_hash(&desc), emb)];
+            let outcome = store::index_document(conn, &meta, &rows)?;
+            Ok(serde_json::json!({"outcome": format!("{outcome:?}")}))
         }
         Request::ClearBrowsing => {
             let n = store::clear_source(conn, "browser")? + store::clear_source(conn, "subtitle")?;
