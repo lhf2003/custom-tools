@@ -601,16 +601,29 @@ export function LauncherView() {
           return prev - rowStep;
         });
         break;
-      case 'ArrowRight':
+      case 'ArrowRight': {
+        // 边界放行：事件来自输入框且光标未到文本末尾（或有选区）时，
+        // 放行默认行为移动光标；只有光标已抵末尾才转为网格横向导航
+        if (e.target instanceof HTMLInputElement
+          && (e.target.selectionStart !== e.target.value.length || e.target.selectionEnd !== e.target.value.length)) {
+          return;
+        }
         e.preventDefault();
         lastKeyboardNavRef.current = Date.now();
         setSelectedIndex(prev => Math.min(prev + 1, maxIndex));
         break;
-      case 'ArrowLeft':
+      }
+      case 'ArrowLeft': {
+        // 边界放行：光标未抵文本开头时放行移动光标，抵开头才向左导航网格
+        if (e.target instanceof HTMLInputElement
+          && (e.target.selectionStart !== 0 || e.target.selectionEnd !== 0)) {
+          return;
+        }
         e.preventDefault();
         lastKeyboardNavRef.current = Date.now();
         setSelectedIndex(prev => Math.max(prev - 1, 0));
         break;
+      }
       case 'Enter':
         // 焦点在设置/展开按钮（选中已清空为 -1）：放行默认行为，让按钮点击生效
         if (!isNoteMode && selectedIndex < 0) return;
