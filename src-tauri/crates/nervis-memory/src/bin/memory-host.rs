@@ -47,6 +47,18 @@ enum Request {
         video_base64: String,
         created_at: Option<String>,
     },
+    /// N3 增强：整视频后台索引（扩展提取 dash 流地址，host 流式分片离线 embed）
+    IndexVideoUrl {
+        url: String,
+        domain: Option<String>,
+        title: Option<String>,
+        video_url: String,
+        /// 视频总时长秒（playinfo timelength，进度展示用）
+        duration_secs: Option<i64>,
+        created_at: Option<String>,
+    },
+    /// 整视频索引进度查询（扩展轮询）
+    VideoIndexProgress { url: String },
     /// D10: 一键清除浏览索引
     ClearBrowsing,
     /// D10: 按域名删除
@@ -69,6 +81,83 @@ struct SubtitleSegment {
 /// 秒 → mm:ss（视频画面段描述用）
 fn fmt_secs(s: i64) -> String {
     format!("{}:{:02}", s / 60, s % 60)
+}
+
+/// 整视频索引作业状态（扩展轮询展示）
+#[derive(Clone, Debug, Default)]
+struct VideoJob {
+    status: String, // indexing / done / failed
+    total: i64,     // 预计总段数（duration/10，仅展示）
+    done: i64,      // 已入库段数
+    skipped: i64,   // 去重跳过段数
+    error: Option<String>,
+}
+
+static VIDEO_JOBS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, VideoJob>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+fn video_job_update(url: &str, f: impl FnOnce(&mut VideoJob)) {
+    let mut jobs = VIDEO_JOBS.lock().expect("video jobs poisoned");
+    f(jobs.entry(url.to_string()).or_default());
+}
+
+/// 整视频后台索引 worker：自己的 db 连接与 embedder（sidecar 代理模式共享主实例，零额外显存）。
+/// 分块调用 embed_video_url，块间模型锁释放，前台查询不被饿死。
+fn run_video_url_job(
+    url: String,
+    domain: Option<String>,
+    title: Option<String>,
+    video_url: String,
+    created_at: Option<String>,
+    db_path: PathBuf,
+) {
+    let outcome = (|| -> Result<()> {
+        let mut conn = Connection::open(&db_path)?;
+        let mut embedder = SidecarEmbedder::resolve_default()?;
+        let mut skip = 0i64;
+        loop {
+            let chunk = embedder.embed_video_url(&video_url, "https://www.bilibili.com", 10, skip, 20)?;
+            for (start, vector) in chunk.segments {
+                let seg_url = seek_url(&url, start);
+                let desc = format!(
+                    "[视频画面] {} {}-{}",
+                    title.as_deref().unwrap_or(""),
+                    fmt_secs(start),
+                    fmt_secs(start + 10)
+                );
+                let meta = DocMeta {
+                    source: "browser",
+                    source_ref: None,
+                    url: Some(&seg_url),
+                    domain: domain.as_deref(),
+                    title: title.as_deref(),
+                    modality: Some("video"),
+                    dedup_key: Some(&seg_url),
+                    created_at: created_at.as_deref(),
+                    expires_at: None,
+                };
+                let rows = vec![(0i64, desc.clone(), content_hash(&desc), vector)];
+                match store::index_document(&mut conn, &meta, &rows)? {
+                    store::IndexOutcome::Indexed(_) => {
+                        video_job_update(&url, |j| j.done += 1)
+                    }
+                    _ => video_job_update(&url, |j| j.skipped += 1),
+                }
+            }
+            if chunk.eof {
+                break;
+            }
+            skip = chunk.next_skip;
+        }
+        Ok(())
+    })();
+    match outcome {
+        Ok(()) => video_job_update(&url, |j| j.status = "done".into()),
+        Err(e) => video_job_update(&url, |j| {
+            j.status = "failed".into();
+            j.error = Some(format!("{e:#}"));
+        }),
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -189,7 +278,7 @@ fn handle(req: Request, conn: &mut Connection, embedder: &mut SidecarEmbedder) -
                 if !is_indexable(&content) {
                     continue;
                 }
-                let seg_url = format!("{url}#t={win_start}");
+                let seg_url = seek_url(&url, win_start as i64);
                 let meta = DocMeta {
                     source: "subtitle",
                     source_ref: None,
@@ -212,7 +301,7 @@ fn handle(req: Request, conn: &mut Connection, embedder: &mut SidecarEmbedder) -
         Request::IndexVideo { url, domain, title, start_seconds, end_seconds, video_base64, created_at } => {
             // N3: 整段 10s webm 直送 WeMM（弃抽帧, CASE-007 Q1）；每段一条 modality=video
             let emb = embedder.embed_video(&video_base64, "video/webm")?;
-            let seg_url = format!("{url}#t={start_seconds}");
+            let seg_url = seek_url(&url, start_seconds);
             let desc = format!(
                 "[视频画面] {} {}-{}",
                 title.as_deref().unwrap_or(""),
@@ -233,6 +322,28 @@ fn handle(req: Request, conn: &mut Connection, embedder: &mut SidecarEmbedder) -
             let rows = vec![(0i64, desc.clone(), content_hash(&desc), emb)];
             let outcome = store::index_document(conn, &meta, &rows)?;
             Ok(serde_json::json!({"outcome": format!("{outcome:?}")}))
+        }
+        Request::IndexVideoUrl { url, domain, title, video_url, duration_secs, created_at } => {
+            // 立即应答 + 后台线程跑长任务（下载解码 embed 可能数分钟）；扩展轮询 VideoIndexProgress
+            let total = duration_secs.map(|d| (d + 9) / 10).unwrap_or(0);
+            video_job_update(&url, |j| {
+                *j = VideoJob { status: "indexing".into(), total, ..Default::default() };
+            });
+            let db = db_path()?;
+            std::thread::spawn(move || {
+                run_video_url_job(url, domain, title, video_url, created_at, db);
+            });
+            Ok(serde_json::json!({"accepted": true, "total_segments": total}))
+        }
+        Request::VideoIndexProgress { url } => {
+            let job = VIDEO_JOBS.lock().expect("video jobs poisoned").get(&url).cloned();
+            Ok(match job {
+                Some(j) => serde_json::json!({
+                    "status": j.status, "done": j.done, "skipped": j.skipped,
+                    "total": j.total, "error": j.error,
+                }),
+                None => serde_json::json!({"status": "not_found"}),
+            })
         }
         Request::ClearBrowsing => {
             let n = store::clear_source(conn, "browser")? + store::clear_source(conn, "subtitle")?;
@@ -260,6 +371,14 @@ fn handle(req: Request, conn: &mut Connection, embedder: &mut SidecarEmbedder) -
         }
         Request::FocusApp => focus_main_app(),
     }
+}
+
+/// 段级跳转链接：B站/YouTube 均以 t 查询参数定位起点；#t= 锚点不被播放器识别，
+/// 会被「上次观看位置」续播覆盖（LHF 实测反馈）
+fn seek_url(url: &str, secs: i64) -> String {
+    let base = url.split('#').next().unwrap_or(url);
+    let sep = if base.contains('?') { '&' } else { '?' };
+    format!("{base}{sep}t={secs}")
 }
 
 /// 拉起同目录主程序：未运行则启动，已运行由 tauri-plugin-single-instance 聚焦其主窗口。

@@ -33,6 +33,14 @@ pub struct SidecarEmbedder {
     state: Arc<Mutex<SidecarState>>,
 }
 
+/// embed_video_url 分块响应
+pub struct VideoUrlChunk {
+    /// (段起始秒, 向量)
+    pub segments: Vec<(i64, Vec<f32>)>,
+    pub eof: bool,
+    pub next_skip: i64,
+}
+
 struct SidecarState {
     child: Option<Child>,
     stdin: Option<ChildStdin>,
@@ -258,6 +266,42 @@ impl SidecarEmbedder {
             "mime": mime,
         }))?;
         parse_vector(&result)
+    }
+
+    /// 整视频后台索引的一块分片结果：sidecar 流式解码 + 分窗 embed，
+    /// 分块调用让模型锁在块间释放（前台查询不被长任务饿死）
+    pub fn embed_video_url(
+        &mut self,
+        video_url: &str,
+        referer: &str,
+        segment_secs: i64,
+        skip_segments: i64,
+        max_segments: i64,
+    ) -> Result<VideoUrlChunk> {
+        let result = self.call(json!({
+            "type": "embed_video_url",
+            "video_url": video_url,
+            "referer": referer,
+            "segment_secs": segment_secs,
+            "skip_segments": skip_segments,
+            "max_segments": max_segments,
+        }))?;
+        let segments = result
+            .get("segments")
+            .and_then(Value::as_array)
+            .context("响应缺 segments")?
+            .iter()
+            .map(|s| {
+                let start = s.get("start").and_then(Value::as_i64).context("段缺 start")?;
+                let vector = parse_vector(s)?;
+                Ok((start, vector))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(VideoUrlChunk {
+            segments,
+            eof: result.get("eof").and_then(Value::as_bool).unwrap_or(true),
+            next_skip: result.get("next_skip").and_then(Value::as_i64).unwrap_or(0),
+        })
     }
 }
 

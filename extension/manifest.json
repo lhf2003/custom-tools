@@ -19,6 +19,12 @@
       ],
       "js": ["subtitle.js", "video-frame.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://*.bilibili.com/video/*"],
+      "js": ["playinfo-probe.js"],
+      "run_at": "document_idle",
+      "world": "MAIN"
     }
   ],
   "action": {

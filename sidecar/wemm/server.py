@@ -19,6 +19,9 @@
 #   embed_image {image_base64, mime}                  -> result.vector
 #   embed_video {video_base64, mime}                    -> result.vector
 #     解码走 PyAV 顺序解码（N3 坑：MediaRecorder webm 元数据残缺，decord 帧索引路线硬失败）
+#   embed_video_url {video_url, referer, segment_secs}  -> result.segments [{start, vector}...]
+#     整视频后台索引：PyAV 直接流式打开 CDN 地址（ffmpeg headers 选项带 Referer/UA），
+#     按 segment_secs 窗口水库抽样 VIDEO_NFRAMES 帧（内存恒定），逐窗口 embed
 #   shutdown                                          -> {"ok":true} 后退出码 0（代理模式只退自己不转发）
 #
 # 维度固定 2048 全维（N0：512 截断裸查询不过线已弃用）；模型 bf16（8GB 显卡约束）。
@@ -224,6 +227,75 @@ def _read_video_frames(path, nframes=VIDEO_NFRAMES, max_w=VIDEO_MAX_W, max_h=VID
     return [frames[i] for i in idx]
 
 
+def _downscale(img):
+    """超过帧预算才缩（LANCZOS 保细节）；640×360 源直出不变"""
+    if img.width > VIDEO_MAX_W or img.height > VIDEO_MAX_H:
+        img.thumbnail((VIDEO_MAX_W, VIDEO_MAX_H))
+    return img
+
+
+def embed_video_url(video_url, referer, segment_secs=10, skip_segments=0, max_segments=None):
+    """整视频后台索引：PyAV 流式打开 CDN 地址（ffmpeg headers 带 Referer/UA），
+    按 segment_secs 窗口做水库抽样（每窗最多 VIDEO_NFRAMES 帧，内存恒定），逐窗 embed。
+    skip_segments/max_segments 支持分段调用（块间释放模型锁，前台查询不被长任务饿死）。
+    返回 {"segments": [{"start", "vector"}], "eof": bool, "next_skip": int}。"""
+    import random
+
+    import av
+
+    if not segment_secs or segment_secs <= 0:
+        segment_secs = 10
+    headers = (f"Referer: {referer}\r\n"
+               "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\r\n")
+    container = av.open(video_url, options={"headers": headers})
+    rng = random.Random(42)  # 定死种子：同一视频重复索引产出一致
+    segments = []
+    win_idx = -1
+    reservoir = []  # 当前窗口抽样帧 [(t, PIL.Image)]
+    seen = 0
+    prev_t = 0.0
+    eof = True
+    limit = None if max_segments is None else skip_segments + max_segments
+
+    def close_window():
+        nonlocal reservoir
+        if win_idx >= 0 and len(reservoir) >= 2:
+            frames = [img for _, img in sorted(reservoir, key=lambda x: x[0])]
+            n = len(frames) // 2 * 2  # FRAME_FACTOR=2 对齐
+            frames = frames[:n]
+            msg = [{"role": "user", "content": [{"type": "video", "video": frames}]}]
+            emb = _encode(msg)
+            segments.append({"start": win_idx * segment_secs, "vector": emb[0].tolist()})
+            log(f"embed_video_url 段 {win_idx}（{n} 帧）完成，累计 {len(segments)} 段")
+        reservoir = []
+
+    try:
+        for frame in container.decode(video=0):
+            t = float(frame.time) if frame.time is not None else prev_t
+            prev_t = t
+            w = int(t // segment_secs)
+            if w < skip_segments:
+                continue  # 快过已处理窗口（只解码不驻留，低成本）
+            if limit is not None and w >= limit:
+                eof = False
+                break
+            if w != win_idx:
+                close_window()
+                win_idx, seen = w, 0
+            seen += 1
+            if len(reservoir) < VIDEO_NFRAMES:
+                reservoir.append((t, _downscale(frame.to_image())))
+            else:
+                j = rng.randrange(seen)
+                if j < VIDEO_NFRAMES:
+                    reservoir[j] = (t, _downscale(frame.to_image()))
+        close_window()
+    finally:
+        container.close()
+    next_skip = limit if limit is not None and not eof else win_idx + 1
+    return {"segments": segments, "eof": eof, "next_skip": next_skip}
+
+
 def embed_media(b64, mime, kind):
     # 剥离 data URI 前缀（调用方可能传 data:image/png;base64,... 格式）
     if b64.startswith("data:"):
@@ -268,6 +340,14 @@ def handle(req):
         return {"vector": embed_media(req["image_base64"], req.get("mime"), "image")}
     if rtype == "embed_video":
         return {"vector": embed_media(req["video_base64"], req.get("mime"), "video")}
+    if rtype == "embed_video_url":
+        return embed_video_url(
+            req["video_url"],
+            req.get("referer") or "https://www.bilibili.com",
+            req.get("segment_secs") or 10,
+            req.get("skip_segments") or 0,
+            req.get("max_segments"),
+        )
     if rtype == "shutdown":
         send({"ok": True, "req_id": req.get("req_id")})
         sys.exit(0)

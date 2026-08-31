@@ -46,6 +46,14 @@
     segments.push({ start: Math.max(0, Math.floor(video.currentTime)), text });
   }
 
+  // B站 BV 号在路径里（query 全是跟踪参数，可安全丢）；
+  // YouTube 视频 id 在 ?v= 里，必须保留，否则跳转链接丢视频身份
+  function pageUrl() {
+    const u = new URL(location.href);
+    const v = u.searchParams.get('v');
+    return v ? `${u.origin}${u.pathname}?v=${v}` : `${u.origin}${u.pathname}`;
+  }
+
   function flush(force = false) {
     const pending = segments.length - pendingFrom;
     if (pending < FLUSH_MIN_SEGMENTS) return;
@@ -54,7 +62,7 @@
     pendingFrom = segments.length;
     chrome.runtime.sendMessage({
       kind: 'subtitle',
-      url: location.href.split('?')[0].split('#')[0],
+      url: pageUrl(),
       domain: location.hostname,
       title: document.title.replace(/_哔哩哔哩_bilibili$/, ''),
       segments: batch,

@@ -261,7 +261,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return { sent: true };
       }
       case 'video_segment': {
-        // N3: 视频画面分片（opt-in 录制, ~2.7MB base64）
+        // N3: 视频画面分片（opt-in 录制, ~2.7MB base64）——整视频索引不可用时的兜底路径
         // 用 callNative（请求-响应）而非 sendNative（入队）——embed 失败的错误需要回到 content script
         const list = await getBlacklist();
         if (list.some(d => msg.domain === d || msg.domain.endsWith('.' + d))) return { dropped: 'blacklist' };
@@ -275,7 +275,34 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             end_seconds: msg.endSeconds,
             video_base64: msg.video_base64,
             created_at: new Date().toISOString(),
-          }, 300_000); // 实测视频 embed 130s+/段（32帧×720p 过 2B 视觉塔），留 2x+ 余量
+          }, 300_000); // 视频 embed 数秒~数十秒/段（帧预算 640×360×24），留足余量
+          return { sent: true, result: r };
+        } catch (e) {
+          return { sent: false, error: String(e) };
+        }
+      }
+      case 'index_video_full': {
+        // 整视频后台索引：host 立即应答 accepted，长任务在 host 后台线程跑
+        const list = await getBlacklist();
+        if (list.some(d => msg.domain === d || msg.domain.endsWith('.' + d))) return { dropped: 'blacklist' };
+        try {
+          const r = await callNative({
+            type: 'index_video_url',
+            url: msg.url,
+            domain: msg.domain,
+            title: msg.title,
+            video_url: msg.video_url,
+            duration_secs: msg.duration_secs,
+            created_at: new Date().toISOString(),
+          }, 10_000);
+          return { sent: true, result: r };
+        } catch (e) {
+          return { sent: false, error: String(e) };
+        }
+      }
+      case 'video_index_progress': {
+        try {
+          const r = await callNative({ type: 'video_index_progress', url: msg.url }, 3_000);
           return { sent: true, result: r };
         } catch (e) {
           return { sent: false, error: String(e) };
