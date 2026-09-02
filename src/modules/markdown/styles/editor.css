@@ -232,7 +232,15 @@
   background: var(--cm-bg-hover);
 }
 
-.cm-codeblock-copy {
+/* 右侧按钮组：格式化（JSON 家族）+ 复制 */
+.cm-codeblock-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.cm-codeblock-copy,
+.cm-codeblock-format {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -248,13 +256,16 @@
   transition: all 0.15s ease;
 }
 
-.cm-codeblock-copy svg {
+.cm-codeblock-copy svg,
+.cm-codeblock-format svg {
   width: 12px;
   height: 12px;
 }
 
 .cm-codeblock-header:hover .cm-codeblock-copy,
-.cm-codeblock-copy:hover {
+.cm-codeblock-header:hover .cm-codeblock-format,
+.cm-codeblock-copy:hover,
+.cm-codeblock-format:hover {
   opacity: 1;
 }
 

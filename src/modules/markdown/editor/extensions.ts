@@ -4,7 +4,7 @@ import { EditorView, drawSelection, keymap, placeholder as cmPlaceholder } from 
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
-import { indentUnit, syntaxHighlighting } from '@codemirror/language';
+import { indentUnit, LanguageDescription, syntaxHighlighting } from '@codemirror/language';
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search';
 import { appHighlightStyle } from './theme';
 import { codeBlockPlugin } from './codeBlockPlugin';
@@ -16,6 +16,14 @@ import {
   toggleItalic,
   toggleStrikethrough,
 } from './commands';
+
+// language-data 的 JSON 条目只认 json/json5，不认 VSCode 习惯写法 jsonc。
+// 补一条映射到同一 lang-json 懒加载 chunk（Vite 会把两条 import 合并为同一异步块）。
+const jsoncLanguage = LanguageDescription.of({
+  name: 'JSONC',
+  alias: ['jsonc'],
+  load: () => import('@codemirror/lang-json').then((m) => m.json()),
+});
 
 interface BuildExtensionsOptions {
   placeholder?: string;
@@ -29,7 +37,7 @@ export function buildExtensions({ placeholder, onDocChange }: BuildExtensionsOpt
     EditorState.allowMultipleSelections.of(true),
     indentUnit.of('    '),
     // codeLanguages：fence 语言名 → 懒加载子语言包，代码块内嵌高亮
-    markdown({ base: markdownLanguage, codeLanguages: languages }),
+    markdown({ base: markdownLanguage, codeLanguages: [...languages, jsoncLanguage] }),
     syntaxHighlighting(appHighlightStyle),
     search({ top: true }),
     highlightSelectionMatches(),

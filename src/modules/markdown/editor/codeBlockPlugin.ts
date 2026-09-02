@@ -3,6 +3,8 @@ import { EditorSelection, StateField } from '@codemirror/state';
 import { Decoration, EditorView, WidgetType } from '@codemirror/view';
 import type { DecorationSet } from '@codemirror/view';
 import { syntaxTree } from '@codemirror/language';
+import { useToastStore } from '@/stores/toastStore';
+import { formatJsonCode } from './formatJsonCode';
 
 /**
  * 代码块即时渲染插件。
@@ -22,34 +24,50 @@ const COPY_ICON =
   '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
 const CHECK_ICON =
   '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+// lucide AlignLeft——与 json_formatter 插件的格式化动作图标一致
+const FORMAT_ICON =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="21" x2="3" y1="6" y2="6"/><line x1="15" x2="3" y1="12" y2="12"/><line x1="17" x2="3" y1="18" y2="18"/></svg>';
+
+/** fence 语言名 → 是否提供就地格式化（JSON 家族） */
+const RE_JSON_LANG = /^(json|jsonc|json5)$/i;
+
+interface FormatRange {
+  from: number;
+  to: number;
+}
 
 class CodeBlockHeaderWidget extends WidgetType {
   readonly lang: string;
   readonly code: string;
   /** 源码中语言名的末尾位置（点击 header 时光标投递点，便于直接改语言） */
   readonly codeInfoEnd: number;
+  /** 块体源码区间（仅 JSON 家族且块闭合、非空时非 null，决定格式化按钮显隐） */
+  readonly formatRange: FormatRange | null;
 
-  constructor(lang: string, code: string, codeInfoEnd: number) {
+  constructor(lang: string, code: string, codeInfoEnd: number, formatRange: FormatRange | null) {
     super();
     this.lang = lang;
     this.code = code;
     this.codeInfoEnd = codeInfoEnd;
+    this.formatRange = formatRange;
   }
 
   override eq(other: CodeBlockHeaderWidget): boolean {
     return (
       other.lang === this.lang &&
       other.code === this.code &&
-      other.codeInfoEnd === this.codeInfoEnd
+      other.codeInfoEnd === this.codeInfoEnd &&
+      other.formatRange?.from === this.formatRange?.from &&
+      other.formatRange?.to === this.formatRange?.to
     );
   }
 
   override toDOM(view: EditorView): HTMLElement {
     const bar = document.createElement('div');
     bar.className = 'cm-codeblock-header';
-    // 点击 header（除复制按钮外）：展开块并把光标放到语言名末尾，直接可改
+    // 点击 header（除右侧按钮组外）：展开块并把光标放到语言名末尾，直接可改
     bar.addEventListener('mousedown', (e) => {
-      if ((e.target as HTMLElement).closest('.cm-codeblock-copy')) return;
+      if ((e.target as HTMLElement).closest('.cm-codeblock-actions')) return;
       e.preventDefault();
       e.stopPropagation();
       view.dispatch({ selection: EditorSelection.cursor(this.codeInfoEnd) });
@@ -60,6 +78,43 @@ class CodeBlockHeaderWidget extends WidgetType {
     langEl.className = 'cm-codeblock-lang';
     langEl.textContent = this.lang || 'text';
     langEl.title = '点击修改语言';
+
+    const actions = document.createElement('div');
+    actions.className = 'cm-codeblock-actions';
+
+    // 格式化按钮（JSON 家族专属）：就地美化块体，失败 toast 报行列
+    if (this.formatRange) {
+      const range = this.formatRange;
+      const fmtBtn = document.createElement('button');
+      fmtBtn.type = 'button';
+      fmtBtn.className = 'cm-codeblock-format';
+      fmtBtn.title = '格式化 JSON';
+      fmtBtn.setAttribute('aria-label', '格式化 JSON');
+      fmtBtn.innerHTML = FORMAT_ICON;
+      fmtBtn.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      });
+      fmtBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const result = formatJsonCode(this.code);
+        if (!result.ok) {
+          useToastStore.getState().addToast({
+            type: 'error',
+            title: `JSON 解析失败：第 ${result.line} 行第 ${result.col} 列`,
+          });
+          return;
+        }
+        if (result.text !== this.code) {
+          view.dispatch({
+            changes: { from: range.from, to: range.to, insert: result.text },
+            userEvent: 'input',
+          });
+        }
+      });
+      actions.appendChild(fmtBtn);
+    }
 
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -88,10 +143,11 @@ class CodeBlockHeaderWidget extends WidgetType {
         .catch((err: unknown) => {
           console.error('[CodeBlock] 复制失败:', err);
         });
-    });
+      });
+    actions.appendChild(btn);
 
     bar.appendChild(langEl);
-    bar.appendChild(btn);
+    bar.appendChild(actions);
     return bar;
   }
 
@@ -140,14 +196,19 @@ function buildCodeBlockDecorations(state: EditorState): DecorationSet {
       // 无语言名时光标落到开 fence 标记之后，可直接输入语言
       const codeInfoEnd = codeInfo ? codeInfo.to : (node.node.getChild('CodeMark')?.to ?? openLine.to);
       const codeTo = closed ? closeLine.from - 1 : to;
-      const code = state.sliceDoc(Math.min(openLine.to + 1, codeTo), Math.max(codeTo, openLine.to + 1));
+      const bodyFrom = Math.min(openLine.to + 1, codeTo);
+      const bodyTo = Math.max(codeTo, openLine.to + 1);
+      const code = state.sliceDoc(bodyFrom, bodyTo);
+      const formatRange =
+        closed && RE_JSON_LANG.test(lang) && code.trim()
+          ? { from: bodyFrom, to: bodyTo }
+          : null;
 
       // 开 fence 行：内容内联替换为 header 行（行高不变，卡片顶盖由行装饰承担）
       ranges.push(
-        Decoration.replace({ widget: new CodeBlockHeaderWidget(lang, code, codeInfoEnd) }).range(
-          openLine.from,
-          openLine.to,
-        ),
+        Decoration.replace({
+          widget: new CodeBlockHeaderWidget(lang, code, codeInfoEnd, formatRange),
+        }).range(openLine.from, openLine.to),
       );
       ranges.push(
         Decoration.line({ class: 'cm-codeblock-line cm-codeblock-first' }).range(openLine.from),
