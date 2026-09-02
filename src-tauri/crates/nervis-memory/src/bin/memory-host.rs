@@ -59,6 +59,8 @@ enum Request {
     },
     /// 整视频索引进度查询（扩展轮询）
     VideoIndexProgress { url: String },
+    /// popup 仪表盘：最近索引的视频（画面/字幕段数聚合）+ 进行中索引任务快照
+    RecentVideos,
     /// D10: 一键清除浏览索引
     ClearBrowsing,
     /// D10: 按域名删除
@@ -116,7 +118,31 @@ fn run_video_url_job(
         let mut embedder = SidecarEmbedder::resolve_default()?;
         let mut skip = 0i64;
         loop {
-            let chunk = embedder.embed_video_url(&video_url, "https://www.bilibili.com", 10, skip, 20)?;
+            // 块级重试：主实例被回收/连接断等瞬态失败时，代理 respawn 或新主实例加载后
+            // 链路自愈（21:17 误杀事故的教训——单点失败不该全殁）。同 skip 重发：
+            // sidecar 崩溃时该块 partial 段随进程丢失，重 embed 无 dedup 浪费
+            const MAX_ATTEMPTS: u32 = 3;
+            let mut last_err: Option<anyhow::Error> = None;
+            let mut chunk = None;
+            for attempt in 0..MAX_ATTEMPTS {
+                match embedder.embed_video_url(&video_url, "https://www.bilibili.com", 10, skip, 20) {
+                    Ok(c) => {
+                        chunk = Some(c);
+                        break;
+                    }
+                    Err(e) => {
+                        last_err = Some(e);
+                        if attempt + 1 < MAX_ATTEMPTS {
+                            let wait_secs = [5u64, 15][attempt as usize];
+                            std::thread::sleep(std::time::Duration::from_secs(wait_secs));
+                        }
+                    }
+                }
+            }
+            let chunk = match chunk {
+                Some(c) => c,
+                None => return Err(last_err.expect("重试循环退出必有错误记录")),
+            };
             for (start, vector) in chunk.segments {
                 let seg_url = seek_url(&url, start);
                 let desc = format!(
@@ -344,6 +370,26 @@ fn handle(req: Request, conn: &mut Connection, embedder: &mut SidecarEmbedder) -
                 }),
                 None => serde_json::json!({"status": "not_found"}),
             })
+        }
+        Request::RecentVideos => {
+            // popup 高度受限（浏览器上限 600px），列表只取最近 3 个；
+            // 进行中的任务若不在其中由扩展侧补到最前
+            let videos = store::recent_videos(conn, 3)?;
+            // 进行中任务快照随查询一并下发（url → 进度），popup 合并到对应条目展示
+            let jobs = VIDEO_JOBS.lock().expect("video jobs poisoned");
+            let jobs_json: serde_json::Map<String, serde_json::Value> = jobs
+                .iter()
+                .map(|(url, j)| {
+                    (
+                        url.clone(),
+                        serde_json::json!({
+                            "status": j.status, "done": j.done, "skipped": j.skipped,
+                            "total": j.total, "error": j.error,
+                        }),
+                    )
+                })
+                .collect();
+            Ok(serde_json::json!({"videos": videos, "jobs": jobs_json}))
         }
         Request::ClearBrowsing => {
             let n = store::clear_source(conn, "browser")? + store::clear_source(conn, "subtitle")?;

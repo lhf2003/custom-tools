@@ -11,8 +11,9 @@
   const isYoutube = location.hostname === 'www.youtube.com';
 
   // 各站字幕渲染节点选择器（DOM 路线, 站点改版时只需维护这里）
+  // B站现状（2026-09 实测）: 新字幕引擎 subtitle-x，文本在 .bili-subtitle-x-subtitle-panel-text
   const SUBTITLE_SELECTORS = isBilibili
-    ? ['.bpx-player-subtitle-panel-text', '.bilibili-player-video-subtitle span']
+    ? ['.bili-subtitle-x-subtitle-panel-text']
     : isYoutube
       ? ['.ytp-caption-segment']
       : [];

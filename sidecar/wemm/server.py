@@ -55,6 +55,18 @@ _model = None
 _device = "cpu"
 _model_lock = threading.Lock()  # GPU 模型非线程安全：主实例 stdio/TCP 两路请求串行化
 
+# 主实例生命周期自治（CASE-009 共享语义）：Rust watchdog 只统计 owner 自己 stdio 通道的
+# 活动，看不见 TCP 代理通道的使用——曾致 21:17 误杀事故（主线程 30min 无页面索引，
+# watchdog kill 主实例，后台视频索引第 4 块 TCP 被拦腰砍断）。
+# 改为 python 侧统计全通道最后活跃，全通道空闲超时才自行退出释放显存。
+_last_activity = time.time()
+IDLE_EXIT_SECS = 30 * 60
+
+
+def _touch():
+    global _last_activity
+    _last_activity = time.time()
+
 
 def log(msg):
     print(f"[wemm {time.strftime('%H:%M:%S')}] {msg}", file=sys.stderr, flush=True)
@@ -248,6 +260,14 @@ def embed_video_url(video_url, referer, segment_secs=10, skip_segments=0, max_se
     headers = (f"Referer: {referer}\r\n"
                "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36\r\n")
     container = av.open(video_url, options={"headers": headers})
+    # 跳过已处理窗口：seek 到 skip 位置前的关键帧（CDN 走 Range），避免每块从头
+    # 下载解码的 O(n²) 重下浪费；seek 失败（流不可 seek）回退顺序解码，w<skip 的
+    # 帧由下方 continue 过滤，两种路径产出一致
+    if skip_segments > 0:
+        try:
+            container.seek(skip_segments * segment_secs * 1_000_000, backward=True)
+        except Exception as e:
+            log(f"seek 到 {skip_segments * segment_secs}s 失败，回退顺序解码: {e}")
     rng = random.Random(42)  # 定死种子：同一视频重复索引产出一致
     segments = []
     win_idx = -1
@@ -363,6 +383,7 @@ def tcp_handler(conn):
             req = read_frame_tcp(conn)
             if req is None:
                 break
+            _touch()  # TCP 通道活动计入自治计时（请求到达即算，不等处理完）
             # shutdown 不允许从 TCP 通道杀主实例（代理侧已过滤，这里防御性忽略）
             if req.get("type") == "shutdown":
                 write_frame_tcp(conn, {"ok": True, "req_id": req.get("req_id")})
@@ -374,6 +395,7 @@ def tcp_handler(conn):
                 except Exception as e:
                     log(f"TCP 请求失败: {e}")
                     resp = {"ok": False, "req_id": req.get("req_id"), "error": str(e)}
+            _touch()
             write_frame_tcp(conn, resp)
     except (OSError, ValueError, json.JSONDecodeError):
         pass
@@ -384,6 +406,19 @@ def tcp_handler(conn):
 def primary_mode(listener):
     send({"type": "loading"})
     load_model()
+
+    # 自治空闲退出：全通道（stdio+TCP）30min 无请求 → 自行退出释放显存。
+    # 必须 os._exit——daemon 线程里 sys.exit 只退线程自己；模型无持久状态，直接退安全。
+    # 退出后 Rust 侧 child_alive 检测到死亡，下次调用透明 respawn。
+    def idle_watchdog():
+        while True:
+            time.sleep(60)
+            if time.time() - _last_activity > IDLE_EXIT_SECS:
+                log("全通道空闲超 30 分钟，主实例自治退出（释放显存）")
+                os._exit(0)
+
+    threading.Thread(target=idle_watchdog, daemon=True).start()
+
     # TCP 监听线程（daemon：主线程退出时自动结束）
     def accept_loop():
         while True:
@@ -404,6 +439,7 @@ def primary_mode(listener):
             continue
         if req is None:
             break  # stdin 关闭，owner 进程已退出
+        _touch()
         with _model_lock:
             try:
                 result = handle(req)
@@ -411,6 +447,7 @@ def primary_mode(listener):
             except Exception as e:
                 log(f"请求失败: {e}")
                 send({"ok": False, "req_id": req.get("req_id"), "error": str(e)})
+        _touch()
 
 
 # ---- 代理模式（不加载模型，stdin 帧转发到主实例 TCP） ----

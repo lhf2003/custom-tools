@@ -34,7 +34,10 @@
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": ["$APPDATA/com.flowhub.app/plugins/**"]
+        "scope": [
+          "$APPDATA/com.flowhub.app/plugins/**",
+          "$APPDATA/com.flowhub.app/clipboard-images/**"
+        ]
       }
     }
   },

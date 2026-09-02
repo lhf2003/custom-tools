@@ -1,10 +1,14 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Portal } from './Portal';
 
+// 全局互斥：同屏只保留一个 tooltip（对齐 OS 单例语义）——启动器应用条目（hover 触发）
+// 与记忆检索行（选中受控）分属不同实例，鼠标跨区移动时两个浮层会同时挂着
+let activeHide: (() => void) | null = null;
+
 interface TooltipProps {
   children: React.ReactNode;
   /** 提示内容；空字符串 / undefined / null 时不触发也不渲染（对齐原生 title 的条件用法） */
-  content?: string | null;
+  content?: React.ReactNode;
   placement?: 'top' | 'bottom' | 'left' | 'right';
   delay?: number;
   /** 包裹层布局类透传。默认 inline-flex 适合行内场景；块级/flex 上下文调用方需自行传入（如 w-full / flex-1 min-w-0 / shrink-0） */
@@ -24,6 +28,8 @@ export function Tooltip({
   const triggerRef = useRef<HTMLDivElement>(null);
   const tooltipRef = useRef<HTMLDivElement>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 渐隐卸载计时器：re-show 时必须清除，否则旧计时器到点会把刚显示的浮层卸载
+  const unmountTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const calculatePosition = useCallback(() => {
     if (!triggerRef.current) return;
@@ -97,9 +103,27 @@ export function Tooltip({
     setPosition({ x, y });
   }, [placement]);
 
+  // useCallback 稳定引用：activeHide 互斥登记/比较依赖函数身份
+  const hideTooltip = useCallback(() => {
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    if (activeHide === hideTooltip) activeHide = null;
+    setIsVisible(false);
+    if (unmountTimerRef.current) clearTimeout(unmountTimerRef.current);
+    unmountTimerRef.current = setTimeout(() => setIsMounted(false), 150);
+  }, []);
+
   const showTooltip = () => {
     if (!content) return;
+    // 只顶掉其他实例：activeHide 是自己时调用等于自杀（StrictMode 双执行必踩）
+    if (activeHide !== hideTooltip) {
+      activeHide?.();
+      activeHide = hideTooltip;
+    }
     calculatePosition();
+    if (unmountTimerRef.current) {
+      clearTimeout(unmountTimerRef.current);
+      unmountTimerRef.current = null;
+    }
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
     timeoutRef.current = setTimeout(() => {
       setIsMounted(true);
@@ -107,17 +131,13 @@ export function Tooltip({
     }, delay);
   };
 
-  const hideTooltip = () => {
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    setIsVisible(false);
-    setTimeout(() => setIsMounted(false), 150);
-  };
-
   useEffect(() => {
     return () => {
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      if (unmountTimerRef.current) clearTimeout(unmountTimerRef.current);
+      if (activeHide === hideTooltip) activeHide = null; // 卸载时解除互斥登记，防残留指向死实例
     };
-  }, []);
+  }, [hideTooltip]);
 
   // content 动态变为空时，隐藏已显示的 tooltip
   useEffect(() => {

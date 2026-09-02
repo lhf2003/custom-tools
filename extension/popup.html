@@ -66,6 +66,33 @@
     }
     .btn-block:disabled { opacity: 0.4; cursor: not-allowed; }
     .empty { font-size: 12px; color: #a1a1aa; text-align: center; padding: 6px 0; } /* ink-tertiary: 对比度 6.4:1 过 AA */
+    /* 最近视频条目（标题 + 格子进度条 + 段数统计） */
+    .video-row {
+      background: #2e2e33;
+      border: 1px solid #ffffff0d;
+      border-radius: 8px; padding: 8px 12px; margin-bottom: 6px;
+    }
+    .v-title {
+      font-size: 12px; color: #f4f4f5;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    /* 格子进度条：单行固定 36 格，长视频按比例压缩（LHF 定案） */
+    .grid-progress { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+    .grid-progress .cells { display: flex; gap: 2px; flex: 1; }
+    .grid-progress .cells i {
+      flex: 1; height: 6px; border-radius: 6px; /* rounded-sm: 与格同高 → 胶囊形 */
+      background: #ffffff1a; /* scrim-white-10 */
+    }
+    .grid-progress .cells i.on { background: #818cf8; } /* signal-indigo-light */
+    .grid-progress .pct {
+      font-size: 12px; color: #a1a1aa; flex-shrink: 0; min-width: 36px; text-align: right;
+    }
+    .v-stats {
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 12px; color: #a1a1aa; margin-top: 6px;
+    }
+    .v-status.done { color: #22c55e; }   /* status-success */
+    .v-status.failed { color: #f87171; } /* status-error-text */
   </style>
 </head>
 <body>
@@ -84,6 +111,9 @@
   </div>
 
   <div class="cost">本地运行 · <b>¥0</b> · 数据不出本机</div>
+
+  <div class="section-title">最近视频</div>
+  <div id="videoBox"><div class="empty">加载中…</div></div>
 
   <div class="section-title">当前站点</div>
   <div class="domain-row">

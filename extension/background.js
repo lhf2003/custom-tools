@@ -308,6 +308,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           return { sent: false, error: String(e) };
         }
       }
+      case 'getRecentVideos': {
+        // popup 仪表盘：最近视频段数聚合 + 进行中任务快照（host 一次返回）
+        try {
+          const r = await callNative({ type: 'recent_videos' }, 5_000);
+          return { sent: true, result: r };
+        } catch (e) {
+          return { sent: false, error: String(e) };
+        }
+      }
       case 'getState': {
         const stats = await getStats();
         const blacklist = await getBlacklist();

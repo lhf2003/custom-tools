@@ -268,6 +268,51 @@ pub fn source_stats(conn: &Connection) -> Result<Vec<(String, i64)>> {
     Ok(mapped.collect::<std::result::Result<Vec<_>, _>>()?)
 }
 
+/// popup「最近视频」条目：按基础 url 聚合的画面/字幕段数
+#[derive(Debug, Clone, Serialize)]
+pub struct RecentVideo {
+    /// 剥离 ?t=/&t= 段级后缀后的页面 url
+    pub url: String,
+    pub title: Option<String>,
+    pub video_segments: i64,
+    pub subtitle_segments: i64,
+    pub last_indexed: String,
+}
+
+/// 最近索引的视频列表（扩展 popup 仪表盘用）：
+/// 画面段（modality=video）与字幕段（source=subtitle）的 url 都带 ?t=/&t= 段级后缀，
+/// 按剥离后缀的基础 url 分组聚合，各源只计自己的段数。
+pub fn recent_videos(conn: &Connection, limit: i64) -> Result<Vec<RecentVideo>> {
+    let mut st = conn.prepare(
+        // RTRIM 尾斜杠归一：BV 页带不带 / 是同一视频（e2e 直发与页面采集会产生两种形态）
+        "SELECT
+           RTRIM(CASE
+             WHEN instr(url, '?t=') > 0 THEN substr(url, 1, instr(url, '?t=') - 1)
+             WHEN instr(url, '&t=') > 0 THEN substr(url, 1, instr(url, '&t=') - 1)
+             ELSE url
+           END, '/') AS base_url,
+           MAX(title),
+           SUM(CASE WHEN modality = 'video' THEN 1 ELSE 0 END),
+           SUM(CASE WHEN source = 'subtitle' THEN 1 ELSE 0 END),
+           MAX(indexed_at)
+         FROM memory_items
+         WHERE modality = 'video' OR source = 'subtitle'
+         GROUP BY base_url
+         ORDER BY MAX(indexed_at) DESC
+         LIMIT ?1",
+    )?;
+    let mapped = st.query_map(params![limit], |r| {
+        Ok(RecentVideo {
+            url: r.get(0)?,
+            title: r.get(1)?,
+            video_segments: r.get(2)?,
+            subtitle_segments: r.get(3)?,
+            last_indexed: r.get(4)?,
+        })
+    })?;
+    Ok(mapped.collect::<std::result::Result<Vec<_>, _>>()?)
+}
+
 /// 文档级索引入口: 去重判断 + 变更替换, 事务保证「删旧写新」原子
 /// chunks: (chunk_index, content, content_hash, embedding)
 pub fn index_document(
@@ -390,6 +435,24 @@ pub fn search(
         }
     }
     Ok(hits)
+}
+
+/// 最近索引的条目（知识页空查询浏览态, P3）：按 indexed_at 倒序，同刻按 id 倒序（后入库优先）
+pub fn recent_items(conn: &Connection, limit: i64) -> Result<Vec<MemoryItem>> {
+    let mut st = conn.prepare(
+        "SELECT id, source, source_ref, url, domain, title, chunk_index, content, content_hash, modality, created_at, indexed_at, expires_at
+         FROM memory_items ORDER BY indexed_at DESC, id DESC LIMIT ?1",
+    )?;
+    let mapped = st.query_map(params![limit], |r| {
+        Ok(MemoryItem {
+            id: r.get(0)?, source: r.get(1)?, source_ref: r.get(2)?,
+            url: r.get(3)?, domain: r.get(4)?, title: r.get(5)?,
+            chunk_index: r.get(6)?, content: r.get(7)?, content_hash: r.get(8)?,
+            modality: r.get(9)?,
+            created_at: r.get(10)?, indexed_at: r.get(11)?, expires_at: r.get(12)?,
+        })
+    })?;
+    Ok(mapped.collect::<std::result::Result<Vec<_>, _>>()?)
 }
 
 /// 按域名物理删除（D10 域名级例外）

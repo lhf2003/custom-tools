@@ -47,6 +47,10 @@ struct SidecarState {
     stdout: Option<BufReader<ChildStdout>>,
     req_id: u64,
     last_used: Instant,
+    /// 握手 ready 帧的 device=="proxy"（CASE-009）：代理是 owner 私有通道，watchdog 可安全回收；
+    /// 主实例被 TCP 跨线程/进程共享，kill 会砍断进行中的代理任务（21:17 误杀事故），
+    /// 其显存回收交给 python 侧全通道空闲自治退出
+    is_proxy: bool,
 }
 
 impl SidecarEmbedder {
@@ -61,6 +65,7 @@ impl SidecarEmbedder {
                 stdout: None,
                 req_id: 0,
                 last_used: Instant::now(),
+                is_proxy: false,
             })),
         }
     }
@@ -155,7 +160,11 @@ impl SidecarEmbedder {
             let frame = read_frame(state.stdout.as_mut().unwrap())
                 .context("sidecar 握手阶段连接中断")?;
             match frame.get("type").and_then(Value::as_str) {
-                Some("ready") => break,
+                Some("ready") => {
+                    state.is_proxy =
+                        frame.get("device").and_then(Value::as_str) == Some("proxy");
+                    break;
+                }
                 Some("loading") => continue,
                 Some("error") => {
                     let err = frame
@@ -225,12 +234,15 @@ impl SidecarEmbedder {
 
     /// 空闲 watchdog：每次调用后重置；超时无调用则回收子进程（释放 5.1GB 显存）
     /// ⚠️ deadline 由调用方在放锁前算好传入——call() 持锁期间本函数绝不能再 lock（std Mutex 不可重入, 曾致首次调用即自死锁）
+    /// ⚠️ 只回收代理 child：主实例被 TCP 代理跨线程/进程共享（CASE-009），kill 会拦腰砍断
+    ///    进行中的后台任务（2026-08-31 21:17 误杀事故：视频索引第 4 块 TCP 断连全殁）；
+    ///    主实例的显存回收由 python 侧全通道空闲自治退出承担
     fn arm_watchdog(&self, deadline: Instant) {
         let state = Arc::clone(&self.state);
         std::thread::spawn(move || {
             std::thread::sleep(IDLE_TIMEOUT);
             let mut state = state.lock().expect("poisoned");
-            if state.last_used <= deadline {
+            if state.last_used <= deadline && state.is_proxy {
                 if let Some(mut child) = state.child.take() {
                     let _ = child.kill();
                     let _ = child.wait();

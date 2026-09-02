@@ -26,6 +26,8 @@ export default defineConfig({
         'translate-toast': path.resolve(__dirname, 'translate-toast.html'),
         'voice-toast': path.resolve(__dirname, 'voice-toast.html'),
         'memo-sticky': path.resolve(__dirname, 'memo-sticky.html'),
+        // 临时：release 产物渲染验证页（排查用，验证后移除）
+        'dev-cm-spike': path.resolve(__dirname, 'dev-cm-spike.html'),
       },
     },
   },

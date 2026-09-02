@@ -1,12 +1,12 @@
-//! 记忆检索命令（M3: 启动器语义分组 + `s ` 前缀全量模式）
-//! 设计: docs/architecture/2026-08-27-CASE-001-多模态记忆检索系统设计_01.md D5
+//! 记忆检索命令（知识索引插件：启动器命中探测 k=20 + 知识页全量检索/最近索引浏览）
+//! 设计: docs/architecture/2026-09-02-CASE-001-知识索引插件化裁决_01.md（D5 内嵌列表已退役）
 //! 二期 N1: bge 进程内 ONNX → WeMM sidecar（CASE-007; 首次查询承担 sidecar 拉起+模型加载 ~15s）。
 //!
 //! 延迟预算: 查询 embed ~42ms(GPU) + vec0 暴力扫描 ~10ms, spawn_blocking 不阻塞主线程。
 
 use crate::db::DatabaseState;
 use nervis_memory::sidecar::{MemoryEmbedder, SidecarEmbedder};
-use nervis_memory::store;
+use nervis_memory::store::{self, MemoryItem};
 use rusqlite::Connection;
 use serde::Serialize;
 use std::sync::Mutex;
@@ -19,6 +19,8 @@ pub struct MemoryEmbedderState(pub std::sync::Arc<Mutex<Option<SidecarEmbedder>>
 pub struct MemoryHitDto {
     pub id: i64,
     pub source: String,
+    /// 来源关联键（剪贴板 id / 笔记路径等）；知识页对无 url 来源按它聚合分组
+    pub source_ref: Option<String>,
     pub title: Option<String>,
     pub url: Option<String>,
     pub domain: Option<String>,
@@ -26,6 +28,9 @@ pub struct MemoryHitDto {
     pub score: f32,
     /// 模态: text | image | video（N2/N3 展示用）
     pub modality: String,
+    /// 剪贴板图片的本地文件路径（source=clipboard + modality=image 时从 source_ref join 解析；
+    /// 知识页图片卡直接渲染预览。文件已删/解析失败为 None，前端降级占位）
+    pub image_path: Option<String>,
     pub created_at: Option<String>,
     pub indexed_at: String,
 }
@@ -36,6 +41,71 @@ pub struct MemoryOpenResult {
     pub action: String,
     pub content: Option<String>,
     pub source_ref: Option<String>,
+}
+
+/// 剪贴板图片路径批量解析：source_ref=clipboard-<id> → clipboard_history.content
+/// （一次 IN 查询，避免逐条 join；仅收集图片条目，文本剪贴板不查。
+///  文件已删（剪贴板历史过期清理）的不给路径，前端走占位降级）
+fn resolve_clip_image_paths(
+    conn: &Connection,
+    items: &[MemoryItem],
+) -> Result<std::collections::HashMap<i64, String>, String> {
+    let clip_ids: Vec<i64> = items
+        .iter()
+        .filter(|it| it.source == "clipboard" && it.modality == "image")
+        .filter_map(|it| {
+            it.source_ref
+                .as_deref()
+                .and_then(|s| s.strip_prefix("clipboard-"))
+                .and_then(|s| s.parse::<i64>().ok())
+        })
+        .collect();
+    if clip_ids.is_empty() {
+        return Ok(Default::default());
+    }
+    let placeholders = vec!["?"; clip_ids.len()].join(",");
+    let sql = format!("SELECT id, content FROM clipboard_history WHERE id IN ({placeholders})");
+    let mut st = conn.prepare(&sql).map_err(|e| e.to_string())?;
+    let rows = st
+        .query_map(rusqlite::params_from_iter(clip_ids.iter()), |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(rows
+        .filter_map(|r| r.ok())
+        .filter(|(_, p)| std::path::Path::new(p).exists())
+        .collect())
+}
+
+/// MemoryItem → DTO（浏览态无相似度，score 填 0）
+fn item_to_dto(
+    item: MemoryItem,
+    score: f32,
+    clip_paths: &std::collections::HashMap<i64, String>,
+) -> MemoryHitDto {
+    let image_path = if item.source == "clipboard" && item.modality == "image" {
+        item.source_ref
+            .as_deref()
+            .and_then(|s| s.strip_prefix("clipboard-"))
+            .and_then(|s| s.parse::<i64>().ok())
+            .and_then(|cid| clip_paths.get(&cid).cloned())
+    } else {
+        None
+    };
+    MemoryHitDto {
+        id: item.id,
+        source: item.source,
+        source_ref: item.source_ref,
+        title: item.title,
+        url: item.url,
+        domain: item.domain,
+        snippet: item.content.chars().take(120).collect(),
+        score,
+        modality: item.modality,
+        image_path,
+        created_at: item.created_at,
+        indexed_at: item.indexed_at,
+    }
 }
 
 #[tauri::command]
@@ -58,24 +128,36 @@ pub async fn memory_search(
 
         let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
         let hits = store::search(&conn, &emb, k.unwrap_or(5), None).map_err(|e| e.to_string())?;
+
+        let items: Vec<MemoryItem> = hits.iter().map(|h| h.item.clone()).collect();
+        let clip_paths = resolve_clip_image_paths(&conn, &items)?;
         Ok(hits
             .into_iter()
-            .map(|h| MemoryHitDto {
-                id: h.item.id,
-                source: h.item.source,
-                title: h.item.title,
-                url: h.item.url,
-                domain: h.item.domain,
-                snippet: h.item.content.chars().take(120).collect(),
-                score: h.score,
-                modality: h.item.modality,
-                created_at: h.item.created_at,
-                indexed_at: h.item.indexed_at,
-            })
+            .map(|h| item_to_dto(h.item, h.score, &clip_paths))
             .collect())
     })
     .await
     .map_err(|e| format!("memory_search join: {e}"))?
+}
+
+/// 最近索引条目（知识页空查询浏览态, P3）：indexed_at 倒序，复用检索的 DTO 组装
+#[tauri::command]
+pub async fn memory_recent(
+    limit: Option<i64>,
+    db: State<'_, DatabaseState>,
+) -> Result<Vec<MemoryHitDto>, String> {
+    let db_path = db.0.clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
+        let items = store::recent_items(&conn, limit.unwrap_or(60)).map_err(|e| e.to_string())?;
+        let clip_paths = resolve_clip_image_paths(&conn, &items)?;
+        Ok(items
+            .into_iter()
+            .map(|item| item_to_dto(item, 0.0, &clip_paths))
+            .collect())
+    })
+    .await
+    .map_err(|e| format!("memory_recent join: {e}"))?
 }
 
 #[tauri::command]

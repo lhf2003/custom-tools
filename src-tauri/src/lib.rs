@@ -562,6 +562,7 @@ pub fn run() {
             commands::search::get_recent_apps,
             commands::memory::memory_search,
             commands::memory::memory_open,
+            commands::memory::memory_recent,
             commands::memory::memory_get_blacklist,
             commands::memory::memory_add_blacklist,
             commands::memory::memory_remove_blacklist,
