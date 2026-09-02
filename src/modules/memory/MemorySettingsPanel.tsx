@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { ArrowLeft, Globe, Plus, X, Cpu, Package, HardDrive } from 'lucide-react';
+import { Globe, Plus, X, Cpu, Package, HardDrive } from 'lucide-react';
 import { confirmDialog } from '@/stores/confirmStore';
 import { useToastStore } from '@/stores/toastStore';
 
 /**
- * 知识索引插件的控制面（2026-09-02 裁决 6：从陪伴设置的 MemoryCenter 迁入）：
+ * 知识索引插件的控制面（2026-09-02 起统一收进设置窗口「系统插件」tab 的行内展开区，
+ * 插件视图内不再设设置入口）：
  * 浏览记忆与隐私（统计/黑名单/一键清除）+ 本地模型环境（WeMM sidecar 状态灯/一键安装）。
  * 记忆事实与习惯模式属于贾维斯人格，仍留在陪伴设置。
  */
@@ -281,20 +282,12 @@ function LocalModelEnvSection() {
   );
 }
 
-/** 插件设置二级视图：控制面两个 section + 返回 */
-export function MemorySettings({ onBack }: { onBack: () => void }) {
+/** 系统插件 tab 行内展开面板：浏览记忆与隐私 + 本地模型环境 */
+export function MemorySettingsPanel() {
   return (
-    <div className="h-full overflow-y-auto px-4 pb-4 panel-glass">
-      <button
-        onClick={onBack}
-        className="flex items-center gap-1.5 text-xs text-app-text-tertiary hover:text-app-text-primary transition-colors cursor-pointer my-3"
-      >
-        <ArrowLeft size={13} /> 返回检索
-      </button>
-      <div className="space-y-3">
-        <BrowsingPrivacySection />
-        <LocalModelEnvSection />
-      </div>
+    <div className="p-3 space-y-3">
+      <BrowsingPrivacySection />
+      <LocalModelEnvSection />
     </div>
   );
 }

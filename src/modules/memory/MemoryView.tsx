@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { Search, Settings2, BrainCircuit } from 'lucide-react';
+import { Search, BrainCircuit } from 'lucide-react';
 import { debouncedResize } from '@/utils/tauri';
 import { WINDOW_SIZE } from '@/constants/window';
 import { usePluginPayload } from '@/plugins/usePluginPayload';
+import { useAppStore } from '@/stores/appStore';
+import { useSettingsStore } from '@/stores/settingsStore';
 import { aggregateBySource } from './aggregation';
 import { SourceCard } from './SourceCard';
-import { MemorySettings } from './MemorySettings';
 import { useMemoryOpen } from './useMemoryOpen';
 import type { MemoryHit } from './types';
 
@@ -28,11 +29,11 @@ export function MemoryView() {
   const [recentHits, setRecentHits] = useState<MemoryHit[]>([]);
   const [recentLoading, setRecentLoading] = useState(true);
   const [recentError, setRecentError] = useState<string | null>(null);
-  const [subView, setSubView] = useState<'search' | 'settings'>('search');
   const inputRef = useRef<HTMLInputElement>(null);
   // 陈旧响应守卫：只认最后一次请求的返回
   const reqRef = useRef(0);
   const openMemoryHit = useMemoryOpen();
+  const setActiveView = useAppStore((s) => s.setActiveView);
 
   useEffect(() => {
     debouncedResize(WINDOW_SIZE.PLUGIN.height, WINDOW_SIZE.PLUGIN.width);
@@ -69,7 +70,6 @@ export function MemoryView() {
     'memory',
     useCallback((payload: unknown) => {
       if (typeof payload === 'string') setQuery(payload);
-      setSubView('search');
       inputRef.current?.focus();
     }, []),
   );
@@ -111,13 +111,9 @@ export function MemoryView() {
     [recentHits],
   );
 
-  if (subView === 'settings') {
-    return <MemorySettings onBack={() => setSubView('search')} />;
-  }
-
   return (
     <div className="h-full flex flex-col px-4 pb-4 panel-glass">
-      {/* 搜索行：输入框 + 设置入口（控制面二级视图） */}
+      {/* 搜索行：设置统一在设置窗口「系统插件」tab（2026-09-02 起插件内不再设入口） */}
       <div className="flex items-center gap-2 mb-3">
         <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg bg-white/5 border border-white/10 focus-within:border-white/20 transition-colors">
           <Search className="w-4 h-4 text-app-text-tertiary flex-shrink-0" />
@@ -129,13 +125,6 @@ export function MemoryView() {
             className="flex-1 bg-transparent text-sm text-app-text-primary outline-none placeholder:text-app-text-placeholder"
           />
         </div>
-        <button
-          onClick={() => setSubView('settings')}
-          aria-label="知识索引设置"
-          className="p-2 rounded-lg text-app-text-tertiary hover:bg-white/10 hover:text-app-text-primary transition-colors cursor-pointer"
-        >
-          <Settings2 className="w-4 h-4" />
-        </button>
       </div>
 
       {/* 结果区 */}
@@ -187,7 +176,10 @@ export function MemoryView() {
           <p className="text-sm">记忆检索暂不可用</p>
           <p className="text-xs opacity-60 max-w-md text-center break-all">{searchError}</p>
           <button
-            onClick={() => setSubView('settings')}
+            onClick={() => {
+              useSettingsStore.getState().setPendingTab('builtin');
+              setActiveView('settings');
+            }}
             className="mt-1 px-3 py-1.5 rounded-lg text-xs bg-white/10 hover:bg-white/15 transition-colors cursor-pointer"
           >
             检查本地模型环境
