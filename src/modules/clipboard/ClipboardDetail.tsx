@@ -6,7 +6,7 @@
  * - 文件 → 路径卡片 + 打开所在文件夹
  * - 文本 → detectTextKind 分级：整链 → 链接卡片；JSON → 着色格式化（可切原文）；其余 → 全文（内联链接可点）
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { Copy, FolderOpen, ExternalLink, Link2, Loader2, X } from 'lucide-react';
@@ -34,15 +34,25 @@ interface ClipboardDetailProps {
 
 interface SelectionToolbar {
   x: number;
+  /** 上方放置锚点：选区顶部 - 8（容器内容坐标系） */
   y: number;
+  /** 下方放置锚点：选区底部 + 8（容器内容坐标系） */
+  yBelow: number;
+  /** 顶部可视空间不足时翻到选区下方，避免被滚动容器顶边裁断 */
+  below: boolean;
   text: string;
 }
 
 const MONO_STACK = "'Fira Code', 'JetBrains Mono', 'SF Mono', Consolas, Monaco, monospace";
 
+// 划词工具条实测约 36px（py-1.5 + 按钮行 + border），取 40 留余量
+const SEL_TOOLBAR_HEIGHT = 40;
+
 export function ClipboardDetail({ item, onCopyPartial }: ClipboardDetailProps) {
   const bodyRef = useRef<HTMLDivElement>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
   const [selToolbar, setSelToolbar] = useState<SelectionToolbar | null>(null);
+  const [toolbarLeft, setToolbarLeft] = useState(0);
   const [appIcon, setAppIcon] = useState<string | null>(null);
 
   const config = getTypeConfig(item.content_type, item.content);
@@ -85,15 +95,33 @@ export function ClipboardDetail({ item, onCopyPartial }: ClipboardDetailProps) {
       }
       const rect = range.getBoundingClientRect();
       const containerRect = body.getBoundingClientRect();
+      // 选区相对容器可视区顶部；加 scrollTop 换算成内容坐标系（绝对定位随内容滚动）
+      const visibleTop = rect.top - containerRect.top;
       setSelToolbar({
         x: rect.left - containerRect.left + rect.width / 2,
-        y: rect.top - containerRect.top - 8,
+        y: visibleTop + body.scrollTop - 8,
+        yBelow: rect.bottom - containerRect.top + body.scrollTop + 8,
+        below: visibleTop - 8 < SEL_TOOLBAR_HEIGHT,
         text: selectedText,
       });
     };
     document.addEventListener('selectionchange', handleSelectionChange);
     return () => document.removeEventListener('selectionchange', handleSelectionChange);
   }, []);
+
+  // 工具条水平钳制：按实测宽度收进容器内（原 44/320 硬编码在行首选区会左侧截断、宽面板下脱锚）。
+  // useLayoutEffect 在绘制前修正，无闪烁
+  useLayoutEffect(() => {
+    const toolbar = toolbarRef.current;
+    const body = bodyRef.current;
+    if (!selToolbar || !toolbar || !body) return;
+    const half = toolbar.offsetWidth / 2;
+    const containerW = body.clientWidth; // 含 padding、不含滚动条，与绝对定位的 padding box 一致
+    const margin = 4;
+    const min = half + margin;
+    const max = containerW - half - margin;
+    setToolbarLeft(min > max ? containerW / 2 : Math.min(Math.max(selToolbar.x, min), max));
+  }, [selToolbar]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -153,11 +181,12 @@ export function ClipboardDetail({ item, onCopyPartial }: ClipboardDetailProps) {
         {/* 划词复制工具条 */}
         {selToolbar && (
           <div
+            ref={toolbarRef}
             className="absolute z-20 flex items-center gap-1 px-2 py-1.5 bg-app-bg-elevated rounded-lg shadow-lg border border-app-border animate-in fade-in zoom-in-95 duration-150"
             style={{
-              left: `${Math.max(44, Math.min(selToolbar.x, 320))}px`,
-              top: `${Math.max(0, selToolbar.y)}px`,
-              transform: 'translate(-50%, -100%)',
+              left: `${toolbarLeft}px`,
+              top: `${Math.max(0, selToolbar.below ? selToolbar.yBelow : selToolbar.y)}px`,
+              transform: selToolbar.below ? 'translate(-50%, 0)' : 'translate(-50%, -100%)',
             }}
             onMouseDown={(e) => {
               e.preventDefault(); // 保持文本选择不被点击清除
