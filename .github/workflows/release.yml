@@ -24,6 +24,19 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      # src-tauri/resources/uv.exe 被 .gitignore（52MB 二进制不入库），CI 现拉官方发布包
+      # 版本与本地开发机保持一致（0.8.4），--version 调用兼作冒烟验证
+      - name: Download uv.exe (bundled resource)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = "$env:TEMP\uv-dist.zip"
+          Invoke-WebRequest -Uri "https://github.com/astral-sh/uv/releases/download/0.8.4/uv-x86_64-pc-windows-msvc.zip" -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath "$env:TEMP\uv-dist" -Force
+          New-Item -ItemType Directory -Force "src-tauri/resources" | Out-Null
+          Copy-Item "$env:TEMP\uv-dist\uv.exe" "src-tauri/resources/uv.exe"
+          & "src-tauri/resources/uv.exe" --version
+
       - name: Update version from release tag
         shell: pwsh
         run: |
