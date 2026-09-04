@@ -7,7 +7,7 @@
 //! 环境变量: NERVIS_DB_PATH / NERVIS_NOTES_DIR / NERVIS_WEMM_MODEL_DIR / NERVIS_WEMM_PYTHON / NERVIS_WEMM_SERVER
 
 use anyhow::{Context, Result};
-use nervis_memory::chunk::{chunk_text, content_hash, is_indexable};
+use nervis_memory::chunk::{chunk_text, is_indexable, Chunk};
 use nervis_memory::sidecar::{MemoryEmbedder, SidecarEmbedder};
 use nervis_memory::store::{self, DocMeta, IndexOutcome};
 use rusqlite::Connection;
@@ -31,7 +31,7 @@ fn notes_dir() -> Result<PathBuf> {
     Ok(data_base()?.join("notes"))
 }
 
-/// 单文档索引: 切块 → 批量 embed → 带去重写入
+/// 单文档索引: 语义分片 → 增量索引（未变块复用向量零重 embed, CASE-003）
 fn index_one(
     conn: &mut Connection,
     embedder: &mut SidecarEmbedder,
@@ -39,16 +39,13 @@ fn index_one(
     text: &str,
 ) -> Result<IndexOutcome> {
     if !is_indexable(text) {
-        return Ok(IndexOutcome::Indexed(0));
+        return Ok(IndexOutcome::Indexed { total: 0, embedded: 0 });
     }
-    let chunks = chunk_text(text);
-    let embeddings = embedder.embed_documents(&chunks)?;
-    let rows: Vec<_> = chunks
-        .iter()
-        .enumerate()
-        .map(|(i, c)| (i as i64, c.clone(), content_hash(c), embeddings[i].clone()))
-        .collect();
-    store::index_document(conn, meta, &rows)
+    let chunks = chunk_text(meta.title, text);
+    if chunks.is_empty() {
+        return Ok(IndexOutcome::Indexed { total: 0, embedded: 0 });
+    }
+    store::index_chunks(conn, meta, chunks, |texts| embedder.embed_documents(texts))
 }
 
 fn backfill(conn: &mut Connection, embedder: &mut SidecarEmbedder) -> Result<()> {
@@ -77,7 +74,7 @@ fn backfill(conn: &mut Connection, embedder: &mut SidecarEmbedder) -> Result<()>
                 ..Default::default()
             };
             match index_one(conn, embedder, &meta, content)? {
-                IndexOutcome::Indexed(n) if n > 0 => indexed += n,
+                IndexOutcome::Indexed { total, .. } if total > 0 => indexed += total,
                 IndexOutcome::SkippedUnchanged => skipped += 1,
                 _ => {}
             }
@@ -99,7 +96,7 @@ fn backfill(conn: &mut Connection, embedder: &mut SidecarEmbedder) -> Result<()>
             ..Default::default()
         };
         match index_one(conn, embedder, &meta, &text)? {
-            IndexOutcome::Indexed(n) if n > 0 => indexed += n,
+            IndexOutcome::Indexed { total, .. } if total > 0 => indexed += total,
             IndexOutcome::SkippedUnchanged => skipped += 1,
             _ => {}
         }
@@ -125,10 +122,14 @@ fn backfill(conn: &mut Connection, embedder: &mut SidecarEmbedder) -> Result<()>
                 created_at: created_s.as_deref(),
                 ..Default::default()
             };
-            let emb = embedder.embed_documents(std::slice::from_ref(fact))?;
-            let row = vec![(0i64, fact.clone(), content_hash(fact), emb[0].clone())];
-            match store::index_document(conn, &meta, &row)? {
-                IndexOutcome::Indexed(n) if n > 0 => indexed += n,
+            let outcome = store::index_chunks(
+                conn,
+                &meta,
+                vec![Chunk { content: fact.clone(), embed_text: fact.clone() }],
+                |texts| embedder.embed_documents(texts),
+            )?;
+            match outcome {
+                IndexOutcome::Indexed { total, .. } if total > 0 => indexed += total,
                 IndexOutcome::SkippedUnchanged => skipped += 1,
                 _ => {}
             }

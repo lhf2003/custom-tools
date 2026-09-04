@@ -523,6 +523,7 @@ fn run_env_install(app: &tauri::AppHandle) -> Result<(), String> {
 // ---------- 二期 N2: 剪贴板图片 opt-in 索引 ----------
 
 /// 「索引此图」：剪贴板图片 → sidecar embed_image → memory_items (modality=image)
+/// CASE-003: plan 先行，内容未变直接跳过 embed_image（省一次图片推理）
 #[tauri::command]
 pub async fn memory_index_image(
     image_base64: String,
@@ -535,18 +536,7 @@ pub async fn memory_index_image(
     let db_path = db.0.clone();
     let embedder_arc = state.0.clone();
     tokio::task::spawn_blocking(move || {
-        let mut guard = embedder_arc.lock().map_err(|e| format!("embedder lock: {e}"))?;
-        if guard.is_none() {
-            *guard = Some(SidecarEmbedder::resolve_default().map_err(|e| e.to_string())?);
-        }
-        let embedder = guard.as_mut().expect("embedder just initialized");
-        let emb = embedder
-            .embed_image(&image_base64, &mime)
-            .map_err(|e| e.to_string())?;
-        drop(guard);
-
         let mut conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
-        let hash = nervis_memory::chunk::content_hash(&label);
         let meta = store::DocMeta {
             source: "clipboard",
             source_ref: Some(&source_ref),
@@ -558,8 +548,34 @@ pub async fn memory_index_image(
             created_at: None,
             expires_at: None,
         };
-        let rows = vec![(0i64, label.clone(), hash, emb)];
-        store::index_document(&mut conn, &meta, &rows).map_err(|e| e.to_string())?;
+        let planned = store::plan_index(
+            &conn,
+            "clipboard",
+            &source_ref,
+            vec![nervis_memory::chunk::Chunk {
+                content: label.clone(),
+                embed_text: label.clone(),
+            }],
+        )
+        .map_err(|e| e.to_string())?;
+        if planned.iter().all(|p| p.reuse_rowid.is_some()) {
+            return store::commit_index(&mut conn, &meta, planned, &std::collections::HashMap::new())
+                .map(|_| ())
+                .map_err(|e| e.to_string());
+        }
+        let mut guard = embedder_arc.lock().map_err(|e| format!("embedder lock: {e}"))?;
+        if guard.is_none() {
+            *guard = Some(SidecarEmbedder::resolve_default().map_err(|e| e.to_string())?);
+        }
+        let emb = guard
+            .as_mut()
+            .expect("embedder just initialized")
+            .embed_image(&image_base64, &mime)
+            .map_err(|e| e.to_string())?;
+        drop(guard);
+        let mut embeddings = std::collections::HashMap::new();
+        embeddings.insert(planned[0].chunk_index, emb);
+        store::commit_index(&mut conn, &meta, planned, &embeddings).map_err(|e| e.to_string())?;
         Ok(())
     })
     .await

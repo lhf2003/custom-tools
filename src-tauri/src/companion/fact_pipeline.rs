@@ -11,7 +11,7 @@
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
-use nervis_memory::chunk::content_hash;
+use nervis_memory::chunk::Chunk;
 use nervis_memory::sidecar::{MemoryEmbedder, SidecarEmbedder};
 use nervis_memory::store::{self, DocMeta};
 use rusqlite::Connection;
@@ -163,41 +163,53 @@ pub(crate) fn sync_fact_index(conn: &mut Connection) -> (usize, usize) {
         }
     }
 
-    // 只 embed 内容有变的（index_document 自身也判哈希, 这里预检省下 embed 开销）
-    let pending: Vec<&db::MemoryFact> = facts
-        .iter()
-        .filter(|f| {
-            let key = format!("fact:{}", f.id);
-            let old: Option<String> = conn
-                .query_row(
-                    "SELECT content_hash FROM memory_items WHERE source = 'memory_fact' AND dedup_key = ?1",
-                    [key],
-                    |r| r.get(0),
-                )
-                .ok();
-            old.as_deref() != Some(content_hash(&f.fact).as_str())
-        })
-        .collect();
-    if pending.is_empty() {
+    // 只 embed 内容有变的（CASE-003: plan_index 统一承担哈希预检，命中块复用向量）
+    let mut plans: Vec<(String, Vec<store::PlannedChunk>)> = Vec::new();
+    let mut embed_texts: Vec<String> = Vec::new();
+    for f in &facts {
+        let key = format!("fact:{}", f.id);
+        let planned = store::plan_index(
+            conn,
+            "memory_fact",
+            &key,
+            vec![Chunk { content: f.fact.clone(), embed_text: f.fact.clone() }],
+        );
+        let Ok(planned) = planned else { continue };
+        for p in &planned {
+            if p.reuse_rowid.is_none() {
+                embed_texts.push(p.embed_text.clone());
+            }
+        }
+        plans.push((key, planned));
+    }
+    if embed_texts.is_empty() {
         return (0, removed);
     }
-    let texts: Vec<String> = pending.iter().map(|f| f.fact.clone()).collect();
     let Ok(mut guard) = mx.lock() else {
         return (0, removed);
     };
-    let Ok(embs) = guard.embed_documents(&texts) else {
+    let Ok(embs) = guard.embed_documents(&embed_texts) else {
         return (0, removed);
     };
+    drop(guard);
     let mut rewritten = 0;
-    for (f, emb) in pending.iter().zip(embs) {
-        let key = format!("fact:{}", f.id);
+    let mut emb_iter = embs.into_iter();
+    for (key, planned) in plans {
+        let mut embeddings = std::collections::HashMap::new();
+        for p in &planned {
+            if p.reuse_rowid.is_none() {
+                let Some(v) = emb_iter.next() else { break };
+                embeddings.insert(p.chunk_index, v);
+            }
+        }
         let meta = DocMeta {
             source: "memory_fact",
             source_ref: Some(&key),
             ..Default::default()
         };
-        let rows = vec![(0i64, f.fact.clone(), content_hash(&f.fact), emb)];
-        if let Ok(store::IndexOutcome::Indexed(_)) = store::index_document(conn, &meta, &rows) {
+        if let Ok(store::IndexOutcome::Indexed { .. }) =
+            store::commit_index(conn, &meta, planned, &embeddings)
+        {
             rewritten += 1;
         }
     }

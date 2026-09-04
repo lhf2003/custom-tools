@@ -2,13 +2,16 @@
 //!
 //! 决策依据 D7/D10/D11 + 二期裁决 CASE-007:
 //! - 向量进 flowhub.db, 与 clipboard/notes 同库 JOIN, 暴力扫描规模足够
-//! - URL 级去重 + 内容哈希判变更 (D11)
+//! - URL 级去重 + 内容哈希判变更 (D11); CASE-003: plan/commit 增量索引——
+//!   哈希对 embed_text 计算，命中块复用向量零重 embed，未变块 rowid/向量不动
 //! - 二期 Q9: 全部数据永久保留（推翻一期 90 天滚动）, expires_at 恒 NULL, 保留期配置与滚动清理已撤除
 //! - 二期 N0: WeMM-2B 2048 全维（512 截断裸查询不过线弃用）, schema v1->v2 迁移重建 vec 表
 
+use crate::chunk::{content_hash, Chunk};
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 /// WeMM-Embedding-2B 全维输出（N0: 2048d+指令 top-3 94%; 换模型时同步改这里并重建 memory_vectors）
 pub const EMBEDDING_DIM: usize = 2048;
@@ -59,10 +62,10 @@ pub struct DocMeta<'a> {
 
 #[derive(Debug, PartialEq)]
 pub enum IndexOutcome {
-    /// 内容哈希未变, 跳过（D11 去重）
+    /// 全部块哈希命中存量且行数一致, 未触碰（D11 去重）
     SkippedUnchanged,
-    /// 实际写入的 chunk 数
-    Indexed(usize),
+    /// total: 文档总块数; embedded: 实际重 embed 的块数（增量索引, CASE-003）
+    Indexed { total: usize, embedded: usize },
 }
 
 pub fn now_local() -> String {
@@ -268,21 +271,23 @@ pub fn source_stats(conn: &Connection) -> Result<Vec<(String, i64)>> {
     Ok(mapped.collect::<std::result::Result<Vec<_>, _>>()?)
 }
 
-/// popup「最近视频」条目：按基础 url 聚合的画面/字幕段数
+/// popup「最近索引」条目：按基础 url 聚合的页面级统计（画面/字幕段数 + 文本块数）
 #[derive(Debug, Clone, Serialize)]
-pub struct RecentVideo {
+pub struct RecentPage {
     /// 剥离 ?t=/&t= 段级后缀后的页面 url
     pub url: String,
     pub title: Option<String>,
     pub video_segments: i64,
     pub subtitle_segments: i64,
+    /// 文本块数（browser 来源非 video 条目：正文块 + 页面主图）
+    pub text_chunks: i64,
     pub last_indexed: String,
 }
 
-/// 最近索引的视频列表（扩展 popup 仪表盘用）：
+/// 最近索引的页面列表（扩展 popup 仪表盘用）：
 /// 画面段（modality=video）与字幕段（source=subtitle）的 url 都带 ?t=/&t= 段级后缀，
-/// 按剥离后缀的基础 url 分组聚合，各源只计自己的段数。
-pub fn recent_videos(conn: &Connection, limit: i64) -> Result<Vec<RecentVideo>> {
+/// 按剥离后缀的基础 url 分组聚合，各源只计自己的段数；正文块与主图计 text_chunks。
+pub fn recent_pages(conn: &Connection, limit: i64) -> Result<Vec<RecentPage>> {
     let mut st = conn.prepare(
         // RTRIM 尾斜杠归一：BV 页带不带 / 是同一视频（e2e 直发与页面采集会产生两种形态）
         "SELECT
@@ -294,92 +299,240 @@ pub fn recent_videos(conn: &Connection, limit: i64) -> Result<Vec<RecentVideo>> 
            MAX(title),
            SUM(CASE WHEN modality = 'video' THEN 1 ELSE 0 END),
            SUM(CASE WHEN source = 'subtitle' THEN 1 ELSE 0 END),
+           SUM(CASE WHEN modality != 'video' AND source != 'subtitle' THEN 1 ELSE 0 END),
            MAX(indexed_at)
          FROM memory_items
-         WHERE modality = 'video' OR source = 'subtitle'
+         WHERE source IN ('browser', 'subtitle')
          GROUP BY base_url
          ORDER BY MAX(indexed_at) DESC
          LIMIT ?1",
     )?;
     let mapped = st.query_map(params![limit], |r| {
-        Ok(RecentVideo {
+        Ok(RecentPage {
             url: r.get(0)?,
             title: r.get(1)?,
             video_segments: r.get(2)?,
             subtitle_segments: r.get(3)?,
-            last_indexed: r.get(4)?,
+            text_chunks: r.get(4)?,
+            last_indexed: r.get(5)?,
         })
     })?;
     Ok(mapped.collect::<std::result::Result<Vec<_>, _>>()?)
 }
 
-/// 文档级索引入口: 去重判断 + 变更替换, 事务保证「删旧写新」原子
-/// chunks: (chunk_index, content, content_hash, embedding)
-pub fn index_document(
-    conn: &mut Connection,
-    meta: &DocMeta,
-    chunks: &[(i64, String, String, Vec<f32>)],
-) -> Result<IndexOutcome> {
-    let dedup_key = meta
-        .dedup_key
+/// 去重键推导：dedup_key > url > source_ref（plan/commit 共用同一推导，保证一致）
+pub fn resolve_dedup_key<'a>(meta: &'a DocMeta<'a>) -> Result<&'a str> {
+    meta.dedup_key
         .or(meta.url)
         .or(meta.source_ref)
-        .context("DocMeta 缺 dedup_key/url/source_ref, 无法去重")?;
+        .context("DocMeta 缺 dedup_key/url/source_ref, 无法去重")
+}
 
-    let tx = conn.transaction()?;
+/// 增量索引的待索引块（plan_index 输出 / commit_index 输入）
+#[derive(Debug)]
+pub struct PlannedChunk {
+    pub chunk_index: i64,
+    /// 入库文本（展示用）
+    pub content: String,
+    /// embed_text 的 xxh3（标题/overlap 变更同样触发重 embed）
+    pub content_hash: String,
+    /// embed 输入文本（仅 reuse_rowid=None 的块需要送 embedding）
+    pub embed_text: String,
+    /// 内容哈希命中存量同 key 块 → 复用该行向量，无需 embed
+    pub reuse_rowid: Option<i64>,
+}
 
-    // 已索引的同 key chunk 哈希
-    let existing: Vec<(i64, i64, String)> = {
-        let mut st = tx.prepare(
-            "SELECT id, chunk_index, content_hash FROM memory_items WHERE source = ?1 AND dedup_key = ?2",
+/// plan（CASE-003 增量索引第一步）：比对存量 (id, content_hash)，按哈希匹配标出可复用块。
+/// 同文档内同内容块多次出现按 id 序消费，块移动位置也复用。
+pub fn plan_index(
+    conn: &Connection,
+    source: &str,
+    dedup_key: &str,
+    chunks: Vec<Chunk>,
+) -> Result<Vec<PlannedChunk>> {
+    let existing: Vec<(i64, String)> = {
+        let mut st = conn.prepare(
+            "SELECT id, content_hash FROM memory_items WHERE source = ?1 AND dedup_key = ?2 ORDER BY id",
         )?;
-        let mapped = st.query_map(params![meta.source, dedup_key], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        let mapped = st.query_map(params![source, dedup_key], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
         })?;
         mapped.collect::<std::result::Result<Vec<_>, _>>()?
     };
+    let mut pool: HashMap<String, VecDeque<i64>> = HashMap::new();
+    for (id, hash) in existing {
+        pool.entry(hash).or_default().push_back(id);
+    }
+    Ok(chunks
+        .into_iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let hash = content_hash(&c.embed_text);
+            let reuse_rowid = pool.get_mut(&hash).and_then(|q| q.pop_front());
+            PlannedChunk {
+                chunk_index: i as i64,
+                content: c.content,
+                content_hash: hash,
+                embed_text: c.embed_text,
+                reuse_rowid,
+            }
+        })
+        .collect())
+}
 
-    let unchanged = existing.len() == chunks.len()
-        && chunks.iter().all(|(ci, _, h, _)| {
-            existing.iter().any(|(_, eci, eh)| eci == ci && eh == h)
-        });
-    if unchanged {
+/// commit（CASE-003 增量索引第二步）：事务内「删旧 / 复用 UPDATE / 新块 INSERT」。
+/// embeddings 按 chunk_index 取向量（仅 reuse_rowid=None 的块需要）。
+/// 全部块复用且行数一致 → SkippedUnchanged（不触碰 indexed_at）；
+/// 复用块刷新元数据但 rowid/向量不动（向量零重算）。
+pub fn commit_index(
+    conn: &mut Connection,
+    meta: &DocMeta,
+    planned: Vec<PlannedChunk>,
+    embeddings: &HashMap<i64, Vec<f32>>,
+) -> Result<IndexOutcome> {
+    let dedup_key = resolve_dedup_key(meta)?;
+
+    let existing_ids: Vec<i64> = {
+        let mut st = conn.prepare(
+            "SELECT id FROM memory_items WHERE source = ?1 AND dedup_key = ?2 ORDER BY id",
+        )?;
+        let mapped = st.query_map(params![meta.source, dedup_key], |r| r.get(0))?;
+        mapped.collect::<std::result::Result<Vec<_>, _>>()?
+    };
+    let reuse_set: HashSet<i64> = planned.iter().filter_map(|p| p.reuse_rowid).collect();
+
+    let all_reused = planned.len() == existing_ids.len()
+        && planned.iter().all(|p| p.reuse_rowid.is_some())
+        && existing_ids.iter().all(|id| reuse_set.contains(id));
+    if all_reused {
         return Ok(IndexOutcome::SkippedUnchanged);
     }
 
-    // 变更: 先删旧向量与旧行, 再写新（同事务）
-    for (id, _, _) in &existing {
-        tx.execute("DELETE FROM memory_vectors WHERE rowid = ?1", params![id])?;
+    let tx = conn.transaction()?;
+
+    // 删不再需要的旧行 + 旧向量
+    for id in &existing_ids {
+        if !reuse_set.contains(id) {
+            tx.execute("DELETE FROM memory_vectors WHERE rowid = ?1", params![id])?;
+            tx.execute("DELETE FROM memory_items WHERE id = ?1", params![id])?;
+        }
     }
-    tx.execute(
-        "DELETE FROM memory_items WHERE source = ?1 AND dedup_key = ?2",
-        params![meta.source, dedup_key],
-    )?;
 
     let now = now_local();
     let modality = meta.modality.unwrap_or("text");
-    for (ci, content, hash, emb) in chunks {
-        if emb.len() != EMBEDDING_DIM {
-            anyhow::bail!("embedding 维度 {} 与库定义 {} 不符", emb.len(), EMBEDDING_DIM);
+    let mut embedded = 0usize;
+    for p in &planned {
+        if let Some(rowid) = p.reuse_rowid {
+            // 并发兜底：plan 与 commit 之间复用行被外部改动（按 source+dedup_key 隔离实际不可达）
+            let still_there: bool = tx
+                .query_row(
+                    "SELECT COUNT(*) FROM memory_items WHERE id = ?1 AND source = ?2 AND dedup_key = ?3",
+                    params![rowid, meta.source, dedup_key],
+                    |r| r.get::<_, i64>(0),
+                )? > 0;
+            anyhow::ensure!(still_there, "复用行 {rowid} 在 plan 后被并发修改，请整体重试");
+            // 复用：刷新元数据，rowid/向量不动
+            tx.execute(
+                "UPDATE memory_items SET chunk_index = ?1, content = ?2, content_hash = ?3,
+                     source_ref = ?4, url = ?5, domain = ?6, title = ?7, modality = ?8,
+                     created_at = ?9, indexed_at = ?10, expires_at = ?11
+                 WHERE id = ?12",
+                params![
+                    p.chunk_index, p.content, p.content_hash,
+                    meta.source_ref, meta.url, meta.domain, meta.title, modality,
+                    meta.created_at, now, meta.expires_at, rowid,
+                ],
+            )?;
+        } else {
+            let emb = embeddings
+                .get(&p.chunk_index)
+                .with_context(|| format!("缺 chunk {} 的向量", p.chunk_index))?;
+            anyhow::ensure!(
+                emb.len() == EMBEDDING_DIM,
+                "embedding 维度 {} 与库定义 {} 不符",
+                emb.len(),
+                EMBEDDING_DIM
+            );
+            tx.execute(
+                "INSERT INTO memory_items
+                 (source, source_ref, url, domain, title, dedup_key, chunk_index, content, content_hash, modality, created_at, indexed_at, expires_at)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+                params![
+                    meta.source, meta.source_ref, meta.url, meta.domain, meta.title,
+                    dedup_key, p.chunk_index, p.content, p.content_hash, modality,
+                    meta.created_at, now, meta.expires_at,
+                ],
+            )?;
+            let rowid = tx.last_insert_rowid();
+            tx.execute(
+                "INSERT INTO memory_vectors(rowid, embedding) VALUES (?1, ?2)",
+                params![rowid, emb_to_bytes(emb)],
+            )?;
+            embedded += 1;
         }
-        tx.execute(
-            "INSERT INTO memory_items
-             (source, source_ref, url, domain, title, dedup_key, chunk_index, content, content_hash, modality, created_at, indexed_at, expires_at)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
-            params![
-                meta.source, meta.source_ref, meta.url, meta.domain, meta.title,
-                dedup_key, ci, content, hash, modality, meta.created_at, now, meta.expires_at,
-            ],
-        )?;
-        let rowid = tx.last_insert_rowid();
-        tx.execute(
-            "INSERT INTO memory_vectors(rowid, embedding) VALUES (?1, ?2)",
-            params![rowid, emb_to_bytes(emb)],
-        )?;
     }
-    let n = chunks.len();
+    let total = planned.len();
     tx.commit()?;
-    Ok(IndexOutcome::Indexed(n))
+    Ok(IndexOutcome::Indexed { total, embedded })
+}
+
+/// 文本文档一站式索引：plan → 只对变更块 embed（回调）→ commit。
+pub fn index_chunks(
+    conn: &mut Connection,
+    meta: &DocMeta,
+    chunks: Vec<Chunk>,
+    embed: impl FnOnce(&[String]) -> Result<Vec<Vec<f32>>>,
+) -> Result<IndexOutcome> {
+    let dedup_key = resolve_dedup_key(meta)?;
+    let planned = plan_index(conn, meta.source, dedup_key, chunks)?;
+    let texts: Vec<String> = planned
+        .iter()
+        .filter(|p| p.reuse_rowid.is_none())
+        .map(|p| p.embed_text.clone())
+        .collect();
+    let vectors = if texts.is_empty() {
+        Vec::new()
+    } else {
+        embed(&texts)?
+    };
+    anyhow::ensure!(
+        vectors.len() == texts.len(),
+        "embed 返回数量 {} 与请求 {} 不符",
+        vectors.len(),
+        texts.len()
+    );
+    let mut embeddings = HashMap::new();
+    let mut it = vectors.into_iter();
+    for p in &planned {
+        if p.reuse_rowid.is_none() {
+            embeddings.insert(p.chunk_index, it.next().expect("数量已校验"));
+        }
+    }
+    commit_index(conn, meta, planned, &embeddings)
+}
+
+/// 非文本向量单块直索引（视频画面段/主图：向量已由调用方算好）。
+/// 单块无增量意义：哈希命中 → SkippedUnchanged；否则替换写入。
+pub fn index_single_with_vector(
+    conn: &mut Connection,
+    meta: &DocMeta,
+    content: String,
+    vector: Vec<f32>,
+) -> Result<IndexOutcome> {
+    let dedup_key = resolve_dedup_key(meta)?;
+    let planned = plan_index(
+        conn,
+        meta.source,
+        dedup_key,
+        vec![Chunk { embed_text: content.clone(), content }],
+    )?;
+    let mut embeddings = HashMap::new();
+    if let Some(p) = planned.first() {
+        if p.reuse_rowid.is_none() {
+            embeddings.insert(p.chunk_index, vector);
+        }
+    }
+    commit_index(conn, meta, planned, &embeddings)
 }
 
 /// 语义检索: vec0 KNN → 过滤过期/来源 → 换算余弦分 → JOIN 元数据
@@ -481,4 +634,115 @@ pub fn clear_source(conn: &Connection, source: &str) -> Result<usize> {
     }
     let n = conn.execute("DELETE FROM memory_items WHERE source = ?1", params![source])?;
     Ok(n)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn setup() -> Connection {
+        register_vec_extension();
+        let conn = Connection::open_in_memory().unwrap();
+        init_memory_tables(&conn).unwrap();
+        conn
+    }
+
+    fn chunk(text: &str) -> Chunk {
+        Chunk { content: text.into(), embed_text: text.into() }
+    }
+
+    fn meta() -> DocMeta<'static> {
+        DocMeta { source: "browser", url: Some("https://a.com/x"), ..Default::default() }
+    }
+
+    fn fake_emb(seed: f32) -> Vec<f32> {
+        vec![seed; EMBEDDING_DIM]
+    }
+
+    /// 便捷：plan + 全量假向量 commit（模拟 embed 回调按序给 1.0/2.0/3.0…）
+    fn run_index(conn: &mut Connection, chunks: Vec<Chunk>) -> IndexOutcome {
+        index_chunks(conn, &meta(), chunks, |texts| {
+            Ok(texts.iter().enumerate().map(|(i, _)| fake_emb(i as f32 + 1.0)).collect())
+        })
+        .unwrap()
+    }
+
+    fn rowids(conn: &Connection) -> Vec<i64> {
+        let mut st = conn
+            .prepare("SELECT id FROM memory_items WHERE source = 'browser' ORDER BY chunk_index")
+            .unwrap();
+        st.query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn fresh_index_writes_all_chunks() {
+        let mut conn = setup();
+        let outcome = run_index(&mut conn, vec![chunk("甲"), chunk("乙"), chunk("丙")]);
+        assert_eq!(outcome, IndexOutcome::Indexed { total: 3, embedded: 3 });
+        assert_eq!(rowids(&conn).len(), 3);
+    }
+
+    #[test]
+    fn unchanged_skips() {
+        let mut conn = setup();
+        run_index(&mut conn, vec![chunk("甲"), chunk("乙")]);
+        let outcome = run_index(&mut conn, vec![chunk("甲"), chunk("乙")]);
+        assert_eq!(outcome, IndexOutcome::SkippedUnchanged);
+    }
+
+    #[test]
+    fn partial_change_reembeds_only_changed_chunk() {
+        let mut conn = setup();
+        run_index(&mut conn, vec![chunk("甲"), chunk("乙"), chunk("丙")]);
+        let before = rowids(&conn);
+        let vec_before: Vec<u8> = conn
+            .query_row("SELECT embedding FROM memory_vectors WHERE rowid = ?1", [before[0]], |r| {
+                r.get(0)
+            })
+            .unwrap();
+
+        // 改中间一块：embedded=1，首尾块 rowid/向量原样保留
+        let outcome = run_index(&mut conn, vec![chunk("甲"), chunk("乙改"), chunk("丙")]);
+        assert_eq!(outcome, IndexOutcome::Indexed { total: 3, embedded: 1 });
+        let after = rowids(&conn);
+        assert_eq!(before[0], after[0], "首块 rowid 应复用");
+        assert_eq!(before[2], after[2], "尾块 rowid 应复用");
+        let vec_after: Vec<u8> = conn
+            .query_row("SELECT embedding FROM memory_vectors WHERE rowid = ?1", [after[0]], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(vec_before, vec_after, "复用块向量不应被触碰");
+    }
+
+    #[test]
+    fn shrink_removes_stale_rows() {
+        let mut conn = setup();
+        run_index(&mut conn, vec![chunk("甲"), chunk("乙"), chunk("丙")]);
+        let outcome = run_index(&mut conn, vec![chunk("甲"), chunk("丙")]);
+        // 结构变更零 embed：丙移动位置仍按哈希复用
+        assert_eq!(outcome, IndexOutcome::Indexed { total: 2, embedded: 0 });
+        assert_eq!(rowids(&conn).len(), 2);
+        let contents: Vec<String> = {
+            let mut st = conn
+                .prepare("SELECT content FROM memory_items WHERE source = 'browser' ORDER BY chunk_index")
+                .unwrap();
+            st.query_map([], |r| r.get(0))
+                .unwrap()
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .unwrap()
+        };
+        assert_eq!(contents, vec!["甲".to_string(), "丙".to_string()]);
+    }
+
+    #[test]
+    fn missing_embedding_errors() {
+        let mut conn = setup();
+        let planned = plan_index(&conn, "browser", "https://a.com/x", vec![chunk("甲")]).unwrap();
+        let result = commit_index(&mut conn, &meta(), planned, &HashMap::new());
+        assert!(result.is_err());
+    }
 }

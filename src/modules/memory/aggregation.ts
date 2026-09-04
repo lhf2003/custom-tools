@@ -21,7 +21,7 @@ export interface AggregatedSource {
   lastIndexedAt: string;
 }
 
-/** 剥离段级定位后缀（与 store.rs recent_videos 的聚合语义一致） */
+/** 剥离段级定位后缀（与 store.rs recent_pages 的聚合语义一致） */
 export function baseUrl(url: string): string {
   return url.replace(/[?&]t=\d+.*$/, '').replace(/\/$/, '');
 }

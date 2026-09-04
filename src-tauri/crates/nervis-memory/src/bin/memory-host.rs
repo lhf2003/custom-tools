@@ -5,7 +5,7 @@
 //! 安全: 无端口无网络，只有浏览器按 manifest 拉起的进程能到达本进程。
 
 use anyhow::{Context, Result};
-use nervis_memory::chunk::{chunk_text, content_hash, is_indexable};
+use nervis_memory::chunk::{chunk_text, is_indexable, Chunk};
 use nervis_memory::sidecar::{MemoryEmbedder, SidecarEmbedder};
 use nervis_memory::store::{self, DocMeta};
 use rusqlite::Connection;
@@ -59,8 +59,8 @@ enum Request {
     },
     /// 整视频索引进度查询（扩展轮询）
     VideoIndexProgress { url: String },
-    /// popup 仪表盘：最近索引的视频（画面/字幕段数聚合）+ 进行中索引任务快照
-    RecentVideos,
+    /// popup 仪表盘：最近索引的页面（视频段数+文本块数聚合）+ 进行中索引任务快照
+    RecentPages,
     /// D10: 一键清除浏览索引
     ClearBrowsing,
     /// D10: 按域名删除
@@ -162,9 +162,8 @@ fn run_video_url_job(
                     created_at: created_at.as_deref(),
                     expires_at: None,
                 };
-                let rows = vec![(0i64, desc.clone(), content_hash(&desc), vector)];
-                match store::index_document(&mut conn, &meta, &rows)? {
-                    store::IndexOutcome::Indexed(_) => {
+                match store::index_single_with_vector(&mut conn, &meta, desc.clone(), vector)? {
+                    store::IndexOutcome::Indexed { .. } => {
                         video_job_update(&url, |j| j.done += 1)
                     }
                     _ => video_job_update(&url, |j| j.skipped += 1),
@@ -251,39 +250,54 @@ fn handle(req: Request, conn: &mut Connection, embedder: &mut SidecarEmbedder) -
                 created_at: created_at.as_deref(),
                 expires_at: None,
             };
-            let chunks = chunk_text(&content);
-            let embeddings = embedder.embed_documents(&chunks)?;
-            let rows: Vec<_> = chunks
-                .iter()
-                .enumerate()
-                .map(|(i, c)| (i as i64, c.clone(), content_hash(c), embeddings[i].clone()))
-                .collect();
-            let outcome = store::index_document(conn, &meta, &rows)?;
+            // CASE-003: 语义分片（标题注入 embed_text）；index_chunks 增量索引——
+            // 未变块复用向量零重 embed
+            let chunks = chunk_text(title.as_deref(), &content);
+            if chunks.is_empty() {
+                return Ok(serde_json::json!({"outcome": "too_short"}));
+            }
+            let outcome = store::index_chunks(conn, &meta, chunks, |texts| {
+                embedder.embed_documents(texts)
+            })?;
 
             // N2: 页面主图单独索引一条 modality=image 记录（dedup_key 加 #img 后缀与正文区分）
+            // plan 先行：内容未变直接跳过 embed_image（省 sidecar 一次图片推理）
             let mut image_indexed = false;
             if let (Some(b64), Some(page_url)) = (&image_base64, &url) {
-                if let Ok(emb) = embedder.embed_image(b64, image_mime.as_deref().unwrap_or("image/jpeg")) {
-                    let img_desc = format!("[页面主图] {}", title.as_deref().unwrap_or(""));
-                    let img_dedup = format!("{page_url}#img");
-                    let img_meta = DocMeta {
-                        source: &source,
-                        source_ref: None,
-                        url: url.as_deref(),
-                        domain: domain.as_deref(),
-                        title: title.as_deref(),
-                        modality: Some("image"),
-                        dedup_key: Some(&img_dedup),
-                        created_at: created_at.as_deref(),
-                        expires_at: None,
-                    };
-                    let img_rows = vec![(0i64, img_desc.clone(), content_hash(&img_desc), emb)];
-                    image_indexed = matches!(
-                        store::index_document(conn, &img_meta, &img_rows)?,
-                        store::IndexOutcome::Indexed(_)
-                    );
+                let img_desc = format!("[页面主图] {}", title.as_deref().unwrap_or(""));
+                let img_dedup = format!("{page_url}#img");
+                let img_meta = DocMeta {
+                    source: &source,
+                    source_ref: None,
+                    url: url.as_deref(),
+                    domain: domain.as_deref(),
+                    title: title.as_deref(),
+                    modality: Some("image"),
+                    dedup_key: Some(&img_dedup),
+                    created_at: created_at.as_deref(),
+                    expires_at: None,
+                };
+                let planned = store::plan_index(
+                    conn,
+                    &source,
+                    &img_dedup,
+                    vec![Chunk { content: img_desc.clone(), embed_text: img_desc }],
+                )?;
+                if planned.iter().any(|p| p.reuse_rowid.is_none()) {
+                    if let Ok(emb) =
+                        embedder.embed_image(b64, image_mime.as_deref().unwrap_or("image/jpeg"))
+                    {
+                        let mut embeddings = std::collections::HashMap::new();
+                        embeddings.insert(planned[0].chunk_index, emb);
+                        image_indexed = matches!(
+                            store::commit_index(conn, &img_meta, planned, &embeddings)?,
+                            store::IndexOutcome::Indexed { .. }
+                        );
+                    }
+                    // embed_image 失败不阻塞正文索引（sidecar 可能不支持/图片损坏）
+                } else {
+                    store::commit_index(conn, &img_meta, planned, &std::collections::HashMap::new())?;
                 }
-                // embed_image 失败不阻塞正文索引（sidecar 可能不支持/图片损坏）
             }
 
             Ok(serde_json::json!({"outcome": format!("{outcome:?}"), "image_indexed": image_indexed}))
@@ -316,9 +330,13 @@ fn handle(req: Request, conn: &mut Connection, embedder: &mut SidecarEmbedder) -
                     created_at: created_at.as_deref(),
                     expires_at: None,
                 };
-                let emb = embedder.embed_documents(std::slice::from_ref(&content))?;
-                let rows = vec![(0i64, content.clone(), content_hash(&content), emb[0].clone())];
-                if let store::IndexOutcome::Indexed(_) = store::index_document(conn, &meta, &rows)? {
+                let emb_outcome = store::index_chunks(
+                    conn,
+                    &meta,
+                    vec![Chunk { content: content.clone(), embed_text: content.clone() }],
+                    |texts| embedder.embed_documents(texts),
+                )?;
+                if let store::IndexOutcome::Indexed { .. } = emb_outcome {
                     indexed += 1;
                 }
             }
@@ -345,8 +363,7 @@ fn handle(req: Request, conn: &mut Connection, embedder: &mut SidecarEmbedder) -
                 created_at: created_at.as_deref(),
                 expires_at: None,
             };
-            let rows = vec![(0i64, desc.clone(), content_hash(&desc), emb)];
-            let outcome = store::index_document(conn, &meta, &rows)?;
+            let outcome = store::index_single_with_vector(conn, &meta, desc.clone(), emb)?;
             Ok(serde_json::json!({"outcome": format!("{outcome:?}")}))
         }
         Request::IndexVideoUrl { url, domain, title, video_url, duration_secs, created_at } => {
@@ -371,10 +388,10 @@ fn handle(req: Request, conn: &mut Connection, embedder: &mut SidecarEmbedder) -
                 None => serde_json::json!({"status": "not_found"}),
             })
         }
-        Request::RecentVideos => {
-            // popup 高度受限（浏览器上限 600px），列表只取最近 3 个；
+        Request::RecentPages => {
+            // popup 高度受限（浏览器上限 600px），列表只取最近 4 个；
             // 进行中的任务若不在其中由扩展侧补到最前
-            let videos = store::recent_videos(conn, 3)?;
+            let pages = store::recent_pages(conn, 4)?;
             // 进行中任务快照随查询一并下发（url → 进度），popup 合并到对应条目展示
             let jobs = VIDEO_JOBS.lock().expect("video jobs poisoned");
             let jobs_json: serde_json::Map<String, serde_json::Value> = jobs
@@ -389,7 +406,7 @@ fn handle(req: Request, conn: &mut Connection, embedder: &mut SidecarEmbedder) -
                     )
                 })
                 .collect();
-            Ok(serde_json::json!({"videos": videos, "jobs": jobs_json}))
+            Ok(serde_json::json!({"pages": pages, "jobs": jobs_json}))
         }
         Request::ClearBrowsing => {
             let n = store::clear_source(conn, "browser")? + store::clear_source(conn, "subtitle")?;
