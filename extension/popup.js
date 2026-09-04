@@ -1,4 +1,5 @@
-// popup.js — D13 仪表盘: 连接状态 / 统计 / 黑名单管理 / 一键清除
+// popup.js — 2026-09-02 重构: 最近索引为主角的仪表盘（统计卡片/黑名单/清空已移至主程序「记忆设置」）
+// 条目整行可点击打开原页; 视频进行中/失败附 ?t= 定位到最后已处理分片
 async function send(msg) {
   return chrome.runtime.sendMessage(msg);
 }
@@ -8,8 +9,38 @@ async function currentTabDomain() {
   try { return new URL(tab.url).hostname; } catch { return null; }
 }
 
-// ---- 最近视频（标题 + 画面/字幕段数 + 格子进度条） ----
+// ---- 最近索引（视频：标题 + 格子进度条 + 段数；文本页：标题 + 块数 · 域名 · 时间） ----
 const GRID_CELLS = 36; // 单行固定格数, 长视频按比例压缩（LHF 定案：不多行平铺）
+const SEGMENT_SECONDS = 10; // 画面分片 10s/个, ?t= 定位与格子条同源
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/** ↗ 图标：hover 浮现, 提示整行可点击打开原页（静态 SVG, 无注入面） */
+function buildGoIcon() {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('class', 'go');
+  svg.setAttribute('viewBox', '0 0 12 12');
+  svg.setAttribute('fill', 'none');
+  const path = document.createElementNS(SVG_NS, 'path');
+  path.setAttribute('d', 'M3 9L9 3M9 3H4.5M9 3V7.5');
+  path.setAttribute('stroke', 'currentColor');
+  path.setAttribute('stroke-width', '1.5');
+  path.setAttribute('stroke-linecap', 'round');
+  path.setAttribute('stroke-linejoin', 'round');
+  svg.appendChild(path);
+  return svg;
+}
+
+/** 条目跳转链接：视频进行中/失败时附 ?t= 到最后已处理分片位置, 其余纯 url */
+function entryUrl(it) {
+  const job = it.job;
+  if (job && (job.status === 'indexing' || job.status === 'failed')) {
+    const processed = job.done + job.skipped;
+    if (processed > 0) {
+      return it.url + (it.url.includes('?') ? '&t=' : '?t=') + processed * SEGMENT_SECONDS;
+    }
+  }
+  return it.url;
+}
 
 /** 格子进度条：每格代表 total/36 个 10s 分片, 已处理(done+skipped)点亮 */
 function buildGridProgress(job) {
@@ -35,41 +66,47 @@ function buildGridProgress(job) {
 }
 
 /**
- * 渲染视频列表；返回是否仍有索引中任务（决定轮询续不续）。
+ * 渲染最近索引列表；返回是否仍有索引中任务（决定轮询续不续）。
+ * 视频条目（有画面/字幕段或有进行中任务）带格子进度条与状态；文本条目只显示块数统计。
  * jobs 快照合入对应条目；进行中任务若不在最近列表（首段未入库）补到最前。
  */
-function renderVideos(videos, jobs) {
-  const box = document.getElementById('videoBox');
+function renderPages(pages, jobs) {
+  const box = document.getElementById('pageBox');
   // host 聚合 url 做过尾斜杠归一, jobs key 是提交原样——合并两侧都按归一值对齐
   const norm = (u) => u.replace(/\/+$/, '');
   const jobsByNormUrl = {};
   for (const [url, job] of Object.entries(jobs)) jobsByNormUrl[norm(url)] = job;
-  const byUrl = new Map(videos.map(v => [norm(v.url), v]));
-  const items = videos.map(v => ({ ...v, job: jobsByNormUrl[norm(v.url)] || null }));
+  const byUrl = new Map(pages.map(p => [norm(p.url), p]));
+  const items = pages.map(p => ({ ...p, job: jobsByNormUrl[norm(p.url)] || null }));
   for (const [url, job] of Object.entries(jobs)) {
     if (!byUrl.has(norm(url)) && job.status === 'indexing') {
-      items.unshift({ url, title: null, video_segments: 0, subtitle_segments: 0, job });
+      items.unshift({ url, title: null, video_segments: 0, subtitle_segments: 0, text_chunks: 0, job });
     }
   }
   if (!items.length) {
-    box.innerHTML = '<div class="empty">暂无（视频页点「索引画面」开启）</div>';
+    box.innerHTML = '<div class="empty">暂无（浏览 10 秒以上的页面会自动索引）</div>';
     return false;
   }
   box.innerHTML = '';
   let anyIndexing = false;
   for (const it of items.slice(0, 4)) {
-    const row = document.createElement('div');
-    row.className = 'video-row';
+    const row = document.createElement('a'); // 整行可点击: 新标签打开原页, 原生键盘可达
+    row.className = 'entry-row';
+    row.href = entryUrl(it); // href 属性赋值无注入面
+    row.target = '_blank';
+    row.rel = 'noreferrer';
+    row.title = it.title || it.url;
+    row.appendChild(buildGoIcon());
 
     const title = document.createElement('div');
     title.className = 'v-title';
     title.textContent = it.title || it.url; // textContent: 标题来自页面 document.title
-    title.title = it.title || it.url;
     row.appendChild(title);
 
+    const isVideo = it.video_segments > 0 || it.subtitle_segments > 0 || it.job;
     const job = it.job;
     // 格子条只在进行中/失败时显示（完成态只显示统计数字, LHF 定案）
-    if (job && (job.status === 'indexing' || job.status === 'failed')) {
+    if (isVideo && job && (job.status === 'indexing' || job.status === 'failed')) {
       if (job.status === 'indexing') anyIndexing = true;
       row.appendChild(buildGridProgress(job));
     }
@@ -77,9 +114,16 @@ function renderVideos(videos, jobs) {
     const stats = document.createElement('div');
     stats.className = 'v-stats';
     const seg = document.createElement('span');
-    seg.textContent = `画面 ${it.video_segments} 段 · 字幕 ${it.subtitle_segments} 段`;
+    if (isVideo) {
+      seg.textContent = `画面 ${it.video_segments} 段 · 字幕 ${it.subtitle_segments} 段`;
+    } else {
+      let host = '';
+      try { host = new URL(it.url).hostname; } catch { /* 非常规 url 省略域名 */ }
+      const when = (it.last_indexed || '').slice(5, 16); // "MM-DD HH:MM"
+      seg.textContent = `${it.text_chunks} 块 · ${host} · ${when}`;
+    }
     stats.appendChild(seg);
-    if (job && job.status !== 'indexing') {
+    if (isVideo && job && job.status !== 'indexing') {
       const st = document.createElement('span');
       if (job.status === 'done') {
         st.className = 'v-status done';
@@ -98,55 +142,36 @@ function renderVideos(videos, jobs) {
 }
 
 // popup 打开期间有索引中任务则 2s 轮询（页面销毁定时器随之消失, 无需清理）
-let videoPollTimer = null;
-async function refreshVideos() {
+let pagePollTimer = null;
+async function refreshPages() {
   let resp;
   try {
-    resp = await send({ kind: 'getRecentVideos' });
+    resp = await send({ kind: 'getRecentPages' });
   } catch { return; } // SW 重启瞬态, 下轮再试
-  if (!resp?.sent) return; // host 不可达: 保留旧内容
-  const { videos = [], jobs = {} } = resp.result || {};
-  const anyIndexing = renderVideos(videos, jobs);
-  if (anyIndexing && !videoPollTimer) {
-    videoPollTimer = setInterval(refreshVideos, 2000);
-  } else if (!anyIndexing && videoPollTimer) {
-    clearInterval(videoPollTimer);
-    videoPollTimer = null;
-  }
-}
-
-function renderBlacklist(list) {
-  const box = document.getElementById('blacklistBox');
-  if (!list.length) {
-    box.innerHTML = '<div class="empty">暂无</div>';
+  if (!resp?.sent) {
+    // host 不可达: 保留旧内容; 若仍是初始加载占位则明示未连接
+    if (document.getElementById('pageLoading')) {
+      document.getElementById('pageBox').innerHTML =
+        '<div class="empty">主程序未运行，无法获取索引状态</div>';
+    }
     return;
   }
-  box.innerHTML = '';
-  for (const d of list) {
-    const row = document.createElement('div');
-    row.className = 'domain-row';
-    const span = document.createElement('span');
-    span.textContent = d; // textContent: 域名经设置页自由输入入库, 不走 innerHTML
-    const actions = document.createElement('div');
-    actions.className = 'actions';
-    const btn = document.createElement('button');
-    btn.textContent = '移除';
-    btn.onclick = async () => {
-      await send({ kind: 'unblockDomain', domain: d });
-      refresh();
-    };
-    actions.appendChild(btn);
-    row.appendChild(span);
-    row.appendChild(actions);
-    box.appendChild(row);
+  const { pages = [], jobs = {} } = resp.result || {};
+  const anyIndexing = renderPages(pages, jobs);
+  if (anyIndexing && !pagePollTimer) {
+    pagePollTimer = setInterval(refreshPages, 2000);
+  } else if (!anyIndexing && pagePollTimer) {
+    clearInterval(pagePollTimer);
+    pagePollTimer = null;
   }
 }
 
 async function refresh() {
-  const { stats, blacklist } = await send({ kind: 'getState' });
-  document.getElementById('statPages').textContent = stats.pages;
-  document.getElementById('statSubs').textContent = stats.subtitleSegments;
-  document.getElementById('statQueue').textContent = stats.queue;
+  let state;
+  try {
+    state = await send({ kind: 'getState' });
+  } catch { return; } // SW 重启瞬态: 保留初始「未连接」徽标
+  const { stats, blacklist } = state;
   const conn = document.getElementById('conn');
   conn.textContent = stats.connected ? '已连接' : '未连接';
   conn.className = 'badge ' + (stats.connected ? 'on' : 'off');
@@ -157,21 +182,15 @@ async function refresh() {
   const btn = document.getElementById('btnBlock');
   btn.textContent = blocked ? '已加入黑名单' : '不再索引此站点';
   btn.disabled = !domain || blocked;
+  btn.title = blocked ? '在主程序「记忆设置」中管理黑名单' : '';
   btn.onclick = async () => {
     if (!domain) return;
     await send({ kind: 'blockDomain', domain });
     refresh();
   };
 
-  renderBlacklist(blacklist);
-  refreshVideos();
+  refreshPages();
 }
-
-document.getElementById('btnClear').onclick = async () => {
-  if (!confirm('物理删除全部浏览页面与字幕索引，不可恢复。确认？')) return;
-  await send({ kind: 'clearBrowsing' });
-  refresh();
-};
 
 // 打开记忆库: 聚焦 Nervis 主窗（检索入口 Alt+Space, host 拉起主 exe 由单例插件聚焦）
 const btnOpen = document.getElementById('btnOpenMemory');

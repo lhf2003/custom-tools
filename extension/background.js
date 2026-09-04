@@ -308,10 +308,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           return { sent: false, error: String(e) };
         }
       }
-      case 'getRecentVideos': {
-        // popup 仪表盘：最近视频段数聚合 + 进行中任务快照（host 一次返回）
+      case 'getRecentPages': {
+        // popup 仪表盘：最近页面（视频段数+文本块数聚合）+ 进行中任务快照（host 一次返回）
         try {
-          const r = await callNative({ type: 'recent_videos' }, 5_000);
+          const r = await callNative({ type: 'recent_pages' }, 5_000);
           return { sent: true, result: r };
         } catch (e) {
           return { sent: false, error: String(e) };
