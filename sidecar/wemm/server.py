@@ -7,6 +7,9 @@
 #   第一个实例绑定 127.0.0.1:47812 成为主实例（加载模型占显存 + TCP 监听）。
 #   后续实例检测到端口已占用 → 代理模式：不加载模型（零显存），stdin 帧转发到主实例 TCP。
 #   代理收到 shutdown 只退出自己（不杀主实例）；主实例退出后下一个 spawn 自动成为新主实例。
+#   例外窗口：前任退出后其 accept 过的连接残留 TIME_WAIT，EXCLUSIVEADDRUSE 下短暂禁重绑
+#   （Windows 默认 ≤120s）——此时 bind/connect 双失败，实例发 loading 帧原地等待接管，
+#   超过 TAKEOVER_BUDGET_SECS 才报 primary_gone 让 Rust 重试（此前是立即报错穿透到 UI）。
 #   Rust 侧零改动——握手/帧协议对主/代理完全透明。
 #
 # 启动握手：主实例 loading → ready；代理直接 ready（模型已加载）。
@@ -45,6 +48,7 @@ DIMENSION = 2048
 EMBED_BATCH = 8
 MAX_FRAME_BYTES = 64 * 1024 * 1024  # 视频 base64 单段 ~2.7MB，余量充足
 PRIMARY_PORT = 47812  # 主实例 TCP 监听端口（SO_EXCLUSIVEADDRUSE 保证绑定即唯一）
+TAKEOVER_BUDGET_SECS = 150  # 前任退出后 TIME_WAIT 禁重绑的最坏等待（Windows 默认 ≤120s, 留余量）
 # 视频帧预算（显存硬约束：处理器 video longest_edge=224MP 不缩放，720p×32≈2.9万 token 必 OOM）
 VIDEO_NFRAMES = 32
 VIDEO_MAX_W = 720
@@ -452,14 +456,7 @@ def primary_mode(listener):
 
 # ---- 代理模式（不加载模型，stdin 帧转发到主实例 TCP） ----
 
-def proxy_mode():
-    try:
-        sock = socket.create_connection(("127.0.0.1", PRIMARY_PORT), timeout=5)
-    except OSError:
-        # 竞态：检测到时还在，连接时已退出 → 报错让 Rust 清理后重新 spawn
-        send({"type": "error", "error": "primary_gone",
-              "detail": "WeMM 主实例已退出，请重试"})
-        sys.exit(3)
+def proxy_mode(sock):
     # create_connection 的 timeout 会残留在 socket 上作用于后续所有 recv/sendall，
     # 视频 embed 单段 130s+，5s 必触发误报「主实例连接断开」→ 连接成功后立即解除
     sock.settimeout(None)
@@ -497,17 +494,43 @@ def main():
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
 
-    # SO_EXCLUSIVEADDRUSE：Windows 上保证端口绑定即进程唯一（防 SO_REUSEADDR 劫持）
-    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    listener.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
-    try:
-        listener.bind(("127.0.0.1", PRIMARY_PORT))
-        listener.listen(4)
-    except OSError:
-        listener.close()
-        proxy_mode()
-        return
-    primary_mode(listener)
+    # SO_EXCLUSIVEADDRUSE：Windows 上保证端口绑定即进程唯一（防 SO_REUSEADDR 劫持）。
+    # 代价：前任主实例退出后，其 accept 过的连接残留 TIME_WAIT 期间禁止重绑（默认 ≤120s）。
+    # 所以「bind 失败 → 当代理」不能只做一次决策——connect 也失败说明主实例真没了、
+    # 端口在 TIME_WAIT：每轮双试（能当主当主、能当代理当代理），都不行就发 loading
+    # 帧保活握手等窗口消散，超预算才报 primary_gone 让 Rust 重试。
+    deadline = time.time() + TAKEOVER_BUDGET_SECS
+    waiting = False
+    while True:
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        try:
+            listener.bind(("127.0.0.1", PRIMARY_PORT))
+            listener.listen(4)
+        except OSError:
+            listener.close()
+        else:
+            primary_mode(listener)
+            return
+
+        try:
+            # localhost refused 即返；2s 只兜底 SYN 被丢（backlog 满）的病理场景
+            sock = socket.create_connection(("127.0.0.1", PRIMARY_PORT), timeout=2)
+        except OSError:
+            sock = None
+        if sock is not None:
+            proxy_mode(sock)
+            return
+
+        if time.time() >= deadline:
+            send({"type": "error", "error": "primary_gone",
+                  "detail": "WeMM 主实例已退出，端口等待接管超时，请重试"})
+            sys.exit(3)
+        if not waiting:
+            log(f"端口 {PRIMARY_PORT} 暂不可绑也不可连（前任退出 TIME_WAIT?），等待接管主实例…")
+            waiting = True
+        send({"type": "loading"})
+        time.sleep(1)
 
 
 if __name__ == "__main__":
