@@ -53,6 +53,19 @@ tools: get_activity_summary, get_habit_patterns, get_memory_facts, remember_fact
 - 进程名必须用摘要中的原文，不能改大小写或加后缀
 - 每次最多 5 条，优先填你本身就认识的常见软件
 
+## 任务四：写本时段的小结（summary）
+
+2-4 句话，概括这个时段他主要在做什么。这段小结会原样进当天日报/日记的素材，
+所以要**留住具体事项锚点**：在改的项目、窗口标题里看得出的话题/页面/文档、
+在追的剧、在跟谁聊——日报就靠这些细节成文。
+
+写法要求：
+- 「上午在 custom-tools 调插件设置页的布局，下午刷了三小时 B 站游戏区」——这样有画面；
+  「他高频使用编辑器与浏览器，工作与娱乐交替进行」——这种模式腔/监控腔一律不许
+- 上面「不该存」约束的是 facts 和 patterns（要抹掉实例才稳定），**不约束小结**——
+  小结就是给当天用的，实例细节在这里尽管写
+- 用「他」，禁用「用户」；数据稀疏（时段很短/基本 AFK）就一句话带过，不硬凑
+
 ## 不该存（一律不写）
 
 - 可从数据直接查到的（重复且会过期）
@@ -80,7 +93,8 @@ tools: get_activity_summary, get_habit_patterns, get_memory_facts, remember_fact
   "app_descriptions": [
     {"app": "Code.exe", "description": "代码编辑器"},
     {"app": "Weixin.exe", "description": "微信桌面客户端"}
-  ]
+  ],
+  "summary": "上午主要在 custom-tools 改插件设置页布局，顺带查了 Tauri 文档；下午泡在 B 站看游戏视频，中间回了几条微信。"
 }
 ```
 
@@ -91,3 +105,4 @@ tools: get_activity_summary, get_habit_patterns, get_memory_facts, remember_fact
 3. facts 的 category 五选一：person/project/workflow/voice/expectation（定义见任务二）；流水基本只能挖出 person/project/workflow 三维，voice/expectation 别硬造
 4. update 的 target_id 必须来自「已有记忆」清单里的 id；对不上 id 就用 add
 5. app_descriptions 只填摘要中没带「（描述）」的进程；本身就认识的常见软件务必填，冷僻进程不确定不填
+6. summary 必填（2-4 句话，写法见任务四）；整段几乎没活动就一句话说明，不留空

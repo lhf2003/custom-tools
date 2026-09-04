@@ -316,6 +316,7 @@ pub fn run_scheduler(app_handle: AppHandle, db_path: PathBuf, flags: Arc<RwLock<
                     Err(e) => log::warn!("Companion 清理活动记录失败: {}", e),
                 }
                 let _ = db::cleanup_suggestions_older_than(&conn, cutoff);
+                let _ = db::cleanup_period_summaries_older_than(&conn, cutoff);
                 // 情绪 housekeeping：纪念日（踏实）+ 过期条目清理
                 super::emotion::on_milestone(&conn, now.timestamp());
                 let _ = super::emotion::cleanup(&conn, now.timestamp());
@@ -899,6 +900,8 @@ pub async fn run_daily_analysis(
 
     let activities =
         db::activities_between(&conn, start, now_ts).map_err(|e| format!("读取活动失败: {}", e))?;
+    // 窗口终点（下方 now_ts 会被重新赋值遮蔽，先接住）
+    let window_end = now_ts;
 
     if activities.len() < 10 {
         return Ok(format!(
@@ -1059,6 +1062,22 @@ pub async fn run_daily_analysis(
         Err(e) => log::warn!("Companion 情境 pattern 收编失败: {}", e),
     }
 
+    // 时段小结沉淀：日报/日记/明日关注的复用素材，与模式/事实同一成败边界。
+    // 空小结不落库——模型没给就当本窗口无产出，日报侧按实际落库的小结拼装。
+    let summary_saved = !parsed.summary.trim().is_empty();
+    if summary_saved {
+        if let Err(e) = db::insert_period_summary(
+            &conn,
+            start,
+            window_end,
+            parsed.summary.trim(),
+            activities.len() as i64,
+            now_ts,
+        ) {
+            log::warn!("时段小结落库失败: {}", e);
+        }
+    }
+
     // 成功落库后推进水位（失败/数据不足都不推进，下次窗口自动顺延合并）
     save_setting(db_path, "companion_last_analysis_ts", &now_ts.to_string());
 
@@ -1066,7 +1085,7 @@ pub async fn run_daily_analysis(
     let reminded = remind_unknown_apps(&conn, app_handle, &activities, &now);
 
     Ok(format!(
-        "窗口 {}：{} 条活动 → 聚合 {} 字符 → {} 个模式 + 事实新增 {} / 更新 {} + 描述回填 {} + 未知应用提醒 {}",
+        "窗口 {}：{} 条活动 → 聚合 {} 字符 → {} 个模式 + 事实新增 {} / 更新 {} + 描述回填 {} + 未知应用提醒 {} + 小结{}",
         window_label,
         activities.len(),
         aggregate_text.len(),
@@ -1074,7 +1093,8 @@ pub async fn run_daily_analysis(
         facts_saved,
         facts_updated,
         desc_saved,
-        reminded
+        reminded,
+        if summary_saved { "已沉淀" } else { "缺省" }
     ))
 }
 
@@ -1288,9 +1308,8 @@ fn fmt_local(ts: i64, fmt: &str) -> String {
         .unwrap_or_default()
 }
 
-/// 聚合某一天的活动为摘要文本（供 MCP 工具 get_activity_summary 使用）
-/// day_label 格式 "YYYY-MM-DD"
-pub(crate) fn aggregate_day(conn: &Connection, day_label: &str) -> Result<String, String> {
+/// 「YYYY-MM-DD」→ 当天 [00:00, 次日 00:00) 的本地时间戳对
+fn day_bounds(day_label: &str) -> Result<(i64, i64), String> {
     let naive = chrono::NaiveDate::parse_from_str(day_label, "%Y-%m-%d")
         .map_err(|e| format!("日期格式错误（应为 YYYY-MM-DD）: {}", e))?;
     let start = naive
@@ -1298,7 +1317,13 @@ pub(crate) fn aggregate_day(conn: &Connection, day_label: &str) -> Result<String
         .and_then(|d| d.and_local_timezone(chrono::Local).single())
         .ok_or("无法计算当日起点")?
         .timestamp();
-    let end = start + 86400;
+    Ok((start, start + 86400))
+}
+
+/// 聚合某一天的活动为摘要文本（供 MCP 工具 get_activity_summary 使用）
+/// day_label 格式 "YYYY-MM-DD"
+pub(crate) fn aggregate_day(conn: &Connection, day_label: &str) -> Result<String, String> {
+    let (start, end) = day_bounds(day_label)?;
 
     let activities =
         db::activities_between(conn, start, end).map_err(|e| format!("读取活动失败: {}", e))?;
@@ -1314,6 +1339,43 @@ pub(crate) fn aggregate_day(conn: &Connection, day_label: &str) -> Result<String
         activities.len(),
         aggregate_activities(&activities, false, AGGREGATE_TEXT_CAP, &app_labels)
     ))
+}
+
+/// 日报/日记/明日关注共用的当日素材：analyst 时段小结（按窗口起点排序）
+/// + 本地算的进程时长 Top（结构化统计，无截断风险）。
+/// 当天一条小结都没有（analyst 被禁用 / 全天分析失败 / 升级前的老数据）
+/// → 回退原全天聚合文本（截断行为与原路径一致）。
+pub(crate) fn day_material(conn: &Connection, date: &str) -> Result<String, String> {
+    let (start, end) = day_bounds(date)?;
+    let summaries = db::period_summaries_between(conn, start, end)
+        .map_err(|e| format!("读取时段小结失败: {}", e))?;
+    if summaries.is_empty() {
+        return aggregate_day(conn, date);
+    }
+
+    let mut text = format!("【{} 活动摘要，共 {} 个时段】\n", date, summaries.len());
+    for s in &summaries {
+        text.push_str(&format!(
+            "【{}-{}】（{} 段）{}\n",
+            fmt_hm(s.window_start),
+            fmt_hm(s.window_end),
+            s.activity_count,
+            s.summary.trim()
+        ));
+    }
+
+    let totals = db::process_totals_between(conn, start, end)
+        .map_err(|e| format!("读取进程时长失败: {}", e))?;
+    let app_labels = crate::db::app_cache::app_label_map(conn).unwrap_or_default();
+    text.push_str("\n【进程时长 Top】\n");
+    for (proc, secs) in totals.iter().take(10) {
+        text.push_str(&format!(
+            "- {} {:.1}h\n",
+            proc_label(proc, &app_labels),
+            *secs as f64 / 3600.0
+        ));
+    }
+    Ok(text)
 }
 
 /// 解析工具传入的时间参数，支持两种格式：
@@ -1424,6 +1486,9 @@ struct LlmPatternsResponse {
     facts: Vec<LlmFact>,
     #[serde(default)]
     app_descriptions: Vec<LlmAppDescription>,
+    /// 本窗口的叙事小结（日报/日记/明日关注的复用素材）
+    #[serde(default)]
+    summary: String,
 }
 
 /// 模型回填的应用描述（app 必须用摘要中的进程名原文）
@@ -1672,7 +1737,7 @@ pub(crate) async fn run_scene_report(
     date: &str,
 ) -> Result<String, String> {
     let conn = Connection::open(db_path).map_err(|e| format!("打开数据库失败: {}", e))?;
-    let aggregate = aggregate_day(&conn, date)?;
+    let aggregate = day_material(&conn, date)?;
 
     let app_data = app_handle
         .path()
@@ -2383,5 +2448,77 @@ mod tests {
         let acts = vec![log(1, "mystery.exe", d, 3600)];
         let text = aggregate_activities(&acts, false, AGGREGATE_TEXT_CAP, &Default::default());
         assert!(text.contains("- mystery.exe"), "未知进程不应带标注: {}", text);
+    }
+
+    // ── day_material ─────────────────────────────────────────
+
+    fn material_setup() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        db::init_tables(&conn).unwrap();
+        conn
+    }
+
+    /// 当天日期 + 当日一段 09:00-10:00 的活动，返回 (date, day_start)
+    fn material_day(conn: &Connection) -> (String, i64) {
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let (start, _) = day_bounds(&today).unwrap();
+        let id = db::insert_activity(conn, "Code.exe", "main.rs", start + 9 * 3600).unwrap();
+        db::close_activity(conn, id, start + 10 * 3600).unwrap();
+        (today, start)
+    }
+
+    #[test]
+    fn day_material_falls_back_to_aggregate_without_summaries() {
+        let conn = material_setup();
+        let (today, _) = material_day(&conn);
+        let text = day_material(&conn, &today).unwrap();
+        assert!(
+            text.contains("活动聚合"),
+            "无小结应回退全天聚合文本: {}",
+            text
+        );
+    }
+
+    #[test]
+    fn day_material_prefers_period_summaries_with_top() {
+        let conn = material_setup();
+        let (today, start) = material_day(&conn);
+        db::insert_period_summary(
+            &conn,
+            start + 9 * 3600,
+            start + 14 * 3600,
+            "上午在改插件设置页布局",
+            42,
+            start + 14 * 3600,
+        )
+        .unwrap();
+        let text = day_material(&conn, &today).unwrap();
+        assert!(text.contains("上午在改插件设置页布局"), "小结应入素材: {}", text);
+        assert!(text.contains("（42 段）"), "段数应入素材: {}", text);
+        assert!(text.contains("【进程时长 Top】"), "Top 应兜底: {}", text);
+        assert!(text.contains("Code.exe"), "进程名应入 Top: {}", text);
+        assert!(!text.contains("活动聚合"), "有小结不应走回退路径: {}", text);
+    }
+
+    #[test]
+    fn day_material_excludes_other_days_summaries() {
+        let conn = material_setup();
+        let (today, start) = material_day(&conn);
+        // 昨天的小结（window_start 在范围外）不应混入
+        db::insert_period_summary(
+            &conn,
+            start - 86400 + 9 * 3600,
+            start - 86400 + 14 * 3600,
+            "昨天的小结",
+            10,
+            start - 86400 + 14 * 3600,
+        )
+        .unwrap();
+        let text = day_material(&conn, &today).unwrap();
+        assert!(
+            !text.contains("昨天的小结"),
+            "他日小结不应混入（走了回退或混入都算错）: {}",
+            text
+        );
     }
 }

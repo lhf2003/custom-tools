@@ -28,6 +28,17 @@ pub struct HabitPattern {
     pub last_seen: i64,
 }
 
+/// 一段增量分析窗口的叙事小结（analyst 产出，日报/日记/明日关注复用）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PeriodSummary {
+    pub id: i64,
+    pub window_start: i64,
+    pub window_end: i64,
+    pub summary: String,
+    pub activity_count: i64,
+    pub created_at: i64,
+}
+
 /// 一条主动建议 / 一条用户意图（统一 suggestion 流）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Suggestion {
@@ -265,6 +276,24 @@ pub fn init_tables(conn: &Connection) -> rusqlite::Result<()> {
         [],
     )?;
 
+    // 时段小结：analyst 每次增量分析的叙事沉淀（日报/日记/明日关注的复用素材）
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS period_summaries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            window_start INTEGER NOT NULL,
+            window_end INTEGER NOT NULL,
+            summary TEXT NOT NULL,
+            activity_count INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_period_summaries_window
+         ON period_summaries(window_start)",
+        [],
+    )?;
+
     // 第三方 MCP 工具调用日志（MCP 设置页 per-server 日志弹窗）
     conn.execute(
         "CREATE TABLE IF NOT EXISTS mcp_tool_calls (
@@ -398,6 +427,60 @@ pub fn cleanup_activities_older_than(conn: &Connection, cutoff: i64) -> rusqlite
 pub fn cleanup_suggestions_older_than(conn: &Connection, cutoff: i64) -> rusqlite::Result<usize> {
     conn.execute(
         "DELETE FROM suggestions WHERE created_at < ?1 AND status != 'pending'",
+        params![cutoff],
+    )
+}
+
+// ── period_summaries ─────────────────────────────────────────
+
+pub fn insert_period_summary(
+    conn: &Connection,
+    window_start: i64,
+    window_end: i64,
+    summary: &str,
+    activity_count: i64,
+    created_at: i64,
+) -> rusqlite::Result<i64> {
+    conn.execute(
+        "INSERT INTO period_summaries (window_start, window_end, summary, activity_count, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![window_start, window_end, summary, activity_count, created_at],
+    )?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// 窗口起点落在 [start, end) 内的时段小结（按窗口起点升序）。
+/// 归属按 window_start：0 点 slot 的窗口（18:00-24:00）起点在昨天，归昨天。
+pub fn period_summaries_between(
+    conn: &Connection,
+    start: i64,
+    end: i64,
+) -> rusqlite::Result<Vec<PeriodSummary>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, window_start, window_end, summary, activity_count, created_at
+         FROM period_summaries
+         WHERE window_start >= ?1 AND window_start < ?2
+         ORDER BY window_start ASC",
+    )?;
+    let rows = stmt.query_map(params![start, end], |row| {
+        Ok(PeriodSummary {
+            id: row.get(0)?,
+            window_start: row.get(1)?,
+            window_end: row.get(2)?,
+            summary: row.get(3)?,
+            activity_count: row.get(4)?,
+            created_at: row.get(5)?,
+        })
+    })?;
+    rows.collect()
+}
+
+pub fn cleanup_period_summaries_older_than(
+    conn: &Connection,
+    cutoff: i64,
+) -> rusqlite::Result<usize> {
+    conn.execute(
+        "DELETE FROM period_summaries WHERE window_start < ?1",
         params![cutoff],
     )
 }
@@ -1652,9 +1735,47 @@ mod tests {
         assert_eq!(leftovers, 1, "新鲜段应保持未闭合");
     }
 
+    fn period_setup() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE period_summaries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                window_start INTEGER NOT NULL,
+                window_end INTEGER NOT NULL,
+                summary TEXT NOT NULL,
+                activity_count INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL
+            )",
+        )
+        .unwrap();
+        conn
+    }
+
     #[test]
-    fn same_day_repeat_sighting_does_not_count() {
-        let conn = setup();
+    fn period_summaries_between_filters_by_window_start() {
+        let conn = period_setup();
+        insert_period_summary(&conn, 1000, 2000, "段内", 10, 2000).unwrap();
+        insert_period_summary(&conn, 5000, 6000, "段外", 5, 6000).unwrap();
+        let list = period_summaries_between(&conn, 0, 3000).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].summary, "段内");
+        assert_eq!(list[0].activity_count, 10);
+    }
+
+    #[test]
+    fn period_summaries_cleanup_goes_by_window_start() {
+        let conn = period_setup();
+        insert_period_summary(&conn, 1000, 2000, "旧", 10, 2000).unwrap();
+        insert_period_summary(&conn, 9000, 10000, "新", 10, 10000).unwrap();
+        let n = cleanup_period_summaries_older_than(&conn, 5000).unwrap();
+        assert_eq!(n, 1);
+        let list = period_summaries_between(&conn, 0, i64::MAX).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].summary, "新");
+    }
+
+    #[test]
+    fn same_day_repeat_sighting_does_not_count() {        let conn = setup();
         // 取 UTC 正午起相邻两小时（本地 20:00/21:00），确保任意时区下都在同一本地日
         let d1_09 = day_ts(20000, 12);
         let d1_14 = day_ts(20000, 13);

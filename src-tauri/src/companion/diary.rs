@@ -40,7 +40,7 @@ pub async fn run_diary(
         .app_data_dir()
         .map_err(|e| e.to_string())?;
 
-    let aggregate = analyzer::aggregate_day(&conn, date).unwrap_or_default();
+    let aggregate = analyzer::day_material(&conn, date).unwrap_or_default();
     let recent_chats = user_messages_on(&conn, date, 10);
     // 素材锚定日记所属日期（0 点跑昨天日记时 now 已是次日，不能用「今天」）
     let day_ref = day_ref_ts(date).unwrap_or_else(|| chrono::Local::now().timestamp());
@@ -184,7 +184,7 @@ async fn run_focus(
         })
         .unwrap_or_else(|_| "（模式查询失败）".to_string());
 
-    let aggregate = analyzer::aggregate_day(&conn, source_date).unwrap_or_default();
+    let aggregate = analyzer::day_material(&conn, source_date).unwrap_or_default();
 
     let prompt = format!(
         "你是他的私人管家贾维斯。基于以下信息，为明天列 3-5 条「关注」——\n\
